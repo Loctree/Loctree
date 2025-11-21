@@ -460,7 +460,7 @@ fn walk(
 }
 
 fn format_usage() -> &'static str {
-    "loc-tree (Rust)\n\nUsage: cargo run -- <root> [options]\n\nOptions:\n  --ext <list>         Comma-separated extensions to include (e.g. --ext rs,ts,tsx).\n  -I, --ignore <path>  Ignore a folder/file (relative or absolute). Repeatable.\n  --gitignore, -g      Respect current Git ignore rules (requires git).\n  -L, --max-depth <n>  Limit recursion depth (0 = only direct children).\n  --color[=mode]       Colorize large files. mode: auto|always|never (default auto).\n  --json               Emit JSON instead of a tree view.\n  --summary[=N]        Print totals and top large files (N entries, default 5).\n  --help, -h           Show this message.\n"
+    "loc-tree (Rust)\n\nUsage: cargo run -- <root ...> [options]\n\nOptions:\n  --ext <list>         Comma-separated extensions to include (e.g. --ext rs,ts,tsx).\n                       Prunes non-matching files/dirs from the tree.\n  -I, --ignore <path>  Ignore a folder/file (relative or absolute). Repeatable.\n  --gitignore, -g      Respect current Git ignore rules (requires git).\n  -L, --max-depth <n>  Limit recursion depth (0 = only direct children).\n  --color[=mode]       Colorize large files. mode: auto|always|never (default auto).\n  --json               Emit JSON instead of a tree view (single root => object, multi-root => array).\n  --summary[=N]        Print totals and top large files (N entries, default 5).\n  --help, -h           Show this message.\n\nExamples:\n  loctree src --ext rs,ts --summary\n  loctree src packages/app src-tauri/src -I node_modules -L 2\n  loctree . --json > tree.json\n"
 }
 
 fn main() -> io::Result<()> {

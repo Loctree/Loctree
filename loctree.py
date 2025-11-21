@@ -182,8 +182,14 @@ def collect_lines(root: Path, options: Options) -> Tuple[
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Tree view with LOC counts",
+        description="Tree view with LOC counts (multi-root, JSON, color, summary)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  loctree src --ext rs,ts --summary\n"
+            "  loctree src packages/app src-tauri/src -I node_modules -L 2\n"
+            "  loctree . --json > tree.json\n"
+        ),
     )
     parser.add_argument(
         "roots",

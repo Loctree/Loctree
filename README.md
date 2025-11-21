@@ -1,73 +1,52 @@
 # loctree
 
-Tree viewer with line-of-code (LOC) counts, shipped in four flavors (Node.js, Python, Rust, Bash). Point it at any directory and you get an `eza`-style tree plus per-file LOC totals, optional filters, and a quick summary of heavyweight files.
+LOC-aware tree with Git/gitignore awareness, pruning by extension, JSON output, and per-root summaries. Available in Rust (recommended), Node.js, and Python.
 
-## Highlights
-- **Cross-runtime**: run it with Node.js (`loctree.mjs`), Python (`loctree.py`), Rust (`loc_tree_rs`), or the tiny Bash prototype (`loctree.sh`).
-- **Extension filters**: focus on specific languages via `--ext rs,ts,tsx,py`.
-- **Selective sweeps**: limit recursion depth (`-L 2`), skip folders (`-I node_modules`), or respect `.gitignore` (`--gitignore`).
-- **Readable output**: clean tree structure, optional ANSI color for 1000+ LOC items, JSON/ND-friendly output, and an end-of-run summary of the largest files.
-- **Relative-friendly**: paths such as `../project` or `./src-tauri` work anywhere—you can even call `loctree.mjs` from another repo.
+## Why use it
+- Filters by extension (`--ext rs,ts,tsx,py,...`) and prunes non-matching branches.
+- Respects gitignore (`-g`), custom ignores (`-I`), and max depth (`-L`).
+- Human or JSON output; per-root summary of totals and “large” files (>=1000 LOC).
+- Multi-root: pass several paths in one command.
 
-## Node CLI usage
-The Node variant has the richest feature set and serves as the canonical CLI.
-
+## Install
+Recommended (Rust binary):
 ```bash
-node loctree.mjs [root ...] [options]
+curl -fsSL https://raw.githubusercontent.com/LibraxisAI/loctree/main/tools/install.sh | sh
+# INSTALL_DIR=$HOME/bin CARGO_HOME=$HOME/.cargo curl -fsSL ... | sh
 ```
 
-| Option | Description |
-| --- | --- |
-| `--ext <list>` | Comma-separated extensions to include (e.g. `--ext rs,tsx`). Dots are optional. Non-matching files/empty dirs are pruned from the tree. |
-| `-I`, `--ignore <path>` | Ignore a folder/file (relative to `root` or absolute). Repeatable. |
-| `--gitignore`, `-g` | Skip entries ignored by Git (requires `git`). |
-| `-L`, `--max-depth <n>` | Cap recursion depth (`0` = direct children, `2` = subfolders of subfolders, etc.). |
-| `--color[=mode]`, `-c` | Colorize large files. mode: `auto` (default), `always`, `never`; bare `-c` equals `always`. |
-| `--json` | Emit JSON instead of a tree view (includes summary + entries). |
-| `--summary[=N]` | Print totals plus top-N large files (default 5). |
-| `--help`, `-h` | Show help. |
+Alternatives:
+- Node wrapper: `curl -fsSL https://raw.githubusercontent.com/LibraxisAI/loctree/main/tools/install_node.sh | sh`
+- Python wrapper: `curl -fsSL https://raw.githubusercontent.com/LibraxisAI/loctree/main/tools/install_py.sh | sh`
 
-> **Tip:** If you omit `root`, the tool scans the current working directory. Relative paths are resolved against where you run the command.
+*(Each installer drops a wrapper in `$HOME/.local/bin` by default and hints if PATH needs updating.)*
 
-### Examples
+## Quick start
 ```bash
-# Whole repo, TypeScript + Rust only, highlight big files
-node loctree.mjs . --ext rs,ts,tsx --color
-
-# Sweep only visit/audio code, ignore generated output, stop after depth 2
-node loctree.mjs packages/app/src -I dist -I coverage -L 2
-
-# Respect gitignore and summarize Python files anywhere
-node loctree.mjs ../VistaScribe --gitignore --ext py
-
-# Machine-readable output with summary
-node loctree.mjs . --json --summary=3 > tree.json
-
-# Multiple roots in one go
-loctree src src-tauri/src --ext rs,tsx,ts,json,py -I src-tauri/src/secure -L 3
+loctree src --ext rs,tsx --summary
+loctree src src-tauri/src -I node_modules -L 2
+loctree . --json > tree.json
 ```
+JSON shape: single root -> object; multi-root -> array. Large files (>=1000 LOC) are listed separately and colored when `--color` (or `-c`) is on.
 
-When a file reaches 1000+ LOC, it is highlighted (when `--color` is set) and also listed under a “Large files” section at the end of the report.
+## CLI flags (all runtimes)
+- `--ext <list>`         Comma-separated extensions; prunes others.
+- `-I, --ignore <path>`  Ignore path (repeatable; abs or relative).
+- `-g, --gitignore`      Respect gitignore via `git check-ignore`.
+- `-L, --max-depth <n>`  Limit recursion depth.
+- `--color[=mode]`       auto|always|never (default auto); `-c` = always.
+- `--json`               Machine-readable output.
+- `--summary[=N]`        Totals + top-N large files (default 5).
 
-## Other runtimes
-Node is the “reference” implementation, but the Python and Rust versions now expose the **same flags and behaviour** (color modes, JSON output, summaries), so you can pick whichever runtime you prefer:
+## Dev & tests
+- Node: `node tools/tests/loctree-node.test.mjs`
+- Python: `node tools/tests/loctree-py.test.mjs`
+- Rust: `node tools/tests/loctree-rs.test.mjs` and `cargo check`
 
-- **Rust (`loc_tree_rs`)** – `cargo run -- <root ...> [options]` for the fastest traversal.
-- **Python (`loctree.py`)** – `python loctree.py [root ...] [options]` for a no-build dependency.
-- **Bash (`loctree.sh`)** – tiny prototype (defaults to `src-tauri/src`, adjust `root` inside the script) that prints LOC via `wc -l`.
+CI runs the three test scripts on PRs/pushes (see `.github/workflows/ci.yml`).
 
-Feel free to add new switches in whichever runtime you like—just mirror them across Node/Python/Rust so the experience stays identical.
-
-## Tools
-
-### `tools/apply_patch.py`
-Need to apply a Codex-style patch outside the CLI? Drop your diff into `tools/apply_patch.py`. It accepts three input modes:
-
-- Inline argument (for short diffs) – `python tools/apply_patch.py "*** Begin Patch\\n..."`
-- Path to a patch file – `python tools/apply_patch.py my.patch`
-- Standard input – `cat diff.patch | python tools/apply_patch.py -`
-
-The script understands `*** Add File`, `*** Update File` (plus optional `*** Move to`), and `*** Delete File` blocks. It applies hunks using their context/line numbers and surfaces clear errors when something cannot be matched.
+## Patch helper
+`tools/apply_patch.py` applies Codex-style `*** Begin Patch` blocks (stdin, arg string, or file). Handy for scripted edits/CI where Codex isn’t available.
 
 ## License
-MIT – reuse it, fork it, or wire it into your own build/scripts.
+MIT – reuse it, fork it, wire it into your own scripts.
