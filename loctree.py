@@ -260,10 +260,17 @@ def main() -> None:
     if args.max_depth is not None and args.max_depth < 0:
         raise SystemExit("--max-depth must be non-negative")
 
-    roots = [Path(r).expanduser().resolve() for r in args.roots]
-    for root_path in roots:
+    trimmed_roots = [r.strip() for r in args.roots if r.strip()]
+    if not trimmed_roots:
+        trimmed_roots = ["."]
+
+    roots = [Path(r).expanduser().resolve() for r in trimmed_roots]
+    cwd = Path(".").resolve()
+    for raw, root_path in zip(trimmed_roots, roots):
         if not root_path.is_dir():
-            raise SystemExit(f"{root_path} is not a directory")
+            raise SystemExit(
+                f'Root "{raw}" resolved to "{root_path}" is not a directory (cwd: {cwd})'
+            )
 
     extensions = parse_extensions(args.ext) if args.ext else None
 

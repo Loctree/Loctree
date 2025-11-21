@@ -81,7 +81,7 @@ class Loctree < Formula
         print(f"  url \"{first.url}\"")
         print(f"  sha256 \"{first.sha}\"")
 
-    print("  def install\n    bin.install \"loc-tree\" => \"loctree\"\n  end\n\n  test do\n    output = shell_output(\"#{bin}/loctree --json\")\n    assert_match \"entries\", output\n  end\nend")
+print("  def install\n    bin.install \"loctree\"\n  end\n\n  test do\n    output = shell_output(\"#{bin}/loctree --json\")\n    assert_match \"entries\", output\n  end\nend")
 
     if tap:
         print(f"\n# TODO: commit this formula to tap repo: {tap}")

@@ -249,7 +249,11 @@ fn parse_args() -> Result<ParsedArgs, String> {
                 i += 1;
             }
             _ => {
-                roots.push(PathBuf::from(arg));
+                // Trim whitespace-only roots to protect against accidental empty args
+                let trimmed = arg.trim();
+                if !trimmed.is_empty() {
+                    roots.push(PathBuf::from(trimmed));
+                }
                 i += 1;
             }
         }
@@ -471,7 +475,7 @@ fn walk(
 }
 
 fn format_usage() -> &'static str {
-    "loc-tree (Rust)\n\nUsage: cargo run -- <root ...> [options]\n\nOptions:\n  --ext <list>         Comma-separated extensions to include (e.g. --ext rs,ts,tsx).\n                       Prunes non-matching files/dirs from the tree.\n  -I, --ignore <path>  Ignore a folder/file (relative or absolute). Repeatable.\n  --gitignore, -g      Respect current Git ignore rules (requires git).\n  -L, --max-depth <n>  Limit recursion depth (0 = only direct children).\n  --color[=mode]       Colorize large files. mode: auto|always|never (default auto).\n  --json               Emit JSON instead of a tree view (single root => object, multi-root => array).\n  --summary[=N]        Print totals and top large files (N entries, default 5).\n  --help, -h           Show this message.\n\nExamples:\n  loctree src --ext rs,ts --summary\n  loctree src packages/app src-tauri/src -I node_modules -L 2\n  loctree . --json > tree.json\n"
+    "loctree (Rust)\n\nUsage: loctree [root ...] [options]\n\nOptions:\n  --ext <list>         Comma-separated extensions to include (e.g. --ext rs,ts,tsx).\n                       Prunes non-matching files/dirs from the tree.\n  -I, --ignore <path>  Ignore a folder/file (relative or absolute). Repeatable.\n  --gitignore, -g      Respect current Git ignore rules (requires git).\n  -L, --max-depth <n>  Limit recursion depth (0 = only direct children).\n  --color[=mode]       Colorize large files. mode: auto|always|never (default auto).\n  --json               Emit JSON instead of a tree view (single root => object, multi-root => array).\n  --summary[=N]        Print totals and top large files (N entries, default 5).\n  --help, -h           Show this message.\n\nExamples:\n  loctree src --ext rs,ts --summary\n  loctree src packages/app src-tauri/src -I node_modules -L 2\n  loctree . --json > tree.json\n"
 }
 
 fn main() -> io::Result<()> {
@@ -494,14 +498,23 @@ fn main() -> io::Result<()> {
     }
 
     let mut root_list: Vec<PathBuf> = Vec::new();
+    let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     for root in parsed.root_list.iter() {
         if !root.is_dir() {
-            eprintln!("{} is not a directory", root.display());
+            let raw = if root.as_os_str().is_empty() {
+                "<empty>".to_string()
+            } else {
+                root.display().to_string()
+            };
+            eprintln!(
+                "Root \"{}\" (cwd: {}) is not a directory",
+                raw,
+                cwd.display()
+            );
             std::process::exit(1);
         }
         root_list.push(
-            root
-                .canonicalize()
+            root.canonicalize()
                 .unwrap_or_else(|_| root.clone()),
         );
     }

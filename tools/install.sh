@@ -24,11 +24,11 @@ command -v cargo >/dev/null 2>&1 || {
 
 info "Installing loctree from $REPO_URL (cargo install --git)"
 # We don't lock here; the project is small and uses minimal deps. Add --locked if you prefer.
-cargo install --git "$REPO_URL" --force loc-tree >/dev/null
+cargo install --git "$REPO_URL" --force loctree >/dev/null
 
-installed_bin="$CARGO_BIN/loc-tree"
+installed_bin="$CARGO_BIN/loctree"
 if [[ ! -x $installed_bin ]]; then
-  warn "loc-tree binary not found at $installed_bin after install";
+  warn "loctree binary not found at $installed_bin after install";
   exit 1;
 fi
 

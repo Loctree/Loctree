@@ -146,10 +146,14 @@ function parseArgs(argv) {
     positional.push(arg);
   }
 
-  if (positional.length === 0) {
-    positional.push('.');
+  const roots = positional
+    .map((r) => r.trim())
+    .filter((r) => r.length > 0);
+
+  if (roots.length === 0) {
+    roots.push('.');
   }
-  return { roots: positional, options };
+  return { roots, options };
 }
 
 function countFileLines(filePath) {
@@ -220,9 +224,7 @@ function pathStartsWith(target, candidate) {
 }
 
 function shouldIgnorePath(fullPath, relativePath, options, gitChecker) {
-  if (
-    options.ignorePaths.some((ignorePath) => pathStartsWith(fullPath, ignorePath))
-  ) {
+  if (options.ignorePaths.some((ignorePath) => pathStartsWith(fullPath, ignorePath))) {
     return true;
   }
   if (options.useGitignore && gitChecker && gitChecker(relativePath)) {
@@ -335,13 +337,15 @@ async function collectLines(root, options) {
 }
 
 function formatUsage() {
-  return `loc-tree\n\nUsage: loctree.mjs [root ...] [options]\n\nArguments:\n  root                 One or more folders to inspect (defaults to current dir).\n\nOptions:\n  --ext <list>         Comma-separated extensions to include (e.g. --ext rs,ts,tsx).\n                       Prunes non-matching files/dirs from the tree.\n  -I, --ignore <path>  Ignore a folder/file (relative or absolute). Repeatable.\n  --gitignore, -g      Respect current Git ignore rules (requires git).\n  -L, --max-depth <n>  Limit recursion depth (0 = only direct children).\n  --color[=mode]       Colorize large files. mode: auto|always|never (default auto).\n                       -c equals --color=always.\n  --json               Emit JSON instead of a tree view (single root => object, multi-root => array).\n  -H, --show-hidden    Include dotfiles and .DS_Store entries.\n  --summary[=N]        Print totals and top large files (N entries, default 5).\n  --help, -h           Show this message.\n\nExamples:\n  loctree src --ext rs,ts --summary\n  loctree src packages/app src-tauri/src -I node_modules -L 2\n  loctree . --json > tree.json\n`;
+  return `loctree (Node)\n\nUsage: loctree [root ...] [options]\n\nArguments:\n  root                 One or more folders to inspect (defaults to current dir).\n\nOptions:\n  --ext <list>         Comma-separated extensions to include (e.g. --ext rs,ts,tsx).\n                       Prunes non-matching files/dirs from the tree.\n  -I, --ignore <path>  Ignore a folder/file (relative or absolute). Repeatable.\n  --gitignore, -g      Respect current Git ignore rules (requires git).\n  -L, --max-depth <n>  Limit recursion depth (0 = only direct children).\n  --color[=mode]       Colorize large files. mode: auto|always|never (default auto).\n                       -c equals --color=always.\n  --json               Emit JSON instead of a tree view (single root => object, multi-root => array).\n  -H, --show-hidden    Include dotfiles and .DS_Store entries.\n  --summary[=N]        Print totals and top large files (N entries, default 5).\n  --help, -h           Show this message.\n\nExamples:\n  loctree src --ext rs,ts --summary\n  loctree src packages/app src-tauri/src -I node_modules -L 2\n  loctree . --json > tree.json\n`;
 }
 
 async function runOne(root, options, isFirst) {
   const rootPath = path.resolve(root);
   if (!fs.existsSync(rootPath) || !fs.statSync(rootPath).isDirectory()) {
-    console.error(`${rootPath} is not a directory`);
+    console.error(
+      `Root "${root}" resolved to "${rootPath}" is not a directory (cwd: ${process.cwd()})`
+    );
     process.exit(1);
   }
 
