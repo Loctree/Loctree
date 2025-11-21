@@ -1,0 +1,7 @@
+{
+  "repo": "LibraxisAI/loctree",
+  "targets": ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu"],
+  "binary": "loc-tree",
+  "artifact_name": "loctree",
+  "tap": "LibraxisAI/homebrew-loctree"
+}
