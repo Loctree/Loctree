@@ -115,8 +115,11 @@ CLI flags (all runtimes):
 - `--json`               Machine-readable output.
 - `--jsonl`              Analyzer: one JSON object per line (per root).
 - `--html-report <file>` Write analyzer results to an HTML report file.
+- `--graph`              Embed an interactive import graph in the HTML report (Cytoscape.js from CDN).
 - `--serve`              Start a tiny local server so HTML links can open files in your editor/OS.
 - `--editor-cmd <tpl>`   Command template for opening files (`{file}`, `{line}`), default tries `code -g`.
+- `--ignore-symbols <l>` Analyzer mode: comma-separated symbol names to skip in duplicate-export detection (case-insensitive).
+- `--ignore-symbols-preset <name>` Analyzer mode: predefined ignore set (currently `common` → `main,run,setup,test_*`).
 - `--summary[=N]`        Totals + top-N large files (default 5).
 - `-A, --analyze-imports` Import/export analyzer mode (duplicate exports, re-export cascades, dynamic imports).
 - `--limit <N>`          Analyzer: cap top lists for duplicates/dynamic imports (default 8).

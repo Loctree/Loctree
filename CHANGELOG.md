@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
+## [0.2.7] - 2025-11-22
+
+### Added
+- `--graph` opcjonalnie dokleja interaktywny graf importów/re-eksportów do raportu HTML (Cytoscape.js z CDN).
+- `--ignore-symbols-preset <name>` (na razie `common` → `main,run,setup,test_*`) oraz wsparcie prefiksów `foo*` w `--ignore-symbols`.
+
+### Changed
+- Help/README/Monika guide uzupełnione o nowe flagi; analiza duplikatów uwzględnia wzorce prefiksowe.
+
 ## [0.2.6] - 2025-11-22
 
 ### Added

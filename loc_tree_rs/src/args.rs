@@ -7,6 +7,8 @@ pub struct ParsedArgs {
     pub extensions: Option<HashSet<String>>,
     pub ignore_patterns: Vec<String>,
     pub ignore_symbols: Option<HashSet<String>>,
+    pub ignore_symbols_preset: Option<String>,
+    pub graph: bool,
     pub use_gitignore: bool,
     pub max_depth: Option<usize>,
     pub color: ColorMode,
@@ -31,6 +33,8 @@ impl Default for ParsedArgs {
             extensions: None,
             ignore_patterns: Vec::new(),
             ignore_symbols: None,
+            ignore_symbols_preset: None,
+            graph: false,
             use_gitignore: false,
             max_depth: None,
             color: ColorMode::Auto,
@@ -109,6 +113,18 @@ pub fn parse_ignore_symbols(raw: &str) -> Option<HashSet<String>> {
     }
 }
 
+pub fn preset_ignore_symbols(name: &str) -> Option<HashSet<String>> {
+    match name.to_lowercase().as_str() {
+        "common" => Some(
+            ["main", "run", "setup", "test_*", "tests_*"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        ),
+        _ => None,
+    }
+}
+
 pub fn parse_args() -> Result<ParsedArgs, String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut parsed = ParsedArgs {
@@ -147,6 +163,10 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
             }
             "--gitignore" | "-g" => {
                 parsed.use_gitignore = true;
+                i += 1;
+            }
+            "--graph" => {
+                parsed.graph = true;
                 i += 1;
             }
             "--show-hidden" | "-H" => {
@@ -258,6 +278,18 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
             _ if arg.starts_with("--ignore-symbols=") => {
                 let value = arg.trim_start_matches("--ignore-symbols=");
                 parsed.ignore_symbols = parse_ignore_symbols(value);
+                i += 1;
+            }
+            "--ignore-symbols-preset" => {
+                let next = args.get(i + 1).ok_or_else(|| {
+                    "--ignore-symbols-preset requires a name (e.g. common)".to_string()
+                })?;
+                parsed.ignore_symbols_preset = Some(next.clone());
+                i += 2;
+            }
+            _ if arg.starts_with("--ignore-symbols-preset=") => {
+                let value = arg.trim_start_matches("--ignore-symbols-preset=");
+                parsed.ignore_symbols_preset = Some(value.to_string());
                 i += 1;
             }
             "-I" | "--ignore" => {

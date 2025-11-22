@@ -12,7 +12,7 @@ use regex::Regex;
 use crate::types::CommandRef;
 use serde_json::json;
 
-use crate::args::ParsedArgs;
+use crate::args::{preset_ignore_symbols, ParsedArgs};
 use crate::fs_utils::{gather_files, normalise_ignore_patterns, GitIgnoreChecker};
 use crate::types::{
     ExportIndex, ExportSymbol, FileAnalysis, ImportEntry, ImportKind, Options, OutputMode,
@@ -41,12 +41,19 @@ struct ReportSection {
     missing_handlers: Vec<CommandGap>,
     unused_handlers: Vec<CommandGap>,
     open_base: Option<String>,
+    graph: Option<GraphData>,
 }
 
 #[derive(Clone)]
 struct CommandGap {
     name: String,
     locations: Vec<(String, usize)>,
+}
+
+#[derive(Clone)]
+struct GraphData {
+    nodes: Vec<String>,
+    edges: Vec<(String, String, String)>, // from, to, kind
 }
 
 fn escape_html(raw: &str) -> String {
@@ -111,6 +118,7 @@ th,td{border:1px solid #ddd;padding:6px 8px;font-size:14px;}
 th{background:#f5f5f5;text-align:left;}
 code{background:#f6f8fa;padding:2px 4px;border-radius:4px;}
 .muted{color:#666;}
+.graph{height:520px;border:1px solid #ddd;border-radius:8px;margin:12px 0;}
 </style>
 </head><body>
 <h1>loctree import/export analysis</h1>
@@ -221,7 +229,62 @@ code{background:#f6f8fa;padding:2px 4px;border-radius:4px;}
             }
             out.push_str("</td></tr></table>");
         }
+
+        if let Some(graph) = &section.graph {
+            out.push_str("<h3>Import graph</h3>");
+            out.push_str(&format!(
+                "<div class=\"graph\" id=\"graph-{}\"></div>",
+                escape_html(
+                    &section
+                        .root
+                        .replace(|c: char| !c.is_ascii_alphanumeric(), "_")
+                )
+            ));
+            let nodes_json = serde_json::to_string(&graph.nodes).unwrap_or("[]".into());
+            let edges_json = serde_json::to_string(&graph.edges).unwrap_or("[]".into());
+            out.push_str("<script>");
+            out.push_str("window.__LOCTREE_GRAPHS = window.__LOCTREE_GRAPHS || [];");
+            out.push_str("window.__LOCTREE_GRAPHS.push({");
+            out.push_str(&format!(
+                "id:\"graph-{}\",nodes:{},edges:{}",
+                escape_html(
+                    &section
+                        .root
+                        .replace(|c: char| !c.is_ascii_alphanumeric(), "_")
+                ),
+                nodes_json,
+                edges_json
+            ));
+            out.push_str("});</script>");
+        }
     }
+
+    // Graph bootstrap (Cytoscape via CDN)
+    out.push_str(
+        r#"<script src="https://unpkg.com/cytoscape@3.26.0/dist/cytoscape.min.js"></script>
+<script>
+(function(){
+  const graphs = window.__LOCTREE_GRAPHS || [];
+  graphs.forEach(g => {
+    const container = document.getElementById(g.id);
+    if (!container) return;
+    const nodes = Array.from(new Set([].concat(g.nodes || []))).map(n => ({ data: { id: n, label: n }}));
+    const edges = (g.edges || []).map((e, idx) => ({
+      data: { id: 'e'+idx, source: e[0], target: e[1], label: e[2] }
+    }));
+    cytoscape({
+      container,
+      elements: { nodes, edges },
+      style: [
+        { selector: 'node', style: { 'label': 'data(label)', 'font-size': 10, 'text-wrap': 'wrap', 'text-max-width': 120, 'background-color': '#4f81e1', 'color': '#fff', 'width': 22, 'height': 22 } },
+        { selector: 'edge', style: { 'curve-style': 'bezier', 'width': 1.5, 'line-color': '#888', 'target-arrow-color': '#888', 'target-arrow-shape': 'triangle', 'arrow-scale': 0.8, 'label': 'data(label)', 'font-size': 9, 'text-background-color': '#fff', 'text-background-opacity': 0.8, 'text-background-padding': 2 } }
+      ],
+      layout: { name: 'cose', idealEdgeLength: 120, nodeOverlap: 8, padding: 20 }
+    });
+  });
+})();
+</script>"#,
+    );
 
     out.push_str("</body></html>");
     fs::write(path, out)
@@ -678,6 +741,48 @@ fn resolve_python_relative(
     }
 }
 
+fn resolve_js_relative(
+    file_path: &Path,
+    root: &Path,
+    spec: &str,
+    exts: Option<&HashSet<String>>,
+) -> Option<String> {
+    if !spec.starts_with('.') {
+        return None;
+    }
+    let parent = file_path.parent()?;
+    let mut candidate = parent.join(spec);
+    if candidate.extension().is_none() {
+        if let Some(set) = exts {
+            for ext in set {
+                let with_ext = candidate.with_extension(ext);
+                if with_ext.exists() {
+                    candidate = with_ext;
+                    break;
+                }
+            }
+        }
+    }
+    if candidate.exists() {
+        candidate
+            .canonicalize()
+            .ok()
+            .and_then(|p| {
+                p.strip_prefix(root)
+                    .ok()
+                    .map(|q| q.to_string_lossy().to_string())
+            })
+            .or_else(|| {
+                candidate
+                    .canonicalize()
+                    .ok()
+                    .map(|p| p.to_string_lossy().to_string())
+            })
+    } else {
+        None
+    }
+}
+
 fn analyze_js_file(
     content: &str,
     path: &Path,
@@ -1103,13 +1208,37 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
     let mut json_results = Vec::new();
     let mut report_sections: Vec<ReportSection> = Vec::new();
     let mut server_handle = None;
-    let ignore_symbols: HashSet<String> = parsed
-        .ignore_symbols
-        .clone()
-        .unwrap_or_default()
-        .into_iter()
-        .map(|s| s.to_lowercase())
-        .collect();
+
+    let mut ignore_exact: HashSet<String> = HashSet::new();
+    let mut ignore_prefixes: Vec<String> = Vec::new();
+
+    if let Some(preset_name) = parsed.ignore_symbols_preset.as_deref() {
+        if let Some(set) = preset_ignore_symbols(preset_name) {
+            for s in set {
+                if s.ends_with('*') {
+                    ignore_prefixes.push(s.trim_end_matches('*').to_string());
+                } else {
+                    ignore_exact.insert(s);
+                }
+            }
+        } else {
+            eprintln!(
+                "[loctree][warn] unknown --ignore-symbols-preset '{}', ignoring",
+                preset_name
+            );
+        }
+    }
+
+    if let Some(user_syms) = parsed.ignore_symbols.clone() {
+        for s in user_syms {
+            let lc = s.to_lowercase();
+            if lc.ends_with('*') {
+                ignore_prefixes.push(lc.trim_end_matches('*').to_string());
+            } else {
+                ignore_exact.insert(lc);
+            }
+        }
+    }
 
     if parsed.serve {
         if let Some((port, handle)) =
@@ -1163,11 +1292,15 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         let mut dynamic_summary: Vec<(String, Vec<String>)> = Vec::new();
         let mut fe_commands: HashMap<String, Vec<(String, usize)>> = HashMap::new();
         let mut be_commands: HashMap<String, Vec<(String, usize)>> = HashMap::new();
+        let mut graph_edges: Vec<(String, String, String)> = Vec::new();
 
         for file in files {
             let analysis = analyze_file(&file, root_path, options.extensions.as_ref())?;
             for exp in &analysis.exports {
-                if !ignore_symbols.is_empty() && ignore_symbols.contains(&exp.name.to_lowercase()) {
+                let name_lc = exp.name.to_lowercase();
+                let ignored = ignore_exact.contains(&name_lc)
+                    || ignore_prefixes.iter().any(|p| name_lc.starts_with(p));
+                if ignored {
                     continue;
                 }
                 export_index
@@ -1177,9 +1310,63 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             }
             for re in &analysis.reexports {
                 reexport_edges.push((analysis.path.clone(), re.resolved.clone()));
+                if parsed.graph && options.report_path.is_some() {
+                    if let Some(target) = &re.resolved {
+                        graph_edges.push((
+                            analysis.path.clone(),
+                            target.clone(),
+                            "reexport".to_string(),
+                        ));
+                    }
+                }
             }
             if !analysis.dynamic_imports.is_empty() {
                 dynamic_summary.push((analysis.path.clone(), analysis.dynamic_imports.clone()));
+            }
+            if parsed.graph && options.report_path.is_some() {
+                let ext = file
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|s| s.to_lowercase())
+                    .unwrap_or_default();
+                for imp in &analysis.imports {
+                    let resolved = match ext.as_str() {
+                        "py" => {
+                            if imp.source.starts_with('.') {
+                                resolve_python_relative(
+                                    &imp.source,
+                                    &file,
+                                    root_path,
+                                    options.extensions.as_ref(),
+                                )
+                            } else {
+                                None
+                            }
+                        }
+                        "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" => {
+                            if imp.source.starts_with('.') {
+                                resolve_js_relative(
+                                    &file,
+                                    root_path,
+                                    &imp.source,
+                                    options.extensions.as_ref(),
+                                )
+                            } else {
+                                None
+                            }
+                        }
+                        _ => None,
+                    };
+                    if let Some(target) = resolved {
+                        graph_edges.push((
+                            analysis.path.clone(),
+                            target,
+                            match imp.kind {
+                                ImportKind::Static | ImportKind::SideEffect => "import".to_string(),
+                            },
+                        ));
+                    }
+                }
             }
             for call in &analysis.command_calls {
                 fe_commands
@@ -1285,6 +1472,19 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                     v
                 },
                 open_base: section_open,
+                graph: if parsed.graph && options.report_path.is_some() && !graph_edges.is_empty() {
+                    let mut nodes: HashSet<String> = HashSet::new();
+                    for (a, b, _) in &graph_edges {
+                        nodes.insert(a.clone());
+                        nodes.insert(b.clone());
+                    }
+                    Some(GraphData {
+                        nodes: nodes.into_iter().collect(),
+                        edges: graph_edges.clone(),
+                    })
+                } else {
+                    None
+                },
             });
         }
 
