@@ -30,6 +30,7 @@ pub struct ReportSection {
     pub analyze_limit: usize,
     pub missing_handlers: Vec<CommandGap>,
     pub unused_handlers: Vec<CommandGap>,
+    pub command_counts: (usize, usize),
     pub open_base: Option<String>,
     pub graph: Option<GraphData>,
 }

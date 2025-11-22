@@ -411,6 +411,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                     v.sort_by(|a, b| a.name.cmp(&b.name));
                     v
                 },
+                command_counts: (fe_commands.len(), be_commands.len()),
                 open_base: section_open,
                 graph: if parsed.graph && options.report_path.is_some() && !graph_edges.is_empty() {
                     let mut nodes: HashSet<String> = HashSet::new();
