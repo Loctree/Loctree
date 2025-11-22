@@ -363,7 +363,7 @@ code{background:#f6f8fa;padding:2px 4px;border-radius:4px;}
     toolbar.className = 'graph-toolbar';
     toolbar.innerHTML = `
       <label>filter:
-        <input type="text" size="18" placeholder="substring (np. features/ai-suite, .tsx)" data-role="filter-text" />
+        <input type="text" size="18" placeholder="substring (e.g. features/ai-suite, .tsx)" data-role="filter-text" />
       </label>
       <label>min degree:
         <input type="number" min="0" value="0" style="width:60px" data-role="min-degree" />
@@ -405,7 +405,7 @@ code{background:#f6f8fa;padding:2px 4px;border-radius:4px;}
 
     const hint = document.createElement('div');
     hint.className = 'graph-hint';
-    hint.textContent = 'Component filter wybiera wyspę (lub małe wyspy) i podświetla węzły; slider ustawia próg dla małych komponentów. Tekstowy filtr nadal dopasowuje ścieżki węzłów.';
+    hint.textContent = 'Component filter selects an island (or small islands) and highlights nodes; slider sets threshold for small components. Text filter still matches node paths.';
     targetParent.insertBefore(hint, container);
 
     const componentSelect = componentBar.querySelector('[data-role="component-filter"]');

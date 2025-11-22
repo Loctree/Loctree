@@ -1019,7 +1019,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
 
     if parsed.serve {
         use std::io::Read;
-        eprintln!("[loctree] --serve: wciśnij Enter (Ctrl+C aby przerwać) aby zakończyć serwer");
+        eprintln!("[loctree] --serve: Press Enter (Ctrl+C to interrupt) to stop the server");
         let _ = std::io::stdin().read(&mut [0u8]).ok();
     }
     Ok(())

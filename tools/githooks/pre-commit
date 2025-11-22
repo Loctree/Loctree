@@ -12,7 +12,7 @@ echo "Running Python unit tests..."
 python3 tools/tests/test_loctree_py_unit.py
 
 echo "Running Rust unit tests..."
-(cd loc_tree_rs && cargo test --quiet)
+(cd loctree_rs && cargo test --quiet)
 
 echo "Running Integration tests..."
 node tools/tests/loctree-node.test.mjs
