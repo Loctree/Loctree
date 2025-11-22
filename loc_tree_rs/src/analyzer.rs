@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::OnceLock;
 
 use regex::Regex;
@@ -126,6 +127,30 @@ code{background:#f6f8fa;padding:2px 4px;border-radius:4px;}
 
     out.push_str("</body></html>");
     fs::write(path, out)
+}
+
+fn open_in_browser(path: &Path) {
+    let target = path.to_string_lossy();
+    let try_cmds = if cfg!(target_os = "macos") {
+        vec![vec!["open", target.as_ref()]]
+    } else if cfg!(target_os = "windows") {
+        vec![vec!["cmd", "/C", "start", target.as_ref()]]
+    } else {
+        vec![vec!["xdg-open", target.as_ref()]]
+    };
+
+    for cmd in try_cmds {
+        let mut parts = cmd.into_iter();
+        if let Some(program) = parts.next() {
+            if Command::new(program).args(parts).spawn().is_ok() {
+                return;
+            }
+        }
+    }
+    eprintln!(
+        "[loctree][warn] Could not open report automatically: {}",
+        target
+    );
 }
 
 fn regex_import() -> &'static Regex {
@@ -581,6 +606,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
     if let Some(report_path) = parsed.report_path.as_ref() {
         render_html_report(report_path, &report_sections)?;
         eprintln!("[loctree] HTML report written to {}", report_path.display());
+        open_in_browser(report_path);
     }
 
     if let Some(limit) = parsed
