@@ -8,6 +8,8 @@ use crate::args::{preset_ignore_symbols, ParsedArgs};
 use crate::fs_utils::{gather_files, normalise_ignore_patterns, GitIgnoreChecker};
 use crate::types::{ExportIndex, FileAnalysis, ImportKind, Options, OutputMode, ReexportKind};
 
+use globset::{Glob, GlobSet, GlobSetBuilder};
+
 use super::css::analyze_css_file;
 use super::html::render_html_report;
 use super::js::analyze_js_file;
@@ -22,6 +24,42 @@ fn is_dev_file(path: &str) -> bool {
         || path.contains("stories")
         || path.contains(".stories.")
         || path.contains("story.")
+}
+
+fn build_globset(patterns: &[String]) -> Option<GlobSet> {
+    let mut builder = GlobSetBuilder::new();
+    let mut added = false;
+    for pat in patterns {
+        if pat.trim().is_empty() {
+            continue;
+        }
+        match Glob::new(pat) {
+            Ok(glob) => {
+                builder.add(glob);
+                added = true;
+            }
+            Err(err) => eprintln!("[loctree][warn] invalid glob '{}': {}", pat, err),
+        }
+    }
+    if !added {
+        None
+    } else {
+        builder.build().ok()
+    }
+}
+
+fn strip_excluded(files: &[String], exclude: &Option<GlobSet>) -> Vec<String> {
+    match exclude {
+        None => files.to_vec(),
+        Some(set) => files.iter().filter(|p| !set.is_match(p)).cloned().collect(),
+    }
+}
+
+fn matches_focus(files: &[String], focus: &Option<GlobSet>) -> bool {
+    match focus {
+        None => true,
+        Some(set) => files.iter().any(|p| set.is_match(p)),
+    }
 }
 
 fn analyze_file(
@@ -94,6 +132,9 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             }
         }
     }
+
+    let focus_set = build_globset(&parsed.focus_patterns);
+    let exclude_set = build_globset(&parsed.exclude_report_patterns);
 
     if parsed.serve {
         if let Some((base, handle)) =
@@ -279,7 +320,54 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                 refactors,
             });
         }
-        ranked_dups.sort_by(|a, b| b.score.cmp(&a.score).then(b.files.len().cmp(&a.files.len())));
+        ranked_dups.sort_by(|a, b| {
+            b.score
+                .cmp(&a.score)
+                .then(b.files.len().cmp(&a.files.len()))
+        });
+
+        let mut filtered_ranked: Vec<RankedDup> = Vec::new();
+        for dup in ranked_dups.into_iter() {
+            let kept_files = strip_excluded(&dup.files, &exclude_set);
+            if kept_files.len() <= 1 {
+                continue;
+            }
+            if !matches_focus(&kept_files, &focus_set) {
+                continue;
+            }
+            let canonical = if kept_files.contains(&dup.canonical) {
+                dup.canonical.clone()
+            } else {
+                kept_files
+                    .iter()
+                    .find(|f| !is_dev_file(f))
+                    .cloned()
+                    .unwrap_or_else(|| kept_files[0].clone())
+            };
+            let dev_count = kept_files.iter().filter(|f| is_dev_file(f)).count();
+            let prod_count = kept_files.len().saturating_sub(dev_count);
+            let score = prod_count * 2 + dev_count;
+            let mut refactors: Vec<String> = kept_files
+                .iter()
+                .filter(|f| *f != &canonical)
+                .cloned()
+                .collect();
+            refactors.sort();
+            filtered_ranked.push(RankedDup {
+                name: dup.name,
+                files: kept_files,
+                score,
+                prod_count,
+                dev_count,
+                canonical,
+                refactors,
+            });
+        }
+        filtered_ranked.sort_by(|a, b| {
+            b.score
+                .cmp(&a.score)
+                .then(b.files.len().cmp(&a.files.len()))
+        });
 
         let missing_handlers: Vec<CommandGap> = fe_commands
             .iter()
@@ -309,7 +397,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             report_sections.push(ReportSection {
                 root: root_path.display().to_string(),
                 files_analyzed: analyses.len(),
-                ranked_dups: ranked_dups.clone(),
+                ranked_dups: filtered_ranked.clone(),
                 cascades: cascades.clone(),
                 dynamic: sorted_dyn,
                 analyze_limit: options.analyze_limit,
@@ -364,11 +452,11 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             let payload = json!({
                 "root": root_path,
                 "filesAnalyzed": analyses.len(),
-                "duplicateExports": duplicate_exports
+                "duplicateExports": filtered_ranked
                     .iter()
-                    .map(|(name, files)| json!({"name": name, "files": files}))
+                    .map(|dup| json!({"name": dup.name, "files": dup.files}))
                     .collect::<Vec<_>>(),
-                "duplicateExportsRanked": ranked_dups
+                "duplicateExportsRanked": filtered_ranked
                     .iter()
                     .map(|dup| json!({
                         "name": dup.name,
@@ -419,7 +507,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
 
         println!("Import/export analysis for {}/", root_path.display());
         println!("  Files analyzed: {}", analyses.len());
-        println!("  Duplicate exports: {}", duplicate_exports.len());
+        println!("  Duplicate exports: {}", filtered_ranked.len());
         println!("  Files with re-exports: {}", reexport_files.len());
         println!("  Dynamic imports: {}", dynamic_summary.len());
 
@@ -428,7 +516,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                 "\nTop duplicate exports (showing up to {}):",
                 options.analyze_limit
             );
-            for dup in ranked_dups.iter().take(options.analyze_limit) {
+            for dup in filtered_ranked.iter().take(options.analyze_limit) {
                 println!(
                     "  - {} (score {}, {} files: {} prod, {} dev) canonical: {} | refs: {}",
                     dup.name,

@@ -105,7 +105,6 @@ JSON shape: single root -> object; multi-root -> array. Large files (>= 1000 LOC
 CLI flags (all runtimes):
 
 - `--ext <list>`         Comma-separated extensions; prunes others (analyzer defaults to ts,tsx,js,jsx,mjs,cjs,rs,css,py).
-- `--ignore-symbols <l>` Analyzer mode: comma-separated symbol names to skip in duplicate-export detection (case-insensitive).
 - `-I, --ignore <path>`  Ignore path (repeatable; abs or relative).
 - `-g, --gitignore`      Respect gitignore via `git check-ignore`.
 - `-L, --max-depth <n>`  Limit recursion depth.
@@ -118,8 +117,9 @@ CLI flags (all runtimes):
 - `--graph`              Embed an interactive import graph in the HTML report (Cytoscape.js from CDN).
 - `--serve`              Start a tiny local server so HTML links can open files in your editor/OS.
 - `--editor-cmd <tpl>`   Command template for opening files (`{file}`, `{line}`), default tries `code -g`.
-- `--ignore-symbols <l>` Analyzer mode: comma-separated symbol names to skip in duplicate-export detection (case-insensitive).
 - `--ignore-symbols-preset <name>` Analyzer mode: predefined ignore set (currently `common` → `main,run,setup,test_*`).
+- `--focus <glob[,..]>`  Analyzer: pokazuje w raporcie tylko duplikaty, w których choć jeden plik pasuje do globów.
+- `--exclude-report <glob[,..]>` Analyzer: wycina z raportu duplikaty, których pliki pasują do globów (np. `**/__tests__/**`).
 - `--summary[=N]`        Totals + top-N large files (default 5).
 - `-A, --analyze-imports` Import/export analyzer mode (duplicate exports, re-export cascades, dynamic imports).
 - `--limit <N>`          Analyzer: cap top lists for duplicates/dynamic imports (default 8).

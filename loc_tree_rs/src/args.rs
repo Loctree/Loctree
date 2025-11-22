@@ -8,6 +8,8 @@ pub struct ParsedArgs {
     pub ignore_patterns: Vec<String>,
     pub ignore_symbols: Option<HashSet<String>>,
     pub ignore_symbols_preset: Option<String>,
+    pub focus_patterns: Vec<String>,
+    pub exclude_report_patterns: Vec<String>,
     pub graph: bool,
     pub use_gitignore: bool,
     pub max_depth: Option<usize>,
@@ -34,6 +36,8 @@ impl Default for ParsedArgs {
             ignore_patterns: Vec::new(),
             ignore_symbols: None,
             ignore_symbols_preset: None,
+            focus_patterns: Vec::new(),
+            exclude_report_patterns: Vec::new(),
             graph: false,
             use_gitignore: false,
             max_depth: None,
@@ -92,6 +96,19 @@ pub fn parse_extensions(raw: &str) -> Option<HashSet<String>> {
     } else {
         Some(set)
     }
+}
+
+fn parse_glob_list(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .filter_map(|segment| {
+            let trimmed = segment.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        })
+        .collect()
 }
 
 pub fn parse_ignore_symbols(raw: &str) -> Option<HashSet<String>> {
@@ -290,6 +307,32 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
             _ if arg.starts_with("--ignore-symbols-preset=") => {
                 let value = arg.trim_start_matches("--ignore-symbols-preset=");
                 parsed.ignore_symbols_preset = Some(value.to_string());
+                i += 1;
+            }
+            "--focus" => {
+                let next = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--focus requires a glob or comma list".to_string())?;
+                parsed.focus_patterns.extend(parse_glob_list(next));
+                i += 2;
+            }
+            _ if arg.starts_with("--focus=") => {
+                let value = arg.trim_start_matches("--focus=");
+                parsed.focus_patterns.extend(parse_glob_list(value));
+                i += 1;
+            }
+            "--exclude-report" => {
+                let next = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--exclude-report requires a glob or comma list".to_string())?;
+                parsed.exclude_report_patterns.extend(parse_glob_list(next));
+                i += 2;
+            }
+            _ if arg.starts_with("--exclude-report=") => {
+                let value = arg.trim_start_matches("--exclude-report=");
+                parsed
+                    .exclude_report_patterns
+                    .extend(parse_glob_list(value));
                 i += 1;
             }
             "-I" | "--ignore" => {

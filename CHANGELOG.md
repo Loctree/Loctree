@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
+## [0.2.8] - 2025-11-22
+
+### Added
+- `--focus <glob>` filtruje w raporcie tylko duplikaty, w których choć jeden plik pasuje do globów (analiza wciąż obejmuje całe drzewo).
+- `--exclude-report <glob>` pozwala wycinać szum (np. `**/__tests__/**`, `**/*.stories.tsx`) tylko z raportu duplikatów.
+
+### Changed
+- Liczba duplikatów w CLI/JSON/HTML odzwierciedla powyższe filtry; kanoniczny plik i score liczone po odfiltrowaniu ścieżek.
+
 ## [0.2.7] - 2025-11-22
 
 ### Added
