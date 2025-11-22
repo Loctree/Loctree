@@ -12,7 +12,8 @@ designed to be fast, scriptable, and usable from multiple runtimes: Rust (native
 - Respects `.gitignore` (`-g`), custom ignores (`-I`), and max depth (`-L`).
 - Human or JSON output; per-root summary with totals and large files (>= 1000 LOC).
 - Multi-root: pass several paths in one command.
-- Import/export analyzer mode (`-A/--analyze-imports`) surfaces duplicate exports, re-export chains, and dynamic imports.
+- Import/export analyzer mode (`-A/--analyze-imports`) surfaces duplicate exports, re-export chains, and dynamic imports
+  across TS/JS (incl. dynamic imports), CSS `@import`, and Rust `use/pub use`/public items.
 
 Common use cases:
 
@@ -99,7 +100,7 @@ JSON shape: single root -> object; multi-root -> array. Large files (>= 1000 LOC
 
 CLI flags (all runtimes):
 
-- `--ext <list>`         Comma-separated extensions; prunes others.
+- `--ext <list>`         Comma-separated extensions; prunes others (analyzer defaults to ts,tsx,js,jsx,mjs,cjs,rs,css).
 - `-I, --ignore <path>`  Ignore path (repeatable; abs or relative).
 - `-g, --gitignore`      Respect gitignore via `git check-ignore`.
 - `-L, --max-depth <n>`  Limit recursion depth.

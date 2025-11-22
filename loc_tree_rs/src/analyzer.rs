@@ -130,21 +130,42 @@ code{background:#f6f8fa;padding:2px 4px;border-radius:4px;}
 }
 
 fn open_in_browser(path: &Path) {
-    let target = path.to_string_lossy();
-    let try_cmds = if cfg!(target_os = "macos") {
-        vec![vec!["open", target.as_ref()]]
-    } else if cfg!(target_os = "windows") {
-        vec![vec!["cmd", "/C", "start", target.as_ref()]]
-    } else {
-        vec![vec!["xdg-open", target.as_ref()]]
+    let Ok(canon) = path.canonicalize() else {
+        eprintln!(
+            "[loctree][warn] Could not resolve report path for auto-open: {}",
+            path.display()
+        );
+        return;
     };
 
-    for cmd in try_cmds {
-        let mut parts = cmd.into_iter();
-        if let Some(program) = parts.next() {
-            if Command::new(program).args(parts).spawn().is_ok() {
-                return;
-            }
+    let target = canon.to_string_lossy().to_string();
+    if target.bytes().any(|b| b < 0x20) {
+        eprintln!(
+            "[loctree][warn] Skipping auto-open for suspicious path: {}",
+            target
+        );
+        return;
+    }
+
+    #[cfg(target_os = "macos")]
+    let try_cmds = vec![("open", vec![target.as_str()])];
+    #[cfg(target_os = "windows")]
+    let try_cmds = vec![(
+        "powershell",
+        vec![
+            "-NoProfile",
+            "-Command",
+            "Start-Process",
+            "-FilePath",
+            target.as_str(),
+        ],
+    )];
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    let try_cmds = vec![("xdg-open", vec![target.as_str()])];
+
+    for (program, args) in try_cmds {
+        if Command::new(program).args(args.clone()).spawn().is_ok() {
+            return;
         }
     }
     eprintln!(
@@ -200,6 +221,68 @@ fn regex_export_brace() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r#"(?m)^\s*export\s+\{([^}]+)\}\s*;?"#).unwrap())
 }
 
+fn regex_css_import() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        // @import "x.css";  @import url("x.css"); @import url(x.css);
+        Regex::new(r#"(?m)@import\s+(?:url\()?["']?([^"'()\s]+)["']?\)?"#).unwrap()
+    })
+}
+
+fn regex_rust_use() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r#"(?m)^\s*(?:pub\s*(?:\([^)]*\))?\s+)?use\s+([^;]+);"#).unwrap())
+}
+
+fn regex_rust_pub_use() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r#"(?m)^\s*pub\s*(?:\([^)]*\))?\s+use\s+([^;]+);"#).unwrap())
+}
+
+fn regex_rust_pub_item(kind: &str) -> Regex {
+    // Matches visibility modifiers like pub(crate) and optional async for fn
+    let pattern = format!(
+        r#"(?m)^\s*pub\s*(?:\([^)]*\)\s*)?(?:async\s+)?{}\s+([A-Za-z0-9_]+)"#,
+        kind
+    );
+    Regex::new(&pattern).unwrap()
+}
+
+fn regex_rust_pub_const_like(kind: &str) -> Regex {
+    let pattern = format!(
+        r#"(?m)^\s*pub\s*(?:\([^)]*\)\s*)?{}\s+([A-Za-z0-9_]+)"#,
+        kind
+    );
+    Regex::new(&pattern).unwrap()
+}
+
+fn rust_pub_decl_regexes() -> &'static [Regex] {
+    static RE: OnceLock<Vec<Regex>> = OnceLock::new();
+    RE.get_or_init(|| {
+        vec![
+            regex_rust_pub_item("fn"),
+            regex_rust_pub_item("struct"),
+            regex_rust_pub_item("enum"),
+            regex_rust_pub_item("trait"),
+            regex_rust_pub_item("type"),
+            regex_rust_pub_item("union"),
+            regex_rust_pub_item("mod"),
+        ]
+    })
+    .as_slice()
+}
+
+fn rust_pub_const_regexes() -> &'static [Regex] {
+    static RE: OnceLock<Vec<Regex>> = OnceLock::new();
+    RE.get_or_init(|| {
+        vec![
+            regex_rust_pub_const_like("const"),
+            regex_rust_pub_const_like("static"),
+        ]
+    })
+    .as_slice()
+}
+
 fn resolve_reexport_target(
     file_path: &Path,
     root: &Path,
@@ -239,27 +322,22 @@ fn resolve_reexport_target(
     }
 }
 
-fn analyze_file(
+fn analyze_js_file(
+    content: &str,
     path: &Path,
     root: &Path,
     extensions: Option<&HashSet<String>>,
-) -> io::Result<FileAnalysis> {
-    let content = std::fs::read_to_string(path)?;
-    let relative = path
-        .strip_prefix(root)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .to_string();
-
+    relative: String,
+) -> FileAnalysis {
     let mut imports = Vec::new();
-    for caps in regex_import().captures_iter(&content) {
+    for caps in regex_import().captures_iter(content) {
         let source = caps.get(2).map(|m| m.as_str()).unwrap_or("").to_string();
         imports.push(ImportEntry {
             source,
             kind: ImportKind::Static,
         });
     }
-    for caps in regex_side_effect_import().captures_iter(&content) {
+    for caps in regex_side_effect_import().captures_iter(content) {
         let source = caps.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
         imports.push(ImportEntry {
             source,
@@ -268,7 +346,7 @@ fn analyze_file(
     }
 
     let mut reexports = Vec::new();
-    for caps in regex_reexport_star().captures_iter(&content) {
+    for caps in regex_reexport_star().captures_iter(content) {
         let source = caps.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
         let resolved = resolve_reexport_target(path, root, &source, extensions);
         reexports.push(ReexportEntry {
@@ -277,7 +355,7 @@ fn analyze_file(
             resolved,
         });
     }
-    for caps in regex_reexport_named().captures_iter(&content) {
+    for caps in regex_reexport_named().captures_iter(content) {
         let raw_names = caps.get(1).map(|m| m.as_str()).unwrap_or("");
         let source = caps.get(2).map(|m| m.as_str()).unwrap_or("").to_string();
         let names = brace_list_to_names(raw_names);
@@ -290,13 +368,13 @@ fn analyze_file(
     }
 
     let mut dynamic_imports = Vec::new();
-    for caps in regex_dynamic_import().captures_iter(&content) {
+    for caps in regex_dynamic_import().captures_iter(content) {
         let source = caps.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
         dynamic_imports.push(source);
     }
 
     let mut exports = Vec::new();
-    for caps in regex_export_named_decl().captures_iter(&content) {
+    for caps in regex_export_named_decl().captures_iter(content) {
         let name = caps.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
         if !name.is_empty() {
             exports.push(ExportSymbol {
@@ -305,7 +383,7 @@ fn analyze_file(
             });
         }
     }
-    for caps in regex_export_default().captures_iter(&content) {
+    for caps in regex_export_default().captures_iter(content) {
         let name = caps
             .get(1)
             .map(|m| m.as_str().to_string())
@@ -315,7 +393,7 @@ fn analyze_file(
             kind: "default".to_string(),
         });
     }
-    for caps in regex_export_brace().captures_iter(&content) {
+    for caps in regex_export_brace().captures_iter(content) {
         let raw = caps.get(1).map(|m| m.as_str()).unwrap_or("");
         for name in brace_list_to_names(raw) {
             exports.push(ExportSymbol {
@@ -335,13 +413,176 @@ fn analyze_file(
         }
     }
 
-    Ok(FileAnalysis {
+    FileAnalysis {
         path: relative,
         imports,
         reexports,
         dynamic_imports,
         exports,
-    })
+    }
+}
+
+fn analyze_css_file(content: &str, relative: String) -> FileAnalysis {
+    let mut imports = Vec::new();
+    for caps in regex_css_import().captures_iter(content) {
+        let source = caps.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
+        imports.push(ImportEntry {
+            source,
+            kind: ImportKind::Static,
+        });
+    }
+
+    FileAnalysis {
+        path: relative,
+        imports,
+        reexports: Vec::new(),
+        dynamic_imports: Vec::new(),
+        exports: Vec::new(),
+    }
+}
+
+fn parse_rust_brace_names(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .filter_map(|item| {
+            let trimmed = item.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            if trimmed == "self" {
+                return None;
+            }
+            if let Some((_, alias)) = trimmed.split_once(" as ") {
+                Some(alias.trim().to_string())
+            } else {
+                Some(trimmed.to_string())
+            }
+        })
+        .collect()
+}
+
+fn analyze_rust_file(content: &str, relative: String) -> FileAnalysis {
+    let mut imports = Vec::new();
+    for caps in regex_rust_use().captures_iter(content) {
+        let source = caps.get(1).map(|m| m.as_str()).unwrap_or("").trim();
+        if !source.is_empty() {
+            imports.push(ImportEntry {
+                source: source.to_string(),
+                kind: ImportKind::Static,
+            });
+        }
+    }
+
+    let mut reexports = Vec::new();
+    let mut exports = Vec::new();
+
+    for caps in regex_rust_pub_use().captures_iter(content) {
+        let raw = caps.get(1).map(|m| m.as_str()).unwrap_or("").trim();
+        if raw.is_empty() {
+            continue;
+        }
+
+        if raw.contains('{') && raw.contains('}') {
+            let mut parts = raw.splitn(2, '{');
+            let prefix = parts.next().unwrap_or("").trim().trim_end_matches("::");
+            let braces = parts.next().unwrap_or("").trim_end_matches('}').trim();
+            let names = parse_rust_brace_names(braces);
+            reexports.push(ReexportEntry {
+                source: raw.to_string(),
+                kind: ReexportKind::Named(names.clone()),
+                resolved: None,
+            });
+            for name in names {
+                exports.push(ExportSymbol {
+                    name,
+                    kind: "reexport".to_string(),
+                });
+            }
+            let _ = prefix; // prefix retained for future resolution
+        } else if raw.ends_with("::*") {
+            reexports.push(ReexportEntry {
+                source: raw.to_string(),
+                kind: ReexportKind::Star,
+                resolved: None,
+            });
+        } else {
+            // pub use foo::bar as Baz;
+            let (path_part, export_name) = if let Some((path, alias)) = raw.split_once(" as ") {
+                (path.trim(), alias.trim())
+            } else {
+                let mut segments = raw.rsplitn(2, "::");
+                let name = segments.next().unwrap_or(raw).trim();
+                let _ = segments.next();
+                (raw, name)
+            };
+
+            reexports.push(ReexportEntry {
+                source: path_part.to_string(),
+                kind: ReexportKind::Named(vec![export_name.to_string()]),
+                resolved: None,
+            });
+            exports.push(ExportSymbol {
+                name: export_name.to_string(),
+                kind: "reexport".to_string(),
+            });
+        }
+    }
+
+    // public items
+    for regex in rust_pub_decl_regexes() {
+        for caps in regex.captures_iter(content) {
+            if let Some(name) = caps.get(1) {
+                exports.push(ExportSymbol {
+                    name: name.as_str().to_string(),
+                    kind: "decl".to_string(),
+                });
+            }
+        }
+    }
+
+    for regex in rust_pub_const_regexes() {
+        for caps in regex.captures_iter(content) {
+            if let Some(name) = caps.get(1) {
+                exports.push(ExportSymbol {
+                    name: name.as_str().to_string(),
+                    kind: "decl".to_string(),
+                });
+            }
+        }
+    }
+
+    FileAnalysis {
+        path: relative,
+        imports,
+        reexports,
+        dynamic_imports: Vec::new(),
+        exports,
+    }
+}
+
+fn analyze_file(
+    path: &Path,
+    root: &Path,
+    extensions: Option<&HashSet<String>>,
+) -> io::Result<FileAnalysis> {
+    let content = std::fs::read_to_string(path)?;
+    let relative = path
+        .strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .to_string();
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_lowercase())
+        .unwrap_or_default();
+
+    let analysis = match ext.as_str() {
+        "rs" => analyze_rust_file(&content, relative),
+        "css" => analyze_css_file(&content, relative),
+        _ => analyze_js_file(&content, path, root, extensions, relative),
+    };
+
+    Ok(analysis)
 }
 
 fn is_dev_file(path: &str) -> bool {
@@ -622,7 +863,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
 }
 
 pub fn default_analyzer_exts() -> HashSet<String> {
-    ["ts", "tsx", "js", "jsx", "mjs", "cjs"]
+    ["ts", "tsx", "js", "jsx", "mjs", "cjs", "rs", "css"]
         .iter()
         .map(|s| s.to_string())
         .collect()

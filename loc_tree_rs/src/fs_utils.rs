@@ -122,7 +122,7 @@ pub fn gather_files(
         .filter_map(Result::ok)
         .filter(|entry| {
             let name = entry.file_name();
-            let is_hidden = name.to_string_lossy().starts_with('.') || name == ".DS_Store";
+            let is_hidden = name.to_string_lossy().starts_with('.');
             options.show_hidden || !is_hidden
         })
         .collect();

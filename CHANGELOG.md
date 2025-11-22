@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
+## [0.2.2] - 2025-11-22
+
+### Added
+- Analyzer now understands CSS `@import` and Rust `use`/`pub use`/public items; default analyzer extensions expanded to include `rs` and `css`.
+- HTML report auto-open remains; help/README updated to note new language coverage.
+
+### Changed
+- Hidden-file detection no longer special-cases `.DS_Store`; relies on leading dot + `--show-hidden`.
+
 ## [0.2.0] - 2025-11-21
 
 ### Added
