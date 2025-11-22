@@ -36,22 +36,42 @@ mkdir -p "$INSTALL_DIR"
 wrapper="$INSTALL_DIR/loctree"
 cat >"$wrapper" <<WRAP
 #!/usr/bin/env bash
-exec "$installed_bin" "$@"
+exec "$installed_bin" "\$@"
 WRAP
 chmod +x "$wrapper"
 
 info "Installed binary: $installed_bin"
 info "Wrapper: $wrapper"
 
+# Ensure PATH contains cargo/bin and INSTALL_DIR (wrapper), in that order.
+ensure_path_line() {
+  local file="$1"
+  local cargo="$CARGO_BIN"
+  local install="$INSTALL_DIR"
+  local tag="# loctree installer"
+
+  if [ ! -w "$file" ]; then
+    warn "Cannot update PATH in $file (not writable). Add manually: export PATH=\"$cargo:$install:\$PATH\""
+    return
+  fi
+
+  # Avoid duplicating our block.
+  if grep -q "loctree installer" "$file"; then
+    return
+  fi
+
+  printf '\n%s\nexport PATH="%s:%s:$PATH"\n' "$tag" "$cargo" "$install" >>"$file"
+  warn "Appended PATH to $file; reload shell or run: source $file"
+}
+
+case ":$PATH:" in
+  *":$CARGO_BIN:"*) :;;
+  *) warn "cargo bin not in PATH; adding to ~/.zshrc"; ensure_path_line "$HOME/.zshrc";;
+esac
+
 case ":$PATH:" in
   *":$INSTALL_DIR:"*) :;;
-  *)
-    warn "Add to PATH: export PATH=\"$INSTALL_DIR:\$PATH\""
-    if [ -w "${HOME}/.zshrc" ]; then
-      warn "Attempting to append to ~/.zshrc"
-      printf '\n# loctree installer\nexport PATH="%s:$PATH"\n' "$INSTALL_DIR" >> "$HOME/.zshrc"
-      warn "Appended to ~/.zshrc — reload shell or run: source ~/.zshrc"
-    fi;;
- esac
+  *) warn "loctree wrapper dir not in PATH; adding to ~/.zshrc"; ensure_path_line "$HOME/.zshrc";;
+esac
 
 info "Done. Try: loctree . --ext rs,ts --summary"

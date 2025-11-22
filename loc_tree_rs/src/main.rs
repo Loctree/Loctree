@@ -4,16 +4,39 @@ mod fs_utils;
 mod tree;
 mod types;
 
+use std::panic;
 use std::path::PathBuf;
 
 use args::parse_args;
 use types::Mode;
+
+fn install_broken_pipe_handler() {
+    let default_hook = panic::take_hook();
+    panic::set_hook(Box::new(move |info| {
+        let payload = info.payload();
+        let is_broken = payload
+            .downcast_ref::<&str>()
+            .is_some_and(|s| s.contains("Broken pipe"))
+            || payload
+                .downcast_ref::<String>()
+                .is_some_and(|s| s.contains("Broken pipe"));
+
+        if is_broken {
+            // Quietly exit when downstream closes the pipe (e.g. piping to `head`).
+            std::process::exit(0);
+        }
+
+        default_hook(info);
+    }));
+}
 
 fn format_usage() -> &'static str {
     "loctree (Rust)\n\nUsage: loctree [root ...] [options]\n\nModes:\n  --analyze-imports, -A  Switch to import/export analyzer (reports re-exports, duplicate exports, dynamic imports).\n\nOptions:\n  --ext <list>         Comma-separated extensions to include (e.g. --ext rs,ts,tsx).\n                       Prunes non-matching files/dirs from the tree or the analyzer input set.\n  -I, --ignore <path>  Ignore a folder/file (relative or absolute). Repeatable.\n  --gitignore, -g      Respect current Git ignore rules (requires git).\n  -L, --max-depth <n>  Limit recursion depth (0 = only direct children).\n  --color[=mode]       Colorize large files. mode: auto|always|never (default auto).\n  --loc <n>            Threshold (LOC) for large-file highlighting (tree mode). Default 1000.\n  --show-hidden, -H    Include dotfiles/.DS_Store.\n  --json               Emit JSON instead of a tree view (single root => object, multi-root => array).\n  --jsonl              Emit one JSON object per line (per root) in analyzer mode.\n  --summary[=N]        Tree: totals + top large files (N entries, default 5).\n  --limit <N>          Analyzer: top-N duplicate exports / dynamic imports (default 8).\n  --help, -h           Show this message.\n\nExamples:\n  loctree src --ext rs,ts --summary\n  loctree src packages/app src-tauri/src -I node_modules -L 2\n  loctree . --json > tree.json\n  loctree src apps/web -A --json --ext ts,tsx --limit 10\n"
 }
 
 fn main() -> std::io::Result<()> {
+    install_broken_pipe_handler();
+
     let parsed = match parse_args() {
         Ok(args) => args,
         Err(err) => {
