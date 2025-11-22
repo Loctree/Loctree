@@ -13,6 +13,7 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 ### Changed
 - Cleaner import graph (edge labels removed, deduped CSS, more defensive `buildElements`/filter handling).
 - Tauri command coverage table restyled for readability (pill rows, clearer columns).
+- FE↔BE Tauri matching now normalizes camelCase/snake_case aliases (e.g., `loginWithPin` ↔ `login_with_pin`) to trim false missing/unused reports.
 
 ## [0.2.8] - 2025-11-22
 

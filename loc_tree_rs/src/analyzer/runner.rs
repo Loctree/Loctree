@@ -22,6 +22,31 @@ use super::{CommandGap, GraphData, GraphNode, RankedDup, ReportSection};
 const MAX_GRAPH_NODES: usize = 8000;
 const MAX_GRAPH_EDGES: usize = 12000;
 
+fn normalize_cmd_name(name: &str) -> String {
+    let mut out = String::new();
+    let mut last_was_lower = false;
+    for ch in name.chars() {
+        if ch.is_ascii_alphanumeric() {
+            if ch.is_uppercase() && last_was_lower && !out.is_empty() {
+                out.push('_');
+            }
+            out.push(ch.to_ascii_lowercase());
+            last_was_lower = ch.is_ascii_lowercase();
+        } else if !out.ends_with('_') && !out.is_empty() {
+            out.push('_');
+            last_was_lower = false;
+        }
+    }
+    while out.ends_with('_') {
+        out.pop();
+    }
+    if out.is_empty() {
+        name.to_lowercase()
+    } else {
+        out
+    }
+}
+
 fn is_dev_file(path: &str) -> bool {
     path.contains("__tests__")
         || path.contains("stories")
@@ -432,9 +457,26 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                 .then(b.files.len().cmp(&a.files.len()))
         });
 
+        let fe_norms: HashMap<String, String> = fe_commands
+            .keys()
+            .map(|k| (k.clone(), normalize_cmd_name(k)))
+            .collect();
+        let be_norms: HashMap<String, String> = be_commands
+            .keys()
+            .map(|k| (k.clone(), normalize_cmd_name(k)))
+            .collect();
+        let be_norm_set: HashSet<String> = be_norms.values().cloned().collect();
+        let fe_norm_set: HashSet<String> = fe_norms.values().cloned().collect();
+
         let missing_handlers: Vec<CommandGap> = fe_commands
             .iter()
-            .filter(|(name, _)| !be_commands.contains_key(*name))
+            .filter(|(name, _)| {
+                let norm = fe_norms
+                    .get(*name)
+                    .cloned()
+                    .unwrap_or_else(|| normalize_cmd_name(name));
+                !be_norm_set.contains(&norm)
+            })
             .map(|(name, locs)| CommandGap {
                 name: name.clone(),
                 locations: locs.clone(),
@@ -442,7 +484,13 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             .collect();
         let unused_handlers: Vec<CommandGap> = be_commands
             .iter()
-            .filter(|(name, _)| !fe_commands.contains_key(*name))
+            .filter(|(name, _)| {
+                let norm = be_norms
+                    .get(*name)
+                    .cloned()
+                    .unwrap_or_else(|| normalize_cmd_name(name));
+                !fe_norm_set.contains(&norm)
+            })
             .map(|(name, locs)| CommandGap {
                 name: name.clone(),
                 locations: locs.clone(),

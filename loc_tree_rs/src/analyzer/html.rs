@@ -2,6 +2,7 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
+use super::assets::CYTOSCAPE_JS;
 use super::open_server::url_encode_component;
 use super::ReportSection;
 
@@ -22,12 +23,21 @@ fn linkify(base: Option<&str>, file: &str, line: usize) -> String {
 }
 
 pub(crate) fn render_html_report(path: &Path, sections: &[ReportSection]) -> io::Result<()> {
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir)?;
+        let js_path = dir.join("loctree-cytoscape.min.js");
+        if !js_path.exists() {
+            fs::write(&js_path, CYTOSCAPE_JS)?;
+        }
+    }
+
     let mut out = String::new();
     out.push_str(
         r#"<!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'none'; font-src 'self' data:;">
 <title>loctree import/export report</title>
 <style>
 body{font-family:system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif;margin:24px;line-height:1.5;}
@@ -202,9 +212,9 @@ code{background:#f6f8fa;padding:2px 4px;border-radius:4px;}
         }
     }
 
-    // Graph bootstrap (Cytoscape via CDN)
+    // Graph bootstrap (Cytoscape self-hosted)
     out.push_str(
-        r#"<script src="https://unpkg.com/cytoscape@3.26.0/dist/cytoscape.min.js"></script>
+        r#"<script src="loctree-cytoscape.min.js"></script>
 <script>
 (function(){
   const graphs = window.__LOCTREE_GRAPHS || [];
@@ -228,6 +238,8 @@ code{background:#f6f8fa;padding:2px 4px;border-radius:4px;}
         <button data-role="reset">reset</button>
         <label><input type="checkbox" data-role="dark" /> dark</label>
         <button data-role="fullscreen">fullscreen</button>
+        <button data-role="png">png</button>
+        <button data-role="json">json</button>
       </span>
       <div class="graph-legend">
         <span><span class="legend-dot" style="background:#4f81e1"></span> file</span>
@@ -274,7 +286,30 @@ code{background:#f6f8fa;padding:2px 4px;border-radius:4px;}
         { selector: 'edge', style: { 'curve-style': 'bezier', 'width': 1.1, 'line-color': 'data(color)', 'target-arrow-color': 'data(color)', 'target-arrow-shape': 'triangle', 'arrow-scale': 0.7, 'label': '', 'font-size': 9, 'text-background-color': '#fff', 'text-background-opacity': 0.8, 'text-background-padding': 2 } }
       ],
       layout: { name: 'preset', animate: false, fit: true }
-    });
+      });
+
+    const download = (filename, data, mime) => {
+      let blob = null;
+      if (data instanceof Blob) {
+        blob = data;
+      } else if (typeof data === 'string' && data.startsWith('data:')) {
+        const parts = data.split(',');
+        const b64 = parts.length > 1 ? parts[1] : '';
+        const bin = atob(b64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        blob = new Blob([bytes], { type: mime || parts[0].split(';')[0].replace('data:','') || 'application/octet-stream' });
+      } else {
+        blob = new Blob([data], {type: mime || 'application/octet-stream'});
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 500);
+    };
 
     const applyFilters = () => {
       const text = (toolbar.querySelector('[data-role="filter-text"]')?.value || '').toLowerCase();
@@ -327,6 +362,8 @@ code{background:#f6f8fa;padding:2px 4px;border-radius:4px;}
     const resetBtn = toolbar.querySelector('[data-role="reset"]');
     const darkChk = toolbar.querySelector('[data-role="dark"]');
     const fsBtn = toolbar.querySelector('[data-role="fullscreen"]');
+    const pngBtn = toolbar.querySelector('[data-role="png"]');
+    const jsonBtn = toolbar.querySelector('[data-role="json"]');
 
     if (fitBtn) fitBtn.addEventListener('click', () => cy.fit());
     if (resetBtn) resetBtn.addEventListener('click', () => {
@@ -334,6 +371,21 @@ code{background:#f6f8fa;padding:2px 4px;border-radius:4px;}
       cy.add(original);
       cy.layout({ name: 'preset', animate: false, fit: true }).run();
       applyFilters();
+    });
+
+    if (pngBtn) pngBtn.addEventListener('click', () => {
+      const dark = darkChk && darkChk.checked;
+      const dataUrl = cy.png({ bg: dark ? '#0f1115' : '#ffffff', full: true, scale: 2 });
+      download(`${g.id}-graph.png`, dataUrl, 'image/png');
+    });
+    if (jsonBtn) jsonBtn.addEventListener('click', () => {
+      const payload = {
+        nodes: cy.nodes().map(n => n.data()),
+        edges: cy.edges().map(e => ({ source: e.data('source'), target: e.data('target'), kind: e.data('kind') })),
+        filter: toolbar.querySelector('[data-role="filter-text"]')?.value || '',
+        minDegree: parseInt(toolbar.querySelector('[data-role="min-degree"]')?.value || '0', 10) || 0,
+      };
+      download(`${g.id}-graph.json`, JSON.stringify(payload, null, 2), 'application/json');
     });
 
     const applyDark = (on) => {

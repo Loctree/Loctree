@@ -1,3 +1,4 @@
+pub mod assets;
 mod css;
 pub mod html;
 pub mod js;
