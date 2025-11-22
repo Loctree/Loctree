@@ -64,12 +64,21 @@ code{background:#f6f8fa;padding:2px 4px;border-radius:4px;}
 .command-pill{display:inline-block;padding:3px 6px;border-radius:6px;background:#eef2ff;color:#2b2f3a;font-size:12px;margin:2px 4px 2px 0;}
 .dark .command-pill{background:#1f2635;color:#e9ecf5;}
 .command-col{width:50%;}
-.dark body{background:#0f1115;color:#d7dde5;}
+.module-header{font-weight:700;margin-top:4px;}
+.module-group{margin-bottom:10px;}
+.graph-drawer{position:fixed;left:16px;right:16px;bottom:12px;z-index:1100;background:#f5f7fb;border:1px solid #cfd4de;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.25);padding:8px 10px;}
+.graph-drawer.collapsed{opacity:0.9;}
+.graph-drawer-header{display:flex;align-items:center;gap:10px;cursor:pointer;font-weight:600;}
+.graph-drawer-header button{font-size:12px;padding:4px 8px;border:1px solid #ccc;background:#fff;border-radius:6px;cursor:pointer;}
+.graph-drawer-body{margin-top:6px;}
+.graph-drawer .graph{margin:0;border-color:#cfd4de;}
 .dark body{background:#0f1115;color:#d7dde5;}
 .dark table th{background:#1c2029;color:#d7dde5;}
 .dark table td{background:#0f1115;color:#d7dde5;border-color:#2a2f3a;}
 .dark code{background:#1c2029;color:#f0f4ff;}
 .dark .graph{border-color:#2a2f3a;}
+.dark .graph-drawer{background:#0b0d11;border-color:#2a2f3a;box-shadow:0 8px 32px rgba(0,0,0,.45);}
+.dark .graph-drawer-header button{background:#111522;color:#e9ecf5;border-color:#2a2f3a;}
 </style>
 </head><body>
 <h1>loctree import/export analysis</h1>
@@ -142,44 +151,56 @@ code{background:#f6f8fa;padding:2px 4px;border-radius:4px;}
         } else if section.missing_handlers.is_empty() && section.unused_handlers.is_empty() {
             out.push_str("<p class=\"muted\">All frontend calls have matching handlers.</p>");
         } else {
+            let render_grouped = |gaps: &Vec<super::report::CommandGap>, out: &mut String| {
+                if gaps.is_empty() {
+                    out.push_str("<span class=\"muted\">None</span>");
+                    return;
+                }
+                let mut groups: std::collections::BTreeMap<String, Vec<String>> =
+                    std::collections::BTreeMap::new();
+                for g in gaps {
+                    let module = g
+                        .locations
+                        .get(0)
+                        .map(|(p, _)| {
+                            let parts: Vec<&str> = p.split('/').collect();
+                            if parts.len() >= 2 {
+                                format!("{}/{}", parts[0], parts[1])
+                            } else {
+                                parts.get(0).unwrap_or(&"").to_string()
+                            }
+                        })
+                        .unwrap_or_else(|| "".to_string());
+                    let locs: Vec<String> = g
+                        .locations
+                        .iter()
+                        .map(|(f, l)| linkify(section.open_base.as_deref(), f, *l))
+                        .collect();
+                    let pill = format!(
+                        "<span class=\"command-pill\"><code>{}</code></span> <span class=\"muted\">{}</span>",
+                        escape_html(&g.name),
+                        locs.join(", ")
+                    );
+                    groups.entry(module).or_default().push(pill);
+                }
+                for (module, items) in groups {
+                    let module_label = if module.is_empty() {
+                        "—".to_string()
+                    } else {
+                        escape_html(&module)
+                    };
+                    out.push_str(&format!(
+                        "<div class=\"module-group\"><div class=\"module-header\">{}</div><div>{}</div></div>",
+                        module_label,
+                        items.join("<br/>")
+                    ));
+                }
+            };
+
             out.push_str("<table class=\"command-table\"><tr><th>Missing handlers (FE→BE)</th><th>Handlers unused by FE</th></tr><tr><td>");
-            if section.missing_handlers.is_empty() {
-                out.push_str("<span class=\"muted\">None</span>");
-            } else {
-                out.push_str("<ul class=\"command-list\">");
-                for g in &section.missing_handlers {
-                    let locs: Vec<String> = g
-                        .locations
-                        .iter()
-                        .map(|(f, l)| linkify(section.open_base.as_deref(), f, *l))
-                        .collect();
-                    out.push_str(&format!(
-                        "<li><code>{}</code> <span class=\"muted\">{}</span></li>",
-                        escape_html(&g.name),
-                        locs.join(", ")
-                    ));
-                }
-                out.push_str("</ul>");
-            }
+            render_grouped(&section.missing_handlers, &mut out);
             out.push_str("</td><td>");
-            if section.unused_handlers.is_empty() {
-                out.push_str("<span class=\"muted\">None</span>");
-            } else {
-                out.push_str("<ul class=\"command-list\">");
-                for g in &section.unused_handlers {
-                    let locs: Vec<String> = g
-                        .locations
-                        .iter()
-                        .map(|(f, l)| linkify(section.open_base.as_deref(), f, *l))
-                        .collect();
-                    out.push_str(&format!(
-                        "<li><code>{}</code> <span class=\"muted\">{}</span></li>",
-                        escape_html(&g.name),
-                        locs.join(", ")
-                    ));
-                }
-                out.push_str("</ul>");
-            }
+            render_grouped(&section.unused_handlers, &mut out);
             out.push_str("</td></tr></table>");
         }
 
@@ -218,9 +239,39 @@ code{background:#f6f8fa;padding:2px 4px;border-radius:4px;}
 <script>
 (function(){
   const graphs = window.__LOCTREE_GRAPHS || [];
-  graphs.forEach(g => {
+  graphs.forEach((g, idx) => {
     const container = document.getElementById(g.id);
     if (!container) return;
+
+    const useDrawer = graphs.length === 1;
+    let drawerBody = null;
+    if (useDrawer) {
+      const drawer = document.createElement('div');
+      drawer.className = 'graph-drawer';
+      const header = document.createElement('div');
+      header.className = 'graph-drawer-header';
+      header.innerHTML = '<button data-role="drawer-toggle">hide graph</button><span>Import graph</span>';
+      drawerBody = document.createElement('div');
+      drawerBody.className = 'graph-drawer-body';
+      container.parentNode.insertBefore(drawer, container);
+      drawerBody.appendChild(container);
+      drawer.appendChild(header);
+      drawer.appendChild(drawerBody);
+      document.body.appendChild(drawer);
+      container.style.height = '460px';
+      const toggle = header.querySelector('[data-role="drawer-toggle"]');
+      let collapsed = false;
+      const applyCollapse = () => {
+        drawer.classList.toggle('collapsed', collapsed);
+        drawerBody.style.display = collapsed ? 'none' : 'block';
+        toggle.textContent = collapsed ? 'show graph' : 'hide graph';
+      };
+      header.addEventListener('click', () => {
+        collapsed = !collapsed;
+        applyCollapse();
+      });
+      applyCollapse();
+    }
 
     // Controls
     const toolbar = document.createElement('div');
@@ -247,11 +298,12 @@ code{background:#f6f8fa;padding:2px 4px;border-radius:4px;}
         <span><span class="legend-dot" style="background:#e67e22"></span> re-export</span>
       </div>
     `;
-    container.parentNode.insertBefore(toolbar, container);
+    const targetParent = drawerBody || container.parentNode;
+    targetParent.insertBefore(toolbar, container);
     const hint = document.createElement('div');
     hint.className = 'graph-hint';
     hint.textContent = 'Filtr dopasowuje substring do ścieżki węzła (ścieżki są względne wobec roota). Ustaw min degree, aby ukryć liście.';
-    container.parentNode.insertBefore(hint, container);
+    targetParent.insertBefore(hint, container);
 
     const buildElements = () => {
       const rawNodes = Array.isArray(g.nodes) ? g.nodes : [];
@@ -282,7 +334,7 @@ code{background:#f6f8fa;padding:2px 4px;border-radius:4px;}
       container,
       elements: original,
       style: [
-        { selector: 'node', style: { 'label': 'data(label)', 'font-size': 10, 'text-wrap': 'wrap', 'text-max-width': 120, 'background-color': '#4f81e1', 'color': '#fff', 'width': 'data(size)', 'height': 'data(size)' } },
+        { selector: 'node', style: { 'label': 'data(label)', 'font-size': 10, 'text-wrap': 'wrap', 'text-max-width': 120, 'background-color': '#4f81e1', 'color': '#fff', 'width': 'data(size)', 'height': 'data(size)', 'overlay-padding': 8, 'overlay-opacity': 0 } },
         { selector: 'edge', style: { 'curve-style': 'bezier', 'width': 1.1, 'line-color': 'data(color)', 'target-arrow-color': 'data(color)', 'target-arrow-shape': 'triangle', 'arrow-scale': 0.7, 'label': '', 'font-size': 9, 'text-background-color': '#fff', 'text-background-opacity': 0.8, 'text-background-padding': 2 } }
       ],
       layout: { name: 'preset', animate: false, fit: true }
@@ -431,8 +483,15 @@ code{background:#f6f8fa;padding:2px 4px;border-radius:4px;}
     const showTip = (evt, node) => {
         const data = node.data();
         tooltip.innerHTML = `<strong>${data.full || data.id}</strong><br/>LOC: ${data.loc || 0}`;
-        tooltip.style.left = (evt.renderedPosition.x + 12) + 'px';
-        tooltip.style.top = (evt.renderedPosition.y + 12) + 'px';
+        const rect = container.getBoundingClientRect();
+        const scrollX = window.scrollX || document.documentElement.scrollLeft || 0;
+        const scrollY = window.scrollY || document.documentElement.scrollTop || 0;
+        let left = rect.left + evt.renderedPosition.x + 12 + scrollX;
+        let top = rect.top + evt.renderedPosition.y + 12 + scrollY;
+        const maxLeft = scrollX + window.innerWidth - 220;
+        if (left > maxLeft) left = maxLeft;
+        tooltip.style.left = left + 'px';
+        tooltip.style.top = top + 'px';
         tooltip.style.display = 'block';
     };
     const hideTip = () => { tooltip.style.display = 'none'; };

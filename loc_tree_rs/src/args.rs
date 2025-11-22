@@ -15,6 +15,7 @@ pub struct ParsedArgs {
     pub max_depth: Option<usize>,
     pub color: ColorMode,
     pub output: OutputMode,
+    pub json_output_path: Option<PathBuf>,
     pub summary: bool,
     pub summary_limit: usize,
     pub show_help: bool,
@@ -43,6 +44,7 @@ impl Default for ParsedArgs {
             max_depth: None,
             color: ColorMode::Auto,
             output: OutputMode::Human,
+            json_output_path: None,
             summary: false,
             summary_limit: 5,
             show_help: false,
@@ -193,6 +195,14 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
             "--json" => {
                 parsed.output = OutputMode::Json;
                 i += 1;
+            }
+            "--json-out" | "--json-output" => {
+                let next = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--json-out requires a file path".to_string())?;
+                parsed.output = OutputMode::Json;
+                parsed.json_output_path = Some(PathBuf::from(next));
+                i += 2;
             }
             "--jsonl" => {
                 parsed.output = OutputMode::Jsonl;

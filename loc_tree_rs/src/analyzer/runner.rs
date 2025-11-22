@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -132,6 +133,33 @@ fn build_globset(patterns: &[String]) -> Option<GlobSet> {
     }
 }
 
+fn strip_excluded_paths(
+    paths: &[(String, usize)],
+    focus: &Option<GlobSet>,
+    exclude: &Option<GlobSet>,
+) -> Vec<(String, usize)> {
+    paths
+        .iter()
+        .filter(|(p, _)| {
+            let pb = Path::new(p);
+            if let Some(ex) = exclude {
+                if ex.is_match(pb) {
+                    return false;
+                }
+            }
+            if let Some(focus_globs) = focus {
+                return focus_globs.is_match(pb);
+            }
+            true
+        })
+        .cloned()
+        .collect()
+}
+
+fn opt_globset(globs: &[String]) -> Option<GlobSet> {
+    build_globset(globs).and_then(|g| if g.is_empty() { None } else { Some(g) })
+}
+
 fn strip_excluded(files: &[String], exclude: &Option<GlobSet>) -> Vec<String> {
     match exclude {
         None => files.to_vec(),
@@ -219,8 +247,8 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         }
     }
 
-    let focus_set = build_globset(&parsed.focus_patterns);
-    let exclude_set = build_globset(&parsed.exclude_report_patterns);
+    let focus_set = opt_globset(&parsed.focus_patterns);
+    let exclude_set = opt_globset(&parsed.exclude_report_patterns);
 
     if parsed.serve {
         if let Some((base, handle)) =
@@ -470,30 +498,44 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
 
         let missing_handlers: Vec<CommandGap> = fe_commands
             .iter()
-            .filter(|(name, _)| {
+            .filter_map(|(name, locs)| {
                 let norm = fe_norms
-                    .get(*name)
+                    .get(name)
                     .cloned()
                     .unwrap_or_else(|| normalize_cmd_name(name));
-                !be_norm_set.contains(&norm)
-            })
-            .map(|(name, locs)| CommandGap {
-                name: name.clone(),
-                locations: locs.clone(),
+                if be_norm_set.contains(&norm) {
+                    return None;
+                }
+                let kept = strip_excluded_paths(locs, &focus_set, &exclude_set);
+                if kept.is_empty() {
+                    None
+                } else {
+                    Some(CommandGap {
+                        name: name.clone(),
+                        locations: kept,
+                    })
+                }
             })
             .collect();
         let unused_handlers: Vec<CommandGap> = be_commands
             .iter()
-            .filter(|(name, _)| {
+            .filter_map(|(name, locs)| {
                 let norm = be_norms
-                    .get(*name)
+                    .get(name)
                     .cloned()
                     .unwrap_or_else(|| normalize_cmd_name(name));
-                !fe_norm_set.contains(&norm)
-            })
-            .map(|(name, locs)| CommandGap {
-                name: name.clone(),
-                locations: locs.clone(),
+                if fe_norm_set.contains(&norm) {
+                    return None;
+                }
+                let kept = strip_excluded_paths(locs, &focus_set, &exclude_set);
+                if kept.is_empty() {
+                    None
+                } else {
+                    Some(CommandGap {
+                        name: name.clone(),
+                        locations: kept,
+                    })
+                }
             })
             .collect();
 
@@ -732,13 +774,26 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
     }
 
     if matches!(parsed.output, OutputMode::Json) {
-        if json_results.len() == 1 {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&json_results[0]).unwrap()
-            );
+        let payload = if json_results.len() == 1 {
+            serde_json::to_string_pretty(&json_results[0]).unwrap()
         } else {
-            println!("{}", serde_json::to_string_pretty(&json_results).unwrap());
+            serde_json::to_string_pretty(&json_results).unwrap()
+        };
+        if let Some(path) = parsed.json_output_path.as_ref() {
+            if let Some(dir) = path.parent() {
+                let _ = fs::create_dir_all(dir);
+            }
+            if let Err(err) = fs::write(path, payload.as_bytes()) {
+                eprintln!(
+                    "[loctree][warn] failed to write JSON to {}: {}",
+                    path.display(),
+                    err
+                );
+            } else {
+                eprintln!("[loctree] JSON written to {}", path.display());
+            }
+        } else {
+            println!("{}", payload);
         }
     }
 

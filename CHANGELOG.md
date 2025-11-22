@@ -4,11 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
+## [0.3.0] - 2025-11-22
+
+### Added
+- **Import Graph Drawer**: When analyzing a single root, the graph is pinned to a collapsible bottom drawer, keeping tables readable.
+- **Easier-to-hit Tooltips**: Nodes now have a larger hitbox, and tooltips appear near the cursor within the viewport boundaries.
+
+### Changed
+- The import graph is now attached to a collapsible drawer when analyzing a single root to improve table visibility.
+
 ## [0.2.9] - 2025-11-22
 
 ### Added
 - Graph toolbar upgrades: fit, reset, graph-only fullscreen, dark mode toggle, and tooltips with full path + LOC; node size now scales with LOC and uses stable preset layout computed in Rust.
 - Graph safety/perf guards: caps at 8k nodes / 12k edges, skips overflow with warnings, and prevents rendering when filters empty; legend/hints updated.
+- Graph assets self-hosted (CSP-friendly) + buttons to export PNG/JSON snapshots.
+- Tauri coverage: FE↔BE matching normalizes camelCase/snake_case aliases; coverage respects `--focus/--exclude-report` globs and groups rows by module for readability.
 
 ### Changed
 - Cleaner import graph (edge labels removed, deduped CSS, more defensive `buildElements`/filter handling).
