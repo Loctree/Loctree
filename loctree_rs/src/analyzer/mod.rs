@@ -1,6 +1,9 @@
 pub mod assets;
+mod coverage;
 mod css;
+mod graph;
 pub mod html;
+mod insights;
 pub mod js;
 pub mod open_server;
 pub mod py;
@@ -30,6 +33,7 @@ pub(super) fn offset_to_line(content: &str, offset: usize) -> usize {
     content[..offset].bytes().filter(|b| *b == b'\n').count() + 1
 }
 
+#[allow(unused_imports)]
 pub use report::{
     AiInsight, CommandGap, GraphComponent, GraphData, GraphNode, RankedDup, ReportSection,
 };

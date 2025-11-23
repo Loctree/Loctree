@@ -19,136 +19,20 @@ use super::py::analyze_py_file;
 use super::resolvers::{resolve_js_relative, resolve_python_relative};
 use super::rust::analyze_rust_file;
 use super::{
-    AiInsight, CommandGap, GraphComponent, GraphData, GraphNode, RankedDup, ReportSection,
+    coverage::{compute_command_gaps, CommandUsage},
+    graph::build_graph_data,
+    insights::collect_ai_insights,
 };
+use super::{RankedDup, ReportSection};
 
-const MAX_GRAPH_NODES: usize = 8000;
-const MAX_GRAPH_EDGES: usize = 12000;
 const DEFAULT_EXCLUDE_REPORT_PATTERNS: &[&str] =
     &["**/__tests__/**", "scripts/semgrep-fixtures/**"];
-
-fn normalize_cmd_name(name: &str) -> String {
-    let mut out = String::new();
-    let mut last_was_lower = false;
-    for ch in name.chars() {
-        if ch.is_ascii_alphanumeric() {
-            if ch.is_uppercase() && last_was_lower && !out.is_empty() {
-                out.push('_');
-            }
-            out.push(ch.to_ascii_lowercase());
-            last_was_lower = ch.is_ascii_lowercase();
-        } else if !out.ends_with('_') && !out.is_empty() {
-            out.push('_');
-            last_was_lower = false;
-        }
-    }
-    while out.ends_with('_') {
-        out.pop();
-    }
-    if out.is_empty() {
-        name.to_lowercase()
-    } else {
-        out
-    }
-}
 
 fn is_dev_file(path: &str) -> bool {
     path.contains("__tests__")
         || path.contains("stories")
         || path.contains(".stories.")
         || path.contains("story.")
-}
-
-fn layout_positions(comps: &[Vec<String>]) -> HashMap<String, (f32, f32)> {
-    let cols = (comps.len() as f32).sqrt().ceil() as usize + 1;
-    let spacing = 1200f32;
-    let mut positions: HashMap<String, (f32, f32)> = HashMap::new();
-    for (idx, comp) in comps.iter().enumerate() {
-        let row = idx / cols;
-        let col = idx % cols;
-        let cx = (col as f32) * spacing;
-        let cy = (row as f32) * spacing;
-        let n = comp.len().max(1) as f32;
-        let radius = 160.0 + 30.0 * n.sqrt();
-        for (i, node) in comp.iter().enumerate() {
-            let theta = (i as f32) * (std::f32::consts::TAU / n);
-            let jitter = 12.0 * (i as f32 % 3.0) - 12.0;
-            let x = cx + radius * theta.cos() + jitter;
-            let y = cy + radius * theta.sin() - jitter;
-            positions.insert(node.clone(), (x, y));
-        }
-    }
-    positions
-}
-
-#[allow(clippy::type_complexity)]
-fn compute_components(
-    nodes: &[String],
-    edges: &[(String, String, String)],
-) -> (
-    Vec<Vec<String>>,
-    HashMap<String, usize>,
-    HashMap<String, usize>,
-) {
-    let mut adj: HashMap<String, Vec<String>> = HashMap::new();
-    for n in nodes {
-        adj.entry(n.clone()).or_default();
-    }
-    for (a, b, _) in edges {
-        if a.is_empty() || b.is_empty() {
-            continue;
-        }
-        let entry = adj.entry(a.clone()).or_default();
-        if !entry.contains(b) {
-            entry.push(b.clone());
-        }
-        let back = adj.entry(b.clone()).or_default();
-        if !back.contains(a) {
-            back.push(a.clone());
-        }
-    }
-
-    let degrees: HashMap<String, usize> = adj.iter().map(|(k, v)| (k.clone(), v.len())).collect();
-
-    let mut visited: HashSet<String> = HashSet::new();
-    let mut comps: Vec<Vec<String>> = Vec::new();
-    for n in nodes {
-        if visited.contains(n) {
-            continue;
-        }
-        let mut stack = vec![n.clone()];
-        let mut comp = Vec::new();
-        visited.insert(n.clone());
-        while let Some(cur) = stack.pop() {
-            comp.push(cur.clone());
-            if let Some(neigh) = adj.get(&cur) {
-                for nb in neigh {
-                    if visited.insert(nb.clone()) {
-                        stack.push(nb.clone());
-                    }
-                }
-            }
-        }
-        comps.push(comp);
-    }
-
-    comps.sort_by(|a, b| {
-        b.len().cmp(&a.len()).then(
-            a.first()
-                .unwrap_or(&String::new())
-                .cmp(b.first().unwrap_or(&String::new())),
-        )
-    });
-
-    let mut node_to_component: HashMap<String, usize> = HashMap::new();
-    for (idx, comp) in comps.iter().enumerate() {
-        let cid = idx + 1;
-        for node in comp {
-            node_to_component.insert(node.clone(), cid);
-        }
-    }
-
-    (comps, node_to_component, degrees)
 }
 
 fn build_globset(patterns: &[String]) -> Option<GlobSet> {
@@ -171,30 +55,6 @@ fn build_globset(patterns: &[String]) -> Option<GlobSet> {
     } else {
         builder.build().ok()
     }
-}
-
-fn strip_excluded_paths(
-    paths: &[(String, usize, String)],
-    focus: &Option<GlobSet>,
-    exclude: &Option<GlobSet>,
-) -> Vec<(String, usize)> {
-    paths
-        .iter()
-        .filter_map(|(p, line, _)| {
-            let pb = Path::new(p);
-            if let Some(ex) = exclude {
-                if ex.is_match(pb) {
-                    return None;
-                }
-            }
-            if let Some(focus_globs) = focus {
-                if !focus_globs.is_match(pb) {
-                    return None;
-                }
-            }
-            Some((p.clone(), *line))
-        })
-        .collect()
 }
 
 fn opt_globset(globs: &[String]) -> Option<GlobSet> {
@@ -249,68 +109,6 @@ pub fn default_analyzer_exts() -> HashSet<String> {
         .iter()
         .map(|s| s.to_string())
         .collect()
-}
-
-fn collect_ai_insights(
-    files: &[FileAnalysis],
-    dups: &[RankedDup],
-    cascades: &[(String, String)],
-    gap_missing: &[CommandGap],
-    _gap_unused: &[CommandGap],
-) -> Vec<AiInsight> {
-    let mut insights = Vec::new();
-
-    // 1. Huge files
-    let huge_files: Vec<_> = files.iter().filter(|f| f.loc > 2000).collect();
-    if !huge_files.is_empty() {
-        insights.push(AiInsight {
-            title: "Huge files detected".to_string(),
-            severity: "medium".to_string(),
-            message: format!(
-                "Found {} files with > 2000 LOC (e.g. {}). Consider splitting them.",
-                huge_files.len(),
-                huge_files[0].path
-            ),
-        });
-    }
-
-    // 2. Many duplicates
-    if dups.len() > 10 {
-        insights.push(AiInsight {
-            title: "High number of duplicate exports".to_string(),
-            severity: "medium".to_string(),
-            message: format!(
-                "Found {} duplicate export groups. Consider refactoring.",
-                dups.len()
-            ),
-        });
-    }
-
-    // 3. Cascades
-    if cascades.len() > 20 {
-        insights.push(AiInsight {
-            title: "Many re-export chains".to_string(),
-            severity: "low".to_string(),
-            message: format!(
-                "Found {} re-export cascades. This might affect tree-shaking/bundling.",
-                cascades.len()
-            ),
-        });
-    }
-
-    // 4. Missing handlers
-    if !gap_missing.is_empty() {
-        insights.push(AiInsight {
-            title: "Missing Tauri Handlers".to_string(),
-            severity: "high".to_string(),
-            message: format!(
-                "Frontend calls {} commands that are missing in Backend.",
-                gap_missing.len()
-            ),
-        });
-    }
-
-    insights
 }
 
 pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
@@ -408,8 +206,8 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         let mut export_index: ExportIndex = HashMap::new();
         let mut reexport_edges: Vec<(String, Option<String>)> = Vec::new();
         let mut dynamic_summary: Vec<(String, Vec<String>)> = Vec::new();
-        let mut fe_commands: HashMap<String, Vec<(String, usize, String)>> = HashMap::new();
-        let mut be_commands: HashMap<String, Vec<(String, usize, String)>> = HashMap::new();
+        let mut fe_commands: CommandUsage = HashMap::new();
+        let mut be_commands: CommandUsage = HashMap::new();
         let mut graph_edges: Vec<(String, String, String)> = Vec::new();
         let mut loc_map: HashMap<String, usize> = HashMap::new();
 
@@ -613,69 +411,8 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                 .then(b.files.len().cmp(&a.files.len()))
         });
 
-        let fe_norms: HashMap<String, String> = fe_commands
-            .keys()
-            .map(|k| (k.clone(), normalize_cmd_name(k)))
-            .collect();
-        let be_norms: HashMap<String, String> = be_commands
-            .keys()
-            .map(|k| (k.clone(), normalize_cmd_name(k)))
-            .collect();
-        let be_norm_set: HashSet<String> = be_norms.values().cloned().collect();
-        let fe_norm_set: HashSet<String> = fe_norms.values().cloned().collect();
-
-        let missing_handlers: Vec<CommandGap> = fe_commands
-            .iter()
-            .filter_map(|(name, locs)| {
-                let norm = fe_norms
-                    .get(name)
-                    .cloned()
-                    .unwrap_or_else(|| normalize_cmd_name(name));
-                if be_norm_set.contains(&norm) {
-                    return None;
-                }
-                let kept = strip_excluded_paths(locs, &focus_set, &exclude_set);
-                if kept.is_empty() {
-                    None
-                } else {
-                    let impl_name = locs
-                        .iter()
-                        .find(|(p, l, _)| p == &kept[0].0 && *l == kept[0].1)
-                        .map(|(_, _, n)| n.clone());
-                    Some(CommandGap {
-                        name: name.clone(),
-                        implementation_name: impl_name,
-                        locations: kept,
-                    })
-                }
-            })
-            .collect();
-        let unused_handlers: Vec<CommandGap> = be_commands
-            .iter()
-            .filter_map(|(name, locs)| {
-                let norm = be_norms
-                    .get(name)
-                    .cloned()
-                    .unwrap_or_else(|| normalize_cmd_name(name));
-                if fe_norm_set.contains(&norm) {
-                    return None;
-                }
-                let kept = strip_excluded_paths(locs, &focus_set, &exclude_set);
-                if kept.is_empty() {
-                    None
-                } else {
-                    let impl_name = locs
-                        .iter()
-                        .find(|(p, l, _)| p == &kept[0].0 && *l == kept[0].1)
-                        .map(|(_, _, n)| n.clone());
-                    Some(CommandGap {
-                        name: name.clone(),
-                        implementation_name: impl_name,
-                        locations: kept,
-                    })
-                }
-            })
-            .collect();
+        let (missing_handlers, unused_handlers) =
+            compute_command_gaps(&fe_commands, &be_commands, &focus_set, &exclude_set);
 
         let mut section_open = None;
         if options.report_path.is_some() && options.serve {
@@ -715,113 +452,13 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                 command_counts: (fe_commands.len(), be_commands.len()),
                 open_base: section_open,
                 graph: if parsed.graph && options.report_path.is_some() {
-                    let mut nodes: HashSet<String> =
-                        analyses.iter().map(|a| a.path.clone()).collect();
-                    for (a, b, _) in &graph_edges {
-                        if !a.is_empty() {
-                            nodes.insert(a.clone());
-                        }
-                        if !b.is_empty() {
-                            nodes.insert(b.clone());
-                        }
-                    }
-
-                    if nodes.is_empty() {
-                        None
-                    } else if nodes.len() > MAX_GRAPH_NODES || graph_edges.len() > MAX_GRAPH_EDGES {
-                        eprintln!(
-                            "[loctree][warn] graph skipped ({} nodes, {} edges > limits)",
-                            nodes.len(),
-                            graph_edges.len()
-                        );
-                        None
-                    } else {
-                        let mut nodes_vec: Vec<String> = nodes.into_iter().collect();
-                        nodes_vec.sort();
-                        let (component_nodes, node_to_component, degrees) =
-                            compute_components(&nodes_vec, &graph_edges);
-                        let positions = layout_positions(&component_nodes);
-                        let main_component_id = if component_nodes.is_empty() { 0 } else { 1 };
-
-                        let mut component_meta: Vec<GraphComponent> = Vec::new();
-                        for (idx, comp_nodes) in component_nodes.iter().enumerate() {
-                            let mut sorted_nodes = comp_nodes.clone();
-                            sorted_nodes.sort();
-                            let cid = idx + 1;
-                            let comp_set: HashSet<String> = sorted_nodes.iter().cloned().collect();
-                            let edge_count = graph_edges
-                                .iter()
-                                .filter(|(a, b, _)| comp_set.contains(a) && comp_set.contains(b))
-                                .count();
-                            let isolated_count = sorted_nodes
-                                .iter()
-                                .filter(|n| degrees.get(*n).cloned().unwrap_or(0) == 0)
-                                .count();
-                            let loc_sum: usize = sorted_nodes
-                                .iter()
-                                .map(|n| loc_map.get(n).cloned().unwrap_or(0))
-                                .sum();
-                            let sample = sorted_nodes.first().cloned().unwrap_or_default();
-
-                            let tauri_frontend = fe_commands
-                                .values()
-                                .flat_map(|locs| locs.iter())
-                                .filter(|(path, _, _)| comp_set.contains(path))
-                                .count();
-                            let tauri_backend = be_commands
-                                .values()
-                                .flat_map(|locs| locs.iter())
-                                .filter(|(path, _, _)| comp_set.contains(path))
-                                .count();
-                            let detached = main_component_id != 0 && cid != main_component_id;
-
-                            component_meta.push(GraphComponent {
-                                id: cid,
-                                size: sorted_nodes.len(),
-                                edge_count,
-                                nodes: sorted_nodes,
-                                isolated_count,
-                                sample,
-                                loc_sum,
-                                detached,
-                                tauri_frontend,
-                                tauri_backend,
-                            });
-                        }
-
-                        let graph_nodes: Vec<GraphNode> = nodes_vec
-                            .iter()
-                            .filter_map(|id| {
-                                if id.is_empty() {
-                                    return None;
-                                }
-                                let (x, y) = positions.get(id).cloned().unwrap_or((0.0, 0.0));
-                                let loc = loc_map.get(id).cloned().unwrap_or(0);
-                                let label =
-                                    id.rsplit('/').next().unwrap_or(id.as_str()).to_string();
-                                let component = *node_to_component.get(id).unwrap_or(&0);
-                                let degree = *degrees.get(id).unwrap_or(&0);
-                                let detached =
-                                    main_component_id != 0 && component != main_component_id;
-                                Some(GraphNode {
-                                    id: id.clone(),
-                                    label,
-                                    loc,
-                                    x,
-                                    y,
-                                    component,
-                                    degree,
-                                    detached,
-                                })
-                            })
-                            .collect();
-                        Some(GraphData {
-                            nodes: graph_nodes,
-                            edges: graph_edges.clone(),
-                            components: component_meta,
-                            main_component_id,
-                        })
-                    }
+                    build_graph_data(
+                        &analyses,
+                        &graph_edges,
+                        &loc_map,
+                        &fe_commands,
+                        &be_commands,
+                    )
                 } else {
                     None
                 },

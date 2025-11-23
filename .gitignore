@@ -1,3 +1,4 @@
 /loctree_rs/target
 /.codex
 *.pyc
+/.fastembed_cache
