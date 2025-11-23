@@ -1,3 +1,4 @@
+use std::fs;
 use std::io::{self, BufRead, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -85,6 +86,7 @@ pub(crate) fn open_in_browser(path: &Path) {
 pub(crate) fn start_open_server(
     roots: Vec<PathBuf>,
     editor_cmd: Option<String>,
+    report_path: Option<PathBuf>,
 ) -> Option<(String, thread::JoinHandle<()>)> {
     let listener = TcpListener::bind("127.0.0.1:0").ok()?;
     let port = listener.local_addr().ok()?.port();
@@ -96,7 +98,13 @@ pub(crate) fn start_open_server(
             let mut buf = String::new();
             let mut reader = io::BufReader::new(&stream);
             if reader.read_line(&mut buf).is_ok() {
-                handle_open_request(&mut stream, &roots, editor_cmd.as_ref(), buf.trim());
+                handle_request(
+                    &mut stream,
+                    &roots,
+                    editor_cmd.as_ref(),
+                    report_path.as_ref(),
+                    buf.trim(),
+                );
             }
         }
     });
@@ -159,19 +167,34 @@ fn open_file_in_editor(
     }
 }
 
+fn write_response(
+    stream: &mut TcpStream,
+    status: &str,
+    content_type: &str,
+    body: &[u8],
+    include_body: bool,
+) {
+    let header = format!(
+        "{status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    let _ = stream.write_all(header.as_bytes());
+    if include_body {
+        let _ = stream.write_all(body);
+    }
+}
+
 fn handle_open_request(
     stream: &mut TcpStream,
     roots: &[PathBuf],
     editor_cmd: Option<&String>,
-    request_line: &str,
-) {
-    let mut parts = request_line.split_whitespace();
-    let _method = parts.next();
-    let target = parts.next().unwrap_or("/");
+    target: &str,
+    head_only: bool,
+) -> bool {
     if !target.starts_with("/open?") {
-        let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\n\r\n");
-        return;
+        return false;
     }
+
     let query = &target[6..];
     let mut file = None;
     let mut line = 1usize;
@@ -187,8 +210,14 @@ fn handle_open_request(
         }
     }
     let Some(rel_or_abs) = file else {
-        let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n");
-        return;
+        write_response(
+            stream,
+            "HTTP/1.1 400 Bad Request",
+            "text/plain",
+            b"missing file",
+            true,
+        );
+        return true;
     };
 
     let mut candidate = None;
@@ -212,15 +241,122 @@ fn handle_open_request(
     }
 
     let Some(full) = candidate else {
-        let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\n\r\n");
-        return;
+        write_response(
+            stream,
+            "HTTP/1.1 404 Not Found",
+            "text/plain",
+            b"not found",
+            true,
+        );
+        return true;
     };
 
     let status = open_file_in_editor(&full, line, editor_cmd);
-    let response = if status.is_ok() {
-        "HTTP/1.1 200 OK\r\n\r\nopened"
+    let (status_line, body) = if status.is_ok() {
+        ("HTTP/1.1 200 OK", b"opened".as_slice())
     } else {
-        "HTTP/1.1 500 Internal Server Error\r\n\r\nopen failed"
+        (
+            "HTTP/1.1 500 Internal Server Error",
+            b"failed to open in editor".as_slice(),
+        )
     };
-    let _ = stream.write_all(response.as_bytes());
+    write_response(stream, status_line, "text/plain", body, !head_only);
+    true
+}
+
+fn serve_report(
+    stream: &mut TcpStream,
+    req_path: &str,
+    report_path: &Path,
+    head_only: bool,
+) -> bool {
+    let (path_only, _) = req_path.split_once('?').unwrap_or((req_path, ""));
+    let target = path_only.trim_start_matches('/');
+
+    let base_dir = report_path.parent().unwrap_or(Path::new("."));
+    let base_canon = base_dir
+        .canonicalize()
+        .unwrap_or_else(|_| base_dir.to_path_buf());
+
+    let requested_path = if target.is_empty() {
+        report_path.to_path_buf()
+    } else {
+        let decoded = url_decode_component(target).unwrap_or_else(|| target.to_string());
+        base_dir.join(decoded)
+    };
+
+    let Ok(canon) = requested_path.canonicalize() else {
+        return false;
+    };
+
+    if !canon.starts_with(&base_canon) {
+        write_response(
+            stream,
+            "HTTP/1.1 403 Forbidden",
+            "text/plain",
+            b"forbidden",
+            true,
+        );
+        return true;
+    }
+
+    if !canon.is_file() {
+        return false;
+    }
+
+    let content_type = match canon.extension().and_then(|e| e.to_str()) {
+        Some("js") => "application/javascript; charset=utf-8",
+        Some("html") => "text/html; charset=utf-8",
+        _ => "application/octet-stream",
+    };
+
+    match fs::read(&canon) {
+        Ok(bytes) => {
+            write_response(stream, "HTTP/1.1 200 OK", content_type, &bytes, !head_only);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+fn handle_request(
+    stream: &mut TcpStream,
+    roots: &[PathBuf],
+    editor_cmd: Option<&String>,
+    report_path: Option<&PathBuf>,
+    request_line: &str,
+) {
+    let mut parts = request_line.split_whitespace();
+    let method = parts.next().unwrap_or("");
+    let target = parts.next().unwrap_or("/");
+    let is_head = method.eq_ignore_ascii_case("head");
+
+    if !(method.eq_ignore_ascii_case("get") || is_head) {
+        write_response(
+            stream,
+            "HTTP/1.1 405 Method Not Allowed",
+            "text/plain",
+            b"method not allowed",
+            true,
+        );
+        return;
+    }
+
+    if handle_open_request(stream, roots, editor_cmd, target, is_head) {
+        return;
+    }
+
+    if let Some(report) = report_path {
+        if serve_report(stream, target, report, is_head) {
+            return;
+        }
+    }
+
+    write_response(
+        stream,
+        "HTTP/1.1 404 Not Found",
+        "text/plain",
+        b"not found",
+        !is_head,
+    );
 }

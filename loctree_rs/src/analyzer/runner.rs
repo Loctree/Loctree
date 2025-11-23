@@ -168,9 +168,11 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
     let exclude_set = opt_globset(&exclude_patterns);
 
     if parsed.serve {
-        if let Some((base, handle)) =
-            start_open_server(root_list.to_vec(), parsed.editor_cmd.clone())
-        {
+        if let Some((base, handle)) = start_open_server(
+            root_list.to_vec(),
+            parsed.editor_cmd.clone(),
+            parsed.report_path.clone(),
+        ) {
             server_handle = Some(handle);
             eprintln!("[loctree] local open server at {}", base);
         } else {

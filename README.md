@@ -117,7 +117,7 @@ CLI flags (all runtimes):
 - `--graph`              Embed an interactive import graph in the HTML report (Cytoscape.js is self-hosted for CSP/offline).
 - `--max-nodes <n>`      Override graph safety limit (default 8000).
 - `--max-edges <n>`      Override graph safety limit (default 12000).
-- `--serve`              Start a tiny local server so HTML links can open files in your editor/OS.
+- `--serve`              Start a tiny local server that hosts the HTML report and opens links in your editor/OS.
 - `--editor-cmd <tpl>`   Command template for opening files (`{file}`, `{line}`), default tries `code -g`.
 - `--ignore-symbols <l>` Analyzer mode: comma-separated symbol names to skip in duplicate-export detection (case-insensitive).
 - `--ignore-symbols-preset <name>` Analyzer mode: predefined ignore set (currently `common` → `main,run,setup,test_*`).

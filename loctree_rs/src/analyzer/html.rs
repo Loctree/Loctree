@@ -296,10 +296,11 @@ code{background:#f6f8fa;padding:2px 4px;border-radius:4px;}
 .module-header{font-weight:700;margin-top:4px;}
 .module-group{margin-bottom:10px;}
 .graph-drawer{position:fixed;left:16px;right:16px;bottom:12px;z-index:1100;background:#f5f7fb;border:1px solid #cfd4de;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.25);padding:8px 10px;}
+.graph-drawer{max-height:82vh;overflow:auto;}
 .graph-drawer.collapsed{opacity:0.9;}
 .graph-drawer-header{display:flex;align-items:center;gap:10px;cursor:pointer;font-weight:600;}
 .graph-drawer-header button{font-size:12px;padding:4px 8px;border:1px solid #ccc;background:#fff;border-radius:6px;cursor:pointer;}
-.graph-drawer-body{margin-top:6px;}
+.graph-drawer-body{margin-top:6px;max-height:72vh;overflow:auto;padding-right:6px;}
 .graph-drawer .graph{margin:0;border-color:#cfd4de;}
 .dark body{background:#0f1115;color:#d7dde5;}
 .dark table th{background:#1c2029;color:#d7dde5;}
