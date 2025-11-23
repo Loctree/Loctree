@@ -198,27 +198,25 @@ mod tests {
 
     #[test]
     fn gather_files_filters_by_extension_and_depth() {
-        let root = std::env::temp_dir().join("loctree_fs_utils");
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(root.join("nested")).unwrap();
-        std::fs::write(root.join("keep.rs"), "// ok").unwrap();
-        std::fs::write(root.join("skip.txt"), "// skip").unwrap();
-        std::fs::write(root.join(".hidden.rs"), "// hidden").unwrap();
-        std::fs::write(root.join("nested").join("deep.rs"), "// deep").unwrap();
+        let tmp = tempfile::tempdir().expect("tmp dir");
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("nested")).expect("tmp nested dir");
+        std::fs::write(root.join("keep.rs"), "// ok").expect("write keep.rs");
+        std::fs::write(root.join("skip.txt"), "// skip").expect("write skip.txt");
+        std::fs::write(root.join(".hidden.rs"), "// hidden").expect("write hidden");
+        std::fs::write(root.join("nested").join("deep.rs"), "// deep").expect("write deep.rs");
 
         let mut files = Vec::new();
         let opts = opts_with_ext("rs");
-        gather_files(&root, &opts, 0, None, &mut files).unwrap();
+        gather_files(root, &opts, 0, None, &mut files).expect("gather files");
 
         let as_strings: Vec<String> = files
             .iter()
-            .map(|p| p.file_name().unwrap().to_string_lossy().to_string())
+            .map(|p| p.file_name().expect("file name").to_string_lossy().to_string())
             .collect();
         assert!(as_strings.contains(&"keep.rs".to_string()));
         assert!(!as_strings.contains(&"skip.txt".to_string()));
         assert!(as_strings.contains(&"deep.rs".to_string()));
         assert!(!as_strings.contains(&".hidden.rs".to_string()));
-
-        let _ = std::fs::remove_dir_all(&root);
     }
 }

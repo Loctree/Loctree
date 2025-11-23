@@ -145,7 +145,11 @@ pub fn preset_ignore_symbols(name: &str) -> Option<HashSet<String>> {
 }
 
 pub fn parse_args() -> Result<ParsedArgs, String> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    // nosemgrep:rust.lang.security.args-os.args-os - CLI arg parsing only; not used for security-sensitive decisions
+    let args: Vec<String> = std::env::args_os()
+        .skip(1)
+        .map(|s| s.to_string_lossy().into_owned())
+        .collect();
     let mut parsed = ParsedArgs {
         ..ParsedArgs::default()
     };
@@ -387,7 +391,7 @@ mod tests {
 
     #[test]
     fn test_parse_extensions() {
-        let res = parse_extensions("rs,ts").unwrap();
+        let res = parse_extensions("rs,ts").expect("parse extensions");
         assert!(res.contains("rs"));
         assert!(res.contains("ts"));
         assert_eq!(res.len(), 2);
@@ -400,14 +404,14 @@ mod tests {
 
     #[test]
     fn test_parse_color_mode() {
-        assert_eq!(parse_color_mode("always").unwrap(), ColorMode::Always);
-        assert_eq!(parse_color_mode("never").unwrap(), ColorMode::Never);
+        assert_eq!(parse_color_mode("always").expect("color always"), ColorMode::Always);
+        assert_eq!(parse_color_mode("never").expect("color never"), ColorMode::Never);
         assert!(parse_color_mode("invalid").is_err());
     }
 
     #[test]
     fn test_parse_summary_limit() {
-        assert_eq!(parse_summary_limit("5").unwrap(), 5);
+        assert_eq!(parse_summary_limit("5").expect("summary"), 5);
         assert!(parse_summary_limit("0").is_err());
         assert!(parse_summary_limit("abc").is_err());
     }

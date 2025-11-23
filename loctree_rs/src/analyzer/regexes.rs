@@ -2,76 +2,76 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 
+fn regex(pattern: &str) -> Regex {
+    Regex::new(pattern).expect("valid regex literal")
+}
+
 pub(crate) fn regex_import() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r#"(?m)^\s*import\s+([^;]+?)\s+from\s+["']([^"']+)["']"#).unwrap())
+    RE.get_or_init(|| regex(r#"(?m)^\s*import\s+([^;]+?)\s+from\s+["']([^"']+)["']"#))
 }
 
 pub(crate) fn regex_side_effect_import() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r#"(?m)^\s*import\s+["']([^"']+)["']"#).unwrap())
+    RE.get_or_init(|| regex(r#"(?m)^\s*import\s+["']([^"']+)["']"#))
 }
 
 pub(crate) fn regex_reexport_star() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r#"(?m)^\s*export\s+\*\s+from\s+["']([^"']+)["']"#).unwrap())
+    RE.get_or_init(|| regex(r#"(?m)^\s*export\s+\*\s+from\s+["']([^"']+)["']"#))
 }
 
 pub(crate) fn regex_reexport_named() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r#"(?m)^\s*export\s+\{([^}]+)\}\s+from\s+["']([^"']+)["']"#).unwrap()
-    })
+    RE.get_or_init(|| regex(r#"(?m)^\s*export\s+\{([^}]+)\}\s+from\s+["']([^"']+)["']"#))
 }
 
 pub(crate) fn regex_dynamic_import() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r#"import\s*\(\s*["']([^"']+)["']\s*\)"#).unwrap())
+    RE.get_or_init(|| regex(r#"import\s*\(\s*["']([^"']+)["']\s*\)"#))
 }
 
 pub(crate) fn regex_export_named_decl() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(
+        regex(
             r#"(?m)^\s*export\s+(?:async\s+)?(?:function|const|let|var|class|interface|type|enum)\s+([A-Za-z0-9_.$]+)"#,
         )
-        .unwrap()
     })
 }
 
 pub(crate) fn regex_export_default() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r#"(?m)^\s*export\s+default(?:\s+(?:async\s+)?(?:function|class)\s+([A-Za-z0-9_.$]+))?"#).unwrap())
+    RE.get_or_init(|| regex(r#"(?m)^\s*export\s+default(?:\s+(?:async\s+)?(?:function|class)\s+([A-Za-z0-9_.$]+))?"#))
 }
 
 pub(crate) fn regex_export_brace() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r#"(?m)^\s*export\s+\{([^}]+)\}\s*;?"#).unwrap())
+    RE.get_or_init(|| regex(r#"(?m)^\s*export\s+\{([^}]+)\}\s*;?"#))
 }
 
 pub(crate) fn regex_safe_invoke() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r#"safeInvoke\s*(?:<[^)]*>)?\(\s*["']([^"']+)["']"#).unwrap())
+    RE.get_or_init(|| regex(r#"safeInvoke\s*(?:<[^>]*>+)?\(\s*["']([^"']+)["']"#))
 }
 
 pub(crate) fn regex_invoke_snake() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r#"invokeSnake\s*(?:<[^)]*>)?\(\s*["']([^"']+)["']"#).unwrap())
+    RE.get_or_init(|| regex(r#"invokeSnake\s*(?:<[^>]*>+)?\(\s*["']([^"']+)["']"#))
 }
 
 pub(crate) fn regex_invoke_audio() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     // capture invokeAudio(...) and invokeAudioCamel(...) helpers used by FE audio API
     RE.get_or_init(|| {
-        Regex::new(r#"invokeAudio(?:Camel)?\s*(?:<[^)]*>)?\(\s*["']([^"']+)["']"#).unwrap()
+        regex(r#"invokeAudio(?:Camel)?\s*(?:<[^>]*>+)?\(\s*["']([^"']+)["']"#)
     })
 }
 
 pub(crate) fn regex_tauri_command_fn() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r#"(?m)#\s*\[\s*tauri::command([^\]]*)\]\s*(?:pub\s*(?:\([^)]*\)\s*)?)?(?:async\s+)?fn\s+([A-Za-z0-9_]+)"#)
-            .unwrap()
+        regex(r#"(?m)#\s*\[\s*tauri::command([^\]]*)\]\s*(?:pub\s*(?:\([^)]*\)\s*)?)?(?:async\s+)?fn\s+([A-Za-z0-9_]+)"#)
     })
 }
 
@@ -79,8 +79,7 @@ pub(crate) fn regex_tauri_invoke() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
         // Matches top-level invoke("cmd") calls (avoids foo.invoke())
-        Regex::new(r#"(?m)(?:^|[^A-Za-z0-9_\.])invoke\s*(?:<[^)]*>)?\(\s*[\"']([^\"']+)[\"']"#)
-            .unwrap()
+        regex(r#"(?m)(?:^|[^A-Za-z0-9_\.])invoke\s*(?:<[^>]*>+)?\(\s*[\\"']([^\\"']+)[\\"']"#)
     })
 }
 
@@ -88,18 +87,18 @@ pub(crate) fn regex_css_import() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
         // @import "x.css";  @import url("x.css"); @import url(x.css);
-        Regex::new(r#"(?m)@import\s+(?:url\()?['"]?([^"'()\s]+)['"]?\)?"#).unwrap()
+        regex(r#"(?m)@import\s+(?:url\()?['"]?([^"'()\s]+)['"]?\)?"#)
     })
 }
 
 pub(crate) fn regex_rust_use() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r#"(?m)^\s*(?:pub\s*(?:\([^)]*\))?\s+)?use\s+([^;]+);"#).unwrap())
+    RE.get_or_init(|| regex(r#"(?m)^\s*(?:pub\s*(?:\([^)]*\))?\s+)?use\s+([^;]+);"#))
 }
 
 pub(crate) fn regex_rust_pub_use() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r#"(?m)^\s*pub\s*(?:\([^)]*\))?\s+use\s+([^;]+);"#).unwrap())
+    RE.get_or_init(|| regex(r#"(?m)^\s*pub\s*(?:\([^)]*\))?\s+use\s+([^;]+);"#))
 }
 
 pub(crate) fn regex_rust_pub_item(kind: &str) -> Regex {
@@ -108,7 +107,7 @@ pub(crate) fn regex_rust_pub_item(kind: &str) -> Regex {
         r#"(?m)^\s*pub\s*(?:\([^)]*\)\s*)?(?:async\s+)?{}\s+([A-Za-z0-9_]+)"#,
         kind
     );
-    Regex::new(&pattern).unwrap()
+    regex(&pattern)
 }
 
 pub(crate) fn regex_rust_pub_const_like(kind: &str) -> Regex {
@@ -116,7 +115,7 @@ pub(crate) fn regex_rust_pub_const_like(kind: &str) -> Regex {
         r#"(?m)^\s*pub\s*(?:\([^)]*\)\s*)?{}\s+([A-Za-z0-9_]+)"#,
         kind
     );
-    Regex::new(&pattern).unwrap()
+    regex(&pattern)
 }
 
 pub(crate) fn rust_pub_decl_regexes() -> &'static [Regex] {
@@ -148,25 +147,25 @@ pub(crate) fn rust_pub_const_regexes() -> &'static [Regex] {
 
 pub(crate) fn regex_py_dynamic_importlib() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r#"importlib\.import_module\(\s*["']([^"']+)["']"#).unwrap())
+    RE.get_or_init(|| regex(r#"importlib\.import_module\(\s*["']([^"']+)["']"#))
 }
 
 pub(crate) fn regex_py_dynamic_dunder() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r#"__import__\(\s*["']([^"']+)["']"#).unwrap())
+    RE.get_or_init(|| regex(r#"__import__\(\s*["']([^"']+)\)"#))
 }
 
 pub(crate) fn regex_py_all() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r#"(?s)__all__\s*=\s*\[([^\]]*)\]"#).unwrap())
+    RE.get_or_init(|| regex(r#"(?s)__all__\s*=\s*\[([^\]]*)\]"#))
 }
 
 pub(crate) fn regex_py_def() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r#"(?m)^\s*def\s+([A-Za-z_][A-Za-z0-9_]*)"#).unwrap())
+    RE.get_or_init(|| regex(r#"(?m)^\s*def\s+([A-Za-z_][A-Za-z0-9_]*)"#))
 }
 
 pub(crate) fn regex_py_class() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r#"(?m)^\s*class\s+([A-Za-z_][A-Za-z0-9_]*)"#).unwrap())
+    RE.get_or_init(|| regex(r#"(?m)^\s*class\s+([A-Za-z_][A-Za-z0-9_]*)"#))
 }

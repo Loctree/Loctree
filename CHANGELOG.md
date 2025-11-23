@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
+## [0.3.2] - 2025-11-23
+
+### Added
+- Component graph metadata in reports (component id/size, isolates, LOC sum, Tauri FE/BE counts) with UI controls for highlighting disconnected components.
+- Import graph data builder extracted to `graph.rs` with safer node/edge caps and deterministic layout; HTML graph bootstrap served from a dedicated asset.
+- AI insights collected from analyzer output (dup/export cascades, missing handlers, huge files) and shown in reports.
+
+### Changed
+- Analyzer runner split into focused modules (`graph.rs`, `coverage.rs`, `insights.rs`, `graph_bootstrap.js`), shrinking `runner.rs` and `html.rs`.
+- Tauri command matching now normalizes names via `heck::ToSnakeCase` and respects focus/exclude globs.
+- Generic invoke regexes hardened to handle type parameters without excessive backtracking risk.
+
+## [0.3.1] - 2025-11-22
+
+### Added
+- Tauri command coverage view (missing vs unused handlers) grouped by module with linkable locations.
+- Import graph drawer and safety limits; buttons for fit/reset/fullscreen/dark-mode and JSON/PNG export.
+- Self-hosted Cytoscape asset for CSP/offline friendliness.
+
+### Changed
+- Duplicate export filtering honors `--focus` / `--exclude-report` globs; canonical picks non-dev files first.
+- `--serve` links url-encoded and open-server startup made more robust.
+
 ## [0.3.0] - 2025-11-22
 
 ### Added

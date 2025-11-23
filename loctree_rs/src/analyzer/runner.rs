@@ -77,17 +77,26 @@ fn matches_focus(files: &[String], focus: &Option<GlobSet>) -> bool {
 
 fn analyze_file(
     path: &Path,
-    root: &Path,
+    root_canon: &Path,
     extensions: Option<&HashSet<String>>,
 ) -> io::Result<FileAnalysis> {
-    let content = std::fs::read_to_string(path)?;
-    let relative = path
-        .strip_prefix(root)
-        .unwrap_or(path)
+    let canonical = path.canonicalize()?;
+    if !canonical.starts_with(root_canon) {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "analyzed file escapes provided root",
+        ));
+    }
+
+    // nosemgrep:rust.actix.path-traversal.tainted-path.tainted-path - canonicalized and bounded to root_canon above
+    let content = std::fs::read_to_string(&canonical)?;
+    let relative = canonical
+        .strip_prefix(root_canon)
+        .unwrap_or(&canonical)
         .to_string_lossy()
         .to_string();
     let loc = content.lines().count();
-    let ext = path
+    let ext = canonical
         .extension()
         .and_then(|e| e.to_str())
         .map(|s| s.to_lowercase())
@@ -96,8 +105,8 @@ fn analyze_file(
     let mut analysis = match ext.as_str() {
         "rs" => analyze_rust_file(&content, relative),
         "css" => analyze_css_file(&content, relative),
-        "py" => analyze_py_file(&content, path, root, extensions, relative),
-        _ => analyze_js_file(&content, path, root, extensions, relative),
+        "py" => analyze_py_file(&content, &canonical, root_canon, extensions, relative),
+        _ => analyze_js_file(&content, &canonical, root_canon, extensions, relative),
     };
     analysis.loc = loc;
 
@@ -115,7 +124,6 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
     let mut json_results = Vec::new();
     let mut report_sections: Vec<ReportSection> = Vec::new();
     let mut server_handle = None;
-    let mut open_base = None;
 
     let mut ignore_exact: HashSet<String> = HashSet::new();
     let mut ignore_prefixes: Vec<String> = Vec::new();
@@ -162,7 +170,6 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             start_open_server(root_list.to_vec(), parsed.editor_cmd.clone())
         {
             server_handle = Some(handle);
-            open_base = Some(base.clone());
             eprintln!("[loctree] local open server at {}", base);
         } else {
             eprintln!("[loctree][warn] could not start open server; continue without --serve");
@@ -171,6 +178,9 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
 
     for (idx, root_path) in root_list.iter().enumerate() {
         let ignore_paths = normalise_ignore_patterns(&parsed.ignore_patterns, root_path);
+        let root_canon = root_path
+            .canonicalize()
+            .unwrap_or_else(|_| root_path.clone());
         let mut extensions = parsed.extensions.clone();
         if extensions.is_none() {
             extensions = Some(default_analyzer_exts());
@@ -212,10 +222,16 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         let mut loc_map: HashMap<String, usize> = HashMap::new();
 
         for file in files {
-            let analysis = analyze_file(&file, root_path, options.extensions.as_ref())?;
+            let analysis = analyze_file(&file, &root_canon, options.extensions.as_ref())?;
+            let abs_for_match = root_canon.join(&analysis.path);
             let is_excluded_for_commands = exclude_set
                 .as_ref()
-                .map(|set| set.is_match(Path::new(&analysis.path)))
+                .map(|set| {
+                    let canon = abs_for_match
+                        .canonicalize()
+                        .unwrap_or_else(|_| abs_for_match.clone());
+                    set.is_match(&canon)
+                })
                 .unwrap_or(false);
 
             loc_map.insert(analysis.path.clone(), analysis.loc);
@@ -416,7 +432,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
 
         let mut section_open = None;
         if options.report_path.is_some() && options.serve {
-            section_open = open_base.clone().or_else(current_open_base);
+            section_open = current_open_base();
         }
 
         if options.report_path.is_some() {
@@ -531,7 +547,12 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             });
 
             if matches!(options.output, OutputMode::Jsonl) {
-                println!("{}", serde_json::to_string(&payload).unwrap());
+                match serde_json::to_string(&payload) {
+                    Ok(line) => println!("{}", line),
+                    Err(err) => {
+                        eprintln!("[loctree][warn] failed to serialize JSONL line: {}", err);
+                    }
+                }
             } else {
                 json_results.push(payload);
             }
@@ -624,10 +645,11 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
 
     if matches!(parsed.output, OutputMode::Json) {
         let payload = if json_results.len() == 1 {
-            serde_json::to_string_pretty(&json_results[0]).unwrap()
+            serde_json::to_string_pretty(&json_results[0])
         } else {
-            serde_json::to_string_pretty(&json_results).unwrap()
-        };
+            serde_json::to_string_pretty(&json_results)
+        }
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
         if let Some(path) = parsed.json_output_path.as_ref() {
             if let Some(dir) = path.parent() {
                 let _ = fs::create_dir_all(dir);

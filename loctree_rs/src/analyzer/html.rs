@@ -323,13 +323,12 @@ mod tests {
     use super::render_html_report;
     use crate::analyzer::report::{AiInsight, RankedDup, ReportSection};
     use std::fs;
+    use tempfile::tempdir;
 
     #[test]
     fn renders_basic_report() {
-        let tmp_dir = std::env::temp_dir().join("loctree_html_test");
-        let _ = fs::remove_dir_all(&tmp_dir);
-        fs::create_dir_all(&tmp_dir).unwrap();
-        let out_path = tmp_dir.join("report.html");
+        let tmp_dir = tempdir().expect("tmp dir");
+        let out_path = tmp_dir.path().join("report.html");
 
         let dup = RankedDup {
             name: "Foo".into(),
@@ -360,8 +359,8 @@ mod tests {
             }],
         };
 
-        render_html_report(&out_path, &[section]).unwrap();
-        let html = fs::read_to_string(&out_path).unwrap();
+        render_html_report(&out_path, &[section]).expect("render html");
+        let html = fs::read_to_string(&out_path).expect("read html");
         assert!(html.contains("loctree import/export analysis"));
         assert!(html.contains("Hint"));
         assert!(html.contains("Foo"));

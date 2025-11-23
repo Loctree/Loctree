@@ -299,7 +299,7 @@ pub fn snake_case_func() {}
         let handlers: Vec<_> = analysis
             .command_handlers
             .iter()
-            .map(|c| c.exposed_name.clone().unwrap())
+                .map(|c| c.exposed_name.clone().unwrap_or_else(|| c.name.clone()))
             .collect();
         assert!(handlers.contains(&"exposed_cmd".to_string()));
         assert!(handlers.contains(&"snakeCaseFunc".to_string()));

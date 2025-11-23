@@ -1,34 +1,14 @@
 use std::collections::{HashMap, HashSet};
 
 use globset::GlobSet;
+use heck::ToSnakeCase;
 
 use super::report::CommandGap;
 
 pub type CommandUsage = HashMap<String, Vec<(String, usize, String)>>;
 
 fn normalize_cmd_name(name: &str) -> String {
-    let mut out = String::new();
-    let mut last_was_lower = false;
-    for ch in name.chars() {
-        if ch.is_ascii_alphanumeric() {
-            if ch.is_uppercase() && last_was_lower && !out.is_empty() {
-                out.push('_');
-            }
-            out.push(ch.to_ascii_lowercase());
-            last_was_lower = ch.is_ascii_lowercase();
-        } else if !out.ends_with('_') && !out.is_empty() {
-            out.push('_');
-            last_was_lower = false;
-        }
-    }
-    while out.ends_with('_') {
-        out.pop();
-    }
-    if out.is_empty() {
-        name.to_lowercase()
-    } else {
-        out
-    }
+    name.to_snake_case()
 }
 
 fn strip_excluded_paths(
