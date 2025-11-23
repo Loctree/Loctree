@@ -106,6 +106,11 @@ loctree packages/app -A --ext ts,tsx --json   # import/export analyzer
 JSON shape: single root -> object; multi-root -> array. Large files (>= 1000 LOC) are listed separately and colored when
 `--color` (or `-c`) is on.
 
+Analyzer JSON hints (schema v1.1.0):
+- Top-level metadata: `schema`, `schemaVersion`, `generatedAt`, `rootDir`, sorted `languages`.
+- Each file: `id`, `path`, `loc`, `language`, `kind` (`code|test|story|config|generated`), `isTest`, `isGenerated`, imports with `sourceRaw|resolvedPath|isBareModule|symbols`, exports with `exportType` + `line`.
+- Derived views: `commands2` (canonical handler + call sites + status), `symbols`/`clusters`, `aiViews` (default export chains, suspicious barrels, dead symbols, ciSummary). Legacy sections remain for compatibility.
+
 CLI flags (all runtimes):
 
 - `--ext <list>`         Comma-separated extensions; prunes others (analyzer defaults to ts,tsx,js,jsx,mjs,cjs,rs,css,py).

@@ -17,10 +17,7 @@ pub(crate) fn analyze_py_file(
     extensions: Option<&HashSet<String>>,
     relative: String,
 ) -> FileAnalysis {
-    let mut imports = Vec::new();
-    let mut reexports = Vec::new();
-    let mut dynamic_imports = Vec::new();
-    let mut exports = Vec::new();
+    let mut analysis = FileAnalysis::new(relative);
 
     for line in content.lines() {
         let without_comment = line.split('#').next().unwrap_or("").trim_end();
@@ -32,10 +29,9 @@ pub(crate) fn analyze_py_file(
                     name = lhs.trim();
                 }
                 if !name.is_empty() {
-                    imports.push(ImportEntry {
-                        source: name.to_string(),
-                        kind: ImportKind::Static,
-                    });
+                    let mut entry = ImportEntry::new(name.to_string(), ImportKind::Static);
+                    entry.resolved_path = resolve_python_relative(name, path, root, extensions);
+                    analysis.imports.push(entry);
                 }
             }
         } else if let Some(rest) = trimmed.strip_prefix("from ") {
@@ -44,14 +40,13 @@ pub(crate) fn analyze_py_file(
                 let names_clean = names_raw.trim().trim_matches('(').trim_matches(')');
                 let names_clean = names_clean.split('#').next().unwrap_or("").trim();
                 if !module.is_empty() {
-                    imports.push(ImportEntry {
-                        source: module.to_string(),
-                        kind: ImportKind::Static,
-                    });
+                    let mut entry = ImportEntry::new(module.to_string(), ImportKind::Static);
+                    entry.resolved_path = resolve_python_relative(module, path, root, extensions);
+                    analysis.imports.push(entry);
                 }
                 if names_clean == "*" {
                     let resolved = resolve_python_relative(module, path, root, extensions);
-                    reexports.push(ReexportEntry {
+                    analysis.reexports.push(ReexportEntry {
                         source: module.to_string(),
                         kind: ReexportKind::Star,
                         resolved,
@@ -63,12 +58,12 @@ pub(crate) fn analyze_py_file(
 
     for caps in regex_py_dynamic_importlib().captures_iter(content) {
         if let Some(m) = caps.get(1) {
-            dynamic_imports.push(m.as_str().to_string());
+            analysis.dynamic_imports.push(m.as_str().to_string());
         }
     }
     for caps in regex_py_dynamic_dunder().captures_iter(content) {
         if let Some(m) = caps.get(1) {
-            dynamic_imports.push(m.as_str().to_string());
+            analysis.dynamic_imports.push(m.as_str().to_string());
         }
     }
 
@@ -81,10 +76,9 @@ pub(crate) fn analyze_py_file(
                 .trim()
                 .to_string();
             if !name.is_empty() {
-                exports.push(ExportSymbol {
-                    name,
-                    kind: "__all__".to_string(),
-                });
+                analysis
+                    .exports
+                    .push(ExportSymbol::new(name, "__all__", "named", None));
             }
         }
     }
@@ -93,10 +87,9 @@ pub(crate) fn analyze_py_file(
         if let Some(name) = caps.get(1) {
             let n = name.as_str();
             if !n.starts_with('_') {
-                exports.push(ExportSymbol {
-                    name: n.to_string(),
-                    kind: "def".to_string(),
-                });
+                analysis
+                    .exports
+                    .push(ExportSymbol::new(n.to_string(), "def", "named", None));
             }
         }
     }
@@ -104,22 +97,12 @@ pub(crate) fn analyze_py_file(
         if let Some(name) = caps.get(1) {
             let n = name.as_str();
             if !n.starts_with('_') {
-                exports.push(ExportSymbol {
-                    name: n.to_string(),
-                    kind: "class".to_string(),
-                });
+                analysis
+                    .exports
+                    .push(ExportSymbol::new(n.to_string(), "class", "named", None));
             }
         }
     }
 
-    FileAnalysis {
-        path: relative,
-        loc: 0,
-        imports,
-        reexports,
-        dynamic_imports,
-        exports,
-        command_calls: Vec::new(),
-        command_handlers: Vec::new(),
-    }
+    analysis
 }

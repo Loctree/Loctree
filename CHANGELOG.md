@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
+## [0.3.3] - 2025-11-24
+
+### Added
+- JSON schema metadata (`schema`, `schemaVersion`, `generatedAt`, `rootDir`, `languages`) plus deterministic ordering for easier machine use.
+- Richer per-file records: stable `id`, `language`, `kind` (code/test/story/config/generated), `isTest`, `isGenerated`, import symbol lists with `resolvedPath`, export `exportType` + `line`.
+- Derived AI views in JSON: `commands2` (canonical handler + call-sites + status), `symbols`/`clusters`, and `aiViews` (default export chains, suspicious barrels, dead symbols, CI summary).
+
+### Changed
+- JSON output remains backward-compatible while exposing the new fields for agents/LLMs; dynamic imports, duplicate metadata, and commands are now sorted deterministically.
+
 ## [0.3.2] - 2025-11-23
 
 ### Added

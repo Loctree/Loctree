@@ -2,7 +2,8 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use crate::types::{
-    CommandRef, ExportSymbol, FileAnalysis, ImportEntry, ImportKind, ReexportEntry, ReexportKind,
+    CommandRef, ExportSymbol, FileAnalysis, ImportEntry, ImportKind, ImportSymbol, ReexportEntry,
+    ReexportKind,
 };
 
 use super::regexes::{
@@ -13,6 +14,74 @@ use super::regexes::{
 use super::resolvers::resolve_reexport_target;
 use super::{brace_list_to_names, offset_to_line};
 
+fn parse_import_symbols(raw: &str) -> Vec<ImportSymbol> {
+    let mut symbols = Vec::new();
+    let trimmed = raw.trim().trim_start_matches("type ").trim();
+
+    // namespace import: * as Foo
+    if trimmed.starts_with('*') {
+        if let Some((_, alias)) = trimmed.split_once(" as ") {
+            symbols.push(ImportSymbol {
+                name: "*".to_string(),
+                alias: Some(alias.trim().to_string()),
+            });
+        }
+        return symbols;
+    }
+
+    // default import before comma or brace
+    let mut default_done = false;
+    if let Some((head, _)) = trimmed.split_once(['{', ',']) {
+        let default_name = head.trim();
+        if !default_name.is_empty() {
+            symbols.push(ImportSymbol {
+                name: default_name.to_string(),
+                alias: None,
+            });
+            default_done = true;
+        }
+    } else if !trimmed.contains('{') && !trimmed.is_empty() {
+        symbols.push(ImportSymbol {
+            name: trimmed.to_string(),
+            alias: None,
+        });
+        default_done = true;
+    }
+
+    if let Some(start) = trimmed.find('{') {
+        if let Some(end) = trimmed[start..].find('}') {
+            let inner = &trimmed[start + 1..start + end];
+            for part in inner.split(',') {
+                let part = part.trim();
+                if part.is_empty() {
+                    continue;
+                }
+                if let Some((name, alias)) = part.split_once(" as ") {
+                    symbols.push(ImportSymbol {
+                        name: name.trim().to_string(),
+                        alias: Some(alias.trim().to_string()),
+                    });
+                } else {
+                    symbols.push(ImportSymbol {
+                        name: part.to_string(),
+                        alias: None,
+                    });
+                }
+            }
+        }
+    }
+
+    // If there was no brace/import list and no default parsed, try to treat the whole trimmed token as default
+    if symbols.is_empty() && !default_done && !trimmed.is_empty() {
+        symbols.push(ImportSymbol {
+            name: trimmed.to_string(),
+            alias: None,
+        });
+    }
+
+    symbols
+}
+
 pub(crate) fn analyze_js_file(
     content: &str,
     path: &Path,
@@ -20,21 +89,25 @@ pub(crate) fn analyze_js_file(
     extensions: Option<&HashSet<String>>,
     relative: String,
 ) -> FileAnalysis {
-    let mut imports = Vec::new();
+    let mut analysis = FileAnalysis::new(relative);
     let mut command_calls = Vec::new();
     for caps in regex_import().captures_iter(content) {
+        let clause = caps.get(1).map(|m| m.as_str()).unwrap_or("");
         let source = caps.get(2).map(|m| m.as_str()).unwrap_or("").to_string();
-        imports.push(ImportEntry {
-            source,
-            kind: ImportKind::Static,
-        });
+        let mut entry = ImportEntry::new(source.clone(), ImportKind::Static);
+        entry.symbols = parse_import_symbols(clause);
+        entry.resolved_path = resolve_reexport_target(path, root, &source, extensions)
+            .or_else(|| super::resolvers::resolve_js_relative(path, root, &source, extensions));
+        entry.is_bare = !source.starts_with('.') && !source.starts_with('/');
+        analysis.imports.push(entry);
     }
     for caps in regex_side_effect_import().captures_iter(content) {
         let source = caps.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
-        imports.push(ImportEntry {
-            source,
-            kind: ImportKind::SideEffect,
-        });
+        let mut entry = ImportEntry::new(source.clone(), ImportKind::SideEffect);
+        entry.resolved_path = resolve_reexport_target(path, root, &source, extensions)
+            .or_else(|| super::resolvers::resolve_js_relative(path, root, &source, extensions));
+        entry.is_bare = !source.starts_with('.') && !source.starts_with('/');
+        analysis.imports.push(entry);
     }
 
     for caps in regex_safe_invoke().captures_iter(content) {
@@ -78,11 +151,10 @@ pub(crate) fn analyze_js_file(
         }
     }
 
-    let mut reexports = Vec::new();
     for caps in regex_reexport_star().captures_iter(content) {
         let source = caps.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
         let resolved = resolve_reexport_target(path, root, &source, extensions);
-        reexports.push(ReexportEntry {
+        analysis.reexports.push(ReexportEntry {
             source,
             kind: ReexportKind::Star,
             resolved,
@@ -93,27 +165,25 @@ pub(crate) fn analyze_js_file(
         let source = caps.get(2).map(|m| m.as_str()).unwrap_or("").to_string();
         let names = brace_list_to_names(raw_names);
         let resolved = resolve_reexport_target(path, root, &source, extensions);
-        reexports.push(ReexportEntry {
+        analysis.reexports.push(ReexportEntry {
             source,
             kind: ReexportKind::Named(names.clone()),
             resolved,
         });
     }
 
-    let mut dynamic_imports = Vec::new();
     for caps in regex_dynamic_import().captures_iter(content) {
         let source = caps.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
-        dynamic_imports.push(source);
+        analysis.dynamic_imports.push(source);
     }
 
-    let mut exports = Vec::new();
     for caps in regex_export_named_decl().captures_iter(content) {
         let name = caps.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
         if !name.is_empty() {
-            exports.push(ExportSymbol {
-                name,
-                kind: "decl".to_string(),
-            });
+            let line = caps.get(1).map(|m| offset_to_line(content, m.start()));
+            analysis
+                .exports
+                .push(ExportSymbol::new(name, "decl", "named", line));
         }
     }
     for caps in regex_export_default().captures_iter(content) {
@@ -121,41 +191,32 @@ pub(crate) fn analyze_js_file(
             .get(1)
             .map(|m| m.as_str().to_string())
             .unwrap_or_else(|| "default".to_string());
-        exports.push(ExportSymbol {
-            name,
-            kind: "default".to_string(),
-        });
+        let line = caps.get(0).map(|m| offset_to_line(content, m.start()));
+        analysis
+            .exports
+            .push(ExportSymbol::new(name, "default", "default", line));
     }
     for caps in regex_export_brace().captures_iter(content) {
         let raw = caps.get(1).map(|m| m.as_str()).unwrap_or("");
         for name in brace_list_to_names(raw) {
-            exports.push(ExportSymbol {
-                name,
-                kind: "named".to_string(),
-            });
+            let line = caps.get(1).map(|m| offset_to_line(content, m.start()));
+            analysis
+                .exports
+                .push(ExportSymbol::new(name, "named", "named", line));
         }
     }
-    for re in &reexports {
+    for re in &analysis.reexports {
         if let ReexportKind::Named(names) = &re.kind {
             for name in names {
-                exports.push(ExportSymbol {
-                    name: name.clone(),
-                    kind: "reexport".to_string(),
-                });
+                analysis
+                    .exports
+                    .push(ExportSymbol::new(name.clone(), "reexport", "named", None));
             }
         }
     }
 
-    FileAnalysis {
-        path: relative,
-        loc: 0,
-        imports,
-        reexports,
-        dynamic_imports,
-        exports,
-        command_calls,
-        command_handlers: Vec::new(),
-    }
+    analysis.command_calls = command_calls;
+    analysis
 }
 
 #[cfg(test)]

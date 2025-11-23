@@ -142,19 +142,15 @@ fn parse_rust_brace_names(raw: &str) -> Vec<String> {
 }
 
 pub(crate) fn analyze_rust_file(content: &str, relative: String) -> FileAnalysis {
-    let mut imports = Vec::new();
+    let mut analysis = FileAnalysis::new(relative);
     for caps in regex_rust_use().captures_iter(content) {
         let source = caps.get(1).map(|m| m.as_str()).unwrap_or("").trim();
         if !source.is_empty() {
-            imports.push(ImportEntry {
-                source: source.to_string(),
-                kind: ImportKind::Static,
-            });
+            analysis
+                .imports
+                .push(ImportEntry::new(source.to_string(), ImportKind::Static));
         }
     }
-
-    let mut reexports = Vec::new();
-    let mut exports = Vec::new();
 
     for caps in regex_rust_pub_use().captures_iter(content) {
         let raw = caps.get(1).map(|m| m.as_str()).unwrap_or("").trim();
@@ -167,19 +163,18 @@ pub(crate) fn analyze_rust_file(content: &str, relative: String) -> FileAnalysis
             let _prefix = parts.next().unwrap_or("").trim().trim_end_matches("::");
             let braces = parts.next().unwrap_or("").trim_end_matches('}').trim();
             let names = parse_rust_brace_names(braces);
-            reexports.push(ReexportEntry {
+            analysis.reexports.push(ReexportEntry {
                 source: raw.to_string(),
                 kind: ReexportKind::Named(names.clone()),
                 resolved: None,
             });
             for name in names {
-                exports.push(ExportSymbol {
-                    name,
-                    kind: "reexport".to_string(),
-                });
+                analysis
+                    .exports
+                    .push(ExportSymbol::new(name, "reexport", "named", None));
             }
         } else if raw.ends_with("::*") {
-            reexports.push(ReexportEntry {
+            analysis.reexports.push(ReexportEntry {
                 source: raw.to_string(),
                 kind: ReexportKind::Star,
                 resolved: None,
@@ -195,15 +190,17 @@ pub(crate) fn analyze_rust_file(content: &str, relative: String) -> FileAnalysis
                 (raw, name)
             };
 
-            reexports.push(ReexportEntry {
+            analysis.reexports.push(ReexportEntry {
                 source: path_part.to_string(),
                 kind: ReexportKind::Named(vec![export_name.to_string()]),
                 resolved: None,
             });
-            exports.push(ExportSymbol {
-                name: export_name.to_string(),
-                kind: "reexport".to_string(),
-            });
+            analysis.exports.push(ExportSymbol::new(
+                export_name.to_string(),
+                "reexport",
+                "named",
+                None,
+            ));
         }
     }
 
@@ -211,10 +208,13 @@ pub(crate) fn analyze_rust_file(content: &str, relative: String) -> FileAnalysis
     for regex in rust_pub_decl_regexes() {
         for caps in regex.captures_iter(content) {
             if let Some(name) = caps.get(1) {
-                exports.push(ExportSymbol {
-                    name: name.as_str().to_string(),
-                    kind: "decl".to_string(),
-                });
+                let line = offset_to_line(content, name.start());
+                analysis.exports.push(ExportSymbol::new(
+                    name.as_str().to_string(),
+                    "decl",
+                    "named",
+                    Some(line),
+                ));
             }
         }
     }
@@ -222,15 +222,17 @@ pub(crate) fn analyze_rust_file(content: &str, relative: String) -> FileAnalysis
     for regex in rust_pub_const_regexes() {
         for caps in regex.captures_iter(content) {
             if let Some(name) = caps.get(1) {
-                exports.push(ExportSymbol {
-                    name: name.as_str().to_string(),
-                    kind: "decl".to_string(),
-                });
+                let line = offset_to_line(content, name.start());
+                analysis.exports.push(ExportSymbol::new(
+                    name.as_str().to_string(),
+                    "decl",
+                    "named",
+                    Some(line),
+                ));
             }
         }
     }
 
-    let mut command_handlers = Vec::new();
     for caps in regex_tauri_command_fn().captures_iter(content) {
         let attr_raw = caps.get(1).map(|m| m.as_str()).unwrap_or("").trim();
         let name_match = caps.get(2);
@@ -240,7 +242,7 @@ pub(crate) fn analyze_rust_file(content: &str, relative: String) -> FileAnalysis
             let exposed_name = exposed_command_name(attr_raw, &fn_name);
 
             let line = offset_to_line(content, name.start());
-            command_handlers.push(CommandRef {
+            analysis.command_handlers.push(CommandRef {
                 name: fn_name,
                 exposed_name: Some(exposed_name),
                 line,
@@ -248,16 +250,7 @@ pub(crate) fn analyze_rust_file(content: &str, relative: String) -> FileAnalysis
         }
     }
 
-    FileAnalysis {
-        path: relative,
-        loc: 0,
-        imports,
-        reexports,
-        dynamic_imports: Vec::new(),
-        exports,
-        command_calls: Vec::new(),
-        command_handlers,
-    }
+    analysis
 }
 
 #[cfg(test)]
