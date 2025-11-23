@@ -105,7 +105,9 @@ pub fn build_graph_data(
     loc_map: &HashMap<String, usize>,
     fe_commands: &CommandUsage,
     be_commands: &CommandUsage,
-) -> Option<GraphData> {
+    max_nodes: usize,
+    max_edges: usize,
+) -> (Option<GraphData>, Option<String>) {
     let mut nodes: HashSet<String> = analyses.iter().map(|a| a.path.clone()).collect();
     for (a, b, _) in graph_edges {
         if !a.is_empty() {
@@ -117,15 +119,19 @@ pub fn build_graph_data(
     }
 
     if nodes.is_empty() {
-        return None;
+        return (None, None);
     }
-    if nodes.len() > MAX_GRAPH_NODES || graph_edges.len() > MAX_GRAPH_EDGES {
-        eprintln!(
-            "[loctree][warn] graph skipped ({} nodes, {} edges > limits)",
-            nodes.len(),
-            graph_edges.len()
+    if nodes.len() > max_nodes || graph_edges.len() > max_edges {
+        return (
+            None,
+            Some(format!(
+                "Graph skipped ({} nodes, {} edges exceed limits of {} nodes / {} edges)",
+                nodes.len(),
+                graph_edges.len(),
+                max_nodes,
+                max_edges
+            )),
         );
-        return None;
     }
 
     let mut nodes_vec: Vec<String> = nodes.into_iter().collect();
@@ -205,10 +211,13 @@ pub fn build_graph_data(
         })
         .collect();
 
-    Some(GraphData {
-        nodes: graph_nodes,
-        edges: graph_edges.to_vec(),
-        components: component_meta,
-        main_component_id,
-    })
+    (
+        Some(GraphData {
+            nodes: graph_nodes,
+            edges: graph_edges.to_vec(),
+            components: component_meta,
+            main_component_id,
+        }),
+        None,
+    )
 }

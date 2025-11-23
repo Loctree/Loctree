@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::collections::HashSet;
 use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -89,6 +90,14 @@ pub fn matches_extension(
     }
 }
 
+pub fn is_allowed_hidden(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    lower == ".env"
+        || lower.starts_with(".env.")
+        || lower.starts_with(".loctree.")
+        || lower == ".example"
+}
+
 pub fn should_ignore(
     full_path: &Path,
     options: &Options,
@@ -116,14 +125,21 @@ pub fn gather_files(
     options: &Options,
     depth: usize,
     git_checker: Option<&GitIgnoreChecker>,
+    visited: &mut HashSet<PathBuf>,
     files: &mut Vec<PathBuf>,
 ) -> io::Result<()> {
-    let mut dir_entries: Vec<_> = fs::read_dir(dir)?
+    let dir_canon = dir.canonicalize()?;
+    if !visited.insert(dir_canon.clone()) {
+        return Ok(());
+    }
+
+    let mut dir_entries: Vec<_> = fs::read_dir(&dir_canon)?
         .filter_map(Result::ok)
         .filter(|entry| {
             let name = entry.file_name();
-            let is_hidden = name.to_string_lossy().starts_with('.');
-            options.show_hidden || !is_hidden
+            let name_str = name.to_string_lossy();
+            let is_hidden = name_str.starts_with('.');
+            options.show_hidden || !is_hidden || is_allowed_hidden(&name_str)
         })
         .collect();
 
@@ -139,14 +155,40 @@ pub fn gather_files(
         if should_ignore(&path, options, git_checker) {
             continue;
         }
+
+        let file_type = match entry.file_type() {
+            Ok(ft) => ft,
+            Err(_) => continue,
+        };
+        if file_type.is_symlink() {
+            let target = match fs::canonicalize(&path) {
+                Ok(p) => p,
+                Err(_) => continue, // broken symlink
+            };
+            if visited.contains(&target) {
+                continue;
+            }
+            let meta = match fs::metadata(&path) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            if meta.is_dir() && options.max_depth.is_none_or(|max| depth < max) {
+                gather_files(&target, options, depth + 1, git_checker, visited, files)?;
+            } else if meta.is_file() && matches_extension(&target, options.extensions.as_ref()) {
+                files.push(target);
+            }
+            continue;
+        }
+
         if path.is_file() {
-            if matches_extension(&path, options.extensions.as_ref()) {
-                files.push(path);
+            let canonical = path.canonicalize().unwrap_or(path.clone());
+            if matches_extension(&canonical, options.extensions.as_ref()) {
+                files.push(canonical);
             }
             continue;
         }
         if path.is_dir() && options.max_depth.is_none_or(|max| depth < max) {
-            gather_files(&path, options, depth + 1, git_checker, files)?;
+            gather_files(&path, options, depth + 1, git_checker, visited, files)?;
         }
     }
 
@@ -176,6 +218,7 @@ mod tests {
     use super::gather_files;
     use crate::types::{ColorMode, Options, OutputMode};
     use std::collections::HashSet;
+    use std::path::PathBuf;
 
     fn opts_with_ext(ext: &str) -> Options {
         Options {
@@ -208,15 +251,85 @@ mod tests {
 
         let mut files = Vec::new();
         let opts = opts_with_ext("rs");
-        gather_files(root, &opts, 0, None, &mut files).expect("gather files");
+        let mut visited = HashSet::new();
+        gather_files(root, &opts, 0, None, &mut visited, &mut files).expect("gather files");
 
         let as_strings: Vec<String> = files
             .iter()
-            .map(|p| p.file_name().expect("file name").to_string_lossy().to_string())
+            .map(|p| {
+                p.file_name()
+                    .expect("file name")
+                    .to_string_lossy()
+                    .to_string()
+            })
             .collect();
         assert!(as_strings.contains(&"keep.rs".to_string()));
         assert!(!as_strings.contains(&"skip.txt".to_string()));
         assert!(as_strings.contains(&"deep.rs".to_string()));
         assert!(!as_strings.contains(&".hidden.rs".to_string()));
+    }
+
+    #[test]
+    fn allows_whitelisted_hidden_files() {
+        let tmp = tempfile::tempdir().expect("tmp dir");
+        let root = tmp.path();
+        std::fs::write(root.join(".env.local"), "KEY=1").expect("env local");
+        std::fs::write(root.join(".loctree.json"), "{}").expect("loctree json");
+        std::fs::write(root.join(".example"), "// example").expect("example");
+        std::fs::write(root.join(".ignored"), "// ignore").expect("ignored");
+
+        let mut files = Vec::new();
+        let opts = Options {
+            extensions: None,
+            ignore_paths: Vec::new(),
+            use_gitignore: false,
+            max_depth: Some(1),
+            color: ColorMode::Never,
+            output: OutputMode::Human,
+            summary: false,
+            summary_limit: 5,
+            show_hidden: false,
+            loc_threshold: crate::types::DEFAULT_LOC_THRESHOLD,
+            analyze_limit: 8,
+            report_path: None,
+            serve: false,
+            editor_cmd: None,
+        };
+        let mut visited = HashSet::new();
+        gather_files(root, &opts, 0, None, &mut visited, &mut files).expect("gather files");
+        let names: HashSet<PathBuf> = files
+            .iter()
+            .filter_map(|p| p.file_name().map(|n| n.into()))
+            .collect();
+        assert!(names.contains(&PathBuf::from(".env.local")));
+        assert!(names.contains(&PathBuf::from(".loctree.json")));
+        assert!(names.contains(&PathBuf::from(".example")));
+        assert!(!names.contains(&PathBuf::from(".ignored")));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn avoids_symlink_loops() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = tempfile::tempdir().expect("tmp dir");
+        let root = tmp.path();
+        let a = root.join("a");
+        let b = root.join("b");
+        std::fs::create_dir_all(&a).expect("mkdir a");
+        std::fs::create_dir_all(&b).expect("mkdir b");
+        std::fs::write(a.join("keep.rs"), "// ok").expect("write keep");
+        symlink(&b, a.join("loop_to_b")).expect("symlink b");
+        symlink(&a, b.join("loop_to_a")).expect("symlink a");
+
+        let mut files = Vec::new();
+        let opts = opts_with_ext("rs");
+        let mut visited = HashSet::new();
+        gather_files(root, &opts, 0, None, &mut visited, &mut files).expect("gather files");
+        let names: Vec<String> = files
+            .iter()
+            .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+            .collect();
+        assert_eq!(names, vec!["keep.rs".to_string()]);
     }
 }

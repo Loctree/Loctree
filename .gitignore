@@ -2,3 +2,7 @@
 /.codex
 *.pyc
 /.fastembed_cache
+tarpaulin-report.json
+tarpaulin-report.html
+*.profraw
+loctree_rs/tarpaulin-report.json

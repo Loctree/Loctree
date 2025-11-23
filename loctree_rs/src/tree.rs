@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -5,7 +6,8 @@ use serde_json::json;
 use std::io::IsTerminal;
 
 use crate::fs_utils::{
-    count_lines, normalise_ignore_patterns, should_ignore, sort_dir_entries, GitIgnoreChecker,
+    count_lines, is_allowed_hidden, normalise_ignore_patterns, should_ignore, sort_dir_entries,
+    GitIgnoreChecker,
 };
 use crate::types::{
     Collectors, ColorMode, LargeEntry, LineEntry, Options, OutputMode, Stats, COLOR_RED,
@@ -21,9 +23,13 @@ fn walk(
     root: &Path,
     root_canon: &Path,
     git_checker: Option<&GitIgnoreChecker>,
+    visited: &mut HashSet<PathBuf>,
 ) -> io::Result<bool> {
     let dir_canon = dir.canonicalize()?;
     if !dir_canon.starts_with(root_canon) {
+        return Ok(false);
+    }
+    if !visited.insert(dir_canon.clone()) {
         return Ok(false);
     }
 
@@ -32,8 +38,9 @@ fn walk(
         .filter_map(Result::ok)
         .filter(|entry| {
             let name = entry.file_name();
-            let is_hidden = name.to_string_lossy().starts_with('.');
-            options.show_hidden || !is_hidden
+            let name_str = name.to_string_lossy();
+            let is_hidden = name_str.starts_with('.');
+            options.show_hidden || !is_hidden || is_allowed_hidden(&name_str)
         })
         .collect();
 
@@ -120,6 +127,7 @@ fn walk(
                 root,
                 root_canon,
                 git_checker,
+                visited,
             )?;
             prefix_parts.pop();
             if child_has {
@@ -184,6 +192,7 @@ pub fn run_tree(root_list: &[PathBuf], parsed: &crate::args::ParsedArgs) -> io::
         let mut large_entries: Vec<LargeEntry> = Vec::new();
         let mut prefix_parts: Vec<bool> = Vec::new();
         let mut stats = Stats::default();
+        let mut visited: HashSet<PathBuf> = HashSet::new();
 
         let mut collectors = Collectors {
             entries: &mut entries,
@@ -200,6 +209,7 @@ pub fn run_tree(root_list: &[PathBuf], parsed: &crate::args::ParsedArgs) -> io::
             root_path,
             &root_canon,
             git_checker.as_ref(),
+            &mut visited,
         )?;
 
         let mut sorted_large = large_entries;
@@ -263,7 +273,9 @@ pub fn run_tree(root_list: &[PathBuf], parsed: &crate::args::ParsedArgs) -> io::
             if matches!(root_options.output, OutputMode::Jsonl) {
                 match serde_json::to_string(&payload) {
                     Ok(line) => println!("{}", line),
-                    Err(err) => eprintln!("[loctree][warn] failed to serialize JSONL line: {}", err),
+                    Err(err) => {
+                        eprintln!("[loctree][warn] failed to serialize JSONL line: {}", err)
+                    }
                 }
             } else {
                 json_results.push(payload);

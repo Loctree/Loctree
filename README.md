@@ -114,7 +114,9 @@ CLI flags (all runtimes):
 - `--json`               Machine-readable output.
 - `--jsonl`              Analyzer: one JSON object per line (per root).
 - `--html-report <file>` Write analyzer results to an HTML report file.
-- `--graph`              Embed an interactive import graph in the HTML report (Cytoscape.js from CDN).
+- `--graph`              Embed an interactive import graph in the HTML report (Cytoscape.js is self-hosted for CSP/offline).
+- `--max-nodes <n>`      Override graph safety limit (default 8000).
+- `--max-edges <n>`      Override graph safety limit (default 12000).
 - `--serve`              Start a tiny local server so HTML links can open files in your editor/OS.
 - `--editor-cmd <tpl>`   Command template for opening files (`{file}`, `{line}`), default tries `code -g`.
 - `--ignore-symbols <l>` Analyzer mode: comma-separated symbol names to skip in duplicate-export detection (case-insensitive).
@@ -126,6 +128,7 @@ CLI flags (all runtimes):
 - `--limit <N>`          Analyzer: cap top lists for duplicates/dynamic imports (default 8).
 - `--fail-on-duplicates <N>` Analyzer: exit 2 if duplicate-export groups exceed N (for CI).
 - `--fail-on-dynamic <N>`   Analyzer: exit 2 if files with dynamic imports exceed N (for CI).
+- `--json-out <file>`    Analyzer: write JSON to a file (creates parent dirs; warns on overwrite; rejects directory paths).
 
 Runtime-specific entry points:
 
@@ -155,6 +158,10 @@ The CLI itself does not require environment variables for normal operation.
 
 Install-time variables (see Installation above): `INSTALL_DIR`, `CARGO_HOME`, `LOCTREE_HOME`.
 
+Dev/test helpers:
+
+- `LOCTREE_FAST=1` — run a fast pre-commit hook (unit tests only; skips Semgrep + integration to keep commit latency <3s).
+
 ## Development and tests
 
 - Node: `node tools/tests/loctree-node.test.mjs`
@@ -162,6 +169,21 @@ Install-time variables (see Installation above): `INSTALL_DIR`, `CARGO_HOME`, `L
 - Rust: `node tools/tests/loctree-rs.test.mjs` and `cargo check`
 
 CI runs all three test scripts on PRs/pushes (see `.github/workflows/ci.yml`).
+
+Hidden files: `.env*`, `.loctree.*`, and `.example` are analyzed even when `--show-hidden` is off (so config-like files are not skipped).
+
+## Graph asset: self-hosted Cytoscape.js
+
+We bundle Cytoscape.js in the repo (written to `loctree-cytoscape.min.js` next to the HTML report) instead of loading it from a CDN because:
+
+- CSP compliance: no external script sources required; reports work with `script-src 'self'`.
+- Offline use: graphs render when browsing reports without internet access.
+- Reliability: avoids CDN downtime and version drift.
+
+Trade-offs:
+
+- Slightly larger repository size and HTML output directory (one JS asset).
+- We own updates: when bumping Cytoscape.js, download the new minified build from <https://js.cytoscape.org/>, verify checksum, and replace the embedded asset in `loctree_rs/src/analyzer/assets/cytoscape.min.js` (the pre-commit hook will copy it next to the HTML report).
 
 ## Project structure
 

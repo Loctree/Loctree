@@ -8,7 +8,20 @@ use super::report::CommandGap;
 pub type CommandUsage = HashMap<String, Vec<(String, usize, String)>>;
 
 fn normalize_cmd_name(name: &str) -> String {
-    name.to_snake_case()
+    let mut buffered = String::new();
+    for ch in name.chars() {
+        if ch.is_alphanumeric() {
+            buffered.push(ch);
+        } else {
+            buffered.push('_');
+        }
+    }
+    buffered
+        .to_snake_case()
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .collect::<String>()
+        .to_lowercase()
 }
 
 fn strip_excluded_paths(
@@ -107,4 +120,47 @@ pub fn compute_command_gaps(
         .collect();
 
     (missing_handlers, unused_handlers)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use globset::{Glob, GlobSetBuilder};
+
+    #[test]
+    fn matches_commands_across_casing() {
+        let mut fe: CommandUsage = HashMap::new();
+        fe.insert(
+            "fetchUserData".into(),
+            vec![("src/fe.ts".into(), 10usize, "fetchUserData".into())],
+        );
+        let mut be: CommandUsage = HashMap::new();
+        be.insert(
+            "fetch_user_data".into(),
+            vec![("src/be.rs".into(), 20usize, "fetch_user_data".into())],
+        );
+        let (missing, unused) = compute_command_gaps(&fe, &be, &None, &None);
+        assert!(missing.is_empty(), "should detect matching handler");
+        assert!(unused.is_empty(), "should detect frontend usage");
+    }
+
+    #[test]
+    fn ignores_excluded_paths_before_gap_report() {
+        let mut builder = GlobSetBuilder::new();
+        builder.add(Glob::new("**/ignored/**").expect("valid glob"));
+        let exclude_set = Some(builder.build().expect("build globset"));
+        let mut fe: CommandUsage = HashMap::new();
+        fe.insert(
+            "audio-play".into(),
+            vec![("ignored/fe.ts".into(), 5usize, "audio-play".into())],
+        );
+        let mut be: CommandUsage = HashMap::new();
+        be.insert(
+            "audio_play".into(),
+            vec![("src/handler.rs".into(), 8usize, "audio_play".into())],
+        );
+        let (missing, unused) = compute_command_gaps(&fe, &be, &None, &exclude_set);
+        assert!(missing.is_empty());
+        assert!(unused.is_empty());
+    }
 }

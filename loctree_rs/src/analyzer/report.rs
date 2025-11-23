@@ -72,5 +72,6 @@ pub struct ReportSection {
     pub command_counts: (usize, usize),
     pub open_base: Option<String>,
     pub graph: Option<GraphData>,
+    pub graph_warning: Option<String>,
     pub insights: Vec<AiInsight>,
 }

@@ -13,6 +13,7 @@ fn escape_html(raw: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
+        .replace('\'', "&#x27;")
 }
 
 fn linkify(base: Option<&str>, file: &str, line: usize) -> String {
@@ -182,6 +183,13 @@ fn render_command_coverage(out: &mut String, section: &ReportSection) {
 }
 
 fn render_graph_stub(out: &mut String, section: &ReportSection) {
+    if let Some(warn) = &section.graph_warning {
+        out.push_str(&format!(
+            "<div class=\"graph-empty\">{}</div>",
+            escape_html(warn)
+        ));
+    }
+
     if let Some(graph) = &section.graph {
         out.push_str("<h3>Import graph</h3>");
         out.push_str(&format!(
@@ -352,6 +360,7 @@ mod tests {
             command_counts: (0, 0),
             open_base: None,
             graph: None,
+            graph_warning: None,
             insights: vec![AiInsight {
                 title: "Hint".into(),
                 severity: "medium".into(),
@@ -364,5 +373,36 @@ mod tests {
         assert!(html.contains("loctree import/export analysis"));
         assert!(html.contains("Hint"));
         assert!(html.contains("Foo"));
+    }
+
+    #[test]
+    fn escapes_html_entities() {
+        let tmp_dir = tempdir().expect("tmp dir");
+        let out_path = tmp_dir.path().join("report.html");
+        let malicious = r#"<script>alert('x')</script>"#;
+        let section = ReportSection {
+            root: malicious.into(),
+            files_analyzed: 0,
+            ranked_dups: Vec::new(),
+            cascades: Vec::new(),
+            dynamic: Vec::new(),
+            analyze_limit: 1,
+            missing_handlers: Vec::new(),
+            unused_handlers: Vec::new(),
+            command_counts: (0, 0),
+            open_base: None,
+            graph: None,
+            graph_warning: Some(
+                "Graph skipped (10000 nodes, 500 edges exceed limits of 8000 nodes / 12000 edges)"
+                    .into(),
+            ),
+            insights: Vec::new(),
+        };
+
+        render_html_report(&out_path, &[section]).expect("render html");
+        let html = fs::read_to_string(&out_path).expect("read html");
+        assert!(!html.contains(malicious));
+        assert!(html.contains("&lt;script&gt;alert(&#x27;x&#x27;)&lt;/script&gt;"));
+        assert!(html.contains("Graph skipped"));
     }
 }

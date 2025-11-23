@@ -5,6 +5,14 @@ set -e
 REPO_ROOT=$(git rev-parse --show-toplevel)
 cd "$REPO_ROOT"
 
+if [ "${LOCTREE_FAST:-0}" != "0" ]; then
+  echo "LOCTREE_FAST=1 -> running fast checks (unit tests only, skipping Semgrep + integration)"
+  node tools/tests/test_loctree_node_unit.mjs
+  python3 tools/tests/test_loctree_py_unit.py
+  (cd loctree_rs && cargo test --quiet)
+  exit 0
+fi
+
 echo "Running Node unit tests..."
 node tools/tests/test_loctree_node_unit.mjs
 

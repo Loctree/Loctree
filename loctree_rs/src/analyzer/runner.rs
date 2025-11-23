@@ -20,7 +20,7 @@ use super::resolvers::{resolve_js_relative, resolve_python_relative};
 use super::rust::analyze_rust_file;
 use super::{
     coverage::{compute_command_gaps, CommandUsage},
-    graph::build_graph_data,
+    graph::{build_graph_data, MAX_GRAPH_EDGES, MAX_GRAPH_NODES},
     insights::collect_ai_insights,
 };
 use super::{RankedDup, ReportSection};
@@ -127,6 +127,8 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
 
     let mut ignore_exact: HashSet<String> = HashSet::new();
     let mut ignore_prefixes: Vec<String> = Vec::new();
+    let effective_max_nodes = parsed.max_graph_nodes.unwrap_or(MAX_GRAPH_NODES);
+    let effective_max_edges = parsed.max_graph_edges.unwrap_or(MAX_GRAPH_EDGES);
 
     if let Some(preset_name) = parsed.ignore_symbols_preset.as_deref() {
         if let Some(set) = preset_ignore_symbols(preset_name) {
@@ -210,7 +212,37 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         };
 
         let mut files = Vec::new();
-        gather_files(root_path, &options, 0, git_checker.as_ref(), &mut files)?;
+        let mut visited = HashSet::new();
+        gather_files(
+            root_path,
+            &options,
+            0,
+            git_checker.as_ref(),
+            &mut visited,
+            &mut files,
+        )?;
+
+        if let (Some(focus), Some(exclude)) = (&focus_set, &exclude_set) {
+            let mut overlapping = Vec::new();
+            for path in &files {
+                let canon = path.canonicalize().unwrap_or_else(|_| path.clone());
+                if focus.is_match(&canon) && exclude.is_match(&canon) {
+                    overlapping.push(canon.display().to_string());
+                    if overlapping.len() >= 5 {
+                        break;
+                    }
+                }
+            }
+            if !overlapping.is_empty() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!(
+                        "--focus and --exclude-report overlap on: {}",
+                        overlapping.join(", ")
+                    ),
+                ));
+            }
+        }
 
         let mut analyses = Vec::new();
         let mut export_index: ExportIndex = HashMap::new();
@@ -435,6 +467,9 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             section_open = current_open_base();
         }
 
+        let mut graph_warning = None;
+        let mut graph_data = None;
+
         if options.report_path.is_some() {
             let mut sorted_dyn = dynamic_summary.clone();
             sorted_dyn.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
@@ -446,6 +481,20 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                 &missing_handlers,
                 &unused_handlers,
             );
+
+            if parsed.graph && options.report_path.is_some() {
+                let (graph, warn) = build_graph_data(
+                    &analyses,
+                    &graph_edges,
+                    &loc_map,
+                    &fe_commands,
+                    &be_commands,
+                    effective_max_nodes,
+                    effective_max_edges,
+                );
+                graph_warning = warn;
+                graph_data = graph;
+            }
 
             report_sections.push(ReportSection {
                 insights,
@@ -467,17 +516,8 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                 },
                 command_counts: (fe_commands.len(), be_commands.len()),
                 open_base: section_open,
-                graph: if parsed.graph && options.report_path.is_some() {
-                    build_graph_data(
-                        &analyses,
-                        &graph_edges,
-                        &loc_map,
-                        &fe_commands,
-                        &be_commands,
-                    )
-                } else {
-                    None
-                },
+                graph: graph_data,
+                graph_warning,
             });
         }
 
@@ -651,18 +691,28 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         }
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
         if let Some(path) = parsed.json_output_path.as_ref() {
+            if path.exists() && path.is_dir() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("--json-out points to a directory: {}", path.display()),
+                ));
+            }
             if let Some(dir) = path.parent() {
-                let _ = fs::create_dir_all(dir);
+                fs::create_dir_all(dir)?;
             }
-            if let Err(err) = fs::write(path, payload.as_bytes()) {
+            if path.exists() {
                 eprintln!(
-                    "[loctree][warn] failed to write JSON to {}: {}",
-                    path.display(),
-                    err
+                    "[loctree][warn] JSON output will overwrite existing file: {}",
+                    path.display()
                 );
-            } else {
-                eprintln!("[loctree] JSON written to {}", path.display());
             }
+            fs::write(path, payload.as_bytes()).map_err(|err| {
+                io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("failed to write JSON to {}: {}", path.display(), err),
+                )
+            })?;
+            eprintln!("[loctree] JSON written to {}", path.display());
         } else {
             println!("{}", payload);
         }

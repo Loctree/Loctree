@@ -63,9 +63,7 @@ pub(crate) fn regex_invoke_snake() -> &'static Regex {
 pub(crate) fn regex_invoke_audio() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     // capture invokeAudio(...) and invokeAudioCamel(...) helpers used by FE audio API
-    RE.get_or_init(|| {
-        regex(r#"invokeAudio(?:Camel)?\s*(?:<[^>]*>+)?\(\s*["']([^"']+)["']"#)
-    })
+    RE.get_or_init(|| regex(r#"invokeAudio(?:Camel)?\s*(?:<[^>]*>+)?\(\s*["']([^"']+)["']"#))
 }
 
 pub(crate) fn regex_tauri_command_fn() -> &'static Regex {
