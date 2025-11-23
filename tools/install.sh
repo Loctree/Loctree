@@ -13,6 +13,8 @@ INSTALL_DIR=${INSTALL_DIR:-"$HOME/.local/bin"}
 CARGO_HOME=${CARGO_HOME:-"$HOME/.cargo"}
 CARGO_BIN="$CARGO_HOME/bin"
 REPO_URL="https://github.com/LibraxisAI/loctree"
+# Allow pinning a branch or commit; defaults to develop (script is typically fetched from that ref).
+LOCTREE_REF=${LOCTREE_REF:-"develop"}
 
 info() { printf "[loctree] %s\n" "$*"; }
 warn() { printf "[loctree][warn] %s\n" "$*" >&2; }
@@ -22,9 +24,11 @@ command -v cargo >/dev/null 2>&1 || {
   exit 1;
 }
 
-info "Installing loctree from $REPO_URL (cargo install --git)"
-# We don't lock here; the project is small and uses minimal deps. Add --locked if you prefer.
-cargo install --git "$REPO_URL" --force loctree >/dev/null
+info "Installing loctree from $REPO_URL (ref: $LOCTREE_REF)"
+# --locked keeps dependency resolution reproducible; override with LOCTREE_NO_LOCK=1 if needed.
+lock_flag="--locked"
+[ "${LOCTREE_NO_LOCK:-0}" = "1" ] && lock_flag=""
+cargo install --git "$REPO_URL" --branch "$LOCTREE_REF" $lock_flag --force loctree >/dev/null
 
 installed_bin="$CARGO_BIN/loctree"
 if [[ ! -x $installed_bin ]]; then

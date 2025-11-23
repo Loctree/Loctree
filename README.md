@@ -62,6 +62,8 @@ Recommended (Rust native binary):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/LibraxisAI/loctree/main/tools/install.sh | sh
+# Pin a branch/SHA if needed (defaults to develop when run from that ref):
+# LOCTREE_REF=main curl -fsSL https://raw.githubusercontent.com/LibraxisAI/loctree/main/tools/install.sh | sh
 ```
 
 # Env overrides:
@@ -85,6 +87,8 @@ Environment variables recognized by installers:
 
 - `INSTALL_DIR` — where to place the runnable wrapper (default: `$HOME/.local/bin`)
 - `CARGO_HOME` — cargo home for Rust install (default: `~/.cargo`) [Rust installer]
+- `LOCTREE_REF` — branch/commit passed to `cargo install --git` (default: `develop` when invoked from that ref; override to `main`/SHA for stable).
+- `LOCTREE_NO_LOCK` — set to `1` to skip `--locked` during install (not recommended).
 - `LOCTREE_HOME` — where to store downloaded script file [Node: `$HOME/.local/lib/loctree-node` | Python:
   `$HOME/.local/lib/loctree-py`]
 
