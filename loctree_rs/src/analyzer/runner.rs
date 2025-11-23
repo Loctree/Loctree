@@ -718,7 +718,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             for name in &all_command_names {
                 let mut handlers = be_commands.get(name).cloned().unwrap_or_default();
                 handlers.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
-                let canonical = handlers.get(0).map(|(path, line, symbol)| {
+                let canonical = handlers.first().map(|(path, line, symbol)| {
                     json!({
                         "path": path,
                         "line": line,
@@ -736,7 +736,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                     .map(|s| s.to_string())
                     .or_else(|| {
                         call_sites
-                            .get(0)
+                            .first()
                             .map(|(path, _, _)| language_from_path(path))
                     })
                     .unwrap_or_default();
@@ -769,10 +769,8 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                 .map(|d| (d.name.clone(), d))
                 .collect();
 
-            let mut symbol_occurrences: HashMap<
-                String,
-                Vec<(String, String, String, Option<usize>)>,
-            > = HashMap::new();
+            type SymbolOccurrence = (String, String, String, Option<usize>);
+            let mut symbol_occurrences: HashMap<String, Vec<SymbolOccurrence>> = HashMap::new();
             for analysis in &analyses {
                 for exp in &analysis.exports {
                     symbol_occurrences
@@ -1121,7 +1119,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         } else {
             serde_json::to_string_pretty(&json_results)
         }
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        .map_err(io::Error::other)?;
         if let Some(path) = parsed.json_output_path.as_ref() {
             if path.exists() && path.is_dir() {
                 return Err(io::Error::new(
@@ -1139,10 +1137,11 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                 );
             }
             fs::write(path, payload.as_bytes()).map_err(|err| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("failed to write JSON to {}: {}", path.display(), err),
-                )
+                io::Error::other(format!(
+                    "failed to write JSON to {}: {}",
+                    path.display(),
+                    err
+                ))
             })?;
             eprintln!("[loctree] JSON written to {}", path.display());
         } else {

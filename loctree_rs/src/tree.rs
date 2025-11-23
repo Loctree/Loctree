@@ -14,6 +14,7 @@ use crate::types::{
     COLOR_RESET,
 };
 
+#[allow(clippy::too_many_arguments)]
 fn walk(
     dir: &Path,
     options: &Options,
