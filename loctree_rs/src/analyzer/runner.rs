@@ -80,6 +80,76 @@ fn matches_focus(files: &[String], focus: &Option<GlobSet>) -> bool {
     }
 }
 
+fn is_ident_like(raw: &str) -> bool {
+    raw.chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$')
+}
+
+fn resolve_event_constants_across_files(analyses: &mut [FileAnalysis]) {
+    let mut consts_by_path: HashMap<String, HashMap<String, String>> = HashMap::new();
+    for a in analyses.iter() {
+        if !a.event_consts.is_empty() {
+            consts_by_path.insert(a.path.clone(), a.event_consts.clone());
+        }
+    }
+
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    let mut unique: HashMap<String, String> = HashMap::new();
+    for map in consts_by_path.values() {
+        for (name, val) in map {
+            *counts.entry(name.clone()).or_insert(0) += 1;
+            unique.entry(name.clone()).or_insert(val.clone());
+        }
+    }
+    unique.retain(|k, _| counts.get(k) == Some(&1));
+
+    for analysis in analyses.iter_mut() {
+        for ev in analysis
+            .event_emits
+            .iter_mut()
+            .chain(analysis.event_listens.iter_mut())
+        {
+            let raw = match ev.raw_name.clone() {
+                Some(r) if is_ident_like(&r) => r,
+                _ => continue,
+            };
+
+            let resolved = if let Some(val) = analysis.event_consts.get(&raw) {
+                Some(val.clone())
+            } else {
+                let mut found: Option<String> = None;
+                for imp in &analysis.imports {
+                    if let Some(resolved_path) = &imp.resolved_path {
+                        for sym in &imp.symbols {
+                            let alias = sym.alias.as_ref().unwrap_or(&sym.name);
+                            if alias == &raw {
+                                if let Some(map) = consts_by_path.get(resolved_path) {
+                                    if let Some(val) = map.get(&sym.name) {
+                                        found = Some(val.clone());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if found.is_some() {
+                        break;
+                    }
+                }
+                found.or_else(|| unique.get(&raw).cloned())
+            };
+
+            if let Some(val) = resolved {
+                ev.name = val;
+                if ev.kind.starts_with("emit_ident") {
+                    ev.kind = "emit_const".to_string();
+                } else if ev.kind.starts_with("listen_ident") {
+                    ev.kind = "listen_const".to_string();
+                }
+            }
+        }
+    }
+}
+
 fn analyze_file(
     path: &Path,
     root_canon: &Path,
@@ -161,6 +231,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
     let mut json_results = Vec::new();
     let mut report_sections: Vec<ReportSection> = Vec::new();
     let mut server_handle = None;
+    let mut fail_reasons: Vec<String> = Vec::new();
 
     let mut ignore_exact: HashSet<String> = HashSet::new();
     let mut ignore_prefixes: Vec<String> = Vec::new();
@@ -318,6 +389,8 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         let mut dynamic_summary: Vec<(String, Vec<String>)> = Vec::new();
         let mut fe_commands: CommandUsage = HashMap::new();
         let mut be_commands: CommandUsage = HashMap::new();
+        let mut fe_payloads: HashMap<String, Vec<(String, usize, Option<String>)>> = HashMap::new();
+        let mut be_payloads: HashMap<String, Vec<(String, usize, Option<String>)>> = HashMap::new();
         let mut graph_edges: Vec<(String, String, String)> = Vec::new();
         let mut loc_map: HashMap<String, usize> = HashMap::new();
         let mut languages: HashSet<String> = HashSet::new();
@@ -432,6 +505,11 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                         call.line,
                         call.name.clone(),
                     ));
+                    fe_payloads.entry(call.name.clone()).or_default().push((
+                        analysis.path.clone(),
+                        call.line,
+                        call.payload.clone(),
+                    ));
                 }
                 for handler in &analysis.command_handlers {
                     let mut key = handler
@@ -444,6 +522,11 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                     } else if let Some(stripped) = key.strip_suffix("_cmd") {
                         key = stripped.to_string();
                     }
+                    be_payloads.entry(key.clone()).or_default().push((
+                        analysis.path.clone(),
+                        handler.line,
+                        handler.payload.clone(),
+                    ));
                     be_commands.entry(key).or_default().push((
                         analysis.path.clone(),
                         handler.line,
@@ -464,6 +547,8 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             .filter(|a| !a.reexports.is_empty())
             .map(|a| a.path.clone())
             .collect();
+
+        resolve_event_constants_across_files(&mut analyses);
 
         let mut cascades = Vec::new();
         for (from, resolved) in &reexport_edges {
@@ -565,7 +650,47 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             &exclude_set,
             &fe_commands,
             &be_commands,
+            &fe_payloads,
+            &be_payloads,
         );
+        if parsed.fail_on_missing_handlers && !missing_handlers.is_empty() {
+            fail_reasons.push(format!(
+                "{}: missing handlers detected ({})",
+                root_path.display(),
+                missing_handlers.len()
+            ));
+        }
+        if parsed.fail_on_ghost_events {
+            let ghost_count = pipeline_summary["events"]["ghostEmits"]
+                .as_array()
+                .map(|a| a.len())
+                .unwrap_or(0);
+            let orphan_count = pipeline_summary["events"]["orphanListeners"]
+                .as_array()
+                .map(|a| a.len())
+                .unwrap_or(0);
+            if ghost_count + orphan_count > 0 {
+                fail_reasons.push(format!(
+                    "{}: ghost/orphan events detected (ghost: {}, orphan: {})",
+                    root_path.display(),
+                    ghost_count,
+                    orphan_count
+                ));
+            }
+        }
+        if parsed.fail_on_races {
+            let race_count = pipeline_summary["risks"]
+                .as_array()
+                .map(|a| a.len())
+                .unwrap_or(0);
+            if race_count > 0 {
+                fail_reasons.push(format!(
+                    "{}: pipeline race risks detected ({})",
+                    root_path.display(),
+                    race_count
+                ));
+            }
+        }
 
         let mut section_open = None;
         if options.report_path.is_some() && options.serve {
@@ -1288,6 +1413,11 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
     }
 
     drop(server_handle);
+
+    if !fail_reasons.is_empty() {
+        eprintln!("[loctree][fail] {}", fail_reasons.join("; "));
+        std::process::exit(1);
+    }
 
     if parsed.serve {
         use std::io::Read;

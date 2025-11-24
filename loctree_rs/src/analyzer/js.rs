@@ -92,10 +92,11 @@ pub(crate) fn analyze_js_file(
     relative: String,
 ) -> FileAnalysis {
     let mut analysis = FileAnalysis::new(relative);
-    let mut event_consts = std::collections::HashMap::new();
     for caps in regex_event_const_js().captures_iter(content) {
         if let (Some(name), Some(val)) = (caps.get(1), caps.get(2)) {
-            event_consts.insert(name.as_str().to_string(), val.as_str().to_string());
+            analysis
+                .event_consts
+                .insert(name.as_str().to_string(), val.as_str().to_string());
         }
     }
 
@@ -110,7 +111,7 @@ pub(crate) fn analyze_js_file(
                 .to_string();
             return (name, Some(trimmed.to_string()), "literal".to_string());
         }
-        if let Some(val) = event_consts.get(trimmed) {
+        if let Some(val) = analysis.event_consts.get(trimmed) {
             return (val.clone(), Some(trimmed.to_string()), "const".to_string());
         }
         (
@@ -140,15 +141,16 @@ pub(crate) fn analyze_js_file(
     let mut command_calls = Vec::new();
     let mut event_emits = Vec::new();
     let mut event_listens = Vec::new();
-    let mut add_call = |name: &str, line: usize, generic: Option<String>| {
-        command_calls.push(CommandRef {
-            name: name.to_string(),
-            exposed_name: None,
-            line,
-            generic_type: generic,
-            payload: None,
-        });
-    };
+    let mut add_call =
+        |name: &str, line: usize, generic: Option<String>, payload: Option<String>| {
+            command_calls.push(CommandRef {
+                name: name.to_string(),
+                exposed_name: None,
+                line,
+                generic_type: generic,
+                payload,
+            });
+        };
     for caps in regex_import().captures_iter(content) {
         let clause = caps.get(1).map(|m| m.as_str()).unwrap_or("");
         let source = caps.get(2).map(|m| m.as_str()).unwrap_or("").to_string();
@@ -177,13 +179,21 @@ pub(crate) fn analyze_js_file(
                 .name("generic")
                 .map(|g| g.as_str().trim().to_string())
                 .filter(|s| !s.is_empty());
-            add_call(cmd.as_str(), line, generic);
+            let payload = caps
+                .name("payload")
+                .map(|p| p.as_str().trim().trim_end_matches(')').trim().to_string())
+                .filter(|s| !s.is_empty());
+            add_call(cmd.as_str(), line, generic, payload);
         }
     }
     for caps in regex_tauri_invoke().captures_iter(content) {
         if let Some(cmd) = caps.get(1) {
             let line = offset_to_line(content, cmd.start());
-            add_call(cmd.as_str(), line, None);
+            let payload = caps
+                .name("payload")
+                .map(|p| p.as_str().trim().trim_end_matches(')').trim().to_string())
+                .filter(|s| !s.is_empty());
+            add_call(cmd.as_str(), line, None, payload);
         }
     }
     for caps in regex_invoke_audio().captures_iter(content) {
@@ -193,7 +203,11 @@ pub(crate) fn analyze_js_file(
                 .name("generic")
                 .map(|g| g.as_str().trim().to_string())
                 .filter(|s| !s.is_empty());
-            add_call(cmd.as_str(), line, generic);
+            let payload = caps
+                .name("payload")
+                .map(|p| p.as_str().trim().trim_end_matches(')').trim().to_string())
+                .filter(|s| !s.is_empty());
+            add_call(cmd.as_str(), line, generic, payload);
         }
     }
     for caps in regex_invoke_snake().captures_iter(content) {
@@ -203,7 +217,11 @@ pub(crate) fn analyze_js_file(
                 .name("generic")
                 .map(|g| g.as_str().trim().to_string())
                 .filter(|s| !s.is_empty());
-            add_call(cmd.as_str(), line, generic);
+            let payload = caps
+                .name("payload")
+                .map(|p| p.as_str().trim().trim_end_matches(')').trim().to_string())
+                .filter(|s| !s.is_empty());
+            add_call(cmd.as_str(), line, generic, payload);
         }
     }
 

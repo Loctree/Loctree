@@ -236,10 +236,11 @@ pub(crate) fn analyze_rust_file(content: &str, relative: String) -> FileAnalysis
         }
     }
 
-    let mut event_consts = std::collections::HashMap::new();
     for caps in regex_event_const_rust().captures_iter(content) {
         if let (Some(name), Some(val)) = (caps.get(1), caps.get(2)) {
-            event_consts.insert(name.as_str().to_string(), val.as_str().to_string());
+            analysis
+                .event_consts
+                .insert(name.as_str().to_string(), val.as_str().to_string());
         }
     }
     let resolve_event = |token: &str| -> (String, Option<String>, String) {
@@ -253,7 +254,7 @@ pub(crate) fn analyze_rust_file(content: &str, relative: String) -> FileAnalysis
                 .to_string();
             return (name, Some(trimmed.to_string()), "literal".to_string());
         }
-        if let Some(val) = event_consts.get(trimmed) {
+        if let Some(val) = analysis.event_consts.get(trimmed) {
             return (val.clone(), Some(trimmed.to_string()), "const".to_string());
         }
         (
@@ -299,6 +300,10 @@ pub(crate) fn analyze_rust_file(content: &str, relative: String) -> FileAnalysis
     for caps in regex_tauri_command_fn().captures_iter(content) {
         let attr_raw = caps.get(1).map(|m| m.as_str()).unwrap_or("").trim();
         let name_match = caps.get(2);
+        let params = caps
+            .name("params")
+            .map(|p| p.as_str().trim().to_string())
+            .filter(|s| !s.is_empty());
 
         if let Some(name) = name_match {
             let fn_name = name.as_str().to_string();
@@ -310,7 +315,7 @@ pub(crate) fn analyze_rust_file(content: &str, relative: String) -> FileAnalysis
                 exposed_name: Some(exposed_name),
                 line,
                 generic_type: None,
-                payload: None,
+                payload: params,
             });
         }
     }
