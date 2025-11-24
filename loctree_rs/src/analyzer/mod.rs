@@ -1,4 +1,5 @@
 pub mod assets;
+pub mod classify;
 mod coverage;
 mod css;
 mod graph;
@@ -12,6 +13,7 @@ pub mod report;
 pub mod resolvers;
 pub mod runner;
 pub mod rust;
+mod tsconfig;
 
 pub(super) fn brace_list_to_names(raw: &str) -> Vec<String> {
     raw.split(',')

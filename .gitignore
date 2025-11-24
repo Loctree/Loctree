@@ -7,3 +7,5 @@ tarpaulin-report.html
 *.profraw
 loctree_rs/tarpaulin-report.json
 /.ai-agents
+/.ai-suite
+/.loctree
