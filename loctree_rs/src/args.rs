@@ -31,7 +31,6 @@ pub struct ParsedArgs {
     pub max_graph_nodes: Option<usize>,
     pub max_graph_edges: Option<usize>,
     pub verbose: bool,
-    pub tauri_preset: bool,
 }
 
 impl Default for ParsedArgs {
@@ -64,7 +63,6 @@ impl Default for ParsedArgs {
             max_graph_nodes: None,
             max_graph_edges: None,
             verbose: false,
-            tauri_preset: false,
         }
     }
 }
@@ -208,10 +206,6 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
     while i < args.len() {
         let arg = &args[i];
         match arg.as_str() {
-            "tauri" | "--preset-tauri" => {
-                parsed.tauri_preset = true;
-                i += 1;
-            }
             "--help" | "-h" => {
                 parsed.show_help = true;
                 i += 1;
@@ -433,23 +427,6 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
                 i += 1;
             }
         }
-    }
-
-    if parsed.tauri_preset {
-        if parsed.extensions.is_none() {
-            parsed.extensions = Some(
-                ["ts", "tsx", "js", "jsx", "mjs", "cjs", "rs", "css"]
-                    .iter()
-                    .map(|s| s.to_string())
-                    .collect(),
-            );
-        }
-        if roots.is_empty() {
-            roots.push(PathBuf::from("."));
-        }
-        parsed.mode = Mode::AnalyzeImports;
-        parsed.graph = true;
-        parsed.use_gitignore = true;
     }
 
     if roots.is_empty() {

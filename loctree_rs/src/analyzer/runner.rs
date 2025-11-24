@@ -13,15 +13,13 @@ use crate::types::{ExportIndex, FileAnalysis, ImportKind, Options, OutputMode, R
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
 
-use super::classify::{detect_language, file_kind, is_dev_file, language_from_path};
 use super::css::analyze_css_file;
 use super::html::render_html_report;
 use super::js::analyze_js_file;
 use super::open_server::{current_open_base, open_in_browser, start_open_server};
 use super::py::analyze_py_file;
-use super::resolvers::{resolve_js_relative, resolve_python_relative, TsPathResolver};
+use super::resolvers::{resolve_js_relative, resolve_python_relative};
 use super::rust::analyze_rust_file;
-use super::tsconfig::summarize_tsconfig;
 use super::{
     coverage::{compute_command_gaps, CommandUsage},
     graph::{build_graph_data, MAX_GRAPH_EDGES, MAX_GRAPH_NODES},
@@ -34,6 +32,88 @@ const DEFAULT_EXCLUDE_REPORT_PATTERNS: &[&str] =
 
 const SCHEMA_NAME: &str = "loctree-json";
 const SCHEMA_VERSION: &str = "1.1.0";
+
+fn is_dev_file(path: &str) -> bool {
+    path.contains("__tests__")
+        || path.contains("stories")
+        || path.contains(".stories.")
+        || path.contains("story.")
+}
+
+fn detect_language(ext: &str) -> String {
+    match ext {
+        "ts" | "tsx" => "ts".to_string(),
+        "js" | "jsx" | "mjs" | "cjs" => "js".to_string(),
+        "rs" => "rs".to_string(),
+        "py" => "py".to_string(),
+        "css" => "css".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn is_test_path(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    lower.contains("__tests__")
+        || lower.contains(".test.")
+        || lower.contains(".spec.")
+        || lower.ends_with("_test.rs")
+        || lower.ends_with("_tests.rs")
+}
+
+fn is_story_path(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    lower.contains("stories") || lower.contains(".story.") || lower.contains(".stories.")
+}
+
+fn is_generated_path(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    lower.contains("generated")
+        || lower.contains("codegen")
+        || lower.contains("/gen/")
+        || lower.ends_with(".gen.ts")
+        || lower.ends_with(".gen.tsx")
+        || lower.ends_with(".gen.rs")
+        || lower.ends_with(".g.rs")
+}
+
+fn file_kind(path: &str) -> (String, bool, bool) {
+    let generated = is_generated_path(path);
+    let test = is_test_path(path);
+    let story = is_story_path(path);
+    let lower = path.to_ascii_lowercase();
+    let config = lower.contains("config/")
+        || lower.contains("/config/")
+        || lower.ends_with("config.ts")
+        || lower.ends_with("config.tsx")
+        || lower.ends_with("config.js")
+        || lower.ends_with("config.rs")
+        || lower.ends_with(".config.ts")
+        || lower.ends_with(".config.js")
+        || lower.ends_with(".config.json");
+
+    let kind = if generated {
+        "generated"
+    } else if test {
+        "test"
+    } else if story {
+        "story"
+    } else if config {
+        "config"
+    } else {
+        "code"
+    };
+
+    (kind.to_string(), test, generated)
+}
+
+fn language_from_path(path: &str) -> String {
+    let ext = Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or_default()
+        .to_lowercase();
+    detect_language(&ext)
+}
 
 fn build_globset(patterns: &[String]) -> Option<GlobSet> {
     let mut builder = GlobSetBuilder::new();
@@ -79,7 +159,6 @@ fn analyze_file(
     path: &Path,
     root_canon: &Path,
     extensions: Option<&HashSet<String>>,
-    ts_resolver: Option<&super::resolvers::TsPathResolver>,
 ) -> io::Result<FileAnalysis> {
     let canonical = path.canonicalize()?;
     if !canonical.starts_with(root_canon) {
@@ -107,14 +186,7 @@ fn analyze_file(
         "rs" => analyze_rust_file(&content, relative),
         "css" => analyze_css_file(&content, relative),
         "py" => analyze_py_file(&content, &canonical, root_canon, extensions, relative),
-        _ => analyze_js_file(
-            &content,
-            &canonical,
-            root_canon,
-            extensions,
-            ts_resolver,
-            relative,
-        ),
+        _ => analyze_js_file(&content, &canonical, root_canon, extensions, relative),
     };
     analysis.loc = loc;
     analysis.language = detect_language(&ext);
@@ -127,11 +199,9 @@ fn analyze_file(
         if imp.resolved_path.is_none() && imp.source.starts_with('.') {
             let resolved = match ext.as_str() {
                 "py" => resolve_python_relative(&imp.source, &canonical, root_canon, extensions),
-                "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "css" => ts_resolver
-                    .and_then(|r| r.resolve(&imp.source, extensions))
-                    .or_else(|| {
-                        resolve_js_relative(&canonical, root_canon, &imp.source, extensions)
-                    }),
+                "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "css" => {
+                    resolve_js_relative(&canonical, root_canon, &imp.source, extensions)
+                }
                 _ => None,
             };
             imp.resolved_path = resolved;
@@ -216,8 +286,6 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             extensions = Some(default_analyzer_exts());
         }
 
-        let ts_resolver = TsPathResolver::from_tsconfig(&root_canon);
-
         let options = Options {
             extensions: extensions.clone(),
             ignore_paths,
@@ -295,12 +363,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         let mut languages: HashSet<String> = HashSet::new();
 
         for file in files {
-            let analysis = analyze_file(
-                &file,
-                &root_canon,
-                options.extensions.as_ref(),
-                ts_resolver.as_ref(),
-            )?;
+            let analysis = analyze_file(&file, &root_canon, options.extensions.as_ref())?;
             let abs_for_match = root_canon.join(&analysis.path);
             let is_excluded_for_commands = exclude_set
                 .as_ref()
@@ -369,9 +432,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                                     options.extensions.as_ref(),
                                 )
                             } else {
-                                ts_resolver.as_ref().and_then(|r| {
-                                    r.resolve(&imp.source, options.extensions.as_ref())
-                                })
+                                None
                             }
                         }
                         _ => None,
@@ -438,17 +499,6 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
 
         let mut ranked_dups: Vec<RankedDup> = Vec::new();
         for (name, files) in &duplicate_exports {
-            // Filter out well-known noisy dupes
-            let all_rs = files.iter().all(|f| f.ends_with(".rs"));
-            let all_d_ts = files.iter().all(|f| {
-                f.ends_with(".d.ts")
-                    || f.ends_with(".d.tsx")
-                    || f.ends_with(".d.mts")
-                    || f.ends_with(".d.cts")
-            });
-            if (name == "new" && all_rs) || (name == "default" && all_d_ts) {
-                continue;
-            }
             let dev_count = files.iter().filter(|f| is_dev_file(f)).count();
             let prod_count = files.len().saturating_sub(dev_count);
             let score = prod_count * 2 + dev_count;
@@ -661,7 +711,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                             "exportType": e.export_type,
                             "line": e.line,
                         })).collect::<Vec<_>>(),
-                        "commandCalls": command_calls.iter().map(|c| json!({"name": c.name, "line": c.line, "genericType": c.generic_type})).collect::<Vec<_>>(),
+                        "commandCalls": command_calls.iter().map(|c| json!({"name": c.name, "line": c.line})).collect::<Vec<_>>(),
                         "commandHandlers": command_handlers.iter().map(|c| json!({"name": c.name, "line": c.line, "exposedName": c.exposed_name})).collect::<Vec<_>>(),
                     }));
                 }
@@ -759,38 +809,6 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             let mut sorted_symbol_names: Vec<_> = symbol_occurrences.keys().cloned().collect();
             sorted_symbol_names.sort();
 
-            let tsconfig_summary = summarize_tsconfig(root_path, &analyses);
-
-            let mut calls_with_generics = Vec::new();
-            for analysis in &analyses {
-                for call in &analysis.command_calls {
-                    if let Some(gen) = &call.generic_type {
-                        calls_with_generics.push(json!({
-                            "name": call.name,
-                            "path": analysis.path,
-                            "line": call.line,
-                            "genericType": gen,
-                        }));
-                    }
-                }
-            }
-
-            let mut renamed_handlers = Vec::new();
-            for analysis in &analyses {
-                for handler in &analysis.command_handlers {
-                    if let Some(exposed) = &handler.exposed_name {
-                        if exposed != &handler.name {
-                            renamed_handlers.push(json!({
-                                "path": analysis.path,
-                                "line": handler.line,
-                                "name": handler.name,
-                                "exposedName": exposed,
-                            }));
-                        }
-                    }
-                }
-            }
-
             for name in &sorted_symbol_names {
                 if let Some(occ_list) = symbol_occurrences.get(name) {
                     let canonical_idx = occ_list
@@ -825,29 +843,17 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                         }));
                     }
 
-                    let canonical_path = occ_list
-                        .get(canonical_idx)
-                        .map(|(p, _, _, _)| p.clone())
-                        .unwrap_or_default();
-                    let public_surface = canonical_path.ends_with("index.ts")
-                        || canonical_path.ends_with("index.tsx")
-                        || canonical_path.ends_with("mod.rs")
-                        || canonical_path.ends_with("lib.rs");
-
                     let score = dup_score_map
                         .get(name)
                         .map(|d| d.score)
                         .unwrap_or(occ_list.len());
-                    let mut severity = if occ_list.len() > 5 {
+                    let severity = if occ_list.len() > 5 {
                         "high"
                     } else if occ_list.len() > 2 {
                         "medium"
                     } else {
                         "low"
                     };
-                    if public_surface && occ_list.len() > 1 {
-                        severity = "high";
-                    }
                     let reason = if occ_list.len() == 1 {
                         "single_export"
                     } else if occ_list.iter().any(|(_, _, kind, _)| kind == "reexport") {
@@ -863,7 +869,6 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                         "duplicateScore": score,
                         "severity": severity,
                         "reason": reason,
-                        "publicSurface": public_surface,
                     }));
 
                     if occ_list.len() > 1 {
@@ -875,7 +880,6 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                             "size": occ_list.len(),
                             "severity": severity,
                             "reason": reason,
-                            "publicSurface": public_surface,
                         }));
                     }
                 }
@@ -928,15 +932,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                     let mut paths: Vec<_> = occs.iter().map(|(p, _, _, _)| p.clone()).collect();
                     paths.sort();
                     paths.dedup();
-                    let public_surface = paths.iter().any(|p| {
-                        p.ends_with("index.ts")
-                            || p.ends_with("index.tsx")
-                            || p.ends_with("mod.rs")
-                            || p.ends_with("lib.rs")
-                    });
-                    dead_symbols.push(
-                        json!({"name": name, "paths": paths, "publicSurface": public_surface}),
-                    );
+                    dead_symbols.push(json!({"name": name, "paths": paths}));
                 }
             }
             dead_symbols.sort_by(|a, b| {
@@ -1030,15 +1026,6 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                     "defaultExportChains": default_export_chains,
                     "suspiciousBarrels": suspicious_barrels,
                     "deadSymbols": dead_symbols,
-                    "coverage": {
-                        "frontendCommandCount": fe_commands.len(),
-                        "backendHandlerCount": be_commands.len(),
-                        "missingCount": missing_handlers.len(),
-                        "unusedCount": unused_handlers.len(),
-                        "renamedHandlers": renamed_handlers,
-                        "callsWithGenerics": calls_with_generics,
-                    },
-                    "tsconfig": tsconfig_summary,
                     "ciSummary": {
                         "duplicateClustersCount": duplicate_clusters_count,
                         "maxClusterSize": max_cluster_size,

@@ -7,8 +7,6 @@
   graphs.forEach((g, idx) => {
     const container = document.getElementById(g.id);
     if (!container) return;
-    if (container.dataset.enhanced === '1') return;
-    container.dataset.enhanced = '1';
 
     const components = Array.isArray(g.components) ? g.components : [];
     const componentMap = new Map();
