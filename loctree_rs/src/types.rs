@@ -162,6 +162,7 @@ pub struct FileAnalysis {
     pub command_handlers: Vec<CommandRef>,
     pub event_emits: Vec<EventRef>,
     pub event_listens: Vec<EventRef>,
+    pub event_consts: HashMap<String, String>,
 }
 
 impl ImportEntry {
@@ -208,6 +209,7 @@ impl FileAnalysis {
             command_handlers: Vec::new(),
             event_emits: Vec::new(),
             event_listens: Vec::new(),
+            event_consts: HashMap::new(),
         }
     }
 }

@@ -38,6 +38,8 @@ pub fn build_pipeline_summary(
     exclude: &Option<GlobSet>,
     fe_commands: &HashMap<String, Vec<(String, usize, String)>>,
     be_commands: &HashMap<String, Vec<(String, usize, String)>>,
+    fe_payloads: &HashMap<String, Vec<(String, usize, Option<String>)>>,
+    be_payloads: &HashMap<String, Vec<(String, usize, Option<String>)>>,
 ) -> serde_json::Value {
     #[derive(Clone)]
     struct Site {
@@ -104,6 +106,22 @@ pub fn build_pipeline_summary(
     let mut ghost_emits = Vec::new();
     let mut orphan_listeners = Vec::new();
     let mut risks = Vec::new();
+    let mut call_payloads: HashMap<String, Vec<(String, usize, Option<String>)>> = HashMap::new();
+    let mut handler_payloads: HashMap<String, Vec<(String, usize, Option<String>)>> =
+        HashMap::new();
+
+    for (name, entries) in fe_payloads {
+        call_payloads
+            .entry(name.clone())
+            .or_default()
+            .extend(entries.clone());
+    }
+    for (name, entries) in be_payloads {
+        handler_payloads
+            .entry(name.clone())
+            .or_default()
+            .extend(entries.clone());
+    }
 
     for (norm, rec) in &events {
         let mut emitters = rec.emitters.clone();
@@ -323,8 +341,20 @@ pub fn build_pipeline_summary(
             "status": status,
             "callCount": calls.len(),
             "handlerCount": handlers.len(),
-            "calls": calls.iter().map(|(p,l,alias)| json!({"path": p, "line": l, "alias": alias})).collect::<Vec<_>>(),
-            "handlers": handlers.iter().map(|(p,l,alias)| json!({"path": p, "line": l, "name": alias})).collect::<Vec<_>>(),
+            "calls": calls.iter().map(|(p,l,alias)| {
+                let payload = call_payloads
+                    .get(name)
+                    .and_then(|entries| entries.iter().find(|(pp,ll,_)| pp == p && *ll == *l))
+                    .and_then(|(_,_,pl)| pl.clone());
+                json!({"path": p, "line": l, "alias": alias, "payload": payload})
+            }).collect::<Vec<_>>(),
+            "handlers": handlers.iter().map(|(p,l,alias)| {
+                let payload = handler_payloads
+                    .get(name)
+                    .and_then(|entries| entries.iter().find(|(pp,ll,_)| pp == p && *ll == *l))
+                    .and_then(|(_,_,pl)| pl.clone());
+                json!({"path": p, "line": l, "name": alias, "payload": payload})
+            }).collect::<Vec<_>>(),
             "handlerEmits": handler_emits,
         }));
     }
