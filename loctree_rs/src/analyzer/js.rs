@@ -2,14 +2,15 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use crate::types::{
-    CommandRef, ExportSymbol, FileAnalysis, ImportEntry, ImportKind, ImportSymbol, ReexportEntry,
-    ReexportKind,
+    CommandRef, EventRef, ExportSymbol, FileAnalysis, ImportEntry, ImportKind, ImportSymbol,
+    ReexportEntry, ReexportKind,
 };
 
 use super::regexes::{
-    regex_dynamic_import, regex_export_brace, regex_export_default, regex_export_named_decl,
-    regex_import, regex_invoke_audio, regex_invoke_snake, regex_reexport_named,
-    regex_reexport_star, regex_safe_invoke, regex_side_effect_import, regex_tauri_invoke,
+    regex_dynamic_import, regex_event_emit_js, regex_event_listen_js, regex_export_brace,
+    regex_export_default, regex_export_named_decl, regex_import, regex_invoke_audio,
+    regex_invoke_snake, regex_reexport_named, regex_reexport_star, regex_safe_invoke,
+    regex_side_effect_import, regex_tauri_invoke,
 };
 use super::resolvers::{resolve_reexport_target, TsPathResolver};
 use super::{brace_list_to_names, offset_to_line};
@@ -92,6 +93,8 @@ pub(crate) fn analyze_js_file(
 ) -> FileAnalysis {
     let mut analysis = FileAnalysis::new(relative);
     let mut command_calls = Vec::new();
+    let mut event_emits = Vec::new();
+    let mut event_listens = Vec::new();
     let mut add_call = |name: &str, line: usize, generic: Option<String>| {
         command_calls.push(CommandRef {
             name: name.to_string(),
@@ -186,6 +189,27 @@ pub(crate) fn analyze_js_file(
         analysis.dynamic_imports.push(source);
     }
 
+    for caps in regex_event_emit_js().captures_iter(content) {
+        if let Some(ev) = caps.get(1) {
+            let line = offset_to_line(content, ev.start());
+            event_emits.push(EventRef {
+                name: ev.as_str().to_string(),
+                line,
+                kind: "emit".to_string(),
+            });
+        }
+    }
+    for caps in regex_event_listen_js().captures_iter(content) {
+        if let Some(ev) = caps.get(1) {
+            let line = offset_to_line(content, ev.start());
+            event_listens.push(EventRef {
+                name: ev.as_str().to_string(),
+                line,
+                kind: "listen".to_string(),
+            });
+        }
+    }
+
     for caps in regex_export_named_decl().captures_iter(content) {
         let name = caps.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
         if !name.is_empty() {
@@ -225,6 +249,8 @@ pub(crate) fn analyze_js_file(
     }
 
     analysis.command_calls = command_calls;
+    analysis.event_emits = event_emits;
+    analysis.event_listens = event_listens;
     analysis
 }
 

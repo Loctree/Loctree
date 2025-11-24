@@ -87,6 +87,38 @@ pub(crate) fn regex_tauri_invoke() -> &'static Regex {
     })
 }
 
+pub(crate) fn regex_event_emit_js() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        // @tauri-apps/api/event emit/emitTo/emitAll("event")
+        regex(r#"(?m)(?:emit(?:All|To)?|app\.emit|window\.emit)\s*\(\s*["']([^"']+)["']"#)
+    })
+}
+
+pub(crate) fn regex_event_listen_js() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        // listen/once("event")
+        regex(r#"(?m)(?:listen|once)\s*\(\s*["']([^"']+)["']"#)
+    })
+}
+
+pub(crate) fn regex_event_emit_rust() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        // app.emit_all("evt", ..) or window.emit("evt", ..) etc.
+        regex(r#"(?m)\.\s*emit[_a-z]*\(\s*["']([^"']+)["']"#)
+    })
+}
+
+pub(crate) fn regex_event_listen_rust() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        // app.listen_global("evt", ..) or window.listen("evt", ..)
+        regex(r#"(?m)\.\s*listen[_a-z]*\(\s*["']([^"']+)["']"#)
+    })
+}
+
 pub(crate) fn regex_css_import() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
