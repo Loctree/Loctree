@@ -53,14 +53,14 @@ pub(crate) fn regex_export_brace() -> &'static Regex {
 pub(crate) fn regex_safe_invoke() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        regex(r#"safeInvoke\s*(?:<(?P<generic>[^>]+)>+)?\(\s*["'](?P<cmd>[^"']+)["']"#)
+        regex(r#"safeInvoke\s*(?:<(?P<generic>[^>]+)>+)?\(\s*["'](?P<cmd>[^"']+)["']\s*(?:,\s*(?P<payload>[^)\n]+))?"#)
     })
 }
 
 pub(crate) fn regex_invoke_snake() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        regex(r#"invokeSnake\s*(?:<(?P<generic>[^>]+)>+)?\(\s*["'](?P<cmd>[^"']+)["']"#)
+        regex(r#"invokeSnake\s*(?:<(?P<generic>[^>]+)>+)?\(\s*["'](?P<cmd>[^"']+)["']\s*(?:,\s*(?P<payload>[^)\n]+))?"#)
     })
 }
 
@@ -68,14 +68,14 @@ pub(crate) fn regex_invoke_audio() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     // capture invokeAudio(...) and invokeAudioCamel(...) helpers used by FE audio API
     RE.get_or_init(|| {
-        regex(r#"invokeAudio(?:Camel)?\s*(?:<(?P<generic>[^>]+)>+)?\(\s*["'](?P<cmd>[^"']+)["']"#)
+        regex(r#"invokeAudio(?:Camel)?\s*(?:<(?P<generic>[^>]+)>+)?\(\s*["'](?P<cmd>[^"']+)["']\s*(?:,\s*(?P<payload>[^)\n]+))?"#)
     })
 }
 
 pub(crate) fn regex_tauri_command_fn() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        regex(r#"(?m)#\s*\[\s*tauri::command([^\]]*)\]\s*(?:pub\s*(?:\([^)]*\)\s*)?)?(?:async\s+)?fn\s+([A-Za-z0-9_]+)"#)
+        regex(r#"(?m)#\s*\[\s*tauri::command([^\]]*)\]\s*(?:pub\s*(?:\([^)]*\)\s*)?)?(?:async\s+)?fn\s+([A-Za-z0-9_]+)\s*\((?P<params>[^)]*)\)"#)
     })
 }
 
@@ -83,7 +83,7 @@ pub(crate) fn regex_tauri_invoke() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
         // Matches top-level invoke("cmd") calls (avoids foo.invoke())
-        regex(r#"(?m)(?:^|[^A-Za-z0-9_\.])invoke\s*(?:<[^>]*>+)?\(\s*[\\"']([^\\"']+)[\\"']"#)
+        regex(r#"(?m)(?:^|[^A-Za-z0-9_\.])invoke\s*(?:<[^>]*>+)?\(\s*[\\"']([^\\"']+)[\\"']\s*(?:,\s*(?P<payload>[^)\n]+))?"#)
     })
 }
 

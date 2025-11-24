@@ -33,6 +33,9 @@ pub struct ParsedArgs {
     pub max_graph_edges: Option<usize>,
     pub verbose: bool,
     pub tauri_preset: bool,
+    pub fail_on_missing_handlers: bool,
+    pub fail_on_ghost_events: bool,
+    pub fail_on_races: bool,
 }
 
 impl Default for ParsedArgs {
@@ -67,6 +70,9 @@ impl Default for ParsedArgs {
             max_graph_edges: None,
             verbose: false,
             tauri_preset: false,
+            fail_on_missing_handlers: false,
+            fail_on_ghost_events: false,
+            fail_on_races: false,
         }
     }
 }
@@ -259,6 +265,18 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
             }
             "--verbose" | "-v" => {
                 parsed.verbose = true;
+                i += 1;
+            }
+            "--fail-on-missing-handlers" => {
+                parsed.fail_on_missing_handlers = true;
+                i += 1;
+            }
+            "--fail-on-ghost-events" => {
+                parsed.fail_on_ghost_events = true;
+                i += 1;
+            }
+            "--fail-on-races" => {
+                parsed.fail_on_races = true;
                 i += 1;
             }
             "--show-hidden" | "-H" => {
