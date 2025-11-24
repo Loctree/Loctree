@@ -1,6 +1,6 @@
 # loctree – fast reference for agents (CLI & outputs)
 
-This is a concise, up-to-date guide for how to drive loctree as of 0.3.4, focused on analyzer mode and machine-readable outputs.
+This is a concise, up-to-date guide for how to drive loctree as of 0.3.5, focused on analyzer mode and machine-readable outputs.
 
 ## Modes
 - **Tree/LOC (default)**: `loctree <roots> [options]` – prints an ASCII tree with LOC highlights.

@@ -19,7 +19,7 @@ use super::html::render_html_report;
 use super::js::analyze_js_file;
 use super::open_server::{current_open_base, open_in_browser, start_open_server};
 use super::py::analyze_py_file;
-use super::resolvers::{resolve_js_relative, resolve_python_relative};
+use super::resolvers::{resolve_js_relative, resolve_python_relative, TsPathResolver};
 use super::rust::analyze_rust_file;
 use super::tsconfig::summarize_tsconfig;
 use super::{
@@ -79,6 +79,7 @@ fn analyze_file(
     path: &Path,
     root_canon: &Path,
     extensions: Option<&HashSet<String>>,
+    ts_resolver: Option<&super::resolvers::TsPathResolver>,
 ) -> io::Result<FileAnalysis> {
     let canonical = path.canonicalize()?;
     if !canonical.starts_with(root_canon) {
@@ -106,7 +107,14 @@ fn analyze_file(
         "rs" => analyze_rust_file(&content, relative),
         "css" => analyze_css_file(&content, relative),
         "py" => analyze_py_file(&content, &canonical, root_canon, extensions, relative),
-        _ => analyze_js_file(&content, &canonical, root_canon, extensions, relative),
+        _ => analyze_js_file(
+            &content,
+            &canonical,
+            root_canon,
+            extensions,
+            ts_resolver,
+            relative,
+        ),
     };
     analysis.loc = loc;
     analysis.language = detect_language(&ext);
@@ -119,9 +127,11 @@ fn analyze_file(
         if imp.resolved_path.is_none() && imp.source.starts_with('.') {
             let resolved = match ext.as_str() {
                 "py" => resolve_python_relative(&imp.source, &canonical, root_canon, extensions),
-                "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "css" => {
-                    resolve_js_relative(&canonical, root_canon, &imp.source, extensions)
-                }
+                "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "css" => ts_resolver
+                    .and_then(|r| r.resolve(&imp.source, extensions))
+                    .or_else(|| {
+                        resolve_js_relative(&canonical, root_canon, &imp.source, extensions)
+                    }),
                 _ => None,
             };
             imp.resolved_path = resolved;
@@ -206,6 +216,8 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             extensions = Some(default_analyzer_exts());
         }
 
+        let ts_resolver = TsPathResolver::from_tsconfig(&root_canon);
+
         let options = Options {
             extensions: extensions.clone(),
             ignore_paths,
@@ -283,7 +295,12 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         let mut languages: HashSet<String> = HashSet::new();
 
         for file in files {
-            let analysis = analyze_file(&file, &root_canon, options.extensions.as_ref())?;
+            let analysis = analyze_file(
+                &file,
+                &root_canon,
+                options.extensions.as_ref(),
+                ts_resolver.as_ref(),
+            )?;
             let abs_for_match = root_canon.join(&analysis.path);
             let is_excluded_for_commands = exclude_set
                 .as_ref()
@@ -352,7 +369,9 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                                     options.extensions.as_ref(),
                                 )
                             } else {
-                                None
+                                ts_resolver.as_ref().and_then(|r| {
+                                    r.resolve(&imp.source, options.extensions.as_ref())
+                                })
                             }
                         }
                         _ => None,

@@ -11,7 +11,7 @@ use super::regexes::{
     regex_import, regex_invoke_audio, regex_invoke_snake, regex_reexport_named,
     regex_reexport_star, regex_safe_invoke, regex_side_effect_import, regex_tauri_invoke,
 };
-use super::resolvers::resolve_reexport_target;
+use super::resolvers::{resolve_reexport_target, TsPathResolver};
 use super::{brace_list_to_names, offset_to_line};
 
 fn parse_import_symbols(raw: &str) -> Vec<ImportSymbol> {
@@ -87,6 +87,7 @@ pub(crate) fn analyze_js_file(
     path: &Path,
     root: &Path,
     extensions: Option<&HashSet<String>>,
+    ts_resolver: Option<&TsPathResolver>,
     relative: String,
 ) -> FileAnalysis {
     let mut analysis = FileAnalysis::new(relative);
@@ -105,6 +106,7 @@ pub(crate) fn analyze_js_file(
         let mut entry = ImportEntry::new(source.clone(), ImportKind::Static);
         entry.symbols = parse_import_symbols(clause);
         entry.resolved_path = resolve_reexport_target(path, root, &source, extensions)
+            .or_else(|| ts_resolver.and_then(|r| r.resolve(&source, extensions)))
             .or_else(|| super::resolvers::resolve_js_relative(path, root, &source, extensions));
         entry.is_bare = !source.starts_with('.') && !source.starts_with('/');
         analysis.imports.push(entry);
@@ -113,6 +115,7 @@ pub(crate) fn analyze_js_file(
         let source = caps.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
         let mut entry = ImportEntry::new(source.clone(), ImportKind::SideEffect);
         entry.resolved_path = resolve_reexport_target(path, root, &source, extensions)
+            .or_else(|| ts_resolver.and_then(|r| r.resolve(&source, extensions)))
             .or_else(|| super::resolvers::resolve_js_relative(path, root, &source, extensions));
         entry.is_bare = !source.starts_with('.') && !source.starts_with('/');
         analysis.imports.push(entry);
@@ -157,7 +160,8 @@ pub(crate) fn analyze_js_file(
 
     for caps in regex_reexport_star().captures_iter(content) {
         let source = caps.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
-        let resolved = resolve_reexport_target(path, root, &source, extensions);
+        let resolved = resolve_reexport_target(path, root, &source, extensions)
+            .or_else(|| ts_resolver.and_then(|r| r.resolve(&source, extensions)));
         analysis.reexports.push(ReexportEntry {
             source,
             kind: ReexportKind::Star,
@@ -168,7 +172,8 @@ pub(crate) fn analyze_js_file(
         let raw_names = caps.get(1).map(|m| m.as_str()).unwrap_or("");
         let source = caps.get(2).map(|m| m.as_str()).unwrap_or("").to_string();
         let names = brace_list_to_names(raw_names);
-        let resolved = resolve_reexport_target(path, root, &source, extensions);
+        let resolved = resolve_reexport_target(path, root, &source, extensions)
+            .or_else(|| ts_resolver.and_then(|r| r.resolve(&source, extensions)));
         analysis.reexports.push(ReexportEntry {
             source,
             kind: ReexportKind::Named(names.clone()),
@@ -255,6 +260,7 @@ invokeAudioCamel<Baz>("cmd_audio_generic");
             Path::new("src/app.tsx"),
             Path::new("src"),
             Some(&HashSet::from(["ts".to_string(), "tsx".to_string()])),
+            None,
             "app.tsx".to_string(),
         );
 
