@@ -151,12 +151,12 @@ pub(crate) fn rust_pub_const_regexes() -> &'static [Regex] {
 
 pub(crate) fn regex_py_dynamic_importlib() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| regex(r#"importlib\.import_module\(\s*["']([^"']+)["']"#))
+    RE.get_or_init(|| regex(r#"importlib\.import_module\(\s*([^)]+?)\s*(?:,|\))"#))
 }
 
 pub(crate) fn regex_py_dynamic_dunder() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| regex(r#"__import__\(\s*["']([^"']+)\)"#))
+    RE.get_or_init(|| regex(r#"__import__\(\s*([^)]+?)\s*(?:,|\))"#))
 }
 
 pub(crate) fn regex_py_all() -> &'static Regex {

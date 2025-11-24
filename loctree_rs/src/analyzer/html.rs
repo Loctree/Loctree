@@ -240,7 +240,10 @@ fn render_section(out: &mut String, section: &ReportSection) {
 }
 
 fn render_graph_bootstrap(out: &mut String) {
+    out.push_str(r#"<script src="loctree-cytoscape.min.js"></script>"#);
+    out.push_str("<script>");
     out.push_str(GRAPH_BOOTSTRAP);
+    out.push_str("</script>");
 }
 
 pub(crate) fn render_html_report(path: &Path, sections: &[ReportSection]) -> io::Result<()> {

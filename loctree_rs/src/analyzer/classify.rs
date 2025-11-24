@@ -5,6 +5,8 @@ pub fn is_dev_file(path: &str) -> bool {
         || path.contains("stories")
         || path.contains(".stories.")
         || path.contains("story.")
+        || path.contains("fixture")
+        || path.contains("fixtures")
 }
 
 pub fn detect_language(ext: &str) -> String {

@@ -134,10 +134,7 @@ pub(crate) fn resolve_reexport_target(
     }
     let parent = file_path.parent()?;
     let candidate = parent.join(spec);
-    if candidate.is_dir() {
-        return None;
-    }
-    resolve_with_extensions(candidate, root, exts)
+    resolve_python_candidate(candidate, root, exts)
 }
 
 pub(crate) fn resolve_python_relative(
@@ -171,11 +168,7 @@ pub(crate) fn resolve_python_relative(
         base.join(remainder)
     };
 
-    if joined.is_dir() {
-        return None;
-    }
-
-    resolve_with_extensions(joined, root, exts)
+    resolve_python_candidate(joined, root, exts)
 }
 
 pub(crate) fn resolve_js_relative(
@@ -190,6 +183,43 @@ pub(crate) fn resolve_js_relative(
     let parent = file_path.parent()?;
     let candidate = parent.join(spec);
     resolve_with_extensions(candidate, root, exts)
+}
+
+pub(crate) fn resolve_python_candidate(
+    candidate: PathBuf,
+    root: &Path,
+    exts: Option<&HashSet<String>>,
+) -> Option<String> {
+    if candidate.is_dir() {
+        let init_candidates = [
+            candidate.join("__init__.py"),
+            candidate.join("__init__.pyi"),
+            candidate.join("mod.py"),
+        ];
+        for init in init_candidates {
+            if init.exists() {
+                return canonical_rel(&init, root).or_else(|| canonical_abs(&init));
+            }
+        }
+    }
+
+    resolve_with_extensions(candidate, root, exts)
+}
+
+pub(crate) fn resolve_python_absolute(
+    module: &str,
+    roots: &[PathBuf],
+    root_for_rel: &Path,
+    exts: Option<&HashSet<String>>,
+) -> Option<String> {
+    let normalized = module.replace('.', "/");
+    for base in roots {
+        let candidate = base.join(&normalized);
+        if let Some(resolved) = resolve_python_candidate(candidate.clone(), root_for_rel, exts) {
+            return Some(resolved);
+        }
+    }
+    None
 }
 
 pub(crate) fn resolve_with_extensions(
