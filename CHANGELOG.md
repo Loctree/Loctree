@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
+## [0.3.8] - 2025-11-22
+
+### Added
+- Report UI reorganized into tabs (Overview / Duplicates / Dynamic imports / Tauri coverage / Graph anchor) with a dedicated bottom drawer for the graph and controls.
+- Help text split per mode (Tree / Analyzer / Common) and expanded examples; graph/drawer behavior documented.
+- Python analyzer refinements: `--py-root` (repeatable) for extra roots, `resolutionKind` + `isTypeChecking` on imports, dynamic import tagging, `__all__` expansion for star imports.
+
+### Fixed
+- Dark-mode toggle in the graph drawer no longer panics when Cytoscape style is not ready.
+- Resolved stray brace/formatting issues in CLI help output.
+
 ## [0.3.5] - 2025-11-24
 
 ### Added
