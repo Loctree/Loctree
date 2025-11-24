@@ -9,7 +9,9 @@ use time::OffsetDateTime;
 
 use crate::args::{preset_ignore_symbols, ParsedArgs};
 use crate::fs_utils::{gather_files, normalise_ignore_patterns, GitIgnoreChecker};
-use crate::types::{ExportIndex, FileAnalysis, ImportKind, Options, OutputMode, ReexportKind};
+use crate::types::{
+    ExportIndex, FileAnalysis, ImportKind, ImportResolutionKind, Options, OutputMode, ReexportKind,
+};
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
 
@@ -18,8 +20,10 @@ use super::css::analyze_css_file;
 use super::html::render_html_report;
 use super::js::analyze_js_file;
 use super::open_server::{current_open_base, open_in_browser, start_open_server};
-use super::py::analyze_py_file;
-use super::resolvers::{resolve_js_relative, resolve_python_relative, TsPathResolver};
+use super::py::{analyze_py_file, python_stdlib_set};
+use super::resolvers::{
+    resolve_js_relative, resolve_python_absolute, resolve_python_relative, TsPathResolver,
+};
 use super::rust::analyze_rust_file;
 use super::tsconfig::summarize_tsconfig;
 use super::{
@@ -33,7 +37,7 @@ const DEFAULT_EXCLUDE_REPORT_PATTERNS: &[&str] =
     &["**/__tests__/**", "scripts/semgrep-fixtures/**"];
 
 const SCHEMA_NAME: &str = "loctree-json";
-const SCHEMA_VERSION: &str = "1.1.0";
+const SCHEMA_VERSION: &str = "1.2.0";
 
 fn build_globset(patterns: &[String]) -> Option<GlobSet> {
     let mut builder = GlobSetBuilder::new();
@@ -80,6 +84,8 @@ fn analyze_file(
     root_canon: &Path,
     extensions: Option<&HashSet<String>>,
     ts_resolver: Option<&super::resolvers::TsPathResolver>,
+    py_roots: &[PathBuf],
+    py_stdlib: &HashSet<String>,
 ) -> io::Result<FileAnalysis> {
     let canonical = path.canonicalize()?;
     if !canonical.starts_with(root_canon) {
@@ -106,7 +112,9 @@ fn analyze_file(
     let mut analysis = match ext.as_str() {
         "rs" => analyze_rust_file(&content, relative),
         "css" => analyze_css_file(&content, relative),
-        "py" => analyze_py_file(&content, &canonical, root_canon, extensions, relative),
+        "py" => analyze_py_file(
+            &content, &canonical, root_canon, extensions, relative, py_roots, py_stdlib,
+        ),
         _ => analyze_js_file(
             &content,
             &canonical,
@@ -206,6 +214,8 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         }
     }
 
+    let py_stdlib = python_stdlib_set();
+
     for (idx, root_path) in root_list.iter().enumerate() {
         let ignore_paths = normalise_ignore_patterns(&parsed.ignore_patterns, root_path);
         let root_canon = root_path
@@ -217,6 +227,23 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         }
 
         let ts_resolver = TsPathResolver::from_tsconfig(&root_canon);
+        let mut py_roots: Vec<PathBuf> = vec![root_canon.clone()];
+        for extra in &parsed.py_roots {
+            let candidate = if extra.is_absolute() {
+                extra.clone()
+            } else {
+                root_canon.join(extra)
+            };
+            if candidate.exists() {
+                py_roots.push(candidate.canonicalize().unwrap_or(candidate));
+            } else {
+                eprintln!(
+                    "[loctree][warn] --py-root '{}' not found under {}; skipping",
+                    extra.display(),
+                    root_canon.display()
+                );
+            }
+        }
 
         let options = Options {
             extensions: extensions.clone(),
@@ -300,6 +327,8 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                 &root_canon,
                 options.extensions.as_ref(),
                 ts_resolver.as_ref(),
+                &py_roots,
+                py_stdlib,
             )?;
             let abs_for_match = root_canon.join(&analysis.path);
             let is_excluded_for_commands = exclude_set
@@ -315,6 +344,9 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             loc_map.insert(analysis.path.clone(), analysis.loc);
             for exp in &analysis.exports {
                 let name_lc = exp.name.to_lowercase();
+                if analysis.path.ends_with(".d.ts") && name_lc == "default" {
+                    continue;
+                }
                 let ignored = ignore_exact.contains(&name_lc)
                     || ignore_prefixes.iter().any(|p| name_lc.starts_with(p));
                 if ignored {
@@ -357,7 +389,12 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                                     options.extensions.as_ref(),
                                 )
                             } else {
-                                None
+                                resolve_python_absolute(
+                                    &imp.source,
+                                    &py_roots,
+                                    root_path,
+                                    options.extensions.as_ref(),
+                                )
                             }
                         }
                         "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "css" => {
@@ -646,6 +683,13 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                             "kind": match i.kind { ImportKind::Static => "static", ImportKind::SideEffect => "side-effect" },
                             "resolvedPath": i.resolved_path,
                             "isBareModule": i.is_bare,
+                            "resolutionKind": match i.resolution {
+                                ImportResolutionKind::Local => "local",
+                                ImportResolutionKind::Stdlib => "stdlib",
+                                ImportResolutionKind::Dynamic => "dynamic",
+                                ImportResolutionKind::Unknown => "unknown",
+                            },
+                            "isTypeChecking": i.is_type_checking,
                             "symbols": i.symbols.iter().map(|s| json!({"name": s.name, "alias": s.alias})).collect::<Vec<_>>(),
                         })).collect::<Vec<_>>(),
                         "reexports": reexports.iter().map(|r| {
