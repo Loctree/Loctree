@@ -11,7 +11,7 @@ use super::regexes::{
     regex_import, regex_invoke_audio, regex_invoke_snake, regex_reexport_named,
     regex_reexport_star, regex_safe_invoke, regex_side_effect_import, regex_tauri_invoke,
 };
-use super::resolvers::{resolve_reexport_target, TsPathResolver};
+use super::resolvers::resolve_reexport_target;
 use super::{brace_list_to_names, offset_to_line};
 
 fn parse_import_symbols(raw: &str) -> Vec<ImportSymbol> {
@@ -87,26 +87,16 @@ pub(crate) fn analyze_js_file(
     path: &Path,
     root: &Path,
     extensions: Option<&HashSet<String>>,
-    ts_resolver: Option<&TsPathResolver>,
     relative: String,
 ) -> FileAnalysis {
     let mut analysis = FileAnalysis::new(relative);
     let mut command_calls = Vec::new();
-    let mut add_call = |name: &str, line: usize, generic: Option<String>| {
-        command_calls.push(CommandRef {
-            name: name.to_string(),
-            exposed_name: None,
-            line,
-            generic_type: generic,
-        });
-    };
     for caps in regex_import().captures_iter(content) {
         let clause = caps.get(1).map(|m| m.as_str()).unwrap_or("");
         let source = caps.get(2).map(|m| m.as_str()).unwrap_or("").to_string();
         let mut entry = ImportEntry::new(source.clone(), ImportKind::Static);
         entry.symbols = parse_import_symbols(clause);
         entry.resolved_path = resolve_reexport_target(path, root, &source, extensions)
-            .or_else(|| ts_resolver.and_then(|r| r.resolve(&source, extensions)))
             .or_else(|| super::resolvers::resolve_js_relative(path, root, &source, extensions));
         entry.is_bare = !source.starts_with('.') && !source.starts_with('/');
         analysis.imports.push(entry);
@@ -115,53 +105,55 @@ pub(crate) fn analyze_js_file(
         let source = caps.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
         let mut entry = ImportEntry::new(source.clone(), ImportKind::SideEffect);
         entry.resolved_path = resolve_reexport_target(path, root, &source, extensions)
-            .or_else(|| ts_resolver.and_then(|r| r.resolve(&source, extensions)))
             .or_else(|| super::resolvers::resolve_js_relative(path, root, &source, extensions));
         entry.is_bare = !source.starts_with('.') && !source.starts_with('/');
         analysis.imports.push(entry);
     }
 
     for caps in regex_safe_invoke().captures_iter(content) {
-        if let Some(cmd) = caps.name("cmd") {
+        if let Some(cmd) = caps.get(1) {
             let line = offset_to_line(content, cmd.start());
-            let generic = caps
-                .name("generic")
-                .map(|g| g.as_str().trim().to_string())
-                .filter(|s| !s.is_empty());
-            add_call(cmd.as_str(), line, generic);
+            command_calls.push(CommandRef {
+                name: cmd.as_str().to_string(),
+                exposed_name: None,
+                line,
+            });
         }
     }
     for caps in regex_tauri_invoke().captures_iter(content) {
         if let Some(cmd) = caps.get(1) {
             let line = offset_to_line(content, cmd.start());
-            add_call(cmd.as_str(), line, None);
+            command_calls.push(CommandRef {
+                name: cmd.as_str().to_string(),
+                exposed_name: None,
+                line,
+            });
         }
     }
     for caps in regex_invoke_audio().captures_iter(content) {
-        if let Some(cmd) = caps.name("cmd") {
+        if let Some(cmd) = caps.get(1) {
             let line = offset_to_line(content, cmd.start());
-            let generic = caps
-                .name("generic")
-                .map(|g| g.as_str().trim().to_string())
-                .filter(|s| !s.is_empty());
-            add_call(cmd.as_str(), line, generic);
+            command_calls.push(CommandRef {
+                name: cmd.as_str().to_string(),
+                exposed_name: None,
+                line,
+            });
         }
     }
     for caps in regex_invoke_snake().captures_iter(content) {
-        if let Some(cmd) = caps.name("cmd") {
+        if let Some(cmd) = caps.get(1) {
             let line = offset_to_line(content, cmd.start());
-            let generic = caps
-                .name("generic")
-                .map(|g| g.as_str().trim().to_string())
-                .filter(|s| !s.is_empty());
-            add_call(cmd.as_str(), line, generic);
+            command_calls.push(CommandRef {
+                name: cmd.as_str().to_string(),
+                exposed_name: None,
+                line,
+            });
         }
     }
 
     for caps in regex_reexport_star().captures_iter(content) {
         let source = caps.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
-        let resolved = resolve_reexport_target(path, root, &source, extensions)
-            .or_else(|| ts_resolver.and_then(|r| r.resolve(&source, extensions)));
+        let resolved = resolve_reexport_target(path, root, &source, extensions);
         analysis.reexports.push(ReexportEntry {
             source,
             kind: ReexportKind::Star,
@@ -172,8 +164,7 @@ pub(crate) fn analyze_js_file(
         let raw_names = caps.get(1).map(|m| m.as_str()).unwrap_or("");
         let source = caps.get(2).map(|m| m.as_str()).unwrap_or("").to_string();
         let names = brace_list_to_names(raw_names);
-        let resolved = resolve_reexport_target(path, root, &source, extensions)
-            .or_else(|| ts_resolver.and_then(|r| r.resolve(&source, extensions)));
+        let resolved = resolve_reexport_target(path, root, &source, extensions);
         analysis.reexports.push(ReexportEntry {
             source,
             kind: ReexportKind::Named(names.clone()),
@@ -260,7 +251,6 @@ invokeAudioCamel<Baz>("cmd_audio_generic");
             Path::new("src/app.tsx"),
             Path::new("src"),
             Some(&HashSet::from(["ts".to_string(), "tsx".to_string()])),
-            None,
             "app.tsx".to_string(),
         );
 
@@ -289,13 +279,6 @@ invokeAudioCamel<Baz>("cmd_audio_generic");
         assert!(commands.contains(&"cmd_generic_snake".to_string()));
         assert!(commands.contains(&"cmd_generic_invoke".to_string()));
         assert!(commands.contains(&"cmd_audio_generic".to_string()));
-
-        let generics: Vec<_> = analysis
-            .command_calls
-            .iter()
-            .filter_map(|c| c.generic_type.clone())
-            .collect();
-        assert!(generics.iter().any(|g| g.contains("Foo.Bar")));
 
         // exports should include defaults and named
         let export_names: Vec<_> = analysis.exports.iter().map(|e| e.name.clone()).collect();
