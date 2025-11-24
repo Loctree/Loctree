@@ -45,6 +45,8 @@ pub fn build_pipeline_summary(
         raw: String,
         path: String,
         line: usize,
+        awaited: bool,
+        payload: Option<String>,
     }
 
     #[derive(Default, Clone)]
@@ -63,31 +65,37 @@ pub fn build_pipeline_summary(
             continue;
         }
         for ev in &analysis.event_emits {
+            let raw_display = ev.raw_name.clone().unwrap_or_else(|| ev.name.clone());
             let norm = normalize_event(&ev.name);
             let site = Site {
                 norm: norm.clone(),
-                raw: ev.name.clone(),
+                raw: raw_display.clone(),
                 path: path.clone(),
                 line: ev.line,
+                awaited: ev.awaited,
+                payload: ev.payload.clone(),
             };
             path_emit_map
                 .entry(path.clone())
                 .or_default()
                 .push(site.clone());
             let rec = events.entry(norm).or_default();
-            rec.raw_names.insert(site.raw.clone());
+            rec.raw_names.insert(raw_display);
             rec.emitters.push(site);
         }
         for ev in &analysis.event_listens {
+            let raw_display = ev.raw_name.clone().unwrap_or_else(|| ev.name.clone());
             let norm = normalize_event(&ev.name);
             let site = Site {
                 norm: norm.clone(),
-                raw: ev.name.clone(),
+                raw: raw_display.clone(),
                 path: path.clone(),
                 line: ev.line,
+                awaited: ev.awaited,
+                payload: ev.payload.clone(),
             };
             let rec = events.entry(norm).or_default();
-            rec.raw_names.insert(site.raw.clone());
+            rec.raw_names.insert(raw_display);
             rec.listeners.push(site);
         }
     }
@@ -129,6 +137,7 @@ pub fn build_pipeline_summary(
                     "path": site.path,
                     "line": site.line,
                     "normalized": norm,
+                    "payload": site.payload,
                 }));
             }
         }
@@ -139,6 +148,7 @@ pub fn build_pipeline_summary(
                     "path": site.path,
                     "line": site.line,
                     "normalized": norm,
+                    "awaited": site.awaited,
                 }));
             }
         }
@@ -151,8 +161,8 @@ pub fn build_pipeline_summary(
             "status": status,
             "emitCount": emitters.len(),
             "listenCount": listeners.len(),
-            "emitters": emitters.iter().map(|s| json!({"path": s.path, "line": s.line, "name": s.raw})).collect::<Vec<_>>(),
-            "listeners": listeners.iter().map(|s| json!({"path": s.path, "line": s.line, "name": s.raw})).collect::<Vec<_>>(),
+            "emitters": emitters.iter().map(|s| json!({"path": s.path, "line": s.line, "name": s.raw, "payload": s.payload})).collect::<Vec<_>>(),
+            "listeners": listeners.iter().map(|s| json!({"path": s.path, "line": s.line, "name": s.raw, "awaited": s.awaited})).collect::<Vec<_>>(),
         }));
     }
 
@@ -199,6 +209,7 @@ pub fn build_pipeline_summary(
     });
 
     // Heuristic race detection: invoke appears before any listener in same file
+    // and listeners that are never awaited.
     for analysis in analyses {
         if !is_in_scope(&analysis.path, focus, exclude) {
             continue;
@@ -206,25 +217,25 @@ pub fn build_pipeline_summary(
         if analysis.command_calls.is_empty() || analysis.event_listens.is_empty() {
             continue;
         }
-        let min_call = analysis
+        let first_call = analysis
             .command_calls
             .iter()
-            .map(|c| c.line)
-            .min()
-            .unwrap_or(usize::MAX);
-        let min_listen = analysis
+            .min_by_key(|c| c.line)
+            .cloned();
+        let first_listen = analysis
             .event_listens
             .iter()
-            .map(|e| e.line)
-            .min()
-            .unwrap_or(usize::MAX);
-        if min_call < min_listen {
-            let first_call = analysis
-                .command_calls
-                .iter()
-                .min_by_key(|c| c.line)
-                .cloned();
-            if let Some(call) = first_call {
+            .min_by_key(|e| e.line)
+            .cloned();
+        let first_awaited = analysis
+            .event_listens
+            .iter()
+            .filter(|e| e.awaited)
+            .min_by_key(|e| e.line)
+            .cloned();
+
+        if let (Some(call), Some(listen)) = (first_call.clone(), first_listen.clone()) {
+            if call.line < listen.line {
                 risks.push(json!({
                     "type": "invoke_before_listen",
                     "path": analysis.path,
@@ -232,6 +243,29 @@ pub fn build_pipeline_summary(
                     "command": call.name,
                     "details": "invoke is called before any listener is registered; event may be missed"
                 }));
+            }
+        }
+
+        if let Some(listen) = first_listen {
+            if !listen.awaited {
+                risks.push(json!({
+                    "type": "listen_not_awaited",
+                    "path": analysis.path,
+                    "line": listen.line,
+                    "details": "listener registration is not awaited; first events may race"
+                }));
+            } else if let Some(call) = first_call {
+                if let Some(aw) = first_awaited {
+                    if call.line < aw.line {
+                        risks.push(json!({
+                            "type": "invoke_before_awaited_listen",
+                            "path": analysis.path,
+                            "line": call.line,
+                            "details": "invoke is issued before awaited listener is registered",
+                            "command": call.name,
+                        }));
+                    }
+                }
             }
         }
     }
@@ -270,6 +304,7 @@ pub fn build_pipeline_summary(
                         "path": path,
                         "line": evt.line,
                         "handler": handler_name,
+                        "payload": evt.payload,
                     }));
                 }
             }

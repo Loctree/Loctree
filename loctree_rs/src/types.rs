@@ -133,13 +133,17 @@ pub struct CommandRef {
     pub exposed_name: Option<String>,
     pub line: usize,
     pub generic_type: Option<String>,
+    pub payload: Option<String>,
 }
 
 #[derive(Clone)]
 pub struct EventRef {
+    pub raw_name: Option<String>,
     pub name: String,
     pub line: usize,
     pub kind: String,
+    pub awaited: bool,
+    pub payload: Option<String>,
 }
 
 #[derive(Clone)]

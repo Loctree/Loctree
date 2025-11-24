@@ -7,10 +7,10 @@ use crate::types::{
 };
 
 use super::regexes::{
-    regex_dynamic_import, regex_event_emit_js, regex_event_listen_js, regex_export_brace,
-    regex_export_default, regex_export_named_decl, regex_import, regex_invoke_audio,
-    regex_invoke_snake, regex_reexport_named, regex_reexport_star, regex_safe_invoke,
-    regex_side_effect_import, regex_tauri_invoke,
+    regex_dynamic_import, regex_event_const_js, regex_event_emit_js, regex_event_listen_js,
+    regex_export_brace, regex_export_default, regex_export_named_decl, regex_import,
+    regex_invoke_audio, regex_invoke_snake, regex_reexport_named, regex_reexport_star,
+    regex_safe_invoke, regex_side_effect_import, regex_tauri_invoke,
 };
 use super::resolvers::{resolve_reexport_target, TsPathResolver};
 use super::{brace_list_to_names, offset_to_line};
@@ -92,6 +92,51 @@ pub(crate) fn analyze_js_file(
     relative: String,
 ) -> FileAnalysis {
     let mut analysis = FileAnalysis::new(relative);
+    let mut event_consts = std::collections::HashMap::new();
+    for caps in regex_event_const_js().captures_iter(content) {
+        if let (Some(name), Some(val)) = (caps.get(1), caps.get(2)) {
+            event_consts.insert(name.as_str().to_string(), val.as_str().to_string());
+        }
+    }
+
+    let resolve_event = |token: &str| -> (String, Option<String>, String) {
+        let trimmed = token.trim();
+        if (trimmed.starts_with('"') && trimmed.ends_with('"'))
+            || (trimmed.starts_with('\'') && trimmed.ends_with('\''))
+        {
+            let name = trimmed
+                .trim_start_matches(['"', '\''])
+                .trim_end_matches(['"', '\''])
+                .to_string();
+            return (name, Some(trimmed.to_string()), "literal".to_string());
+        }
+        if let Some(val) = event_consts.get(trimmed) {
+            return (val.clone(), Some(trimmed.to_string()), "const".to_string());
+        }
+        (
+            trimmed.to_string(),
+            Some(trimmed.to_string()),
+            "ident".to_string(),
+        )
+    };
+
+    let is_awaited = |start: usize| -> bool {
+        let prefix = &content[..start];
+        if let Some(line) = prefix.rsplit('\n').next() {
+            let mut iter = line.chars().rev().skip_while(|c| c.is_whitespace());
+            let mut word = String::new();
+            for ch in iter.by_ref() {
+                if ch.is_alphanumeric() || ch == '_' {
+                    word.push(ch);
+                } else {
+                    break;
+                }
+            }
+            let word: String = word.chars().rev().collect();
+            return word == "await";
+        }
+        false
+    };
     let mut command_calls = Vec::new();
     let mut event_emits = Vec::new();
     let mut event_listens = Vec::new();
@@ -101,6 +146,7 @@ pub(crate) fn analyze_js_file(
             exposed_name: None,
             line,
             generic_type: generic,
+            payload: None,
         });
     };
     for caps in regex_import().captures_iter(content) {
@@ -190,22 +236,35 @@ pub(crate) fn analyze_js_file(
     }
 
     for caps in regex_event_emit_js().captures_iter(content) {
-        if let Some(ev) = caps.get(1) {
-            let line = offset_to_line(content, ev.start());
+        if let Some(target) = caps.name("target") {
+            let (name, raw_name, source_kind) = resolve_event(target.as_str());
+            let payload = caps
+                .name("payload")
+                .map(|p| p.as_str().trim().trim_end_matches(')').trim().to_string())
+                .filter(|s| !s.is_empty());
+            let line = offset_to_line(content, caps.get(0).map(|m| m.start()).unwrap_or(0));
             event_emits.push(EventRef {
-                name: ev.as_str().to_string(),
+                raw_name,
+                name,
                 line,
-                kind: "emit".to_string(),
+                kind: format!("emit_{}", source_kind),
+                awaited: false,
+                payload,
             });
         }
     }
     for caps in regex_event_listen_js().captures_iter(content) {
-        if let Some(ev) = caps.get(1) {
-            let line = offset_to_line(content, ev.start());
+        if let Some(target) = caps.name("target") {
+            let (name, raw_name, source_kind) = resolve_event(target.as_str());
+            let start = caps.get(0).map(|m| m.start()).unwrap_or(0);
+            let line = offset_to_line(content, start);
             event_listens.push(EventRef {
-                name: ev.as_str().to_string(),
+                raw_name,
+                name,
                 line,
-                kind: "listen".to_string(),
+                kind: format!("listen_{}", source_kind),
+                awaited: is_awaited(start),
+                payload: None,
             });
         }
     }

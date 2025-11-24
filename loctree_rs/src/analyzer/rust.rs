@@ -5,8 +5,8 @@ use crate::types::{
 
 use super::offset_to_line;
 use super::regexes::{
-    regex_event_emit_rust, regex_event_listen_rust, regex_rust_pub_use, regex_rust_use,
-    regex_tauri_command_fn, rust_pub_const_regexes, rust_pub_decl_regexes,
+    regex_event_const_rust, regex_event_emit_rust, regex_event_listen_rust, regex_rust_pub_use,
+    regex_rust_use, regex_tauri_command_fn, rust_pub_const_regexes, rust_pub_decl_regexes,
 };
 
 fn split_words_lower(name: &str) -> Vec<String> {
@@ -236,23 +236,62 @@ pub(crate) fn analyze_rust_file(content: &str, relative: String) -> FileAnalysis
         }
     }
 
+    let mut event_consts = std::collections::HashMap::new();
+    for caps in regex_event_const_rust().captures_iter(content) {
+        if let (Some(name), Some(val)) = (caps.get(1), caps.get(2)) {
+            event_consts.insert(name.as_str().to_string(), val.as_str().to_string());
+        }
+    }
+    let resolve_event = |token: &str| -> (String, Option<String>, String) {
+        let trimmed = token.trim();
+        if (trimmed.starts_with('"') && trimmed.ends_with('"'))
+            || (trimmed.starts_with('\'') && trimmed.ends_with('\''))
+        {
+            let name = trimmed
+                .trim_start_matches(['"', '\''])
+                .trim_end_matches(['"', '\''])
+                .to_string();
+            return (name, Some(trimmed.to_string()), "literal".to_string());
+        }
+        if let Some(val) = event_consts.get(trimmed) {
+            return (val.clone(), Some(trimmed.to_string()), "const".to_string());
+        }
+        (
+            trimmed.to_string(),
+            Some(trimmed.to_string()),
+            "ident".to_string(),
+        )
+    };
+
     for caps in regex_event_emit_rust().captures_iter(content) {
-        if let Some(ev) = caps.get(1) {
-            let line = offset_to_line(content, ev.start());
+        if let Some(target) = caps.name("target") {
+            let (name, raw_name, source_kind) = resolve_event(target.as_str());
+            let payload = caps
+                .name("payload")
+                .map(|p| p.as_str().trim().trim_end_matches(')').trim().to_string())
+                .filter(|s| !s.is_empty());
+            let line = offset_to_line(content, caps.get(0).map(|m| m.start()).unwrap_or(0));
             event_emits.push(EventRef {
-                name: ev.as_str().to_string(),
+                raw_name,
+                name,
                 line,
-                kind: "emit".to_string(),
+                kind: format!("emit_{}", source_kind),
+                awaited: false,
+                payload,
             });
         }
     }
     for caps in regex_event_listen_rust().captures_iter(content) {
-        if let Some(ev) = caps.get(1) {
-            let line = offset_to_line(content, ev.start());
+        if let Some(target) = caps.name("target") {
+            let (name, raw_name, source_kind) = resolve_event(target.as_str());
+            let line = offset_to_line(content, caps.get(0).map(|m| m.start()).unwrap_or(0));
             event_listens.push(EventRef {
-                name: ev.as_str().to_string(),
+                raw_name,
+                name,
                 line,
-                kind: "listen".to_string(),
+                kind: format!("listen_{}", source_kind),
+                awaited: false,
+                payload: None,
             });
         }
     }
@@ -271,6 +310,7 @@ pub(crate) fn analyze_rust_file(content: &str, relative: String) -> FileAnalysis
                 exposed_name: Some(exposed_name),
                 line,
                 generic_type: None,
+                payload: None,
             });
         }
     }
