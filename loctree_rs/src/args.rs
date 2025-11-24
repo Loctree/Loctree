@@ -28,14 +28,21 @@ pub struct ParsedArgs {
     pub analyze_limit: usize,
     pub report_path: Option<PathBuf>,
     pub serve: bool,
+    pub serve_once: bool,
+    pub serve_port: Option<u16>,
     pub editor_cmd: Option<String>,
+    pub editor_kind: Option<String>,
     pub max_graph_nodes: Option<usize>,
     pub max_graph_edges: Option<usize>,
     pub verbose: bool,
     pub tauri_preset: bool,
+    pub styles_preset: bool,
     pub fail_on_missing_handlers: bool,
     pub fail_on_ghost_events: bool,
     pub fail_on_races: bool,
+    pub ai_mode: bool,
+    pub top_dead_symbols: usize,
+    pub skip_dead_symbols: bool,
 }
 
 impl Default for ParsedArgs {
@@ -65,14 +72,21 @@ impl Default for ParsedArgs {
             analyze_limit: 8,
             report_path: None,
             serve: false,
+            serve_once: false,
+            serve_port: None,
             editor_cmd: None,
+            editor_kind: None,
             max_graph_nodes: None,
             max_graph_edges: None,
             verbose: false,
             tauri_preset: false,
+            styles_preset: false,
             fail_on_missing_handlers: false,
             fail_on_ghost_events: false,
             fail_on_races: false,
+            ai_mode: false,
+            top_dead_symbols: 20,
+            skip_dead_symbols: false,
         }
     }
 }
@@ -138,6 +152,13 @@ fn parse_positive_usize(raw: &str, flag: &str) -> Result<usize, String> {
     } else {
         Ok(value)
     }
+}
+
+fn parse_port(raw: &str, flag: &str) -> Result<u16, String> {
+    let value = raw
+        .parse::<u16>()
+        .map_err(|_| format!("{flag} requires a port number (0-65535)"))?;
+    Ok(value)
 }
 
 fn validate_globs(patterns: &[String], flag: &str) -> Result<(), String> {
@@ -231,6 +252,17 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
                 parsed.tauri_preset = true;
                 i += 1;
             }
+            "styles" | "--preset-styles" => {
+                parsed.styles_preset = true;
+                parsed.mode = Mode::AnalyzeImports;
+                i += 1;
+            }
+            "--ai" => {
+                parsed.ai_mode = true;
+                parsed.output = OutputMode::Json;
+                parsed.summary = true;
+                i += 1;
+            }
             "--help" | "-h" => {
                 parsed.show_help = true;
                 i += 1;
@@ -317,12 +349,36 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
                 parsed.serve = true;
                 i += 1;
             }
+            "--serve-once" => {
+                parsed.serve = true;
+                parsed.serve_once = true;
+                i += 1;
+            }
+            "--port" | "--serve-port" => {
+                let next = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--port requires a value".to_string())?;
+                parsed.serve_port = Some(parse_port(next, "--port")?);
+                i += 2;
+            }
             "--editor-cmd" => {
                 let next = args
                     .get(i + 1)
                     .ok_or_else(|| "--editor-cmd requires a command template".to_string())?;
                 parsed.editor_cmd = Some(next.clone());
                 i += 2;
+            }
+            "--editor" => {
+                let next = args.get(i + 1).ok_or_else(|| {
+                    "--editor requires a value (code|cursor|windsurf|jetbrains|none)".to_string()
+                })?;
+                parsed.editor_kind = Some(next.clone());
+                i += 2;
+            }
+            _ if arg.starts_with("--editor=") => {
+                let value = arg.trim_start_matches("--editor=");
+                parsed.editor_kind = Some(value.to_string());
+                i += 1;
             }
             "--summary" => {
                 parsed.summary = true;
@@ -354,6 +410,17 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
                     .ok_or_else(|| "--limit requires a positive integer".to_string())?;
                 parsed.analyze_limit = parse_positive_usize(next, "--limit")?;
                 i += 2;
+            }
+            "--top-dead-symbols" => {
+                let next = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--top-dead-symbols requires a positive integer".to_string())?;
+                parsed.top_dead_symbols = parse_positive_usize(next, "--top-dead-symbols")?;
+                i += 2;
+            }
+            "--skip-dead-symbols" => {
+                parsed.skip_dead_symbols = true;
+                i += 1;
             }
             "--analyze-imports" | "-A" => {
                 parsed.mode = Mode::AnalyzeImports;

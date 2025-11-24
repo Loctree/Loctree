@@ -8,6 +8,43 @@ use std::thread;
 
 static OPEN_SERVER_BASE: OnceLock<String> = OnceLock::new();
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EditorKind {
+    Code,
+    Cursor,
+    Windsurf,
+    Jetbrains,
+    None,
+    Auto,
+}
+
+#[derive(Clone, Debug)]
+pub struct EditorConfig {
+    pub kind: EditorKind,
+    pub command_template: Option<String>,
+}
+
+impl EditorConfig {
+    pub fn from_args(kind: Option<String>, cmd_tpl: Option<String>) -> Self {
+        let parsed_kind = kind
+            .as_deref()
+            .map(|v| match v.to_lowercase().as_str() {
+                "code" | "vscode" | "vs" => EditorKind::Code,
+                "cursor" => EditorKind::Cursor,
+                "windsurf" => EditorKind::Windsurf,
+                "jetbrains" | "jb" => EditorKind::Jetbrains,
+                "none" => EditorKind::None,
+                _ => EditorKind::Auto,
+            })
+            .unwrap_or(EditorKind::Auto);
+
+        Self {
+            kind: parsed_kind,
+            command_template: cmd_tpl,
+        }
+    }
+}
+
 pub(crate) fn url_encode_component(input: &str) -> String {
     input
         .bytes()
@@ -85,10 +122,15 @@ pub(crate) fn open_in_browser(path: &Path) {
 
 pub(crate) fn start_open_server(
     roots: Vec<PathBuf>,
-    editor_cmd: Option<String>,
+    editor_cfg: EditorConfig,
     report_path: Option<PathBuf>,
+    port_hint: Option<u16>,
 ) -> Option<(String, thread::JoinHandle<()>)> {
-    let listener = TcpListener::bind("127.0.0.1:0").ok()?;
+    let bind_addr = match port_hint {
+        Some(p) => format!("127.0.0.1:{p}"),
+        None => "127.0.0.1:0".to_string(),
+    };
+    let listener = TcpListener::bind(&bind_addr).ok()?;
     let port = listener.local_addr().ok()?.port();
     let base = format!("http://127.0.0.1:{port}");
     let _ = OPEN_SERVER_BASE.set(base.clone());
@@ -101,7 +143,7 @@ pub(crate) fn start_open_server(
                 handle_request(
                     &mut stream,
                     &roots,
-                    editor_cmd.as_ref(),
+                    &editor_cfg,
                     report_path.as_ref(),
                     buf.trim(),
                 );
@@ -115,30 +157,98 @@ pub(crate) fn current_open_base() -> Option<String> {
     OPEN_SERVER_BASE.get().cloned()
 }
 
-fn open_file_in_editor(
-    full_path: &Path,
-    line: usize,
-    editor_cmd: Option<&String>,
-) -> io::Result<()> {
-    if let Some(tpl) = editor_cmd {
+fn open_file_in_editor(full_path: &Path, line: usize, cfg: &EditorConfig) -> io::Result<()> {
+    if cfg.kind == EditorKind::None {
+        return Err(io::Error::other("editor disabled (--editor none)"));
+    }
+
+    let template_result = if let Some(tpl) = &cfg.command_template {
         let replaced = tpl
             .replace("{file}", full_path.to_string_lossy().as_ref())
             .replace("{line}", &line.to_string());
         let parts: Vec<String> = replaced.split_whitespace().map(|s| s.to_string()).collect();
-        if let Some((prog, args)) = parts.split_first() {
-            let status = Command::new(prog).args(args).status()?;
-            if status.success() {
+        parts
+            .split_first()
+            .map(|(prog, args)| (prog.clone(), args.to_vec()))
+    } else {
+        None
+    };
+
+    let try_commands = |program: &str, args: &[String]| -> io::Result<bool> {
+        let status = Command::new(program).args(args).status()?;
+        Ok(status.success())
+    };
+
+    if let Some((prog, args)) = template_result {
+        if try_commands(&prog, &args)? {
+            return Ok(());
+        }
+    }
+
+    let location_arg = format!("{}:{}", full_path.to_string_lossy(), line.max(1));
+    let mut tried = false;
+
+    let mut attempt_editor = |binary: &str| -> io::Result<bool> {
+        tried = true;
+        try_commands(binary, &[String::from("-g"), location_arg.clone()])
+    };
+
+    match cfg.kind {
+        EditorKind::Code => {
+            if attempt_editor("code")? {
                 return Ok(());
             }
         }
-    } else if Command::new("code")
-        .arg("-g")
-        .arg(format!("{}:{}", full_path.to_string_lossy(), line.max(1)))
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-    {
-        return Ok(());
+        EditorKind::Cursor => {
+            if attempt_editor("cursor")? {
+                return Ok(());
+            }
+        }
+        EditorKind::Windsurf => {
+            if attempt_editor("windsurf")? {
+                return Ok(());
+            }
+        }
+        EditorKind::Jetbrains => {
+            let url = format!(
+                "jetbrains://idea/navigate/reference?path={}&line={}&column=1",
+                url_encode_component(full_path.to_string_lossy().as_ref()),
+                line.max(1)
+            );
+            let launcher = if cfg!(target_os = "macos") {
+                "open"
+            } else {
+                "xdg-open"
+            };
+            if try_commands(launcher, &[url])? {
+                return Ok(());
+            }
+            tried = true;
+        }
+        EditorKind::Auto | EditorKind::None => {}
+    }
+
+    if cfg.kind == EditorKind::Auto {
+        // Try common binaries in order.
+        for bin in ["code", "cursor", "windsurf"] {
+            if try_commands(bin, &[String::from("-g"), location_arg.clone()])? {
+                return Ok(());
+            }
+        }
+        // JetBrains URI
+        let url = format!(
+            "jetbrains://idea/navigate/reference?path={}&line={}&column=1",
+            url_encode_component(full_path.to_string_lossy().as_ref()),
+            line.max(1)
+        );
+        let launcher = if cfg!(target_os = "macos") {
+            "open"
+        } else {
+            "xdg-open"
+        };
+        if try_commands(launcher, &[url])? {
+            return Ok(());
+        }
     }
 
     #[cfg(target_os = "macos")]
@@ -163,7 +273,13 @@ fn open_file_in_editor(
     if fallback {
         Ok(())
     } else {
-        Err(io::Error::other("could not open file via editor"))
+        if tried {
+            Err(io::Error::other("could not open file via editor"))
+        } else {
+            Err(io::Error::other(
+                "no editor command succeeded (try --editor-cmd)",
+            ))
+        }
     }
 }
 
@@ -187,7 +303,7 @@ fn write_response(
 fn handle_open_request(
     stream: &mut TcpStream,
     roots: &[PathBuf],
-    editor_cmd: Option<&String>,
+    editor_cfg: &EditorConfig,
     target: &str,
     head_only: bool,
 ) -> bool {
@@ -251,7 +367,7 @@ fn handle_open_request(
         return true;
     };
 
-    let status = open_file_in_editor(&full, line, editor_cmd);
+    let status = open_file_in_editor(&full, line, editor_cfg);
     let (status_line, body) = if status.is_ok() {
         ("HTTP/1.1 200 OK", b"opened".as_slice())
     } else {
@@ -322,7 +438,7 @@ fn serve_report(
 fn handle_request(
     stream: &mut TcpStream,
     roots: &[PathBuf],
-    editor_cmd: Option<&String>,
+    editor_cfg: &EditorConfig,
     report_path: Option<&PathBuf>,
     request_line: &str,
 ) {
@@ -342,7 +458,7 @@ fn handle_request(
         return;
     }
 
-    if handle_open_request(stream, roots, editor_cmd, target, is_head) {
+    if handle_open_request(stream, roots, editor_cfg, target, is_head) {
         return;
     }
 

@@ -136,6 +136,8 @@ CLI flags (all runtimes):
 - `--summary[=N]`        Totals + top-N large files (default 5).
 - `-A, --analyze-imports` Import/export analyzer mode (duplicate exports, re-export cascades, dynamic imports).
 - `--limit <N>`          Analyzer: cap top lists for duplicates/dynamic imports (default 8).
+- `--ai`                 Analyzer: emit a compact AI-friendly JSON (top issues only, no per-file payloads).
+- `--top-dead-symbols <N>` Limit dead-symbol list (default 20); `--skip-dead-symbols` omits it entirely.
 - `--fail-on-duplicates <N>` Analyzer: exit 2 if duplicate-export groups exceed N (for CI).
 - `--fail-on-dynamic <N>`   Analyzer: exit 2 if files with dynamic imports exceed N (for CI).
 - `--json-out <file>`    Analyzer: write JSON to a file (creates parent dirs; warns on overwrite; rejects directory paths).

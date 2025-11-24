@@ -24,6 +24,8 @@ loctree --version   # oczekiwane: 0.3.8
 ### Analyzer (-A)
 - `--ext <list>` – rozszerzenia (domyślnie: ts,tsx,js,jsx,mjs,cjs,rs,css,py).
 - `--limit <N>` – top-N (duplikaty, dynamiczne importy), domyślnie 8.
+- `--ai` – kompaktowy JSON dla agentów (top issues, bez sekcji per-file; dobre do krótkich kontekstów).
+- `--top-dead-symbols <N>` / `--skip-dead-symbols` – kontrola listy dead symbols (domyślnie 20 lub całkowicie pomiń).
 - `--ignore-symbols <list>` / `--ignore-symbols-preset common|tauri` – filtr szumu (np. main/run/setup/__all__/test_*).
 - `--focus <glob>` / `--exclude-report <glob>` – filtrowanie widoku duplikatów (analiza pełna).
 - `--py-root <path>` – dodatkowe rooty Pythona (powtarzalne); pyproject jest nadal wykrywany.
