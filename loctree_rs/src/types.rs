@@ -81,6 +81,8 @@ pub struct ImportEntry {
     pub resolved_path: Option<String>,
     pub is_bare: bool,
     pub symbols: Vec<ImportSymbol>,
+    pub resolution: ImportResolutionKind,
+    pub is_type_checking: bool,
 }
 
 #[derive(Clone)]
@@ -89,20 +91,29 @@ pub enum ImportKind {
     SideEffect,
 }
 
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ImportResolutionKind {
+    Local,
+    Stdlib,
+    Dynamic,
+    Unknown,
+}
+
 #[derive(Clone)]
 pub struct ImportSymbol {
     pub name: String,
     pub alias: Option<String>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ReexportEntry {
     pub source: String,
     pub kind: ReexportKind,
     pub resolved: Option<String>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum ReexportKind {
     Star,
     Named(Vec<String>),
@@ -150,6 +161,8 @@ impl ImportEntry {
             resolved_path: None,
             is_bare,
             symbols: Vec::new(),
+            resolution: ImportResolutionKind::Unknown,
+            is_type_checking: false,
         }
     }
 }

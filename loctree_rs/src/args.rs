@@ -21,6 +21,7 @@ pub struct ParsedArgs {
     pub show_help: bool,
     pub show_version: bool,
     pub root_list: Vec<PathBuf>,
+    pub py_roots: Vec<PathBuf>,
     pub show_hidden: bool,
     pub loc_threshold: usize,
     pub mode: Mode,
@@ -54,6 +55,7 @@ impl Default for ParsedArgs {
             show_help: false,
             show_version: false,
             root_list: Vec::new(),
+            py_roots: Vec::new(),
             show_hidden: false,
             loc_threshold: DEFAULT_LOC_THRESHOLD,
             mode: Mode::Tree,
@@ -187,6 +189,17 @@ pub fn preset_ignore_symbols(name: &str) -> Option<HashSet<String>> {
                 .iter()
                 .map(|s| s.to_string())
                 .collect(),
+        ),
+        "tauri" => Some(
+            [
+                // language-level boilerplate often duplicated across crates/configs
+                "default", "new", "from", "try_from", "from_str", "into", "build", "init", "config",
+                "main", "run", "setup", // python/ts interop noise
+                "__all__", "__init__", "test_*", "tests_*",
+            ]
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
         ),
         _ => None,
     }
@@ -421,6 +434,18 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
                 parsed.max_graph_edges = Some(parse_positive_usize(next, "--max-edges")?);
                 i += 2;
             }
+            "--py-root" => {
+                let next = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--py-root requires a path".to_string())?;
+                parsed.py_roots.push(PathBuf::from(next));
+                i += 2;
+            }
+            _ if arg.starts_with("--py-root=") => {
+                let value = arg.trim_start_matches("--py-root=");
+                parsed.py_roots.push(PathBuf::from(value));
+                i += 1;
+            }
             _ if arg.starts_with('-') => {
                 eprintln!("Ignoring unknown flag {}", arg);
                 i += 1;
@@ -450,6 +475,9 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
         parsed.mode = Mode::AnalyzeImports;
         parsed.graph = true;
         parsed.use_gitignore = true;
+        if parsed.ignore_symbols.is_none() && parsed.ignore_symbols_preset.is_none() {
+            parsed.ignore_symbols_preset = Some("tauri".to_string());
+        }
     }
 
     if roots.is_empty() {
@@ -477,6 +505,21 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
 
     if parsed.serve && parsed.report_path.is_none() {
         return Err("--serve requires --html-report to be set".to_string());
+    }
+
+    for extra in &parsed.py_roots {
+        if !extra.exists() {
+            return Err(format!(
+                "--py-root '{}' does not exist. Provide a valid directory.",
+                extra.display()
+            ));
+        }
+        if !extra.is_dir() {
+            return Err(format!(
+                "--py-root '{}' is not a directory.",
+                extra.display()
+            ));
+        }
     }
 
     Ok(parsed)
