@@ -1,59 +1,81 @@
-# loctree – fast reference for agents (CLI & outputs)
+# loctree – szybki przewodnik dla agentów (v0.3.8)
 
-This is a concise, up-to-date guide for how to drive loctree as of 0.3.6, focused on analyzer mode and machine-readable outputs.
+Najważniejsze: `loctree --help` jest teraz podzielone na sekcje (Tree / Analyzer / Common), a raport HTML ma zakładki + dolny drawer z grafem.
 
-## Modes
-- **Tree/LOC (default)**: `loctree <roots> [options]` – prints an ASCII tree with LOC highlights.
-- **Import/Export analyzer**: add `-A` – detects imports, exports, re-exports, duplicate exports, dynamic imports, Tauri command calls/handlers, and can emit HTML/JSON/JSONL.
+## Instalacja / update (globalnie)
+```bash
+cargo install --force --path loctree_rs
+# weryfikacja:
+loctree --version   # oczekiwane: 0.3.8
+```
 
-## Inputs & filters (analyzer)
-- `--ext <list>`: restrict files by extension. Default analyzer set: `ts,tsx,js,jsx,mjs,cjs,rs,css,py`.
-- `-g, --gitignore`: honor .gitignore.
-- `-I, --ignore <path>`: repeatable ignore paths.
-- `--ignore-symbols <list>` / `--ignore-symbols-preset <name>`: drop noisy symbols (preset `common` → `main,run,setup,test_*`).
-- `--focus <glob[,..]>`: show duplicate groups only if any file matches.
-- `--exclude-report <glob[,..]>`: hide duplicate groups whose files match globs (analysis still runs).
-- `--limit <N>`: cap top lists (dups, dynamic imports); default 8.
+## Tryby
+- **Tree (domyślnie)** – drzewo plików z LOC highlight.
+- **Analyzer (`-A`)** – importy/eksporty, duplikaty, re-eksporty, dynamiczne importy, pokrycie komend Tauri, graf.
+- **Preset Tauri** – `--preset-tauri` ustawia rozszerzenia + preset ignore-symbols dla Tauri.
 
-## Outputs
-- `--json` prints JSON to stdout; `--json-out <file>` writes JSON (parents auto-created; warns on overwrite). `--jsonl` (analyzer) emits one JSON object per root per line.
-- `--html-report <file>` writes HTML (parents auto-created). `--graph` embeds an interactive Cytoscape graph (self-hosted asset). `--serve` requires `--html-report` and starts a tiny local server so links can open in editor/OS; `--editor-cmd` customizes the opener.
-- `--verbose`: extra debug logs (paths of written reports, graph warnings).
+## Kluczowe flagi
+### Tree
+- `--summary[=N]` – podsumowanie + top duże pliki (domyślnie 5).
+- `--loc <n>` – próg LOC dla highlight (domyślnie 1000).
+- `-L, --max-depth <n>` – limit głębokości (0 = tylko dzieci).
+- `-H, --show-hidden` – pokaż pliki ukryte.
 
-Graph safety: defaults `MAX_GRAPH_NODES=8000`, `MAX_GRAPH_EDGES=12000`; overridable via `--max-nodes/--max-edges`. When limits hit, graph is skipped and a warning is logged (visible with `--verbose` in CLI; also shown in HTML if present).
+### Analyzer (-A)
+- `--ext <list>` – rozszerzenia (domyślnie: ts,tsx,js,jsx,mjs,cjs,rs,css,py).
+- `--limit <N>` – top-N (duplikaty, dynamiczne importy), domyślnie 8.
+- `--ignore-symbols <list>` / `--ignore-symbols-preset common|tauri` – filtr szumu (np. main/run/setup/__all__/test_*).
+- `--focus <glob>` / `--exclude-report <glob>` – filtrowanie widoku duplikatów (analiza pełna).
+- `--py-root <path>` – dodatkowe rooty Pythona (powtarzalne); pyproject jest nadal wykrywany.
+- `--html-report <file>` – zapis HTML; `--graph` dokłada interaktywny graf (Cytoscape lokalnie).
+- `--serve` – wymaga `--html-report`; uruchamia lokalny serwer do otwierania plików w edytorze/OS (`--editor-cmd` do szablonu, default: VS Code -> open/xdg-open).
+- `--max-graph-nodes/--max-graph-edges` – limity bezpieczeństwa (gdy przekroczone, graf jest pomijany z ostrzeżeniem).
 
-Python notes (0.3.6):
-- `--py-root <path>` (repeatable) lets you add extra Python package roots for resolution.
-- Imports now carry `resolutionKind` (local|stdlib|dynamic|unknown) and `isTypeChecking` in JSON; `__all__` is expanded for star imports when available; dynamic imports (`importlib.import_module`, `__import__`) are tagged.
+### Wspólne
+- `-I, --ignore <path>` – ignoruj ścieżkę (powtarzalne).
+- `-g, --gitignore` – respektuj .gitignore.
+- `--color[=auto|always|never]` – kolory (domyślnie auto).
+- `--json` – JSON na stdout (tree/analyzer); `--jsonl` (analyzer) – jeden JSON na linię per root.
 
-## JSON shape (analyzer)
-Schema is declared in the report:
-- Top-level: `schema`, `schemaVersion` (currently `1.2.0`), `generatedAt` (UTC RFC3339), `rootDir`, `root`, `languages`, `filesAnalyzed`, `duplicateExports*`, `reexportCascades`, `dynamicImports`, `commands`, `commands2`, `symbols`, `clusters`, `aiViews`, `files`.
-- Files: stable `id`, `path` (relative to root), `loc`, `language`, `kind` (`code|test|story|config|generated`), `isTest`, `isGenerated`, imports (`sourceRaw`, `resolvedPath`, `isBareModule`, `resolutionKind`, `isTypeChecking`, symbols with `name/alias`, kind), exports (`name`, `kind`, `exportType`, `line`), reexports (`star/named` + resolved), command calls/handlers with lines.
-- Derived sections:
-  - `commands2`: canonical handler per command + call sites + status (`ok|missing_handler|unused_handler`).
-  - `symbols`/`clusters`: occurrences with canonical pick, severity, duplicateScore, reasons (+`publicSurface` hint for barrels/index/mod.rs).
-  - `aiViews`: default export chains, suspicious barrels, dead symbols, coverage summary (FE↔BE gaps + generic call sites + renamed handlers), `tsconfig` summary (baseUrl/aliases/include|exclude drift), `ciSummary` (duplicate cluster counts, top clusters).
-Legacy sections (`commands`, `duplicateExports*`, etc.) remain for compatibility.
+## Raport HTML (zakładki + drawer)
+- Sekcje: Overview (AI Insights), Duplicates, Dynamic imports, Tauri coverage, Graph (kotwica).
+- Graf i kontrolki są w dolnym drawerze (toggle). Toolbar: filtr tekstowy, min-degree, labels on/off, fit/reset/fullscreen/dark, PNG/JSON, panel komponentów (wyspy) z highlight/dim/copy/export.
+- Tooltipy są przypięte do kursora; filtrowanie po ścieżkach i rozmiarze komponentów.
 
-## Graph drawer (HTML)
-- Graph and controls live in a bottom drawer with a toggle. Toolbar includes text filter, min-degree, labels on/off, fit/reset/fullscreen/dark mode, PNG/JSON export. Component panel lists disconnected components (id, size, sample, isolates, edges, LOC) with highlight/dim/copy/export controls.
+## JSON (schema 1.2.0)
+- `files[*].imports` mają `resolutionKind` (local|stdlib|dynamic|unknown) oraz `isTypeChecking`.
+- `aiViews.commands2` – FE↔BE komendy (status: ok/missing_handler/unused_handler + alias impl).
+- `symbols/clusters` – grupy duplikatów z canonical, score, reasons.
+- `dynamicImports` – statyczne + dynamiczne (importlib/__import__/f-strings).
+- `graphs` – osobno, gdy `--graph` i limity pozwalają.
 
-## Typical commands
-- FE/BE combined (with graph + HTML + JSON):
-  ```bash
-  mkdir -p logs/loctree/reports
-  loctree -A src src-tauri/src --ext ts,tsx,rs,css --gitignore --graph \
-    --exclude-report "**/__tests__/**" \
-    --json-out logs/loctree/reports/report.json \
-    --html-report logs/loctree/reports/report.html \
-    --verbose
-  ```
-- Quick JSON only:
-  ```bash
-  loctree -A src --ext ts,tsx --gitignore --json > /tmp/loctree.json
-  ```
+## Przykłady (Monika/agent)
+- Pełny scan FE+BE z raportem:
+```bash
+cd /Users/monika/hosted/Vistas/vista-develop
+loctree -A src src-tauri/src --ext ts,tsx,rs,css --gitignore --graph \
+  --exclude-report "**/__tests__/**" \
+  --json-out .ai-agents/loctree/reports/loctree.json \
+  --html-report .ai-agents/loctree/reports/loctree.html \
+  --serve --verbose
+```
+- Szybki JSON tylko dla FE:
+```bash
+loctree -A src --ext ts,tsx --gitignore --limit 5 --json > /tmp/loctree.json
+```
+- Python-only z dodatkowymi rootami:
+```bash
+loctree -A backend --ext py --py-root backend/src --gitignore --graph \
+  --html-report /tmp/loctree-py.html
+```
 
-## Notes / gaps
-- No `--fail-on-*` guards yet; CI gating must be scripted externally.
-- `--serve` requires `--html-report`; graph still respects size limits—use `--max-nodes/--max-edges` if needed.
+## Notatki operacyjne
+- Graph może być pominięty przy dużych kodach – sprawdź ostrzeżenie w HTML/CLI i ewentualnie podbij limity.
+- `--serve` wymaga, by proces loctree pozostał uruchomiony (nie zabijaj sesji).
+- W ciemnym motywie raportu graf dostosowuje kolory (tryb dark w toolbarze draweru).
+- Pomoc “per-mode” dostępna przez `loctree --help` (podział na Tree/Analyzer/Common).
+
+## Troubleshooting
+- “Root ... is not a directory” – podaj ścieżki względem bieżącego cwd lub użyj bezwzględnych.
+- Brak grafu – sprawdź limity (`--max-graph-nodes/edges`), ewentualnie uruchom z mniejszym zakresem (`--focus` lub węższe rooty).
+- Tauri pokrycie wygląda na szum – w Viście część komend idzie przez wraper safeInvoke; patrz `commands2` w JSON, aliasy impl są raportowane. 
