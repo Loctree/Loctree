@@ -559,7 +559,13 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
 
         let (missing_handlers, unused_handlers) =
             compute_command_gaps(&fe_commands, &be_commands, &focus_set, &exclude_set);
-        let pipeline_summary = build_pipeline_summary(&analyses, &focus_set, &exclude_set);
+        let pipeline_summary = build_pipeline_summary(
+            &analyses,
+            &focus_set,
+            &exclude_set,
+            &fe_commands,
+            &be_commands,
+        );
 
         let mut section_open = None;
         if options.report_path.is_some() && options.serve {
