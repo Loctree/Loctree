@@ -227,6 +227,15 @@ pub fn default_analyzer_exts() -> HashSet<String> {
         .collect()
 }
 
+pub fn styles_preset_exts() -> HashSet<String> {
+    [
+        "css", "scss", "sass", "less", "ts", "tsx", "js", "jsx", "mjs", "cjs",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
+}
+
 pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
     let mut json_results = Vec::new();
     let mut report_sections: Vec<ReportSection> = Vec::new();
@@ -273,11 +282,17 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
     );
     let exclude_set = opt_globset(&exclude_patterns);
 
+    let editor_cfg = super::open_server::EditorConfig::from_args(
+        parsed.editor_kind.clone(),
+        parsed.editor_cmd.clone(),
+    );
+
     if parsed.serve {
         if let Some((base, handle)) = start_open_server(
             root_list.to_vec(),
-            parsed.editor_cmd.clone(),
+            editor_cfg.clone(),
             parsed.report_path.clone(),
+            parsed.serve_port,
         ) {
             server_handle = Some(handle);
             eprintln!("[loctree] local open server at {}", base);
@@ -295,7 +310,11 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             .unwrap_or_else(|_| root_path.clone());
         let mut extensions = parsed.extensions.clone();
         if extensions.is_none() {
-            extensions = Some(default_analyzer_exts());
+            if parsed.styles_preset {
+                extensions = Some(styles_preset_exts());
+            } else {
+                extensions = Some(default_analyzer_exts());
+            }
         }
 
         let ts_resolver = TsPathResolver::from_tsconfig(&root_canon);
@@ -1131,31 +1150,33 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             });
 
             let mut dead_symbols = Vec::new();
-            for (name, occs) in &symbol_occurrences {
-                if occs
-                    .iter()
-                    .all(|(path, _, _, _)| !imports_targeted.contains(path))
-                {
-                    let mut paths: Vec<_> = occs.iter().map(|(p, _, _, _)| p.clone()).collect();
-                    paths.sort();
-                    paths.dedup();
-                    let public_surface = paths.iter().any(|p| {
-                        p.ends_with("index.ts")
-                            || p.ends_with("index.tsx")
-                            || p.ends_with("mod.rs")
-                            || p.ends_with("lib.rs")
-                    });
-                    dead_symbols.push(
-                        json!({"name": name, "paths": paths, "publicSurface": public_surface}),
-                    );
+            if !parsed.skip_dead_symbols {
+                for (name, occs) in &symbol_occurrences {
+                    if occs
+                        .iter()
+                        .all(|(path, _, _, _)| !imports_targeted.contains(path))
+                    {
+                        let mut paths: Vec<_> = occs.iter().map(|(p, _, _, _)| p.clone()).collect();
+                        paths.sort();
+                        paths.dedup();
+                        let public_surface = paths.iter().any(|p| {
+                            p.ends_with("index.ts")
+                                || p.ends_with("index.tsx")
+                                || p.ends_with("mod.rs")
+                                || p.ends_with("lib.rs")
+                        });
+                        dead_symbols.push(
+                            json!({"name": name, "paths": paths, "publicSurface": public_surface}),
+                        );
+                    }
                 }
+                dead_symbols.sort_by(|a, b| {
+                    let a_name = a["name"].as_str().unwrap_or("");
+                    let b_name = b["name"].as_str().unwrap_or("");
+                    a_name.cmp(b_name)
+                });
+                dead_symbols.truncate(parsed.top_dead_symbols);
             }
-            dead_symbols.sort_by(|a, b| {
-                let a_name = a["name"].as_str().unwrap_or("");
-                let b_name = b["name"].as_str().unwrap_or("");
-                a_name.cmp(b_name)
-            });
-            dead_symbols.truncate(50);
 
             let duplicate_clusters_count = clusters_json.len();
             let max_cluster_size = symbol_occurrences
@@ -1198,6 +1219,106 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             let generated_at = OffsetDateTime::now_utc()
                 .format(&Rfc3339)
                 .unwrap_or_else(|_| String::new());
+
+            let ghost_events: Vec<_> = pipeline_summary["events"]["ghostEmits"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            let orphan_listeners: Vec<_> = pipeline_summary["events"]["orphanListeners"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            let pipeline_risks: Vec<_> = pipeline_summary["risks"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+
+            if parsed.ai_mode {
+                let top_limit = parsed.summary_limit;
+                let mut event_alerts = Vec::new();
+                for item in ghost_events.iter().take(top_limit) {
+                    event_alerts.push(json!({
+                        "type": "ghost_event",
+                        "name": item.get("name"),
+                        "path": item.get("path"),
+                        "line": item.get("line"),
+                    }));
+                }
+                for item in orphan_listeners.iter().take(top_limit) {
+                    event_alerts.push(json!({
+                        "type": "orphan_listener",
+                        "name": item.get("name"),
+                        "path": item.get("path"),
+                        "line": item.get("line"),
+                        "awaited": item.get("awaited"),
+                    }));
+                }
+
+                let ai_payload = json!({
+                    "schema": SCHEMA_NAME,
+                    "schemaVersion": SCHEMA_VERSION,
+                    "generatedAt": generated_at,
+                    "rootDir": root_path,
+                    "languages": languages_vec,
+                    "filesAnalyzed": analyses.len(),
+                    "summary": {
+                        "duplicateExports": filtered_ranked.len(),
+                        "reexportFiles": reexport_files.len(),
+                        "dynamicImports": dynamic_summary.len(),
+                        "commands": {
+                            "frontendCalls": fe_commands.len(),
+                            "backendHandlers": be_commands.len(),
+                            "missingHandlers": missing_handlers.len(),
+                            "unusedHandlers": unused_handlers.len(),
+                        },
+                        "events": {
+                            "ghost": ghost_events.len(),
+                            "orphan": orphan_listeners.len(),
+                            "risks": pipeline_risks.len(),
+                        },
+                        "clusters": {
+                            "duplicateCount": duplicate_clusters_count,
+                            "maxClusterSize": max_cluster_size,
+                        },
+                    },
+                    "topIssues": {
+                        "duplicateExports": filtered_ranked.iter().take(top_limit).map(|dup| json!({
+                            "name": dup.name,
+                            "canonical": dup.canonical,
+                            "refactorTargets": dup.refactors,
+                            "score": dup.score,
+                        })).collect::<Vec<_>>(),
+                        "missingHandlers": missing_handlers.iter().take(top_limit).map(|g| json!({
+                            "name": g.name,
+                            "locations": g.locations,
+                        })).collect::<Vec<_>>(),
+                        "unusedHandlers": unused_handlers.iter().take(top_limit).map(|g| json!({
+                            "name": g.name,
+                            "locations": g.locations,
+                        })).collect::<Vec<_>>(),
+                        "events": event_alerts,
+                        "pipelineRisks": pipeline_risks.iter().take(top_limit).cloned().collect::<Vec<_>>(),
+                        "deadSymbols": dead_symbols.iter().take(parsed.top_dead_symbols).cloned().collect::<Vec<_>>(),
+                        "duplicateClusters": top_clusters,
+                    },
+                    "limits": {
+                        "topItems": top_limit,
+                        "topDeadSymbols": parsed.top_dead_symbols,
+                    }
+                });
+
+                if matches!(options.output, OutputMode::Jsonl) {
+                    match serde_json::to_string(&ai_payload) {
+                        Ok(line) => println!("{}", line),
+                        Err(err) => {
+                            eprintln!("[loctree][warn] failed to serialize JSONL line: {}", err)
+                        }
+                    }
+                } else {
+                    json_results.push(ai_payload);
+                }
+                continue;
+            }
 
             let payload = json!({
                 "schema": SCHEMA_NAME,
@@ -1249,8 +1370,8 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                         "unusedCount": unused_handlers.len(),
                         "renamedHandlers": renamed_handlers,
                         "callsWithGenerics": calls_with_generics,
-                        "ghostEventCount": pipeline_summary["events"]["ghostEmits"].as_array().map(|a| a.len()).unwrap_or(0),
-                        "orphanListenerCount": pipeline_summary["events"]["orphanListeners"].as_array().map(|a| a.len()).unwrap_or(0),
+                        "ghostEventCount": ghost_events.len(),
+                        "orphanListenerCount": orphan_listeners.len(),
                     },
                     "tsconfig": tsconfig_summary,
                     "ciSummary": {
@@ -1412,17 +1533,16 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         open_in_browser(report_path);
     }
 
-    drop(server_handle);
-
     if !fail_reasons.is_empty() {
         eprintln!("[loctree][fail] {}", fail_reasons.join("; "));
         std::process::exit(1);
     }
 
-    if parsed.serve {
+    if parsed.serve && !parsed.serve_once {
         use std::io::Read;
         eprintln!("[loctree] --serve: Press Enter (Ctrl+C to interrupt) to stop the server");
         let _ = std::io::stdin().read(&mut [0u8]).ok();
     }
+    drop(server_handle);
     Ok(())
 }

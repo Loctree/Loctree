@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
+## [0.3.9] - 2025-11-24
+
+### Added
+- `--ai` concise output mode that emits a compact JSON summary with top issues instead of full per-file payloads.
+- Dead-symbol controls: `--top-dead-symbols` (default 20) to cap lists and `--skip-dead-symbols` to omit them entirely.
+
+### Changed
+- AI/summary views respect the new limits to reduce noisy output; help/README refreshed to mention the AI flags and limits.
+
+### Fixed
+- Resolved clippy warning in the open-server editor launcher (mutable closure), no functional change.
+
 ## [0.3.8] - 2025-11-22
 
 ### Added
