@@ -4,55 +4,120 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
+## [0.3.3] - 2025-11-24
+
+### Added
+- JSON schema metadata (`schema`, `schemaVersion`, `generatedAt`, `rootDir`, `languages`) plus deterministic ordering for easier machine use.
+- Richer per-file records: stable `id`, `language`, `kind` (code/test/story/config/generated), `isTest`, `isGenerated`, import symbol lists with `resolvedPath`, export `exportType` + `line`.
+- Derived AI views in JSON: `commands2` (canonical handler + call-sites + status), `symbols`/`clusters`, and `aiViews` (default export chains, suspicious barrels, dead symbols, CI summary).
+- `--verbose` flag and auto-creation of parent directories for `--html-report` (matching `--json-out`).
+
+### Changed
+- JSON output remains backward-compatible while exposing the new fields for agents/LLMs; dynamic imports, duplicate metadata, and commands are now sorted deterministically.
+
+## [0.3.2] - 2025-11-23
+
+### Added
+- Component graph metadata in reports (component id/size, isolates, LOC sum, Tauri FE/BE counts) with UI controls for highlighting disconnected components.
+- Import graph data builder extracted to `graph.rs` with safer node/edge caps and deterministic layout; HTML graph bootstrap served from a dedicated asset.
+- AI insights collected from analyzer output (dup/export cascades, missing handlers, huge files) and shown in reports.
+
+### Changed
+- Analyzer runner split into focused modules (`graph.rs`, `coverage.rs`, `insights.rs`, `graph_bootstrap.js`), shrinking `runner.rs` and `html.rs`.
+- Tauri command matching now normalizes names via `heck::ToSnakeCase` and respects focus/exclude globs.
+- Generic invoke regexes hardened to handle type parameters without excessive backtracking risk.
+
+## [0.3.1] - 2025-11-22
+
+### Added
+- Tauri command coverage view (missing vs unused handlers) grouped by module with linkable locations.
+- Import graph drawer and safety limits; buttons for fit/reset/fullscreen/dark-mode and JSON/PNG export.
+- Self-hosted Cytoscape asset for CSP/offline friendliness.
+
+### Changed
+- Duplicate export filtering honors `--focus` / `--exclude-report` globs; canonical picks non-dev files first.
+- `--serve` links url-encoded and open-server startup made more robust.
+
+## [0.3.0] - 2025-11-22
+
+### Added
+- **Import Graph Drawer**: When analyzing a single root, the graph is pinned to a collapsible bottom drawer, keeping tables readable.
+- **Easier-to-hit Tooltips**: Nodes now have a larger hitbox, and tooltips appear near the cursor within the viewport boundaries.
+
+### Changed
+- The import graph is now attached to a collapsible drawer when analyzing a single root to improve table visibility.
+
+## [0.2.9] - 2025-11-22
+
+### Added
+- Graph toolbar upgrades: fit, reset, graph-only fullscreen, dark mode toggle, and tooltips with full path + LOC; node size now scales with LOC and uses stable preset layout computed in Rust.
+- Graph safety/perf guards: caps at 8k nodes / 12k edges, skips overflow with warnings, and prevents rendering when filters empty; legend/hints updated.
+- Graph assets self-hosted (CSP-friendly) + buttons to export PNG/JSON snapshots.
+- Tauri coverage: FE↔BE matching normalizes camelCase/snake_case aliases; coverage respects `--focus/--exclude-report` globs and groups rows by module for readability.
+
+### Changed
+- Cleaner import graph (edge labels removed, deduped CSS, more defensive `buildElements`/filter handling).
+- Tauri command coverage table restyled for readability (pill rows, clearer columns).
+- FE↔BE Tauri matching now normalizes camelCase/snake_case aliases (e.g., `loginWithPin` ↔ `login_with_pin`) to trim false missing/unused reports.
+
+## [0.2.8] - 2025-11-22
+
+### Added
+- `--focus <glob>` filters the report to show only duplicates where at least one file matches the glob patterns (analysis still covers the entire tree).
+- `--exclude-report <glob>` allows filtering out noise (e.g., `**/__tests__/**`, `**/*.stories.tsx`) only from the duplicate report.
+
+### Changed
+- The number of duplicates in CLI/JSON/HTML reflects the above filters; canonical file and score are calculated after filtering paths.
+
 ## [0.2.7] - 2025-11-22
 
 ### Added
-- `--graph` opcjonalnie dokleja interaktywny graf importów/re-eksportów do raportu HTML (Cytoscape.js z CDN).
-- `--ignore-symbols-preset <name>` (na razie `common` → `main,run,setup,test_*`) oraz wsparcie prefiksów `foo*` w `--ignore-symbols`.
+- `--graph` optionally appends an interactive import/re-export graph to the HTML report (Cytoscape.js from CDN).
+- `--ignore-symbols-preset <name>` (currently `common` → `main,run,setup,test_*`) and support for `foo*` prefixes in `--ignore-symbols`.
 
 ### Changed
-- Help/README/Monika guide uzupełnione o nowe flagi; analiza duplikatów uwzględnia wzorce prefiksowe.
+- Help/README/Monika guide updated with new flags; duplicate analysis now considers prefix patterns.
 
 ## [0.2.6] - 2025-11-22
 
 ### Added
-- Flaga `--ignore-symbols` dla analizera – pozwala pominąć wskazane symbole (np. `main,run`) przy wykrywaniu duplikatów eksportów.
+- The `--ignore-symbols` flag for the analyzer – allows omitting specified symbols (e.g., `main,run`) when detecting duplicate exports.
 
 ### Changed
-- Dokumentacja i help zaktualizowane o nową flagę.
+- Documentation and help updated with the new flag.
 
 ## [0.2.5] - 2025-11-22
 
 ### Added
-- Import/export analyzer obejmuje Pythona: `import`/`from`/`__all__`, wykrywa dynamiczne `importlib.import_module` oraz `__import__`, raportuje re-export przez `from x import *`.
-- Domyślne rozszerzenia analizera zawierają teraz `py`.
+- The import/export analyzer now covers Python: `import`/`from`/`__all__`, detects dynamic `importlib.import_module` and `__import__`, and reports re-exports via `from x import *`.
+- Default analyzer extensions now include `py`.
 
 ### Changed
-- README i przewodnik Moniki uzupełnione o wsparcie Pythona.
+- README and Monika's guide updated with Python support.
 
 ## [0.2.4] - 2025-11-22
 
 ### Added
-- Optional `--serve` mini HTTP server: HTML raport zawiera klikalne linki `file:line` otwierające się w edytorze/OS (`code -g` domyślnie, konfigurowalne `--editor-cmd`). Bezpieczne: ścieżki kanonikalizowane i ograniczone do podanych rootów.
-- Raporty i JSON zawierają lokalizacje wywołań/handlerów komend Tauri, co przyspiesza diagnozę FE↔BE.
+- Optional `--serve` mini HTTP server: HTML reports contain clickable `file:line` links that open in an editor/OS (`code -g` by default, configurable with `--editor-cmd`). Safe: paths are canonicalized and restricted to provided roots.
+- Reports and JSON now include locations of Tauri command calls/handlers, which speeds up FE↔BE diagnosis.
 
 ### Changed
-- `--serve`/`--editor-cmd` opisane w pomocy/README; auto-open raportu w przeglądarce pozostaje.
+- `--serve`/`--editor-cmd` described in help/README; auto-opening the report in the browser remains.
 
 ## [0.2.3] - 2025-11-22
 
 ### Added
-- Analyzer raportuje pokrycie komend Tauri: wywołania FE (`safeInvoke`/`invokeSnake`) vs. handlery z `#[tauri::command]` w Rust; pokazuje brakujące i nieużywane handlery również w raporcie HTML/JSON/CLI.
+- The analyzer reports Tauri command coverage: FE calls (`safeInvoke`/`invokeSnake`) vs. handlers with `#[tauri::command]` in Rust; also shows missing and unused handlers in HTML/JSON/CLI reports.
 
 ### Changed
-- Hardening auto-open HTML (kanonikalizacja ścieżki, brak kontroli znaków sterujących).
-- Ujednolicone zależności: `regex = 1.12` w manifest.
-- Ukryte pliki rozpoznawane wyłącznie po kropce (bez specjal-case `.DS_Store`).
+- Hardening auto-open HTML (path canonicalization, no control character checks).
+- Unified dependencies: `regex = 1.12` in manifest.
+- Hidden files recognized solely by a leading dot (no special-case `.DS_Store`).
 
 ## [0.2.2] - 2025-11-22
 
 ### Added
-- Analyzer now understands CSS `@import` and Rust `use`/`pub use`/public items; default analyzer extensions expanded to include `rs` and `css`.
+- The analyzer now understands CSS `@import` and Rust `use`/`pub use`/public items; default analyzer extensions expanded to include `rs` and `css`.
 - HTML report auto-open remains; help/README updated to note new language coverage.
 
 ### Changed

@@ -1,2 +1,9 @@
-/loc_tree_rs/target
+/loctree_rs/target
 /.codex
+*.pyc
+/.fastembed_cache
+tarpaulin-report.json
+tarpaulin-report.html
+*.profraw
+loctree_rs/tarpaulin-report.json
+/.ai-agents

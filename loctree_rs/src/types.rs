@@ -4,21 +4,21 @@ pub const DEFAULT_LOC_THRESHOLD: usize = 1000;
 pub const COLOR_RED: &str = "\u{001b}[31m";
 pub const COLOR_RESET: &str = "\u{001b}[0m";
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ColorMode {
     Auto,
     Always,
     Never,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum OutputMode {
     Human,
     Json,
     Jsonl,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Mode {
     Tree,
     AnalyzeImports,
@@ -41,6 +41,9 @@ pub struct Options {
     pub serve: bool,
     #[allow(dead_code)]
     pub editor_cmd: Option<String>,
+    pub max_graph_nodes: Option<usize>,
+    pub max_graph_edges: Option<usize>,
+    pub verbose: bool,
 }
 
 pub struct LineEntry {
@@ -73,13 +76,23 @@ pub struct Collectors<'a> {
 #[derive(Clone)]
 pub struct ImportEntry {
     pub source: String,
+    pub source_raw: String,
     pub kind: ImportKind,
+    pub resolved_path: Option<String>,
+    pub is_bare: bool,
+    pub symbols: Vec<ImportSymbol>,
 }
 
 #[derive(Clone)]
 pub enum ImportKind {
     Static,
     SideEffect,
+}
+
+#[derive(Clone)]
+pub struct ImportSymbol {
+    pub name: String,
+    pub alias: Option<String>,
 }
 
 #[derive(Clone)]
@@ -99,23 +112,75 @@ pub enum ReexportKind {
 pub struct ExportSymbol {
     pub name: String,
     pub kind: String,
+    pub export_type: String,
+    pub line: Option<usize>,
 }
 
 #[derive(Clone)]
 pub struct CommandRef {
     pub name: String,
+    pub exposed_name: Option<String>,
     pub line: usize,
 }
 
 #[derive(Clone)]
 pub struct FileAnalysis {
     pub path: String,
+    pub loc: usize,
+    pub language: String,
+    pub kind: String,
+    pub is_test: bool,
+    pub is_generated: bool,
     pub imports: Vec<ImportEntry>,
     pub reexports: Vec<ReexportEntry>,
     pub dynamic_imports: Vec<String>,
     pub exports: Vec<ExportSymbol>,
     pub command_calls: Vec<CommandRef>,
     pub command_handlers: Vec<CommandRef>,
+}
+
+impl ImportEntry {
+    pub fn new(source: String, kind: ImportKind) -> Self {
+        let is_bare = !source.starts_with('.') && !source.starts_with('/');
+        Self {
+            source_raw: source.clone(),
+            source,
+            kind,
+            resolved_path: None,
+            is_bare,
+            symbols: Vec::new(),
+        }
+    }
+}
+
+impl ExportSymbol {
+    pub fn new(name: String, kind: &str, export_type: &str, line: Option<usize>) -> Self {
+        Self {
+            name,
+            kind: kind.to_string(),
+            export_type: export_type.to_string(),
+            line,
+        }
+    }
+}
+
+impl FileAnalysis {
+    pub fn new(path: String) -> Self {
+        Self {
+            path,
+            loc: 0,
+            language: String::new(),
+            kind: "code".to_string(),
+            is_test: false,
+            is_generated: false,
+            imports: Vec::new(),
+            reexports: Vec::new(),
+            dynamic_imports: Vec::new(),
+            exports: Vec::new(),
+            command_calls: Vec::new(),
+            command_handlers: Vec::new(),
+        }
+    }
 }
 
 // Convenience type aliases reused across modules

@@ -62,6 +62,8 @@ Recommended (Rust native binary):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/LibraxisAI/loctree/main/tools/install.sh | sh
+# Pin a branch/SHA if needed (defaults to develop when run from that ref):
+# LOCTREE_REF=main curl -fsSL https://raw.githubusercontent.com/LibraxisAI/loctree/main/tools/install.sh | sh
 ```
 
 # Env overrides:
@@ -85,6 +87,8 @@ Environment variables recognized by installers:
 
 - `INSTALL_DIR` — where to place the runnable wrapper (default: `$HOME/.local/bin`)
 - `CARGO_HOME` — cargo home for Rust install (default: `~/.cargo`) [Rust installer]
+- `LOCTREE_REF` — branch/commit passed to `cargo install --git` (default: `develop` when invoked from that ref; override to `main`/SHA for stable).
+- `LOCTREE_NO_LOCK` — set to `1` to skip `--locked` during install (not recommended).
 - `LOCTREE_HOME` — where to store downloaded script file [Node: `$HOME/.local/lib/loctree-node` | Python:
   `$HOME/.local/lib/loctree-py`]
 
@@ -102,10 +106,14 @@ loctree packages/app -A --ext ts,tsx --json   # import/export analyzer
 JSON shape: single root -> object; multi-root -> array. Large files (>= 1000 LOC) are listed separately and colored when
 `--color` (or `-c`) is on.
 
+Analyzer JSON hints (schema v1.1.0):
+- Top-level metadata: `schema`, `schemaVersion`, `generatedAt`, `rootDir`, sorted `languages`.
+- Each file: `id`, `path`, `loc`, `language`, `kind` (`code|test|story|config|generated`), `isTest`, `isGenerated`, imports with `sourceRaw|resolvedPath|isBareModule|symbols`, exports with `exportType` + `line`.
+- Derived views: `commands2` (canonical handler + call sites + status), `symbols`/`clusters`, `aiViews` (default export chains, suspicious barrels, dead symbols, ciSummary). Legacy sections remain for compatibility.
+
 CLI flags (all runtimes):
 
 - `--ext <list>`         Comma-separated extensions; prunes others (analyzer defaults to ts,tsx,js,jsx,mjs,cjs,rs,css,py).
-- `--ignore-symbols <l>` Analyzer mode: comma-separated symbol names to skip in duplicate-export detection (case-insensitive).
 - `-I, --ignore <path>`  Ignore path (repeatable; abs or relative).
 - `-g, --gitignore`      Respect gitignore via `git check-ignore`.
 - `-L, --max-depth <n>`  Limit recursion depth.
@@ -115,16 +123,23 @@ CLI flags (all runtimes):
 - `--json`               Machine-readable output.
 - `--jsonl`              Analyzer: one JSON object per line (per root).
 - `--html-report <file>` Write analyzer results to an HTML report file.
-- `--graph`              Embed an interactive import graph in the HTML report (Cytoscape.js from CDN).
-- `--serve`              Start a tiny local server so HTML links can open files in your editor/OS.
+- `--graph`              Embed an interactive import graph in the HTML report (Cytoscape.js is self-hosted for CSP/offline).
+- `--verbose`            Extra debug logs (paths for outputs, graph warnings).
+- `--max-nodes <n>`      Override graph safety limit (default 8000).
+- `--max-edges <n>`      Override graph safety limit (default 12000).
+- `--serve`              Start a tiny local server that hosts the HTML report and opens links in your editor/OS.
 - `--editor-cmd <tpl>`   Command template for opening files (`{file}`, `{line}`), default tries `code -g`.
 - `--ignore-symbols <l>` Analyzer mode: comma-separated symbol names to skip in duplicate-export detection (case-insensitive).
 - `--ignore-symbols-preset <name>` Analyzer mode: predefined ignore set (currently `common` → `main,run,setup,test_*`).
+- `--focus <glob[,..]>`  Analyzer: show only duplicates where at least one file matches the globs.
+- `--exclude-report <glob[,..]>` Analyzer: exclude from the report duplicates whose files match the globs (e.g., `**/__tests__/**`).
 - `--summary[=N]`        Totals + top-N large files (default 5).
 - `-A, --analyze-imports` Import/export analyzer mode (duplicate exports, re-export cascades, dynamic imports).
 - `--limit <N>`          Analyzer: cap top lists for duplicates/dynamic imports (default 8).
 - `--fail-on-duplicates <N>` Analyzer: exit 2 if duplicate-export groups exceed N (for CI).
 - `--fail-on-dynamic <N>`   Analyzer: exit 2 if files with dynamic imports exceed N (for CI).
+- `--json-out <file>`    Analyzer: write JSON to a file (creates parent dirs; warns on overwrite; rejects directory paths).
+- `--html-report <file>` Analyzer: write HTML report (parent dirs created automatically).
 
 Runtime-specific entry points:
 
@@ -154,6 +169,10 @@ The CLI itself does not require environment variables for normal operation.
 
 Install-time variables (see Installation above): `INSTALL_DIR`, `CARGO_HOME`, `LOCTREE_HOME`.
 
+Dev/test helpers:
+
+- `LOCTREE_FAST=1` — run a fast pre-commit hook (unit tests only; skips Semgrep + integration to keep commit latency <3s).
+
 ## Development and tests
 
 - Node: `node tools/tests/loctree-node.test.mjs`
@@ -161,6 +180,21 @@ Install-time variables (see Installation above): `INSTALL_DIR`, `CARGO_HOME`, `L
 - Rust: `node tools/tests/loctree-rs.test.mjs` and `cargo check`
 
 CI runs all three test scripts on PRs/pushes (see `.github/workflows/ci.yml`).
+
+Hidden files: `.env*`, `.loctree.*`, and `.example` are analyzed even when `--show-hidden` is off (so config-like files are not skipped).
+
+## Graph asset: self-hosted Cytoscape.js
+
+We bundle Cytoscape.js in the repo (written to `loctree-cytoscape.min.js` next to the HTML report) instead of loading it from a CDN because:
+
+- CSP compliance: no external script sources required; reports work with `script-src 'self'`.
+- Offline use: graphs render when browsing reports without internet access.
+- Reliability: avoids CDN downtime and version drift.
+
+Trade-offs:
+
+- Slightly larger repository size and HTML output directory (one JS asset).
+- We own updates: when bumping Cytoscape.js, download the new minified build from <https://js.cytoscape.org/>, verify checksum, and replace the embedded asset in `loctree_rs/src/analyzer/assets/cytoscape.min.js` (the pre-commit hook will copy it next to the HTML report).
 
 ## Project structure
 

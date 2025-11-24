@@ -7,32 +7,66 @@ on:
     branches: [ main ]
 
 jobs:
-  test-node:
-    runs-on: ubuntu-latest
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Cache npm
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-nolock
+          restore-keys: |
+            ${{ runner.os }}-node-
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Run node tests
-        run: node tools/tests/loctree-node.test.mjs
 
-  test-python:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-noreqs
+          restore-keys: |
+            ${{ runner.os }}-pip-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install deps
+      - name: Install Python deps
         run: pip install --upgrade pip
-      - name: Run python tests
-        run: node tools/tests/loctree-py.test.mjs
 
-  test-rust:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            loctree_rs/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('loctree_rs/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
       - uses: dtolnay/rust-toolchain@stable
-      - name: Run rust tests
+
+      - name: Rust fmt
+        run: cd loctree_rs && cargo fmt -- --check
+      - name: Rust clippy
+        run: cd loctree_rs && cargo clippy -- -D warnings
+      - name: Run rust unit tests
+        run: cd loctree_rs && cargo test
+      - name: Run rust integration tests
         run: node tools/tests/loctree-rs.test.mjs
+
+      - name: Run node unit tests
+        run: node tools/tests/test_loctree_node_unit.mjs
+      - name: Run node integration tests
+        run: node tools/tests/loctree-node.test.mjs
+
+      - name: Run python unit tests
+        run: python3 tools/tests/test_loctree_py_unit.py
+      - name: Run python integration tests
+        run: node tools/tests/loctree-py.test.mjs

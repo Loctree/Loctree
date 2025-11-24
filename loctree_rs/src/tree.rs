@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -5,13 +6,15 @@ use serde_json::json;
 use std::io::IsTerminal;
 
 use crate::fs_utils::{
-    count_lines, normalise_ignore_patterns, should_ignore, sort_dir_entries, GitIgnoreChecker,
+    count_lines, is_allowed_hidden, normalise_ignore_patterns, should_ignore, sort_dir_entries,
+    GitIgnoreChecker,
 };
 use crate::types::{
     Collectors, ColorMode, LargeEntry, LineEntry, Options, OutputMode, Stats, COLOR_RED,
     COLOR_RESET,
 };
 
+#[allow(clippy::too_many_arguments, clippy::only_used_in_recursion)]
 fn walk(
     dir: &Path,
     options: &Options,
@@ -19,14 +22,26 @@ fn walk(
     collectors: &mut Collectors,
     depth: usize,
     root: &Path,
+    root_canon: &Path,
     git_checker: Option<&GitIgnoreChecker>,
+    visited: &mut HashSet<PathBuf>,
 ) -> io::Result<bool> {
-    let mut dir_entries: Vec<_> = std::fs::read_dir(dir)?
+    let dir_canon = dir.canonicalize()?;
+    if !dir_canon.starts_with(root_canon) {
+        return Ok(false);
+    }
+    if !visited.insert(dir_canon.clone()) {
+        return Ok(false);
+    }
+
+    // nosemgrep:rust.actix.path-traversal.tainted-path.tainted-path - dir path canonicalized and bounded to root_canon
+    let mut dir_entries: Vec<_> = std::fs::read_dir(&dir_canon)?
         .filter_map(Result::ok)
         .filter(|entry| {
             let name = entry.file_name();
-            let is_hidden = name.to_string_lossy().starts_with('.');
-            options.show_hidden || !is_hidden
+            let name_str = name.to_string_lossy();
+            let is_hidden = name_str.starts_with('.');
+            options.show_hidden || !is_hidden || is_allowed_hidden(&name_str)
         })
         .collect();
 
@@ -49,7 +64,12 @@ fn walk(
         let name = entry.file_name().to_string_lossy().to_string();
         let label = format!("{}{}{}", prefix, branch, name);
 
-        let relative = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
+        let relative = path
+            .canonicalize()
+            .unwrap_or_else(|_| path.clone())
+            .strip_prefix(root_canon)
+            .unwrap_or(&path)
+            .to_path_buf();
         if should_ignore(&path, options, git_checker) {
             continue;
         }
@@ -106,7 +126,9 @@ fn walk(
                 collectors,
                 depth + 1,
                 root,
+                root_canon,
                 git_checker,
+                visited,
             )?;
             prefix_parts.pop();
             if child_has {
@@ -146,12 +168,18 @@ pub fn run_tree(root_list: &[PathBuf], parsed: &crate::args::ParsedArgs) -> io::
         report_path: None,
         serve: false,
         editor_cmd: None,
+        max_graph_nodes: parsed.max_graph_nodes,
+        max_graph_edges: parsed.max_graph_edges,
+        verbose: parsed.verbose,
     };
 
     let mut json_results = Vec::new();
 
     for (idx, root_path) in root_list.iter().enumerate() {
         let ignore_paths = normalise_ignore_patterns(&parsed.ignore_patterns, root_path);
+        let root_canon = root_path
+            .canonicalize()
+            .unwrap_or_else(|_| root_path.clone());
         let root_options = Options {
             ignore_paths,
             loc_threshold: parsed.loc_threshold,
@@ -168,6 +196,7 @@ pub fn run_tree(root_list: &[PathBuf], parsed: &crate::args::ParsedArgs) -> io::
         let mut large_entries: Vec<LargeEntry> = Vec::new();
         let mut prefix_parts: Vec<bool> = Vec::new();
         let mut stats = Stats::default();
+        let mut visited: HashSet<PathBuf> = HashSet::new();
 
         let mut collectors = Collectors {
             entries: &mut entries,
@@ -182,7 +211,9 @@ pub fn run_tree(root_list: &[PathBuf], parsed: &crate::args::ParsedArgs) -> io::
             &mut collectors,
             0,
             root_path,
+            &root_canon,
             git_checker.as_ref(),
+            &mut visited,
         )?;
 
         let mut sorted_large = large_entries;
@@ -244,7 +275,12 @@ pub fn run_tree(root_list: &[PathBuf], parsed: &crate::args::ParsedArgs) -> io::
             });
 
             if matches!(root_options.output, OutputMode::Jsonl) {
-                println!("{}", serde_json::to_string(&payload).unwrap());
+                match serde_json::to_string(&payload) {
+                    Ok(line) => println!("{}", line),
+                    Err(err) => {
+                        eprintln!("[loctree][warn] failed to serialize JSONL line: {}", err)
+                    }
+                }
             } else {
                 json_results.push(payload);
             }
@@ -312,12 +348,15 @@ pub fn run_tree(root_list: &[PathBuf], parsed: &crate::args::ParsedArgs) -> io::
 
     if matches!(options.output, OutputMode::Json) {
         if json_results.len() == 1 {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&json_results[0]).unwrap()
-            );
+            match serde_json::to_string_pretty(&json_results[0]) {
+                Ok(out) => println!("{}", out),
+                Err(err) => eprintln!("[loctree][warn] failed to serialize JSON: {}", err),
+            }
         } else {
-            println!("{}", serde_json::to_string_pretty(&json_results).unwrap());
+            match serde_json::to_string_pretty(&json_results) {
+                Ok(out) => println!("{}", out),
+                Err(err) => eprintln!("[loctree][warn] failed to serialize JSON: {}", err),
+            }
         }
     }
 

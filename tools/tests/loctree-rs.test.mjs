@@ -7,7 +7,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const repoRoot = resolve(__dirname, '..', '..');
 const fixtureRoot = resolve(repoRoot, 'tools', 'fixtures', 'basic-tree');
-const cliDir = resolve(repoRoot, 'loc_tree_rs');
+const cliDir = resolve(repoRoot, 'loctree_rs');
 
 function run(args) {
   return execFileSync('cargo', ['run', '--quiet', '--', ...args], {
@@ -60,4 +60,18 @@ assert.equal(lines.length, 1);
 const parsedJsonl = JSON.parse(lines[0]);
 assert.equal(parsedJsonl.root.endsWith('import-graph'), true);
 
-console.log('loc_tree_rs basic tests passed');
+// Tauri command coverage
+const tauriRoot = resolve(repoRoot, 'tools', 'fixtures', 'tauri-coverage');
+const tauriCoverage = JSON.parse(
+  run([tauriRoot, '-A', '--json', '--ext', 'ts,rs', '--color=never'])
+);
+const missingNames = tauriCoverage.commands.missingHandlers.map((c) => c.name);
+assert.ok(missingNames.includes('frontend_missing'));
+const unusedNames = tauriCoverage.commands.unusedHandlers.map((c) => c.name);
+assert.ok(unusedNames.includes('backend_only'));
+const backendNames = tauriCoverage.commands.backend.map((c) => c.name);
+assert.ok(backendNames.includes('explicit_rename')); // rename="..."
+assert.ok(backendNames.includes('snakeCaseFunc')); // rename_all=camelCase
+assert.ok(backendNames.includes('RenameAllPascal')); // rename_all=PascalCase
+
+console.log('loctree_rs basic tests passed');

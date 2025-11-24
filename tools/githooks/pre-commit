@@ -1,0 +1,47 @@
+#!/bin/sh
+set -e
+
+# Get repo root
+REPO_ROOT=$(git rev-parse --show-toplevel)
+cd "$REPO_ROOT"
+
+if [ "${LOCTREE_FAST:-0}" != "0" ]; then
+  echo "LOCTREE_FAST=1 -> running fast checks (unit tests only, skipping Semgrep + integration)"
+  node tools/tests/test_loctree_node_unit.mjs
+  python3 tools/tests/test_loctree_py_unit.py
+  (cd loctree_rs && cargo test --quiet)
+  exit 0
+fi
+
+echo "Running Node unit tests..."
+node tools/tests/test_loctree_node_unit.mjs
+
+echo "Running Python unit tests..."
+python3 tools/tests/test_loctree_py_unit.py
+
+echo "Running Rust unit tests..."
+(cd loctree_rs && cargo test --quiet)
+
+if command -v semgrep >/dev/null 2>&1; then
+  echo "Running Semgrep (global + local rules)..."
+  semgrep \
+    --config p/secrets \
+    --config p/owasp-top-ten \
+    --config p/r2c-security-audit \
+    --config p/r2c-ci \
+    --config p/rust \
+    --config p/python \
+    --config p/javascript \
+    --config .semgrep.yaml \
+    --error --metrics=off \
+    --exclude tests/fixtures --exclude loctree_rs/target || exit 1
+else
+  echo "Semgrep not installed; skipping static checks (install via 'pipx install semgrep')."
+fi
+
+echo "Running Integration tests..."
+node tools/tests/loctree-node.test.mjs
+node tools/tests/loctree-py.test.mjs
+node tools/tests/loctree-rs.test.mjs
+
+echo "All checks passed."

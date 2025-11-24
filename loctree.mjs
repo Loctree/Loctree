@@ -4,6 +4,7 @@ import { readdir } from 'node:fs/promises';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 const DEFAULT_LOC_THRESHOLD = 1000;
 const COLORS = {
@@ -482,7 +483,11 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(error.message ?? error);
-  process.exit(1);
-});
+export { parseArgs, countFileLines, normaliseIgnorePatterns, collectLines, main };
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error(error.message ?? error);
+    process.exit(1);
+  });
+}

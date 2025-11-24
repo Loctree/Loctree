@@ -120,7 +120,7 @@ def collect_lines(root: Path, options: Options) -> Tuple[
             entries = [
                 p
                 for p in current.iterdir()
-                if options.show_hidden or not p.name.startswith(".") and p.name != ".DS_Store"
+                if options.show_hidden or not p.name.startswith(".")
             ]
             entries = sorted(
                 entries,
@@ -131,8 +131,6 @@ def collect_lines(root: Path, options: Options) -> Tuple[
 
         any_included = False
         for index, entry in enumerate(entries):
-            if entry.name == ".DS_Store":
-                continue
             is_last = index == len(entries) - 1
             label = format_label(prefix_flags, entry.name, is_last)
             full_path = entry.resolve()

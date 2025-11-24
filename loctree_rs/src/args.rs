@@ -8,11 +8,14 @@ pub struct ParsedArgs {
     pub ignore_patterns: Vec<String>,
     pub ignore_symbols: Option<HashSet<String>>,
     pub ignore_symbols_preset: Option<String>,
+    pub focus_patterns: Vec<String>,
+    pub exclude_report_patterns: Vec<String>,
     pub graph: bool,
     pub use_gitignore: bool,
     pub max_depth: Option<usize>,
     pub color: ColorMode,
     pub output: OutputMode,
+    pub json_output_path: Option<PathBuf>,
     pub summary: bool,
     pub summary_limit: usize,
     pub show_help: bool,
@@ -25,6 +28,9 @@ pub struct ParsedArgs {
     pub report_path: Option<PathBuf>,
     pub serve: bool,
     pub editor_cmd: Option<String>,
+    pub max_graph_nodes: Option<usize>,
+    pub max_graph_edges: Option<usize>,
+    pub verbose: bool,
 }
 
 impl Default for ParsedArgs {
@@ -34,11 +40,14 @@ impl Default for ParsedArgs {
             ignore_patterns: Vec::new(),
             ignore_symbols: None,
             ignore_symbols_preset: None,
+            focus_patterns: Vec::new(),
+            exclude_report_patterns: Vec::new(),
             graph: false,
             use_gitignore: false,
             max_depth: None,
             color: ColorMode::Auto,
             output: OutputMode::Human,
+            json_output_path: None,
             summary: false,
             summary_limit: 5,
             show_help: false,
@@ -51,6 +60,9 @@ impl Default for ParsedArgs {
             report_path: None,
             serve: false,
             editor_cmd: None,
+            max_graph_nodes: None,
+            max_graph_edges: None,
+            verbose: false,
         }
     }
 }
@@ -94,6 +106,59 @@ pub fn parse_extensions(raw: &str) -> Option<HashSet<String>> {
     }
 }
 
+fn parse_glob_list(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .filter_map(|segment| {
+            let trimmed = segment.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        })
+        .collect()
+}
+
+fn parse_positive_usize(raw: &str, flag: &str) -> Result<usize, String> {
+    let value = raw
+        .parse::<usize>()
+        .map_err(|_| format!("{flag} requires a positive integer"))?;
+    if value == 0 {
+        Err(format!("{flag} requires a positive integer"))
+    } else {
+        Ok(value)
+    }
+}
+
+fn validate_globs(patterns: &[String], flag: &str) -> Result<(), String> {
+    for pat in patterns {
+        if pat.trim().is_empty() {
+            continue;
+        }
+        globset::Glob::new(pat).map_err(|e| format!("{flag}: invalid glob '{pat}': {e}"))?;
+    }
+    Ok(())
+}
+
+fn detect_glob_conflicts(focus: &[String], exclude: &[String]) -> Result<(), String> {
+    if focus.is_empty() || exclude.is_empty() {
+        return Ok(());
+    }
+    let focus_set: std::collections::HashSet<_> = focus.iter().collect();
+    let exclude_set: std::collections::HashSet<_> = exclude.iter().collect();
+    let duplicates: Vec<_> = focus_set
+        .intersection(&exclude_set)
+        .map(|s| s.to_string())
+        .collect();
+    if !duplicates.is_empty() {
+        return Err(format!(
+            "Conflicting globs between --focus and --exclude-report: {}",
+            duplicates.join(", ")
+        ));
+    }
+    Ok(())
+}
+
 pub fn parse_ignore_symbols(raw: &str) -> Option<HashSet<String>> {
     let set: HashSet<String> = raw
         .split(',')
@@ -126,7 +191,11 @@ pub fn preset_ignore_symbols(name: &str) -> Option<HashSet<String>> {
 }
 
 pub fn parse_args() -> Result<ParsedArgs, String> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    // nosemgrep:rust.lang.security.args-os.args-os - CLI arg parsing only; not used for security-sensitive decisions
+    let args: Vec<String> = std::env::args_os()
+        .skip(1)
+        .map(|s| s.to_string_lossy().into_owned())
+        .collect();
     let mut parsed = ParsedArgs {
         ..ParsedArgs::default()
     };
@@ -169,13 +238,32 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
                 parsed.graph = true;
                 i += 1;
             }
+            "--verbose" | "-v" => {
+                parsed.verbose = true;
+                i += 1;
+            }
             "--show-hidden" | "-H" => {
                 parsed.show_hidden = true;
                 i += 1;
             }
             "--json" => {
                 parsed.output = OutputMode::Json;
+                if let Some(next) = args.get(i + 1) {
+                    if !next.starts_with('-') {
+                        parsed.json_output_path = Some(PathBuf::from(next));
+                        i += 2;
+                        continue;
+                    }
+                }
                 i += 1;
+            }
+            "--json-out" | "--json-output" => {
+                let next = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--json-out requires a file path".to_string())?;
+                parsed.output = OutputMode::Json;
+                parsed.json_output_path = Some(PathBuf::from(next));
+                i += 2;
             }
             "--jsonl" => {
                 parsed.output = OutputMode::Jsonl;
@@ -188,7 +276,7 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
                 parsed.report_path = Some(PathBuf::from(next));
                 i += 2;
             }
-            "--serve" => {
+            "--serve" | "--serve-keepalive" | "--serve-wait" => {
                 parsed.serve = true;
                 i += 1;
             }
@@ -220,26 +308,14 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
                 let next = args
                     .get(i + 1)
                     .ok_or_else(|| "--loc requires a positive integer".to_string())?;
-                let value = next
-                    .parse::<usize>()
-                    .map_err(|_| "--loc requires a positive integer".to_string())?;
-                if value == 0 {
-                    return Err("--loc requires a positive integer".to_string());
-                }
-                parsed.loc_threshold = value;
+                parsed.loc_threshold = parse_positive_usize(next, "--loc")?;
                 i += 2;
             }
             "--limit" => {
                 let next = args
                     .get(i + 1)
                     .ok_or_else(|| "--limit requires a positive integer".to_string())?;
-                let value = next
-                    .parse::<usize>()
-                    .map_err(|_| "--limit requires a positive integer".to_string())?;
-                if value == 0 {
-                    return Err("--limit requires a positive integer".to_string());
-                }
-                parsed.analyze_limit = value;
+                parsed.analyze_limit = parse_positive_usize(next, "--limit")?;
                 i += 2;
             }
             "--analyze-imports" | "-A" => {
@@ -292,11 +368,51 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
                 parsed.ignore_symbols_preset = Some(value.to_string());
                 i += 1;
             }
+            "--focus" => {
+                let next = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--focus requires a glob or comma list".to_string())?;
+                parsed.focus_patterns.extend(parse_glob_list(next));
+                i += 2;
+            }
+            _ if arg.starts_with("--focus=") => {
+                let value = arg.trim_start_matches("--focus=");
+                parsed.focus_patterns.extend(parse_glob_list(value));
+                i += 1;
+            }
+            "--exclude-report" => {
+                let next = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--exclude-report requires a glob or comma list".to_string())?;
+                parsed.exclude_report_patterns.extend(parse_glob_list(next));
+                i += 2;
+            }
+            _ if arg.starts_with("--exclude-report=") => {
+                let value = arg.trim_start_matches("--exclude-report=");
+                parsed
+                    .exclude_report_patterns
+                    .extend(parse_glob_list(value));
+                i += 1;
+            }
             "-I" | "--ignore" => {
                 let next = args
                     .get(i + 1)
                     .ok_or_else(|| "-I/--ignore requires a path argument".to_string())?;
                 parsed.ignore_patterns.push(next.clone());
+                i += 2;
+            }
+            "--max-nodes" => {
+                let next = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--max-nodes requires a positive integer".to_string())?;
+                parsed.max_graph_nodes = Some(parse_positive_usize(next, "--max-nodes")?);
+                i += 2;
+            }
+            "--max-edges" => {
+                let next = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--max-edges requires a positive integer".to_string())?;
+                parsed.max_graph_edges = Some(parse_positive_usize(next, "--max-edges")?);
                 i += 2;
             }
             _ if arg.starts_with('-') => {
@@ -316,7 +432,81 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
     if roots.is_empty() {
         roots.push(PathBuf::from("."));
     }
+    for root in &roots {
+        if !root.exists() {
+            return Err(format!(
+                "Path '{}' does not exist. Provide a valid file or directory.",
+                root.display()
+            ));
+        }
+        if root.is_file() && matches!(parsed.mode, Mode::AnalyzeImports) {
+            return Err(format!(
+                "Path '{}' is a file; import analyzer expects a directory.",
+                root.display()
+            ));
+        }
+    }
     parsed.root_list = roots;
 
+    validate_globs(&parsed.focus_patterns, "--focus")?;
+    validate_globs(&parsed.exclude_report_patterns, "--exclude-report")?;
+    detect_glob_conflicts(&parsed.focus_patterns, &parsed.exclude_report_patterns)?;
+
+    if parsed.serve && parsed.report_path.is_none() {
+        return Err("--serve requires --html-report to be set".to_string());
+    }
+
     Ok(parsed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_extensions() {
+        let res = parse_extensions("rs,ts").expect("parse extensions");
+        assert!(res.contains("rs"));
+        assert!(res.contains("ts"));
+        assert_eq!(res.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_extensions_empty() {
+        assert!(parse_extensions("").is_none());
+    }
+
+    #[test]
+    fn test_parse_color_mode() {
+        assert_eq!(
+            parse_color_mode("always").expect("color always"),
+            ColorMode::Always
+        );
+        assert_eq!(
+            parse_color_mode("never").expect("color never"),
+            ColorMode::Never
+        );
+        assert!(parse_color_mode("invalid").is_err());
+    }
+
+    #[test]
+    fn test_parse_summary_limit() {
+        assert_eq!(parse_summary_limit("5").expect("summary"), 5);
+        assert!(parse_summary_limit("0").is_err());
+        assert!(parse_summary_limit("abc").is_err());
+    }
+
+    #[test]
+    fn detects_glob_conflicts() {
+        let focus = vec!["src/**".to_string(), "pkg/**".to_string()];
+        let exclude = vec!["pkg/**".to_string()];
+        assert!(detect_glob_conflicts(&focus, &exclude).is_err());
+    }
+
+    #[test]
+    fn allows_distinct_globs() {
+        let focus = vec!["src/**".to_string()];
+        let exclude = vec!["tests/**".to_string()];
+        assert!(detect_glob_conflicts(&focus, &exclude).is_ok());
+    }
 }
