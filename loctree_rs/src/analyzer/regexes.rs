@@ -90,32 +90,47 @@ pub(crate) fn regex_tauri_invoke() -> &'static Regex {
 pub(crate) fn regex_event_emit_js() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        // @tauri-apps/api/event emit/emitTo/emitAll("event")
-        regex(r#"(?m)(?:emit(?:All|To)?|app\.emit|window\.emit)\s*\(\s*["']([^"']+)["']"#)
+        // @tauri-apps/api/event emit/emitTo/emitAll("event") or emit(EVENT_CONST)
+        regex(r#"(?m)(?:emit(?:All|To)?|app\.emit|window\.emit)\s*\(\s*(?P<target>["'][^"']+["']|[A-Za-z_][A-Za-z0-9_]*)\s*(?:,\s*(?P<payload>[^)\n]+))?"#)
     })
 }
 
 pub(crate) fn regex_event_listen_js() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        // listen/once("event")
-        regex(r#"(?m)(?:listen|once)\s*\(\s*["']([^"']+)["']"#)
+        // listen/once("event") or listen(EVENT_CONST)
+        regex(r#"(?m)(?:listen|once)\s*\(\s*(?P<target>["'][^"']+["']|[A-Za-z_][A-Za-z0-9_]*)"#)
+    })
+}
+
+pub(crate) fn regex_event_const_js() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        regex(r#"(?m)^\s*(?:export\s+)?const\s+([A-Za-z0-9_]+)\s*=\s*["']([^"']+)["']"#)
     })
 }
 
 pub(crate) fn regex_event_emit_rust() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        // app.emit_all("evt", ..) or window.emit("evt", ..) etc.
-        regex(r#"(?m)\.\s*emit[_a-z]*\(\s*["']([^"']+)["']"#)
+        // app.emit_all("evt", ..) or window.emit("evt", ..) etc., supports const identifiers
+        regex(r#"(?m)\.\s*emit[_a-z]*\(\s*(?P<target>["'][^"']+["']|[A-Za-z_][A-Za-z0-9_]*)\s*(?:,\s*(?P<payload>[^)]*))?"#)
     })
 }
 
 pub(crate) fn regex_event_listen_rust() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        // app.listen_global("evt", ..) or window.listen("evt", ..)
-        regex(r#"(?m)\.\s*listen[_a-z]*\(\s*["']([^"']+)["']"#)
+        // app.listen_global("evt", ..) or window.listen("evt", ..) supports const identifiers
+        regex(r#"(?m)\.\s*listen[_a-z]*\(\s*(?P<target>["'][^"']+["']|[A-Za-z_][A-Za-z0-9_]*)"#)
+    })
+}
+
+pub(crate) fn regex_event_const_rust() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        // const EVENT: &str = "name";
+        regex(r#"(?m)^\s*(?:pub\s+)?(?:const|static)\s+([A-Za-z0-9_]+)\s*:\s*&str\s*=\s*["']([^"']+)["']"#)
     })
 }
 

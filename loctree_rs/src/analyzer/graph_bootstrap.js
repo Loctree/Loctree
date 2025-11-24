@@ -363,14 +363,11 @@
 
     const applyDark = (on) => {
       document.documentElement.classList.toggle("dark", on);
-      cy
-        .style()
-        .selector("node")
-        .style("color", on ? "#eef2ff" : "#fff")
-        .update()
-        .selector("edge")
-        .style("text-background-color", on ? "#0f1115" : "#fff")
-        .update();
+      if (!cy || typeof cy.style !== "function") return;
+      const style = cy.style();
+      if (!style) return;
+      style.selector("node").style("color", on ? "#eef2ff" : "#fff").update();
+      style.selector("edge").style("text-background-color", on ? "#0f1115" : "#fff").update();
     };
     if (darkChk) darkChk.addEventListener("change", () => applyDark(darkChk.checked));
 
