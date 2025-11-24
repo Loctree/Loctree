@@ -4,12 +4,30 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
+## [0.3.5] - 2025-11-24
+
+### Added
+- TS/JS resolver now honors `tsconfig.json` (`baseUrl` + `paths` with `*` patterns) for imports and re-exports, improving FE↔BE linkage and graph accuracy when aliasing is heavy.
+
+### Changed
+- Graph/import resolution for non-relative specs prefers tsconfig aliases before falling back to relative heuristics; reduces “unresolved” noise in JSON/HTML/CLI reports.
+
+## [0.3.4] - 2025-11-24
+
+### Added
+- FE↔BE coverage view now captures generic `invoke`/`safeInvoke` call sites and renamed Tauri handlers; surfaced in `aiViews.coverage`.
+- `aiViews.tsconfig` summarizes `baseUrl`/aliases and highlights unresolved aliases plus `include`/`exclude` drift.
+- Public-surface exports (barrels/index/mod.rs) are flagged in `symbols`/`clusters`/`deadSymbols` to prioritize cleanup.
+
+### Changed
+- Patch release bump for the above analyzer JSON improvements; no CLI-breaking changes.
+
 ## [0.3.3] - 2025-11-24
 
 ### Added
 - JSON schema metadata (`schema`, `schemaVersion`, `generatedAt`, `rootDir`, `languages`) plus deterministic ordering for easier machine use.
 - Richer per-file records: stable `id`, `language`, `kind` (code/test/story/config/generated), `isTest`, `isGenerated`, import symbol lists with `resolvedPath`, export `exportType` + `line`.
-- Derived AI views in JSON: `commands2` (canonical handler + call-sites + status), `symbols`/`clusters`, and `aiViews` (default export chains, suspicious barrels, dead symbols, CI summary).
+- Derived AI views in JSON: `commands2` (canonical handler + call-sites + status), `symbols`/`clusters`, and `aiViews` (default export chains, suspicious barrels, dead symbols, CI summary, coverage stats with renamed handlers + generic call sites, tsconfig summary with aliases/include|exclude drift).
 - `--verbose` flag and auto-creation of parent directories for `--html-report` (matching `--json-out`).
 
 ### Changed

@@ -246,6 +246,7 @@ pub(crate) fn analyze_rust_file(content: &str, relative: String) -> FileAnalysis
                 name: fn_name,
                 exposed_name: Some(exposed_name),
                 line,
+                generic_type: None,
             });
         }
     }
