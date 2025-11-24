@@ -91,6 +91,14 @@ pub(crate) fn analyze_js_file(
 ) -> FileAnalysis {
     let mut analysis = FileAnalysis::new(relative);
     let mut command_calls = Vec::new();
+    let mut add_call = |name: &str, line: usize, generic: Option<String>| {
+        command_calls.push(CommandRef {
+            name: name.to_string(),
+            exposed_name: None,
+            line,
+            generic_type: generic,
+        });
+    };
     for caps in regex_import().captures_iter(content) {
         let clause = caps.get(1).map(|m| m.as_str()).unwrap_or("");
         let source = caps.get(2).map(|m| m.as_str()).unwrap_or("").to_string();
@@ -111,43 +119,39 @@ pub(crate) fn analyze_js_file(
     }
 
     for caps in regex_safe_invoke().captures_iter(content) {
-        if let Some(cmd) = caps.get(1) {
+        if let Some(cmd) = caps.name("cmd") {
             let line = offset_to_line(content, cmd.start());
-            command_calls.push(CommandRef {
-                name: cmd.as_str().to_string(),
-                exposed_name: None,
-                line,
-            });
+            let generic = caps
+                .name("generic")
+                .map(|g| g.as_str().trim().to_string())
+                .filter(|s| !s.is_empty());
+            add_call(cmd.as_str(), line, generic);
         }
     }
     for caps in regex_tauri_invoke().captures_iter(content) {
         if let Some(cmd) = caps.get(1) {
             let line = offset_to_line(content, cmd.start());
-            command_calls.push(CommandRef {
-                name: cmd.as_str().to_string(),
-                exposed_name: None,
-                line,
-            });
+            add_call(cmd.as_str(), line, None);
         }
     }
     for caps in regex_invoke_audio().captures_iter(content) {
-        if let Some(cmd) = caps.get(1) {
+        if let Some(cmd) = caps.name("cmd") {
             let line = offset_to_line(content, cmd.start());
-            command_calls.push(CommandRef {
-                name: cmd.as_str().to_string(),
-                exposed_name: None,
-                line,
-            });
+            let generic = caps
+                .name("generic")
+                .map(|g| g.as_str().trim().to_string())
+                .filter(|s| !s.is_empty());
+            add_call(cmd.as_str(), line, generic);
         }
     }
     for caps in regex_invoke_snake().captures_iter(content) {
-        if let Some(cmd) = caps.get(1) {
+        if let Some(cmd) = caps.name("cmd") {
             let line = offset_to_line(content, cmd.start());
-            command_calls.push(CommandRef {
-                name: cmd.as_str().to_string(),
-                exposed_name: None,
-                line,
-            });
+            let generic = caps
+                .name("generic")
+                .map(|g| g.as_str().trim().to_string())
+                .filter(|s| !s.is_empty());
+            add_call(cmd.as_str(), line, generic);
         }
     }
 
@@ -279,6 +283,13 @@ invokeAudioCamel<Baz>("cmd_audio_generic");
         assert!(commands.contains(&"cmd_generic_snake".to_string()));
         assert!(commands.contains(&"cmd_generic_invoke".to_string()));
         assert!(commands.contains(&"cmd_audio_generic".to_string()));
+
+        let generics: Vec<_> = analysis
+            .command_calls
+            .iter()
+            .filter_map(|c| c.generic_type.clone())
+            .collect();
+        assert!(generics.iter().any(|g| g.contains("Foo.Bar")));
 
         // exports should include defaults and named
         let export_names: Vec<_> = analysis.exports.iter().map(|e| e.name.clone()).collect();

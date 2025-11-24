@@ -1,6 +1,6 @@
 # loctree – fast reference for agents (CLI & outputs)
 
-This is a concise, up-to-date guide for how to drive loctree as of 0.3.3, focused on analyzer mode and machine-readable outputs.
+This is a concise, up-to-date guide for how to drive loctree as of 0.3.4, focused on analyzer mode and machine-readable outputs.
 
 ## Modes
 - **Tree/LOC (default)**: `loctree <roots> [options]` – prints an ASCII tree with LOC highlights.
@@ -28,8 +28,8 @@ Schema is declared in the report:
 - Files: stable `id`, `path` (relative to root), `loc`, `language`, `kind` (`code|test|story|config|generated`), `isTest`, `isGenerated`, imports (`sourceRaw`, `resolvedPath`, `isBareModule`, symbols with `name/alias`, kind), exports (`name`, `kind`, `exportType`, `line`), reexports (`star/named` + resolved), command calls/handlers with lines.
 - Derived sections:
   - `commands2`: canonical handler per command + call sites + status (`ok|missing_handler|unused_handler`).
-  - `symbols`/`clusters`: occurrences with canonical pick, severity, duplicateScore, reasons.
-  - `aiViews`: default export chains, suspicious barrels, dead symbols, `ciSummary` (duplicate cluster counts, top clusters).
+  - `symbols`/`clusters`: occurrences with canonical pick, severity, duplicateScore, reasons (+`publicSurface` hint for barrels/index/mod.rs).
+  - `aiViews`: default export chains, suspicious barrels, dead symbols, coverage summary (FE↔BE gaps + generic call sites + renamed handlers), `tsconfig` summary (baseUrl/aliases/include|exclude drift), `ciSummary` (duplicate cluster counts, top clusters).
 Legacy sections (`commands`, `duplicateExports*`, etc.) remain for compatibility.
 
 ## Graph drawer (HTML)

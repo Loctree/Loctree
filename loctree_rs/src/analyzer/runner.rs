@@ -137,6 +137,123 @@ fn build_globset(patterns: &[String]) -> Option<GlobSet> {
     }
 }
 
+fn load_tsconfig(root: &Path) -> Option<serde_json::Value> {
+    let ts_path = root.join("tsconfig.json");
+    if !ts_path.exists() {
+        return None;
+    }
+    let content = fs::read_to_string(&ts_path).ok()?;
+    serde_json::from_str(&content).ok()
+}
+
+fn summarize_tsconfig(root: &Path, analyses: &[FileAnalysis]) -> serde_json::Value {
+    let Some(tsconfig) = load_tsconfig(root) else {
+        return json!({"found": false});
+    };
+
+    let compiler = tsconfig
+        .get("compilerOptions")
+        .and_then(|v| v.as_object())
+        .cloned()
+        .unwrap_or_default();
+    let base_url = compiler
+        .get("baseUrl")
+        .and_then(|v| v.as_str())
+        .unwrap_or(".")
+        .to_string();
+    let base_path = root.join(&base_url);
+
+    let mut alias_entries = Vec::new();
+    if let Some(paths) = compiler.get("paths").and_then(|p| p.as_object()) {
+        for (alias, targets) in paths.iter() {
+            if let Some(first) = targets.as_array().and_then(|arr| arr.first()) {
+                if let Some(target_str) = first.as_str() {
+                    let normalized = target_str.replace('\\', "/");
+                    let target_dir = normalized.replace("/*", "").replace('*', "");
+                    let resolved = base_path.join(&target_dir);
+                    let exists = resolved.exists();
+                    alias_entries.push(json!({
+                        "alias": alias,
+                        "target": target_str,
+                        "resolved": resolved.display().to_string(),
+                        "exists": exists,
+                    }));
+                }
+            }
+        }
+    }
+
+    let include_patterns: Vec<String> = tsconfig
+        .get("include")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.replace('\\', "/")))
+                .collect()
+        })
+        .unwrap_or_default();
+    let exclude_patterns: Vec<String> = tsconfig
+        .get("exclude")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.replace('\\', "/")))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let include_set = build_globset(&include_patterns);
+    let exclude_set = build_globset(&exclude_patterns);
+
+    let mut outside_include = Vec::new();
+    let mut excluded_samples = Vec::new();
+    for analysis in analyses {
+        let rel = analysis.path.replace('\\', "/");
+        let path_obj = Path::new(&rel);
+        let included = include_set
+            .as_ref()
+            .map(|set| set.is_match(path_obj))
+            .unwrap_or(true);
+        let excluded = exclude_set
+            .as_ref()
+            .map(|set| set.is_match(path_obj))
+            .unwrap_or(false);
+
+        if excluded {
+            if excluded_samples.len() < 8 {
+                excluded_samples.push(rel.clone());
+            }
+            continue;
+        }
+        if include_set.is_some() && !included && outside_include.len() < 8 {
+            outside_include.push(rel.clone());
+        }
+    }
+
+    let unresolved: Vec<_> = alias_entries
+        .iter()
+        .filter(|entry| {
+            !entry
+                .get("exists")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+        })
+        .cloned()
+        .collect();
+
+    json!({
+        "found": true,
+        "baseUrl": base_path.display().to_string(),
+        "aliasCount": alias_entries.len(),
+        "aliases": alias_entries,
+        "unresolvedAliases": unresolved,
+        "includeCount": include_patterns.len(),
+        "excludeCount": exclude_patterns.len(),
+        "outsideIncludeSamples": outside_include,
+        "excludedSamples": excluded_samples,
+    })
+}
+
 fn opt_globset(globs: &[String]) -> Option<GlobSet> {
     build_globset(globs).and_then(|g| if g.is_empty() { None } else { Some(g) })
 }
@@ -499,6 +616,17 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
 
         let mut ranked_dups: Vec<RankedDup> = Vec::new();
         for (name, files) in &duplicate_exports {
+            // Filter out well-known noisy dupes
+            let all_rs = files.iter().all(|f| f.ends_with(".rs"));
+            let all_d_ts = files.iter().all(|f| {
+                f.ends_with(".d.ts")
+                    || f.ends_with(".d.tsx")
+                    || f.ends_with(".d.mts")
+                    || f.ends_with(".d.cts")
+            });
+            if (name == "new" && all_rs) || (name == "default" && all_d_ts) {
+                continue;
+            }
             let dev_count = files.iter().filter(|f| is_dev_file(f)).count();
             let prod_count = files.len().saturating_sub(dev_count);
             let score = prod_count * 2 + dev_count;
@@ -711,7 +839,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                             "exportType": e.export_type,
                             "line": e.line,
                         })).collect::<Vec<_>>(),
-                        "commandCalls": command_calls.iter().map(|c| json!({"name": c.name, "line": c.line})).collect::<Vec<_>>(),
+                        "commandCalls": command_calls.iter().map(|c| json!({"name": c.name, "line": c.line, "genericType": c.generic_type})).collect::<Vec<_>>(),
                         "commandHandlers": command_handlers.iter().map(|c| json!({"name": c.name, "line": c.line, "exposedName": c.exposed_name})).collect::<Vec<_>>(),
                     }));
                 }
@@ -809,6 +937,38 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             let mut sorted_symbol_names: Vec<_> = symbol_occurrences.keys().cloned().collect();
             sorted_symbol_names.sort();
 
+            let tsconfig_summary = summarize_tsconfig(root_path, &analyses);
+
+            let mut calls_with_generics = Vec::new();
+            for analysis in &analyses {
+                for call in &analysis.command_calls {
+                    if let Some(gen) = &call.generic_type {
+                        calls_with_generics.push(json!({
+                            "name": call.name,
+                            "path": analysis.path,
+                            "line": call.line,
+                            "genericType": gen,
+                        }));
+                    }
+                }
+            }
+
+            let mut renamed_handlers = Vec::new();
+            for analysis in &analyses {
+                for handler in &analysis.command_handlers {
+                    if let Some(exposed) = &handler.exposed_name {
+                        if exposed != &handler.name {
+                            renamed_handlers.push(json!({
+                                "path": analysis.path,
+                                "line": handler.line,
+                                "name": handler.name,
+                                "exposedName": exposed,
+                            }));
+                        }
+                    }
+                }
+            }
+
             for name in &sorted_symbol_names {
                 if let Some(occ_list) = symbol_occurrences.get(name) {
                     let canonical_idx = occ_list
@@ -843,17 +1003,29 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                         }));
                     }
 
+                    let canonical_path = occ_list
+                        .get(canonical_idx)
+                        .map(|(p, _, _, _)| p.clone())
+                        .unwrap_or_default();
+                    let public_surface = canonical_path.ends_with("index.ts")
+                        || canonical_path.ends_with("index.tsx")
+                        || canonical_path.ends_with("mod.rs")
+                        || canonical_path.ends_with("lib.rs");
+
                     let score = dup_score_map
                         .get(name)
                         .map(|d| d.score)
                         .unwrap_or(occ_list.len());
-                    let severity = if occ_list.len() > 5 {
+                    let mut severity = if occ_list.len() > 5 {
                         "high"
                     } else if occ_list.len() > 2 {
                         "medium"
                     } else {
                         "low"
                     };
+                    if public_surface && occ_list.len() > 1 {
+                        severity = "high";
+                    }
                     let reason = if occ_list.len() == 1 {
                         "single_export"
                     } else if occ_list.iter().any(|(_, _, kind, _)| kind == "reexport") {
@@ -869,6 +1041,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                         "duplicateScore": score,
                         "severity": severity,
                         "reason": reason,
+                        "publicSurface": public_surface,
                     }));
 
                     if occ_list.len() > 1 {
@@ -880,6 +1053,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                             "size": occ_list.len(),
                             "severity": severity,
                             "reason": reason,
+                            "publicSurface": public_surface,
                         }));
                     }
                 }
@@ -932,7 +1106,15 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                     let mut paths: Vec<_> = occs.iter().map(|(p, _, _, _)| p.clone()).collect();
                     paths.sort();
                     paths.dedup();
-                    dead_symbols.push(json!({"name": name, "paths": paths}));
+                    let public_surface = paths.iter().any(|p| {
+                        p.ends_with("index.ts")
+                            || p.ends_with("index.tsx")
+                            || p.ends_with("mod.rs")
+                            || p.ends_with("lib.rs")
+                    });
+                    dead_symbols.push(
+                        json!({"name": name, "paths": paths, "publicSurface": public_surface}),
+                    );
                 }
             }
             dead_symbols.sort_by(|a, b| {
@@ -1026,6 +1208,15 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                     "defaultExportChains": default_export_chains,
                     "suspiciousBarrels": suspicious_barrels,
                     "deadSymbols": dead_symbols,
+                    "coverage": {
+                        "frontendCommandCount": fe_commands.len(),
+                        "backendHandlerCount": be_commands.len(),
+                        "missingCount": missing_handlers.len(),
+                        "unusedCount": unused_handlers.len(),
+                        "renamedHandlers": renamed_handlers,
+                        "callsWithGenerics": calls_with_generics,
+                    },
+                    "tsconfig": tsconfig_summary,
                     "ciSummary": {
                         "duplicateClustersCount": duplicate_clusters_count,
                         "maxClusterSize": max_cluster_size,
