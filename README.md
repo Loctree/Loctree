@@ -30,7 +30,7 @@ Common use cases:
 ## Stack and entry points
 
 - Rust (primary native CLI)
-    - Package: `loc_tree_rs` (Cargo binary `loctree` at `loc_tree_rs/src/main.rs`)
+    - Package: `loctree_rs` (Cargo binary `loctree` at `loctree_rs/src/main.rs`)
 - Node.js (ESM script)
     - Entry: `loctree.mjs`
 - Python (single-file script)
@@ -145,9 +145,9 @@ CLI flags (all runtimes):
 
 Runtime-specific entry points:
 
-- Rust: `loc_tree_rs/` via cargo
-    - Run: `cargo run --quiet --manifest-path loc_tree_rs/Cargo.toml -- . --summary`
-    - Build binary locally: `cargo build --release --manifest-path loc_tree_rs/Cargo.toml`
+- Rust: `loctree_rs/` via cargo
+    - Run: `cargo run --quiet --manifest-path loctree_rs/Cargo.toml -- . --summary`
+    - Build binary locally: `cargo build --release --manifest-path loctree_rs/Cargo.toml`
 - Node: `node loctree.mjs . --summary`
 - Python: `python3 loctree.py . --summary`
 
@@ -207,7 +207,7 @@ Selected files and directories:
 ├─ loctree.mjs            # Node.js ESM CLI
 ├─ loctree.py             # Python CLI
 ├─ loctree.sh             # Example shell helper (not part of main CLI)
-├─ loc_tree_rs/           # Rust crate (binary `loctree`)
+├─ loctree_rs/           # Rust crate (binary `loctree`)
 │  ├─ Cargo.toml
 │  └─ src/main.rs
 ├─ tools/
