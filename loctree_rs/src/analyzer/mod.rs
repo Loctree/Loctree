@@ -7,6 +7,7 @@ pub mod html;
 mod insights;
 pub mod js;
 pub mod open_server;
+mod pipelines;
 pub mod py;
 pub mod regexes;
 pub mod report;
