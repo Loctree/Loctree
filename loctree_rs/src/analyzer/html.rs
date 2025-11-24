@@ -225,24 +225,89 @@ fn render_graph_stub(out: &mut String, section: &ReportSection) {
 }
 
 fn render_section(out: &mut String, section: &ReportSection) {
+    let root_id = section
+        .root
+        .replace(|c: char| !c.is_ascii_alphanumeric(), "_");
+    out.push_str("<section class=\"report-section\">");
     out.push_str(&format!(
-        "<h2>{}</h2><p class=\"muted\">Files analyzed: {}</p>",
+        "<div class=\"section-head\"><div><h2>{}</h2><p class=\"muted\">Files analyzed: {}</p></div><span class=\"pill\">Graph is docked in the drawer below</span></div>",
         escape_html(&section.root),
         section.files_analyzed
     ));
 
+    out.push_str(&format!(
+        "<div class=\"tab-bar\" data-tab-scope=\"{id}\">\
+            <button class=\"active\" data-tab=\"{id}-overview\">Overview</button>\
+            <button data-tab=\"{id}-dups\">Duplicates</button>\
+            <button data-tab=\"{id}-dynamic\">Dynamic imports</button>\
+            <button data-tab=\"{id}-commands\">Tauri coverage</button>\
+            <button data-tab=\"{id}-graph\">Graph</button>\
+        </div>",
+        id = escape_html(&root_id),
+    ));
+
+    out.push_str(&format!(
+        "<div class=\"tab-content active\" data-tab-panel=\"{}-overview\">",
+        escape_html(&root_id)
+    ));
     render_ai_insights(out, section);
+    out.push_str("</div>");
+
+    out.push_str(&format!(
+        "<div class=\"tab-content\" data-tab-panel=\"{}-dups\">",
+        escape_html(&root_id)
+    ));
     render_duplicate_exports(out, section);
     render_cascades(out, section);
+    out.push_str("</div>");
+
+    out.push_str(&format!(
+        "<div class=\"tab-content\" data-tab-panel=\"{}-dynamic\">",
+        escape_html(&root_id)
+    ));
     render_dynamic_imports(out, section);
+    out.push_str("</div>");
+
+    out.push_str(&format!(
+        "<div class=\"tab-content\" data-tab-panel=\"{}-commands\">",
+        escape_html(&root_id)
+    ));
     render_command_coverage(out, section);
+    out.push_str("</div>");
+
+    out.push_str(&format!(
+        "<div class=\"tab-content\" data-tab-panel=\"{}-graph\">",
+        escape_html(&root_id)
+    ));
+    out.push_str("<div class=\"graph-anchor\"><strong>Import graph</strong><span class=\"muted\">Graph lives in the bottom drawer. Use fit/reset/filter controls there.</span></div>");
     render_graph_stub(out, section);
+    out.push_str("</div>");
+    out.push_str("</section>");
 }
 
 fn render_graph_bootstrap(out: &mut String) {
     out.push_str(r#"<script src="loctree-cytoscape.min.js"></script>"#);
     out.push_str("<script>");
     out.push_str(GRAPH_BOOTSTRAP);
+    out.push_str(
+        r#"
+(() => {
+  document.querySelectorAll(".tab-bar").forEach((bar) => {
+    const scope = bar.dataset.tabScope || "";
+    bar.querySelectorAll("button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        bar.querySelectorAll("button").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        const target = btn.dataset.tab;
+        document.querySelectorAll(`[data-tab-panel^="${scope}-"]`).forEach((panel) => {
+          panel.classList.toggle("active", panel.dataset.tabPanel === target);
+        });
+      });
+    });
+  });
+})();
+"#,
+    );
     out.push_str("</script>");
 }
 
@@ -264,13 +329,20 @@ pub(crate) fn render_html_report(path: &Path, sections: &[ReportSection]) -> io:
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'none'; font-src 'self' data:;">
 <title>loctree import/export report</title>
 <style>
-body{font-family:system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif;margin:24px;line-height:1.5;}
-h1,h2,h3{margin-bottom:0.2em;}
+body{font-family:system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif;margin:24px;line-height:1.5;padding-bottom:520px;}
+h1,h2,h3{margin-bottom:0.2em;margin-top:0;}
 table{border-collapse:collapse;width:100%;margin:0.5em 0;}
 th,td{border:1px solid #ddd;padding:6px 8px;font-size:14px;}
 th{background:#f5f5f5;text-align:left;}
 code{background:#f6f8fa;padding:2px 4px;border-radius:4px;}
 .muted{color:#666;}
+.section-head{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;}
+.pill{background:#eef2ff;color:#2b2f3a;padding:4px 8px;border-radius:12px;font-size:12px;}
+.tab-bar{display:flex;gap:8px;margin:12px 0 6px 0;flex-wrap:wrap;}
+.tab-bar button{border:1px solid #cfd4de;background:#f7f9fc;border-radius:10px;padding:6px 10px;cursor:pointer;font-weight:600;}
+.tab-bar button.active{background:#4f81e1;color:#fff;border-color:#4f81e1;box-shadow:0 4px 16px rgba(0,0,0,.12);}
+.tab-content{display:none;padding:8px 0;}
+.tab-content.active{display:block;}
 .graph{height:520px;border:1px solid #ddd;border-radius:8px;margin:12px 0;}
 .command-table td{vertical-align:top;}
 .command-list{margin:0;padding-left:1.1rem;columns:2;column-gap:1.4rem;list-style:disc;}
@@ -298,6 +370,8 @@ code{background:#f6f8fa;padding:2px 4px;border-radius:4px;}
 .command-col{width:50%;}
 .module-header{font-weight:700;margin-top:4px;}
 .module-group{margin-bottom:10px;}
+.graph-anchor{margin-top:14px;font-size:13px;color:#444;}
+.graph-anchor .muted{display:block;margin-top:4px;}
 .graph-drawer{position:fixed;left:16px;right:16px;bottom:12px;z-index:1100;background:#f5f7fb;border:1px solid #cfd4de;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.25);padding:8px 10px;}
 .graph-drawer{max-height:82vh;overflow:auto;}
 .graph-drawer.collapsed{opacity:0.9;}
@@ -314,6 +388,9 @@ code{background:#f6f8fa;padding:2px 4px;border-radius:4px;}
 .dark .graph-drawer-header button{background:#111522;color:#e9ecf5;border-color:#2a2f3a;}
 .dark .component-panel{background:#0f131c;border-color:#2a2f3a;}
 .dark .component-chip{background:#1f2635;color:#e9ecf5;}
+.dark .pill{background:#1f2635;color:#e9ecf5;}
+.dark .tab-bar button{background:#0f131c;color:#e9ecf5;border-color:#2a2f3a;}
+.dark .tab-bar button.active{background:#4f81e1;color:#fff;border-color:#4f81e1;}
 </style>
 </head><body>
 <h1>loctree import/export analysis</h1>

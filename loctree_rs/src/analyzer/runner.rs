@@ -719,11 +719,35 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                             "exportType": e.export_type,
                             "line": e.line,
                         })).collect::<Vec<_>>(),
-                        "commandCalls": command_calls.iter().map(|c| json!({"name": c.name, "line": c.line, "genericType": c.generic_type})).collect::<Vec<_>>(),
-                        "commandHandlers": command_handlers.iter().map(|c| json!({"name": c.name, "line": c.line, "exposedName": c.exposed_name})).collect::<Vec<_>>(),
+                        "commandCalls": command_calls.iter().map(|c| json!({
+                            "name": c.name,
+                            "line": c.line,
+                            "genericType": c.generic_type,
+                            "payload": c.payload,
+                        })).collect::<Vec<_>>(),
+                        "commandHandlers": command_handlers.iter().map(|c| json!({
+                            "name": c.name,
+                            "line": c.line,
+                            "exposedName": c.exposed_name,
+                            "payload": c.payload,
+                        })).collect::<Vec<_>>(),
                         "events": {
-                            "emit": event_emits.iter().map(|e| json!({"name": e.name, "line": e.line, "kind": e.kind})).collect::<Vec<_>>(),
-                            "listen": event_listens.iter().map(|e| json!({"name": e.name, "line": e.line, "kind": e.kind})).collect::<Vec<_>>(),
+                            "emit": event_emits.iter().map(|e| json!({
+                                "name": e.name,
+                                "rawName": e.raw_name,
+                                "line": e.line,
+                                "kind": e.kind,
+                                "payload": e.payload,
+                                "awaited": e.awaited,
+                            })).collect::<Vec<_>>(),
+                            "listen": event_listens.iter().map(|e| json!({
+                                "name": e.name,
+                                "rawName": e.raw_name,
+                                "line": e.line,
+                                "kind": e.kind,
+                                "payload": e.payload,
+                                "awaited": e.awaited,
+                            })).collect::<Vec<_>>(),
                         },
                     }));
                 }
