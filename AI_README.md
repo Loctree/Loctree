@@ -1,6 +1,6 @@
 # loctree – fast reference for agents (CLI & outputs)
 
-This is a concise, up-to-date guide for how to drive loctree as of 0.3.5, focused on analyzer mode and machine-readable outputs.
+This is a concise, up-to-date guide for how to drive loctree as of 0.3.6, focused on analyzer mode and machine-readable outputs.
 
 ## Modes
 - **Tree/LOC (default)**: `loctree <roots> [options]` – prints an ASCII tree with LOC highlights.
@@ -22,10 +22,14 @@ This is a concise, up-to-date guide for how to drive loctree as of 0.3.5, focuse
 
 Graph safety: defaults `MAX_GRAPH_NODES=8000`, `MAX_GRAPH_EDGES=12000`; overridable via `--max-nodes/--max-edges`. When limits hit, graph is skipped and a warning is logged (visible with `--verbose` in CLI; also shown in HTML if present).
 
+Python notes (0.3.6):
+- `--py-root <path>` (repeatable) lets you add extra Python package roots for resolution.
+- Imports now carry `resolutionKind` (local|stdlib|dynamic|unknown) and `isTypeChecking` in JSON; `__all__` is expanded for star imports when available; dynamic imports (`importlib.import_module`, `__import__`) are tagged.
+
 ## JSON shape (analyzer)
 Schema is declared in the report:
-- Top-level: `schema`, `schemaVersion` (currently `1.1.0`), `generatedAt` (UTC RFC3339), `rootDir`, `root`, `languages`, `filesAnalyzed`, `duplicateExports*`, `reexportCascades`, `dynamicImports`, `commands`, `commands2`, `symbols`, `clusters`, `aiViews`, `files`.
-- Files: stable `id`, `path` (relative to root), `loc`, `language`, `kind` (`code|test|story|config|generated`), `isTest`, `isGenerated`, imports (`sourceRaw`, `resolvedPath`, `isBareModule`, symbols with `name/alias`, kind), exports (`name`, `kind`, `exportType`, `line`), reexports (`star/named` + resolved), command calls/handlers with lines.
+- Top-level: `schema`, `schemaVersion` (currently `1.2.0`), `generatedAt` (UTC RFC3339), `rootDir`, `root`, `languages`, `filesAnalyzed`, `duplicateExports*`, `reexportCascades`, `dynamicImports`, `commands`, `commands2`, `symbols`, `clusters`, `aiViews`, `files`.
+- Files: stable `id`, `path` (relative to root), `loc`, `language`, `kind` (`code|test|story|config|generated`), `isTest`, `isGenerated`, imports (`sourceRaw`, `resolvedPath`, `isBareModule`, `resolutionKind`, `isTypeChecking`, symbols with `name/alias`, kind), exports (`name`, `kind`, `exportType`, `line`), reexports (`star/named` + resolved), command calls/handlers with lines.
 - Derived sections:
   - `commands2`: canonical handler per command + call sites + status (`ok|missing_handler|unused_handler`).
   - `symbols`/`clusters`: occurrences with canonical pick, severity, duplicateScore, reasons (+`publicSurface` hint for barrels/index/mod.rs).

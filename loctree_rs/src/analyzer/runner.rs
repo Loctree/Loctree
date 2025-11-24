@@ -30,6 +30,7 @@ use super::{
     coverage::{compute_command_gaps, CommandUsage},
     graph::{build_graph_data, MAX_GRAPH_EDGES, MAX_GRAPH_NODES},
     insights::collect_ai_insights,
+    pipelines::build_pipeline_summary,
 };
 use super::{RankedDup, ReportSection};
 
@@ -558,6 +559,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
 
         let (missing_handlers, unused_handlers) =
             compute_command_gaps(&fe_commands, &be_commands, &focus_set, &exclude_set);
+        let pipeline_summary = build_pipeline_summary(&analyses, &focus_set, &exclude_set);
 
         let mut section_open = None;
         if options.report_path.is_some() && options.serve {
@@ -663,6 +665,12 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                     let mut command_handlers = a.command_handlers.clone();
                     command_handlers.sort_by(|x, y| x.line.cmp(&y.line).then(x.name.cmp(&y.name)));
 
+                    let mut event_emits = a.event_emits.clone();
+                    event_emits.sort_by(|x, y| x.line.cmp(&y.line).then(x.name.cmp(&y.name)));
+
+                    let mut event_listens = a.event_listens.clone();
+                    event_listens.sort_by(|x, y| x.line.cmp(&y.line).then(x.name.cmp(&y.name)));
+
                     for imp in &imports {
                         if let Some(resolved) = &imp.resolved_path {
                             imports_targeted.insert(resolved.clone());
@@ -707,6 +715,10 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                         })).collect::<Vec<_>>(),
                         "commandCalls": command_calls.iter().map(|c| json!({"name": c.name, "line": c.line, "genericType": c.generic_type})).collect::<Vec<_>>(),
                         "commandHandlers": command_handlers.iter().map(|c| json!({"name": c.name, "line": c.line, "exposedName": c.exposed_name})).collect::<Vec<_>>(),
+                        "events": {
+                            "emit": event_emits.iter().map(|e| json!({"name": e.name, "line": e.line, "kind": e.kind})).collect::<Vec<_>>(),
+                            "listen": event_listens.iter().map(|e| json!({"name": e.name, "line": e.line, "kind": e.kind})).collect::<Vec<_>>(),
+                        },
                     }));
                 }
             }
@@ -1070,6 +1082,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                 "commands2": commands2,
                 "symbols": symbols_json,
                 "clusters": clusters_json,
+                "pipeline": pipeline_summary,
                 "aiViews": {
                     "defaultExportChains": default_export_chains,
                     "suspiciousBarrels": suspicious_barrels,
@@ -1081,6 +1094,8 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                         "unusedCount": unused_handlers.len(),
                         "renamedHandlers": renamed_handlers,
                         "callsWithGenerics": calls_with_generics,
+                        "ghostEventCount": pipeline_summary["events"]["ghostEmits"].as_array().map(|a| a.len()).unwrap_or(0),
+                        "orphanListenerCount": pipeline_summary["events"]["orphanListeners"].as_array().map(|a| a.len()).unwrap_or(0),
                     },
                     "tsconfig": tsconfig_summary,
                     "ciSummary": {

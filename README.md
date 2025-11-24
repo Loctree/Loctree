@@ -13,8 +13,8 @@ designed to be fast, scriptable, and usable from multiple runtimes: Rust (native
 - Human or JSON output; per-root summary with totals and large files (>= 1000 LOC).
 - Multi-root: pass several paths in one command.
 - Import/export analyzer mode (`-A/--analyze-imports`) surfaces duplicate exports, re-export chains, dynamic imports,
-  CSS `@import`, Rust `use/pub use`/public items, Python `import`/`from` + `__all__` + `importlib`/`__import__`
-  dynamic loads, oraz mapuje komendy Tauri: wywołania FE (`safeInvoke`/`invokeSnake`) vs. backend `#[tauri::command]`
+  CSS `@import`, Rust `use/pub use`/public items, Python `import`/`from` (z `__all__` expansion, stdlib vs local tagging, TYPE_CHECKING-aware imports, dynamic `importlib`/`__import__`),
+  oraz mapuje komendy Tauri: wywołania FE (`safeInvoke`/`invokeSnake`) vs. backend `#[tauri::command]`
   (brakujące/nieużywane handlery w CLI/JSON/HTML). Z `--serve` linki w HTML otwierają pliki w edytorze/OS (domyślnie
   `code -g` lub `open`/`xdg-open`).
 

@@ -136,6 +136,13 @@ pub struct CommandRef {
 }
 
 #[derive(Clone)]
+pub struct EventRef {
+    pub name: String,
+    pub line: usize,
+    pub kind: String,
+}
+
+#[derive(Clone)]
 pub struct FileAnalysis {
     pub path: String,
     pub loc: usize,
@@ -149,6 +156,8 @@ pub struct FileAnalysis {
     pub exports: Vec<ExportSymbol>,
     pub command_calls: Vec<CommandRef>,
     pub command_handlers: Vec<CommandRef>,
+    pub event_emits: Vec<EventRef>,
+    pub event_listens: Vec<EventRef>,
 }
 
 impl ImportEntry {
@@ -193,6 +202,8 @@ impl FileAnalysis {
             exports: Vec::new(),
             command_calls: Vec::new(),
             command_handlers: Vec::new(),
+            event_emits: Vec::new(),
+            event_listens: Vec::new(),
         }
     }
 }

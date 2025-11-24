@@ -161,3 +161,11 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 ---
 
 Release notes are generated from the last 5 commits on the default branch (`main`).
+## [0.3.6] - 2025-11-25
+
+### Added
+- Python analyzer: TYPE_CHECKING-aware imports (`isTypeChecking`), dynamic import tagging (`importlib.import_module`, `__import__`), `__all__` expansion for star imports, and stdlib vs local disambiguation (`resolutionKind`).
+- New flag `--py-root <path>` (repeatable) to add extra Python package roots for resolution.
+
+### Changed
+- JSON schema bumped to `1.2.0`; per-import records now include `resolutionKind` and `isTypeChecking`. Fixtures count as dev noise in duplicate scoring.
