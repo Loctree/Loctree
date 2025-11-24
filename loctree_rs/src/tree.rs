@@ -168,6 +168,9 @@ pub fn run_tree(root_list: &[PathBuf], parsed: &crate::args::ParsedArgs) -> io::
         report_path: None,
         serve: false,
         editor_cmd: None,
+        max_graph_nodes: parsed.max_graph_nodes,
+        max_graph_edges: parsed.max_graph_edges,
+        verbose: parsed.verbose,
     };
 
     let mut json_results = Vec::new();

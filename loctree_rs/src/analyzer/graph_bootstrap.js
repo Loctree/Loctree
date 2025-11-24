@@ -15,8 +15,9 @@
     const mainComponentId = g.mainComponent || 0;
     const openBase = g.openBase || null;
 
-    const useDrawer = graphs.length === 1;
+    const useDrawer = true;
     let drawerBody = null;
+    const originalParent = container.parentNode;
     if (useDrawer) {
       const drawer = document.createElement('div');
       drawer.className = 'graph-drawer';
@@ -25,11 +26,14 @@
       header.innerHTML = '<button data-role="drawer-toggle">hide graph</button><span>Import graph</span>';
       drawerBody = document.createElement('div');
       drawerBody.className = 'graph-drawer-body';
-      container.parentNode.insertBefore(drawer, container);
-      drawerBody.appendChild(container);
       drawer.appendChild(header);
       drawer.appendChild(drawerBody);
-      document.body.appendChild(drawer);
+      drawerBody.appendChild(container);
+      if (originalParent) {
+        originalParent.appendChild(drawer);
+      } else {
+        document.body.appendChild(drawer);
+      }
       container.style.height = '460px';
       const toggle = header.querySelector('[data-role="drawer-toggle"]');
       let collapsed = false;
@@ -46,7 +50,7 @@
     }
 
     // Component controls
-    const targetParent = drawerBody || container.parentNode;
+    const targetParent = drawerBody || container.parentNode || originalParent;
     const componentBar = document.createElement('div');
     componentBar.className = 'graph-toolbar component-toolbar';
     componentBar.innerHTML = `
@@ -70,7 +74,7 @@
         <button data-role="component-show-isolates">Show isolates</button>
       </span>
     `;
-    targetParent.insertBefore(componentBar, container);
+    if (targetParent) targetParent.insertBefore(componentBar, container);
 
     // Controls
     const toolbar = document.createElement('div');
@@ -98,7 +102,7 @@
         <span><span class="legend-dot" style="background:#d1830f"></span> detached</span>
       </div>
     `;
-    targetParent.insertBefore(toolbar, container);
+    if (targetParent) targetParent.insertBefore(toolbar, componentBar.nextSibling);
 
     const componentPanel = document.createElement('div');
     componentPanel.className = 'component-panel';
@@ -115,12 +119,12 @@
         <tbody data-role="component-table"></tbody>
       </table>
     `;
-    targetParent.insertBefore(componentPanel, container);
+    if (targetParent) targetParent.insertBefore(componentPanel, toolbar.nextSibling);
 
     const hint = document.createElement('div');
     hint.className = 'graph-hint';
     hint.textContent = 'Component filter selects an island (or small islands) and highlights nodes; slider sets threshold for small components. Text filter still matches node paths.';
-    targetParent.insertBefore(hint, container);
+    if (targetParent) targetParent.insertBefore(hint, componentPanel.nextSibling);
 
     const componentSelect = componentBar.querySelector('[data-role="component-filter"]');
     const sizeSlider = componentBar.querySelector('[data-role="component-threshold"]');

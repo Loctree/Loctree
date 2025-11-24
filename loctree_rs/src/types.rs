@@ -41,6 +41,9 @@ pub struct Options {
     pub serve: bool,
     #[allow(dead_code)]
     pub editor_cmd: Option<String>,
+    pub max_graph_nodes: Option<usize>,
+    pub max_graph_edges: Option<usize>,
+    pub verbose: bool,
 }
 
 pub struct LineEntry {

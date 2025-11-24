@@ -225,8 +225,6 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
 
     let mut ignore_exact: HashSet<String> = HashSet::new();
     let mut ignore_prefixes: Vec<String> = Vec::new();
-    let effective_max_nodes = parsed.max_graph_nodes.unwrap_or(MAX_GRAPH_NODES);
-    let effective_max_edges = parsed.max_graph_edges.unwrap_or(MAX_GRAPH_EDGES);
 
     if let Some(preset_name) = parsed.ignore_symbols_preset.as_deref() {
         if let Some(set) = preset_ignore_symbols(preset_name) {
@@ -303,7 +301,17 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             report_path: parsed.report_path.clone(),
             serve: parsed.serve,
             editor_cmd: parsed.editor_cmd.clone(),
+            max_graph_nodes: parsed.max_graph_nodes,
+            max_graph_edges: parsed.max_graph_edges,
+            verbose: parsed.verbose,
         };
+
+        let effective_max_nodes = options.max_graph_nodes.unwrap_or(MAX_GRAPH_NODES);
+        let effective_max_edges = options.max_graph_edges.unwrap_or(MAX_GRAPH_EDGES);
+
+        if options.verbose {
+            eprintln!("[loctree][debug] analyzing root {}", root_path.display());
+        }
 
         let git_checker = if options.use_gitignore {
             GitIgnoreChecker::new(root_path)
@@ -596,6 +604,17 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                 );
                 graph_warning = warn;
                 graph_data = graph;
+                if options.verbose {
+                    if let Some(w) = &graph_warning {
+                        eprintln!("[loctree][debug] graph warning: {}", w);
+                    } else {
+                        eprintln!(
+                            "[loctree][debug] graph ready: nodes={}, edges={}",
+                            graph_data.as_ref().map(|g| g.nodes.len()).unwrap_or(0),
+                            graph_data.as_ref().map(|g| g.edges.len()).unwrap_or(0)
+                        );
+                    }
+                }
             }
 
             report_sections.push(ReportSection {
@@ -1143,15 +1162,26 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                     err
                 ))
             })?;
-            eprintln!("[loctree] JSON written to {}", path.display());
+            if parsed.verbose {
+                eprintln!("[loctree][debug] wrote JSON to {}", path.display());
+            } else {
+                eprintln!("[loctree] JSON written to {}", path.display());
+            }
         } else {
             println!("{}", payload);
         }
     }
 
     if let Some(report_path) = parsed.report_path.as_ref() {
+        if let Some(dir) = report_path.parent() {
+            fs::create_dir_all(dir)?;
+        }
         render_html_report(report_path, &report_sections)?;
-        eprintln!("[loctree] HTML report written to {}", report_path.display());
+        if parsed.verbose {
+            eprintln!("[loctree][debug] wrote HTML to {}", report_path.display());
+        } else {
+            eprintln!("[loctree] HTML report written to {}", report_path.display());
+        }
         open_in_browser(report_path);
     }
 

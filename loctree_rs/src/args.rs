@@ -30,6 +30,7 @@ pub struct ParsedArgs {
     pub editor_cmd: Option<String>,
     pub max_graph_nodes: Option<usize>,
     pub max_graph_edges: Option<usize>,
+    pub verbose: bool,
 }
 
 impl Default for ParsedArgs {
@@ -61,6 +62,7 @@ impl Default for ParsedArgs {
             editor_cmd: None,
             max_graph_nodes: None,
             max_graph_edges: None,
+            verbose: false,
         }
     }
 }
@@ -234,6 +236,10 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
             }
             "--graph" => {
                 parsed.graph = true;
+                i += 1;
+            }
+            "--verbose" | "-v" => {
+                parsed.verbose = true;
                 i += 1;
             }
             "--show-hidden" | "-H" => {

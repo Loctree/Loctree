@@ -236,6 +236,9 @@ mod tests {
             report_path: None,
             serve: false,
             editor_cmd: None,
+            max_graph_nodes: None,
+            max_graph_edges: None,
+            verbose: false,
         }
     }
 
@@ -294,6 +297,9 @@ mod tests {
             report_path: None,
             serve: false,
             editor_cmd: None,
+            max_graph_nodes: None,
+            max_graph_edges: None,
+            verbose: false,
         };
         let mut visited = HashSet::new();
         gather_files(root, &opts, 0, None, &mut visited, &mut files).expect("gather files");

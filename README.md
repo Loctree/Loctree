@@ -124,6 +124,7 @@ CLI flags (all runtimes):
 - `--jsonl`              Analyzer: one JSON object per line (per root).
 - `--html-report <file>` Write analyzer results to an HTML report file.
 - `--graph`              Embed an interactive import graph in the HTML report (Cytoscape.js is self-hosted for CSP/offline).
+- `--verbose`            Extra debug logs (paths for outputs, graph warnings).
 - `--max-nodes <n>`      Override graph safety limit (default 8000).
 - `--max-edges <n>`      Override graph safety limit (default 12000).
 - `--serve`              Start a tiny local server that hosts the HTML report and opens links in your editor/OS.
@@ -138,6 +139,7 @@ CLI flags (all runtimes):
 - `--fail-on-duplicates <N>` Analyzer: exit 2 if duplicate-export groups exceed N (for CI).
 - `--fail-on-dynamic <N>`   Analyzer: exit 2 if files with dynamic imports exceed N (for CI).
 - `--json-out <file>`    Analyzer: write JSON to a file (creates parent dirs; warns on overwrite; rejects directory paths).
+- `--html-report <file>` Analyzer: write HTML report (parent dirs created automatically).
 
 Runtime-specific entry points:
 
