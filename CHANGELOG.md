@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
-## [0.3.9] - 2025-11-24
+## [0.3.9] - 2025-11-25
 
 ### Added
 - `--ai` concise output mode that emits a compact JSON summary with top issues instead of full per-file payloads.
@@ -16,7 +16,7 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 ### Fixed
 - Resolved clippy warning in the open-server editor launcher (mutable closure), no functional change.
 
-## [0.3.8] - 2025-11-22
+## [0.3.8] - 2025-11-24
 
 ### Added
 - Report UI reorganized into tabs (Overview / Duplicates / Dynamic imports / Tauri coverage / Graph anchor) with a dedicated bottom drawer for the graph and controls.
@@ -26,6 +26,15 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 ### Fixed
 - Dark-mode toggle in the graph drawer no longer panics when Cytoscape style is not ready.
 - Resolved stray brace/formatting issues in CLI help output.
+
+## [0.3.6] - 2025-11-23
+
+### Added
+- Python analyzer: TYPE_CHECKING-aware imports (`isTypeChecking`), dynamic import tagging (`importlib.import_module`, `__import__`), `__all__` expansion for star imports, and stdlib vs local disambiguation (`resolutionKind`).
+- New flag `--py-root <path>` (repeatable) to add extra Python package roots for resolution.
+
+### Changed
+- JSON schema bumped to `1.2.0`; per-import records now include `resolutionKind` and `isTypeChecking`. Fixtures count as dev noise in duplicate scoring.
 
 ## [0.3.5] - 2025-11-24
 
@@ -184,11 +193,3 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 ---
 
 Release notes are generated from the last 5 commits on the default branch (`main`).
-## [0.3.6] - 2025-11-25
-
-### Added
-- Python analyzer: TYPE_CHECKING-aware imports (`isTypeChecking`), dynamic import tagging (`importlib.import_module`, `__import__`), `__all__` expansion for star imports, and stdlib vs local disambiguation (`resolutionKind`).
-- New flag `--py-root <path>` (repeatable) to add extra Python package roots for resolution.
-
-### Changed
-- JSON schema bumped to `1.2.0`; per-import records now include `resolutionKind` and `isTypeChecking`. Fixtures count as dev noise in duplicate scoring.

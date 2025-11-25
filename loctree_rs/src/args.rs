@@ -261,6 +261,7 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
                 parsed.ai_mode = true;
                 parsed.output = OutputMode::Json;
                 parsed.summary = true;
+                parsed.mode = Mode::AnalyzeImports;
                 i += 1;
             }
             "--help" | "-h" => {

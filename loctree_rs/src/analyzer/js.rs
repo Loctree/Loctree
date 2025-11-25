@@ -121,6 +121,9 @@ pub(crate) fn analyze_js_file(
         )
     };
 
+    // Best-effort await detection: checks the current line immediately preceding the call.
+    // Note: does not scan multi-line awaits (e.g., await on prior line). This is intentionally
+    // lightweight to avoid full AST parsing; callers should treat awaited = false as a heuristic.
     let is_awaited = |start: usize| -> bool {
         let prefix = &content[..start];
         if let Some(line) = prefix.rsplit('\n').next() {
