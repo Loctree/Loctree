@@ -1241,6 +1241,12 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                 .cloned()
                 .unwrap_or_default();
 
+            let bridge_limit = parsed.summary_limit.max(50);
+            let mut bridges_for_ai = Vec::new();
+            for cmd in commands2.iter().take(bridge_limit) {
+                bridges_for_ai.push(cmd.clone());
+            }
+
             if parsed.ai_mode {
                 let top_limit = parsed.summary_limit;
                 let mut event_alerts = Vec::new();
@@ -1308,10 +1314,12 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                         "pipelineRisks": pipeline_risks.iter().take(top_limit).cloned().collect::<Vec<_>>(),
                         "deadSymbols": dead_symbols.iter().take(parsed.top_dead_symbols).cloned().collect::<Vec<_>>(),
                         "duplicateClusters": top_clusters,
+                        "bridges": bridges_for_ai,
                     },
                     "limits": {
                         "topItems": top_limit,
                         "topDeadSymbols": parsed.top_dead_symbols,
+                        "bridges": bridge_limit,
                     }
                 });
 

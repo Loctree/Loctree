@@ -561,6 +561,10 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
         parsed.mode = Mode::AnalyzeImports;
         parsed.graph = true;
         parsed.use_gitignore = true;
+        if parsed.ignore_patterns.is_empty() {
+            parsed.ignore_patterns
+                .extend(["node_modules", "dist", "target", "build", "coverage", "docs/*.json"].iter().map(|s| s.to_string()));
+        }
         if parsed.ignore_symbols.is_none() && parsed.ignore_symbols_preset.is_none() {
             parsed.ignore_symbols_preset = Some("tauri".to_string());
         }

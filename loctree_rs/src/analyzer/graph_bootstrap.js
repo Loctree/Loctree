@@ -14,36 +14,14 @@
     components.forEach((c) => componentMap.set(c.id, c));
     const detachedSet = new Set(components.filter((c) => c.detached).map((c) => c.id));
     const openBase = g.openBase || null;
+    let cyDrawer = null;
+    let drawerDarkChk = null;
 
-    // Drawer shell
-    const drawer = document.createElement("div");
-    drawer.className = "graph-drawer";
-    const header = document.createElement("div");
-    header.className = "graph-drawer-header";
-    header.innerHTML = '<button data-role="drawer-toggle">hide graph</button><span>Import graph</span>';
-    const drawerBody = document.createElement("div");
-    drawerBody.className = "graph-drawer-body";
-    drawer.appendChild(header);
-    drawer.appendChild(drawerBody);
     const originalParent = container.parentNode;
-    drawerBody.appendChild(container);
-    (originalParent || document.body).appendChild(drawer);
-    container.style.height = "460px";
-    const toggle = header.querySelector('[data-role="drawer-toggle"]');
-    let collapsed = false;
-    const applyCollapse = () => {
-      drawer.classList.toggle("collapsed", collapsed);
-      drawerBody.style.display = collapsed ? "none" : "block";
-      toggle.textContent = collapsed ? "show graph" : "hide graph";
-    };
-    header.addEventListener("click", () => {
-      collapsed = !collapsed;
-      applyCollapse();
-    });
-    applyCollapse();
+    container.style.height = "520px";
 
-    // Component controls
-    const targetParent = drawerBody || container.parentNode || originalParent;
+    // Component controls stay in the main Graph tab
+    const targetParent = originalParent || container.parentNode;
     const componentBar = document.createElement("div");
     componentBar.className = "graph-toolbar component-toolbar";
     componentBar.innerHTML = `
@@ -361,13 +339,27 @@
         download(`${g.id}-graph.json`, JSON.stringify(payload, null, 2), "application/json");
       });
 
+    const syncDarkToggles = (on) => {
+      if (darkChk) darkChk.checked = on;
+      if (drawerDarkChk) drawerDarkChk.checked = on;
+    };
     const applyDark = (on) => {
+      syncDarkToggles(on);
       document.documentElement.classList.toggle("dark", on);
-      if (!cy || typeof cy.style !== "function") return;
-      const style = cy.style();
-      if (!style) return;
-      style.selector("node").style("color", on ? "#eef2ff" : "#fff").update();
-      style.selector("edge").style("text-background-color", on ? "#0f1115" : "#fff").update();
+      if (cy && typeof cy.style === "function") {
+        const style = cy.style();
+        if (style) {
+          style.selector("node").style("color", on ? "#eef2ff" : "#fff").update();
+          style.selector("edge").style("text-background-color", on ? "#0f1115" : "#fff").update();
+        }
+      }
+      if (cyDrawer && typeof cyDrawer.style === "function") {
+        const style = cyDrawer.style();
+        if (style) {
+          style.selector("node").style("color", on ? "#eef2ff" : "#fff").update();
+          style.selector("edge").style("text-background-color", on ? "#0f1115" : "#fff").update();
+        }
+      }
     };
     if (darkChk) darkChk.addEventListener("change", () => applyDark(darkChk.checked));
 
@@ -559,6 +551,133 @@
       inp.addEventListener("input", () => applyFilters());
       inp.addEventListener("change", () => applyFilters());
     });
+
+    // Drawer (floating) with minimal controls + graph
+    const drawer = document.createElement("div");
+    drawer.className = "graph-drawer";
+    const header = document.createElement("div");
+    header.className = "graph-drawer-header";
+    header.innerHTML = '<button data-role="drawer-toggle">hide graph</button><span>Import graph</span>';
+    const drawerBody = document.createElement("div");
+    drawerBody.className = "graph-drawer-body";
+    const drawerToolbar = document.createElement("div");
+    drawerToolbar.className = "graph-toolbar";
+    drawerToolbar.innerHTML = `
+      <label>filter: <input type="text" size="16" data-role="drawer-filter" placeholder="substring" /></label>
+      <label>min degree: <input type="number" min="0" value="0" style="width:60px" data-role="drawer-min-degree" /></label>
+      <label><input type="checkbox" data-role="drawer-labels" checked /> labels</label>
+      <span class="graph-controls">
+        <button data-role="drawer-fit">fit</button>
+        <button data-role="drawer-reset">reset</button>
+        <label><input type="checkbox" data-role="drawer-dark" /> dark</label>
+        <button data-role="drawer-fullscreen">fullscreen</button>
+        <button data-role="drawer-png">png</button>
+      </span>
+    `;
+    const drawerCanvas = document.createElement("div");
+    drawerCanvas.className = "graph";
+    drawerCanvas.style.height = "420px";
+    drawerBody.appendChild(drawerToolbar);
+    drawerBody.appendChild(drawerCanvas);
+    drawer.appendChild(header);
+    drawer.appendChild(drawerBody);
+    document.body.appendChild(drawer);
+
+    const toggle = header.querySelector('[data-role="drawer-toggle"]');
+    let collapsed = false;
+    const applyCollapse = () => {
+      drawer.classList.toggle("collapsed", collapsed);
+      drawerBody.style.display = collapsed ? "none" : "block";
+      toggle.textContent = collapsed ? "show graph" : "hide graph";
+    };
+    header.addEventListener("click", () => {
+      collapsed = !collapsed;
+      applyCollapse();
+    });
+    applyCollapse();
+
+    const drawerElements = buildElements();
+    cyDrawer = cytoscape({
+      container: drawerCanvas,
+      elements: drawerElements,
+      style: [
+        { selector: "node", style: { label: "data(label)", "font-size": 10, "text-wrap": "wrap", "text-max-width": 120, "background-color": "data(color)", color: "#fff", width: "data(size)", height: "data(size)", "overlay-padding": 8, "overlay-opacity": 0 } },
+        { selector: "edge", style: { "curve-style": "bezier", width: 1.1, "line-color": "data(color)", "target-arrow-color": "data(color)", "target-arrow-shape": "triangle", "arrow-scale": 0.7, label: "", "font-size": 9, "text-background-color": "#fff", "text-background-opacity": 0.8, "text-background-padding": 2 } },
+      ],
+      layout: { name: "preset", animate: false, fit: true },
+    });
+
+    const drawerFilter = drawerToolbar.querySelector('[data-role="drawer-filter"]');
+    const drawerMinDeg = drawerToolbar.querySelector('[data-role="drawer-min-degree"]');
+    const drawerLabels = drawerToolbar.querySelector('[data-role="drawer-labels"]');
+    drawerDarkChk = drawerToolbar.querySelector('[data-role="drawer-dark"]');
+    const drawerFit = drawerToolbar.querySelector('[data-role="drawer-fit"]');
+    const drawerReset = drawerToolbar.querySelector('[data-role="drawer-reset"]');
+    const drawerFs = drawerToolbar.querySelector('[data-role="drawer-fullscreen"]');
+    const drawerPng = drawerToolbar.querySelector('[data-role="drawer-png"]');
+
+    const applyDrawerFilters = () => {
+      let nodes = drawerElements.nodes.map((n) => ({ data: { ...n.data }, position: { ...n.position } }));
+      let edges = drawerElements.edges.map((e) => ({ data: { ...e.data } }));
+      const txt = (drawerFilter?.value || "").toLowerCase();
+      const minDeg = parseInt(drawerMinDeg?.value || "0", 10) || 0;
+      if (txt) nodes = nodes.filter((n) => (n.data.id || "").toLowerCase().includes(txt));
+      const nodeSet = new Set(nodes.map((n) => n.data.id));
+      edges = edges.filter((e) => nodeSet.has(e.data.source) && nodeSet.has(e.data.target));
+      if (minDeg > 0) {
+        const deg = {};
+        edges.forEach((e) => {
+          deg[e.data.source] = (deg[e.data.source] || 0) + 1;
+          deg[e.data.target] = (deg[e.data.target] || 0) + 1;
+        });
+        nodes = nodes.filter((n) => (deg[n.data.id] || 0) >= minDeg);
+        const filt = new Set(nodes.map((n) => n.data.id));
+        edges = edges.filter((e) => filt.has(e.data.source) && filt.has(e.data.target));
+      }
+      cyDrawer.elements().remove();
+      cyDrawer.add({ nodes, edges });
+      const labelsOn = drawerLabels?.checked && nodes.length <= 800;
+      cyDrawer.style().selector("node").style("label", labelsOn ? "data(label)" : "").update();
+      cyDrawer.layout({ name: "preset", animate: false, fit: true }).run();
+    };
+
+    if (drawerFilter) drawerFilter.addEventListener("input", applyDrawerFilters);
+    if (drawerMinDeg) drawerMinDeg.addEventListener("input", applyDrawerFilters);
+    if (drawerLabels) drawerLabels.addEventListener("change", applyDrawerFilters);
+    if (drawerFit) drawerFit.addEventListener("click", () => cyDrawer.fit());
+    if (drawerReset)
+      drawerReset.addEventListener("click", () => {
+        cyDrawer.elements().remove();
+        cyDrawer.add(drawerElements);
+        cyDrawer.layout({ name: "preset", animate: false, fit: true }).run();
+        applyDrawerFilters();
+      });
+    if (drawerPng)
+      drawerPng.addEventListener("click", () => {
+        const dark = drawerDarkChk && drawerDarkChk.checked;
+        const dataUrl = cyDrawer.png({ bg: dark ? "#0f1115" : "#ffffff", full: true, scale: 2 });
+        const a = document.createElement("a");
+        a.href = dataUrl;
+        a.download = `${g.id}-graph.png`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      });
+    if (drawerFs && drawerCanvas.requestFullscreen) {
+      drawerFs.addEventListener("click", () => {
+        if (document.fullscreenElement) {
+          document.exitFullscreen();
+        } else {
+          drawerCanvas.requestFullscreen().catch(() => {});
+        }
+      });
+      document.addEventListener("fullscreenchange", () => {
+        drawerFs.textContent = document.fullscreenElement ? "exit fullscreen" : "fullscreen";
+        if (!document.fullscreenElement) cyDrawer.fit();
+      });
+    }
+    if (drawerDarkChk) drawerDarkChk.addEventListener("change", () => applyDark(drawerDarkChk.checked));
+    applyDrawerFilters();
 
     renderComponentTable();
     applyFilters();

@@ -4,14 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
-## [0.3.9] - 2025-11-25
+## [0.4.0] - 2025-11-25
 
 ### Added
 - `--ai` concise output mode that emits a compact JSON summary with top issues instead of full per-file payloads.
 - Dead-symbol controls: `--top-dead-symbols` (default 20) to cap lists and `--skip-dead-symbols` to omit them entirely.
+- AI/bridge payload now keeps a compact list of FE↔BE Tauri command mappings (`bridges`) so agents can jump to handlers/call-sites.
 
 ### Changed
 - AI/summary views respect the new limits to reduce noisy output; help/README refreshed to mention the AI flags and limits.
+- `--preset-tauri` now auto-ignores common build artifacts (`node_modules`, `dist`, `target`, `build`, `coverage`, `docs/*.json`) to cut report noise without extra flags.
 
 ### Fixed
 - Resolved clippy warning in the open-server editor launcher (mutable closure), no functional change.
