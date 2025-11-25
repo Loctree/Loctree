@@ -437,7 +437,10 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             loc_map.insert(analysis.path.clone(), analysis.loc);
             for exp in &analysis.exports {
                 let name_lc = exp.name.to_lowercase();
-                if analysis.path.ends_with(".d.ts") && name_lc == "default" {
+                let is_decl = [".d.ts", ".d.tsx", ".d.mts", ".d.cts"]
+                    .iter()
+                    .any(|ext| analysis.path.ends_with(ext));
+                if is_decl && name_lc == "default" {
                     continue;
                 }
                 let ignored = ignore_exact.contains(&name_lc)
