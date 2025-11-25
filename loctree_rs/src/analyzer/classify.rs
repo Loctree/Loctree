@@ -83,3 +83,48 @@ pub fn language_from_path(path: &str) -> String {
         .to_lowercase();
     detect_language(&ext)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_dev_and_non_dev_files() {
+        assert!(is_dev_file("features/__tests__/thing.ts"));
+        assert!(is_dev_file("components/Button.stories.tsx"));
+        assert!(is_dev_file("fixtures/foo.rs"));
+        assert!(!is_dev_file("src/app.tsx"));
+    }
+
+    #[test]
+    fn classifies_file_kinds_and_flags() {
+        let (kind, test, gen) = file_kind("src/generated/foo.gen.ts");
+        assert_eq!(kind, "generated");
+        assert!(!test);
+        assert!(gen);
+
+        let (kind, test, gen) = file_kind("src/components/Button.story.tsx");
+        assert_eq!(kind, "story");
+        assert!(!gen);
+        assert!(!test);
+
+        let (kind, test, _) = file_kind("src/__tests__/foo.test.ts");
+        assert_eq!(kind, "test");
+        assert!(test);
+
+        let (kind, _, _) = file_kind("config/vite.config.ts");
+        assert_eq!(kind, "config");
+
+        let (kind, _, _) = file_kind("src/features/app.tsx");
+        assert_eq!(kind, "code");
+    }
+
+    #[test]
+    fn detects_language_from_path() {
+        assert_eq!(language_from_path("foo/bar.tsx"), "ts");
+        assert_eq!(language_from_path("foo/bar.rs"), "rs");
+        assert_eq!(language_from_path("foo/bar.py"), "py");
+        assert_eq!(language_from_path("foo/bar.css"), "css");
+        assert_eq!(language_from_path("foo/bar.unknown"), "unknown");
+    }
+}

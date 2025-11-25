@@ -144,3 +144,62 @@ pub fn summarize_tsconfig(root: &Path, analyses: &[FileAnalysis]) -> serde_json:
         "excludedSamples": excluded_samples,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{FileAnalysis, ImportEntry, ImportKind};
+    use tempfile::tempdir;
+
+    #[test]
+    fn summarizes_aliases_and_include_exclude() {
+        let dir = tempdir().expect("tmpdir");
+        let tsconfig = r#"
+        {
+          "compilerOptions": {
+            "baseUrl": ".",
+            "paths": {
+              "@/*": ["src/*"]
+            }
+          },
+          "include": ["src/**/*"],
+          "exclude": ["**/ignored/**"]
+        }
+        "#;
+        let ts_path = dir.path().join("tsconfig.json");
+        std::fs::write(&ts_path, tsconfig).expect("write tsconfig");
+
+        let mut analyses = Vec::new();
+        let mut a = FileAnalysis::new("src/main.ts".into());
+        a.imports.push(ImportEntry::new("@/.something".into(), ImportKind::Static));
+        analyses.push(a);
+        analyses.push(FileAnalysis::new("ignored/file.ts".into()));
+        analyses.push(FileAnalysis::new("outside/file.ts".into()));
+
+        let summary = summarize_tsconfig(dir.path(), &analyses);
+        assert!(summary.get("found").and_then(|v| v.as_bool()).unwrap_or(false));
+        assert_eq!(summary.get("aliasCount").and_then(|v| v.as_u64()), Some(1));
+
+        let binding: Vec<serde_json::Value> = Vec::new();
+        let unresolved = summary
+            .get("unresolvedAliases")
+            .and_then(|v| v.as_array())
+            .unwrap_or(&binding);
+        // target directory doesn't exist in tmpdir
+        assert_eq!(unresolved.len(), 1);
+
+        let outside_binding: Vec<serde_json::Value> = Vec::new();
+        let outside = summary
+            .get("outsideIncludeSamples")
+            .and_then(|v| v.as_array())
+            .unwrap_or(&outside_binding);
+        assert!(outside.iter().any(|v| v.as_str() == Some("outside/file.ts")));
+
+        let excluded_binding: Vec<serde_json::Value> = Vec::new();
+        let excluded = summary
+            .get("excludedSamples")
+            .and_then(|v| v.as_array())
+            .unwrap_or(&excluded_binding);
+        assert!(excluded.iter().any(|v| v.as_str() == Some("ignored/file.ts")));
+    }
+}

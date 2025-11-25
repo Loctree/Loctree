@@ -392,3 +392,129 @@ pub fn build_pipeline_summary(
         "risks": risks,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{CommandRef, EventRef, FileAnalysis};
+
+    fn mk_event(name: &str, line: usize, kind: &str, awaited: bool) -> EventRef {
+        EventRef {
+            raw_name: Some(name.to_string()),
+            name: name.to_string(),
+            line,
+            kind: kind.to_string(),
+            awaited,
+            payload: None,
+        }
+    }
+
+    #[test]
+    fn detects_ghost_orphan_and_command_chain_status() {
+        let mut fe_commands: HashMap<String, Vec<(String, usize, String)>> = HashMap::new();
+        fe_commands.insert(
+            "unified_ai_chat".into(),
+            vec![("src/frontend.ts".into(), 3, "unified_ai_chat".into())],
+        );
+        fe_commands.insert(
+            "missing_cmd".into(),
+            vec![("src/frontend.ts".into(), 4, "missing_cmd".into())],
+        );
+
+        let mut be_commands: HashMap<String, Vec<(String, usize, String)>> = HashMap::new();
+        be_commands.insert(
+            "unified_ai_chat".into(),
+            vec![("src/backend.rs".into(), 15, "unified_ai_chat".into())],
+        );
+        be_commands.insert(
+            "unused_cmd".into(),
+            vec![("src/backend.rs".into(), 20, "unused_cmd".into())],
+        );
+
+        let fe_payloads: HashMap<String, Vec<(String, usize, Option<String>)>> = HashMap::new();
+        let be_payloads: HashMap<String, Vec<(String, usize, Option<String>)>> = HashMap::new();
+
+        // FE file with matching emit/listen
+        let mut fe = FileAnalysis::new("src/frontend.ts".into());
+        fe.event_emits.push(mk_event("vista://ok", 10, "emit_literal", false));
+        fe.event_listens
+            .push(mk_event("vista://ok", 5, "listen_literal", true));
+        fe.command_calls.push(CommandRef {
+            name: "unified_ai_chat".into(),
+            exposed_name: None,
+            line: 3,
+            generic_type: None,
+            payload: None,
+        });
+
+        // BE file emitting ghost event and handling command
+        let mut be = FileAnalysis::new("src/backend.rs".into());
+        be.event_emits
+            .push(mk_event("vista://ghost", 20, "emit_literal", false));
+        be.command_handlers.push(CommandRef {
+            name: "unified_ai_chat".into(),
+            exposed_name: None,
+            line: 15,
+            generic_type: None,
+            payload: None,
+        });
+
+        // Racy file: invoke before listener and not awaited
+        let mut racy = FileAnalysis::new("src/racy.ts".into());
+        racy.command_calls.push(CommandRef {
+            name: "racy_cmd".into(),
+            exposed_name: None,
+            line: 1,
+            generic_type: None,
+            payload: None,
+        });
+        racy.event_listens
+            .push(mk_event("vista://racy", 10, "listen_literal", false));
+
+        let analyses = vec![fe, be, racy];
+        let summary = build_pipeline_summary(
+            &analyses,
+            &None,
+            &None,
+            &fe_commands,
+            &be_commands,
+            &fe_payloads,
+            &be_payloads,
+        );
+
+        let events = summary["events"]
+            .as_object()
+            .expect("events section present");
+        let ghost = events["ghostEmits"]
+            .as_array()
+            .expect("ghostEmits array present");
+        assert!(ghost.iter().any(|g| g["name"] == "vista://ghost"));
+
+        let orphans = events["orphanListeners"]
+            .as_array()
+            .expect("orphanListeners array present");
+        assert!(orphans.iter().any(|o| o["name"] == "vista://racy"));
+
+        let chains = summary["commands"]["chains"]
+            .as_array()
+            .expect("chains array");
+        let status_map: HashMap<_, _> = chains
+            .iter()
+            .map(|c| {
+                (
+                    c.get("name").and_then(|n| n.as_str()).unwrap_or_default(),
+                    c.get("status").and_then(|s| s.as_str()).unwrap_or_default(),
+                )
+            })
+            .collect();
+        assert_eq!(status_map.get("unified_ai_chat"), Some(&"ok"));
+        assert_eq!(status_map.get("missing_cmd"), Some(&"missing_handler"));
+        assert_eq!(status_map.get("unused_cmd"), Some(&"unused_handler"));
+
+        let risks = summary["risks"]
+            .as_array()
+            .expect("risks array present");
+        assert!(risks.iter().any(|r| r["type"] == "invoke_before_listen"));
+        assert!(risks.iter().any(|r| r["type"] == "listen_not_awaited"));
+    }
+}

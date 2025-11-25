@@ -13,3 +13,20 @@ pub(crate) fn analyze_css_file(content: &str, relative: String) -> FileAnalysis 
 
     analysis
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_css_imports() {
+        let content = r#"
+        @import "base.css";
+        @import url("theme.css");
+        "#;
+        let analysis = analyze_css_file(content, "styles/main.css".to_string());
+        assert_eq!(analysis.imports.len(), 2);
+        assert_eq!(analysis.imports[0].source, "base.css");
+        assert_eq!(analysis.imports[1].source, "theme.css");
+    }
+}
