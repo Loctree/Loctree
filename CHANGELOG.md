@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
+## [0.4.1] - 2025-11-25
+
+### Fixed
+- TS path resolver now walks parent dirs to find `tsconfig.json` (or a base in parent), merges `extends`, parses JSONC/JSON5 (tsconfig with comments/trailing commas), and canonicalizes `baseUrl/paths`, so aliases like `@/*` resolve instead of returning null even when tsconfig lives above the scanned root.
+
 ## [0.4.0] - 2025-11-25
 
 ### Added

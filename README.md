@@ -8,6 +8,11 @@ designed to be fast, scriptable, and usable from multiple runtimes: Rust (native
 
 ## Overview
 
+Highlights (0.4.1):
+- AI mode (`--ai`) now keeps a compact FE↔BE Tauri bridges list so agents can jump to handlers/call-sites without 8 MB JSON.
+- `--preset-tauri` auto-ignores common build artifacts (`node_modules`, `dist`, `target`, `build`, `coverage`, `docs/*.json`) to cut noise by default.
+- TS path resolver follows `tsconfig` `extends` and canonicalizes `baseUrl/paths`, so aliases like `@/*` resolve instead of returning `null`.
+
 - Filters by extension (`--ext rs,ts,tsx,py,...`) and prunes non-matching branches.
 - Respects `.gitignore` (`-g`), custom ignores (`-I`), and max depth (`-L`).
 - Human or JSON output; per-root summary with totals and large files (>= 1000 LOC).

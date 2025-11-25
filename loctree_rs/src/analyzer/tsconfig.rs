@@ -1,4 +1,3 @@
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
@@ -29,12 +28,37 @@ fn build_globset(patterns: &[String]) -> Option<GlobSet> {
 }
 
 fn load_tsconfig(root: &Path) -> Option<serde_json::Value> {
-    let ts_path = root.join("tsconfig.json");
-    if !ts_path.exists() {
-        return None;
+    let ts_path = find_tsconfig(root)?;
+    let content = std::fs::read_to_string(&ts_path).ok()?;
+    parse_tsconfig_value(&content)
+}
+
+fn find_tsconfig(start: &Path) -> Option<PathBuf> {
+    let mut current = start
+        .canonicalize()
+        .ok()
+        .unwrap_or_else(|| start.to_path_buf());
+    loop {
+        let candidate = current.join("tsconfig.json");
+        if candidate.exists() {
+            return Some(candidate);
+        }
+        if let Some(parent) = current.parent() {
+            if parent == current {
+                break;
+            }
+            current = parent.to_path_buf();
+        } else {
+            break;
+        }
     }
-    let content = fs::read_to_string(&ts_path).ok()?;
-    serde_json::from_str(&content).ok()
+    None
+}
+
+fn parse_tsconfig_value(content: &str) -> Option<serde_json::Value> {
+    serde_json::from_str(content)
+        .ok()
+        .or_else(|| json5::from_str::<serde_json::Value>(content).ok())
 }
 
 pub fn summarize_tsconfig(root: &Path, analyses: &[FileAnalysis]) -> serde_json::Value {
@@ -171,13 +195,17 @@ mod tests {
 
         let mut analyses = Vec::new();
         let mut a = FileAnalysis::new("src/main.ts".into());
-        a.imports.push(ImportEntry::new("@/.something".into(), ImportKind::Static));
+        a.imports
+            .push(ImportEntry::new("@/.something".into(), ImportKind::Static));
         analyses.push(a);
         analyses.push(FileAnalysis::new("ignored/file.ts".into()));
         analyses.push(FileAnalysis::new("outside/file.ts".into()));
 
         let summary = summarize_tsconfig(dir.path(), &analyses);
-        assert!(summary.get("found").and_then(|v| v.as_bool()).unwrap_or(false));
+        assert!(summary
+            .get("found")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false));
         assert_eq!(summary.get("aliasCount").and_then(|v| v.as_u64()), Some(1));
 
         let binding: Vec<serde_json::Value> = Vec::new();
@@ -193,13 +221,17 @@ mod tests {
             .get("outsideIncludeSamples")
             .and_then(|v| v.as_array())
             .unwrap_or(&outside_binding);
-        assert!(outside.iter().any(|v| v.as_str() == Some("outside/file.ts")));
+        assert!(outside
+            .iter()
+            .any(|v| v.as_str() == Some("outside/file.ts")));
 
         let excluded_binding: Vec<serde_json::Value> = Vec::new();
         let excluded = summary
             .get("excludedSamples")
             .and_then(|v| v.as_array())
             .unwrap_or(&excluded_binding);
-        assert!(excluded.iter().any(|v| v.as_str() == Some("ignored/file.ts")));
+        assert!(excluded
+            .iter()
+            .any(|v| v.as_str() == Some("ignored/file.ts")));
     }
 }

@@ -1,18 +1,22 @@
-# loctree – szybki przewodnik dla agentów (v0.3.8)
+# loctree – szybki przewodnik dla agentów (v0.4.1)
 
-Najważniejsze: `loctree --help` jest teraz podzielone na sekcje (Tree / Analyzer / Common), a raport HTML ma zakładki + dolny drawer z grafem.
+Najważniejsze (0.4.1):
+- `--ai` zawiera kompaktową listę mostów FE↔BE (bridges), więc agent widzi komendę Tauri i jej call-site/handler w ~38 KB JSON.
+- `--preset-tauri` domyślnie ignoruje szum (`node_modules`, `dist`, `target`, `build`, `coverage`, `docs/*.json`).
+- Resolver TS czyta łańcuch `extends` w tsconfig i kanonikalizuje `baseUrl/paths`, więc aliasy `@/*` dostają `resolvedPath` zamiast `null`.
+- `loctree --help` jest podzielone na Tree / Analyzer / Common, raport HTML ma zakładki + dolny drawer z grafem.
 
 ## Instalacja / update (globalnie)
 ```bash
 cargo install --force --path loctree_rs
 # weryfikacja:
-loctree --version   # oczekiwane: 0.3.8
+loctree --version   # oczekiwane: 0.4.1
 ```
 
 ## Tryby
 - **Tree (domyślnie)** – drzewo plików z LOC highlight.
 - **Analyzer (`-A`)** – importy/eksporty, duplikaty, re-eksporty, dynamiczne importy, pokrycie komend Tauri, graf.
-- **Preset Tauri** – `--preset-tauri` ustawia rozszerzenia + preset ignore-symbols dla Tauri.
+- **Preset Tauri** – `--preset-tauri` ustawia rozszerzenia + preset ignore-symbols i auto-ignore artefaktów buildowych.
 
 ## Kluczowe flagi
 ### Tree
@@ -24,7 +28,7 @@ loctree --version   # oczekiwane: 0.3.8
 ### Analyzer (-A)
 - `--ext <list>` – rozszerzenia (domyślnie: ts,tsx,js,jsx,mjs,cjs,rs,css,py).
 - `--limit <N>` – top-N (duplikaty, dynamiczne importy), domyślnie 8.
-- `--ai` – kompaktowy JSON dla agentów (top issues, bez sekcji per-file; dobre do krótkich kontekstów).
+- `--ai` – kompaktowy JSON dla agentów (top issues + bridges, bez sekcji per-file; dobre do krótkich kontekstów).
 - `--top-dead-symbols <N>` / `--skip-dead-symbols` – kontrola listy dead symbols (domyślnie 20 lub całkowicie pomiń).
 - `--ignore-symbols <list>` / `--ignore-symbols-preset common|tauri` – filtr szumu (np. main/run/setup/__all__/test_*).
 - `--focus <glob>` / `--exclude-report <glob>` – filtrowanie widoku duplikatów (analiza pełna).
@@ -46,16 +50,15 @@ loctree --version   # oczekiwane: 0.3.8
 
 ## JSON (schema 1.2.0)
 - `files[*].imports` mają `resolutionKind` (local|stdlib|dynamic|unknown) oraz `isTypeChecking`.
-- `aiViews.commands2` – FE↔BE komendy (status: ok/missing_handler/unused_handler + alias impl).
+- `aiViews.commands2` – FE↔BE komendy (status: ok/missing_handler/unused_handler + alias impl); w `--ai` dostępne w skróconej liście `bridges`.
 - `symbols/clusters` – grupy duplikatów z canonical, score, reasons.
 - `dynamicImports` – statyczne + dynamiczne (importlib/__import__/f-strings).
 - `graphs` – osobno, gdy `--graph` i limity pozwalają.
 
 ## Przykłady (Monika/agent)
-- Pełny scan FE+BE z raportem:
+- Pełny scan FE+BE z raportem (mniej szumu dzięki auto-ignore w preset-tauri):
 ```bash
-cd /Users/monika/hosted/Vistas/vista-develop
-loctree -A src src-tauri/src --ext ts,tsx,rs,css --gitignore --graph \
+loctree -A --preset-tauri src src-tauri/src --graph \
   --exclude-report "**/__tests__/**" \
   --json-out .ai-agents/loctree/reports/loctree.json \
   --html-report .ai-agents/loctree/reports/loctree.html \

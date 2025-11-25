@@ -240,8 +240,6 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
     let mut json_results = Vec::new();
     let mut report_sections: Vec<ReportSection> = Vec::new();
     let mut server_handle = None;
-    let mut fail_reasons: Vec<String> = Vec::new();
-
     let mut ignore_exact: HashSet<String> = HashSet::new();
     let mut ignore_prefixes: Vec<String> = Vec::new();
 
@@ -303,7 +301,38 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
 
     let py_stdlib = python_stdlib_set();
 
-    for (idx, root_path) in root_list.iter().enumerate() {
+    struct RootContext {
+        root_path: PathBuf,
+        _root_canon: PathBuf,
+        options: Options,
+        analyses: Vec<FileAnalysis>,
+        export_index: ExportIndex,
+        _reexport_edges: Vec<(String, Option<String>)>,
+        dynamic_summary: Vec<(String, Vec<String>)>,
+        cascades: Vec<(String, String)>,
+        filtered_ranked: Vec<RankedDup>,
+        graph_edges: Vec<(String, String, String)>,
+        loc_map: HashMap<String, usize>,
+        languages: HashSet<String>,
+        tsconfig_summary: serde_json::Value,
+        calls_with_generics: Vec<serde_json::Value>,
+        renamed_handlers: Vec<serde_json::Value>,
+        _fe_commands: CommandUsage,
+        _be_commands: CommandUsage,
+        _fe_payloads: HashMap<String, Vec<(String, usize, Option<String>)>>,
+        _be_payloads: HashMap<String, Vec<(String, usize, Option<String>)>>,
+    }
+
+    let mut contexts: Vec<RootContext> = Vec::new();
+    let mut global_fe_commands: CommandUsage = HashMap::new();
+    let mut global_be_commands: CommandUsage = HashMap::new();
+    let mut global_fe_payloads: HashMap<String, Vec<(String, usize, Option<String>)>> =
+        HashMap::new();
+    let mut global_be_payloads: HashMap<String, Vec<(String, usize, Option<String>)>> =
+        HashMap::new();
+    let mut global_analyses: Vec<FileAnalysis> = Vec::new();
+
+    for (_idx, root_path) in root_list.iter().enumerate() {
         let ignore_paths = normalise_ignore_patterns(&parsed.ignore_patterns, root_path);
         let root_canon = root_path
             .canonicalize()
@@ -356,8 +385,8 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             verbose: parsed.verbose,
         };
 
-        let effective_max_nodes = options.max_graph_nodes.unwrap_or(MAX_GRAPH_NODES);
-        let effective_max_edges = options.max_graph_edges.unwrap_or(MAX_GRAPH_EDGES);
+        let _effective_max_nodes = options.max_graph_nodes.unwrap_or(MAX_GRAPH_NODES);
+        let _effective_max_edges = options.max_graph_edges.unwrap_or(MAX_GRAPH_EDGES);
 
         if options.verbose {
             eprintln!("[loctree][debug] analyzing root {}", root_path.display());
@@ -436,6 +465,9 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
 
             loc_map.insert(analysis.path.clone(), analysis.loc);
             for exp in &analysis.exports {
+                if exp.kind == "reexport" {
+                    continue;
+                }
                 let name_lc = exp.name.to_lowercase();
                 let is_decl = [".d.ts", ".d.tsx", ".d.mts", ".d.cts"]
                     .iter()
@@ -559,9 +591,36 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             languages.insert(analysis.language.clone());
             analyses.push(analysis);
         }
+
+        for (name, entries) in &fe_commands {
+            global_fe_commands
+                .entry(name.clone())
+                .or_default()
+                .extend(entries.clone());
+        }
+        for (name, entries) in &be_commands {
+            global_be_commands
+                .entry(name.clone())
+                .or_default()
+                .extend(entries.clone());
+        }
+        for (name, entries) in &fe_payloads {
+            global_fe_payloads
+                .entry(name.clone())
+                .or_default()
+                .extend(entries.clone());
+        }
+        for (name, entries) in &be_payloads {
+            global_be_payloads
+                .entry(name.clone())
+                .or_default()
+                .extend(entries.clone());
+        }
+        global_analyses.extend(analyses.iter().cloned());
         let duplicate_exports: Vec<_> = export_index
-            .into_iter()
+            .iter()
             .filter(|(_, files)| files.len() > 1)
+            .map(|(name, files)| (name.clone(), files.clone()))
             .collect();
 
         let reexport_files: HashSet<String> = analyses
@@ -664,589 +723,553 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                 .then(b.files.len().cmp(&a.files.len()))
         });
 
-        let (missing_handlers, unused_handlers) =
-            compute_command_gaps(&fe_commands, &be_commands, &focus_set, &exclude_set);
-        let pipeline_summary = build_pipeline_summary(
-            &analyses,
-            &focus_set,
-            &exclude_set,
-            &fe_commands,
-            &be_commands,
-            &fe_payloads,
-            &be_payloads,
-        );
-        if parsed.fail_on_missing_handlers && !missing_handlers.is_empty() {
-            fail_reasons.push(format!(
-                "{}: missing handlers detected ({})",
-                root_path.display(),
-                missing_handlers.len()
-            ));
-        }
-        if parsed.fail_on_ghost_events {
-            let ghost_count = pipeline_summary["events"]["ghostEmits"]
-                .as_array()
-                .map(|a| a.len())
-                .unwrap_or(0);
-            let orphan_count = pipeline_summary["events"]["orphanListeners"]
-                .as_array()
-                .map(|a| a.len())
-                .unwrap_or(0);
-            if ghost_count + orphan_count > 0 {
-                fail_reasons.push(format!(
-                    "{}: ghost/orphan events detected (ghost: {}, orphan: {})",
-                    root_path.display(),
-                    ghost_count,
-                    orphan_count
-                ));
-            }
-        }
-        if parsed.fail_on_races {
-            let race_count = pipeline_summary["risks"]
-                .as_array()
-                .map(|a| a.len())
-                .unwrap_or(0);
-            if race_count > 0 {
-                fail_reasons.push(format!(
-                    "{}: pipeline race risks detected ({})",
-                    root_path.display(),
-                    race_count
-                ));
-            }
-        }
+        let tsconfig_summary = summarize_tsconfig(root_path, &analyses);
 
-        let mut section_open = None;
-        if options.report_path.is_some() && options.serve {
-            section_open = current_open_base();
-        }
-
-        let mut graph_warning = None;
-        let mut graph_data = None;
-
-        if options.report_path.is_some() {
-            let mut sorted_dyn = dynamic_summary.clone();
-            sorted_dyn.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
-
-            let insights = collect_ai_insights(
-                &analyses,
-                &filtered_ranked,
-                &cascades,
-                &missing_handlers,
-                &unused_handlers,
-            );
-
-            if parsed.graph && options.report_path.is_some() {
-                let (graph, warn) = build_graph_data(
-                    &analyses,
-                    &graph_edges,
-                    &loc_map,
-                    &fe_commands,
-                    &be_commands,
-                    effective_max_nodes,
-                    effective_max_edges,
-                );
-                graph_warning = warn;
-                graph_data = graph;
-                if options.verbose {
-                    if let Some(w) = &graph_warning {
-                        eprintln!("[loctree][debug] graph warning: {}", w);
-                    } else {
-                        eprintln!(
-                            "[loctree][debug] graph ready: nodes={}, edges={}",
-                            graph_data.as_ref().map(|g| g.nodes.len()).unwrap_or(0),
-                            graph_data.as_ref().map(|g| g.edges.len()).unwrap_or(0)
-                        );
-                    }
-                }
-            }
-
-            report_sections.push(ReportSection {
-                insights,
-                root: root_path.display().to_string(),
-                files_analyzed: analyses.len(),
-                ranked_dups: filtered_ranked.clone(),
-                cascades: cascades.clone(),
-                dynamic: sorted_dyn,
-                analyze_limit: options.analyze_limit,
-                missing_handlers: {
-                    let mut v = missing_handlers.clone();
-                    v.sort_by(|a, b| a.name.cmp(&b.name));
-                    v
-                },
-                unused_handlers: {
-                    let mut v = unused_handlers.clone();
-                    v.sort_by(|a, b| a.name.cmp(&b.name));
-                    v
-                },
-                command_counts: (fe_commands.len(), be_commands.len()),
-                open_base: section_open,
-                graph: graph_data,
-                graph_warning,
-            });
-        }
-
-        if matches!(options.output, OutputMode::Json | OutputMode::Jsonl) {
-            let mut sorted_paths: Vec<String> = analyses.iter().map(|a| a.path.clone()).collect();
-            sorted_paths.sort();
-            let file_id_map: HashMap<String, usize> = sorted_paths
-                .iter()
-                .enumerate()
-                .map(|(idx, p)| (p.clone(), idx + 1))
-                .collect();
-
-            let analysis_by_path: HashMap<String, FileAnalysis> = analyses
-                .iter()
-                .map(|a| (a.path.clone(), a.clone()))
-                .collect();
-
-            let mut imports_targeted: HashSet<String> = HashSet::new();
-
-            let mut files_json: Vec<_> = Vec::new();
-            for path in &sorted_paths {
-                if let Some(a) = analysis_by_path.get(path) {
-                    let mut imports = a.imports.clone();
-                    imports.sort_by(|x, y| x.source.cmp(&y.source));
-
-                    let mut reexports = a.reexports.clone();
-                    reexports.sort_by(|x, y| x.source.cmp(&y.source));
-
-                    let mut exports = a.exports.clone();
-                    exports.sort_by(|x, y| x.name.cmp(&y.name));
-
-                    let mut command_calls = a.command_calls.clone();
-                    command_calls.sort_by(|x, y| x.line.cmp(&y.line).then(x.name.cmp(&y.name)));
-
-                    let mut command_handlers = a.command_handlers.clone();
-                    command_handlers.sort_by(|x, y| x.line.cmp(&y.line).then(x.name.cmp(&y.name)));
-
-                    let mut event_emits = a.event_emits.clone();
-                    event_emits.sort_by(|x, y| x.line.cmp(&y.line).then(x.name.cmp(&y.name)));
-
-                    let mut event_listens = a.event_listens.clone();
-                    event_listens.sort_by(|x, y| x.line.cmp(&y.line).then(x.name.cmp(&y.name)));
-
-                    for imp in &imports {
-                        if let Some(resolved) = &imp.resolved_path {
-                            imports_targeted.insert(resolved.clone());
-                        }
-                    }
-                    for re in &reexports {
-                        if let Some(resolved) = &re.resolved {
-                            imports_targeted.insert(resolved.clone());
-                        }
-                    }
-
-                    files_json.push(json!({
-                        "id": file_id_map.get(&a.path).cloned().unwrap_or(0),
-                        "path": a.path,
-                        "loc": a.loc,
-                        "language": a.language,
-                        "kind": a.kind,
-                        "isTest": a.is_test,
-                        "isGenerated": a.is_generated,
-                        "imports": imports.iter().map(|i| json!({
-                            "source": i.source,
-                            "sourceRaw": i.source_raw,
-                            "kind": match i.kind { ImportKind::Static => "static", ImportKind::SideEffect => "side-effect" },
-                            "resolvedPath": i.resolved_path,
-                            "isBareModule": i.is_bare,
-                            "resolutionKind": match i.resolution {
-                                ImportResolutionKind::Local => "local",
-                                ImportResolutionKind::Stdlib => "stdlib",
-                                ImportResolutionKind::Dynamic => "dynamic",
-                                ImportResolutionKind::Unknown => "unknown",
-                            },
-                            "isTypeChecking": i.is_type_checking,
-                            "symbols": i.symbols.iter().map(|s| json!({"name": s.name, "alias": s.alias})).collect::<Vec<_>>(),
-                        })).collect::<Vec<_>>(),
-                        "reexports": reexports.iter().map(|r| {
-                            match &r.kind {
-                                ReexportKind::Star => json!({"source": r.source, "kind": "star", "resolved": r.resolved}),
-                                ReexportKind::Named(names) => json!({"source": r.source, "kind": "named", "names": names, "resolved": r.resolved})
-                            }
-                        }).collect::<Vec<_>>(),
-                        "dynamicImports": a.dynamic_imports,
-                        "exports": exports.iter().map(|e| json!({
-                            "name": e.name,
-                            "kind": e.kind,
-                            "exportType": e.export_type,
-                            "line": e.line,
-                        })).collect::<Vec<_>>(),
-                        "commandCalls": command_calls.iter().map(|c| json!({
-                            "name": c.name,
-                            "line": c.line,
-                            "genericType": c.generic_type,
-                            "payload": c.payload,
-                        })).collect::<Vec<_>>(),
-                        "commandHandlers": command_handlers.iter().map(|c| json!({
-                            "name": c.name,
-                            "line": c.line,
-                            "exposedName": c.exposed_name,
-                            "payload": c.payload,
-                        })).collect::<Vec<_>>(),
-                        "events": {
-                            "emit": event_emits.iter().map(|e| json!({
-                                "name": e.name,
-                                "rawName": e.raw_name,
-                                "line": e.line,
-                                "kind": e.kind,
-                                "payload": e.payload,
-                                "awaited": e.awaited,
-                            })).collect::<Vec<_>>(),
-                            "listen": event_listens.iter().map(|e| json!({
-                                "name": e.name,
-                                "rawName": e.raw_name,
-                                "line": e.line,
-                                "kind": e.kind,
-                                "payload": e.payload,
-                                "awaited": e.awaited,
-                            })).collect::<Vec<_>>(),
-                        },
+        let mut calls_with_generics = Vec::new();
+        for analysis in &analyses {
+            for call in &analysis.command_calls {
+                if let Some(gen) = &call.generic_type {
+                    calls_with_generics.push(json!({
+                        "name": call.name,
+                        "path": analysis.path,
+                        "line": call.line,
+                        "genericType": gen,
                     }));
                 }
             }
+        }
 
-            let mut languages_vec: Vec<_> = languages.iter().cloned().collect();
-            languages_vec.sort();
+        let mut renamed_handlers = Vec::new();
+        for analysis in &analyses {
+            for handler in &analysis.command_handlers {
+                if let Some(exposed) = &handler.exposed_name {
+                    if exposed != &handler.name {
+                        renamed_handlers.push(json!({
+                            "path": analysis.path,
+                            "line": handler.line,
+                            "name": handler.name,
+                            "exposedName": exposed,
+                        }));
+                    }
+                }
+            }
+        }
 
-            let mut all_command_names: Vec<String> = fe_commands
-                .keys()
-                .chain(be_commands.keys())
-                .cloned()
-                .collect();
-            all_command_names.sort();
-            all_command_names.dedup();
+        contexts.push(RootContext {
+            root_path: root_path.clone(),
+            _root_canon: root_canon,
+            options,
+            analyses,
+            export_index,
+            _reexport_edges: reexport_edges,
+            dynamic_summary,
+            cascades,
+            filtered_ranked,
+            graph_edges,
+            loc_map,
+            languages,
+            tsconfig_summary,
+            calls_with_generics,
+            renamed_handlers,
+            _fe_commands: fe_commands,
+            _be_commands: be_commands,
+            _fe_payloads: fe_payloads,
+            _be_payloads: be_payloads,
+        });
+    }
 
-            let missing_set: HashSet<String> =
-                missing_handlers.iter().map(|g| g.name.clone()).collect();
-            let unused_set: HashSet<String> =
-                unused_handlers.iter().map(|g| g.name.clone()).collect();
+    // Cross-root command gaps (fixes multi-root FP for missing/unused handlers)
+    let (global_missing_handlers, global_unused_handlers) =
+        compute_command_gaps(&global_fe_commands, &global_be_commands, &focus_set, &exclude_set);
 
-            let mut commands2 = Vec::new();
-            for name in &all_command_names {
-                let mut handlers = be_commands.get(name).cloned().unwrap_or_default();
-                handlers.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
-                let canonical = handlers.first().map(|(path, line, symbol)| {
-                    json!({
-                        "path": path,
-                        "line": line,
-                        "symbol": symbol,
-                        "language": language_from_path(path),
-                    })
-                });
+    let pipeline_summary = build_pipeline_summary(
+        &global_analyses,
+        &focus_set,
+        &exclude_set,
+        &global_fe_commands,
+        &global_be_commands,
+        &global_fe_payloads,
+        &global_be_payloads,
+    );
 
-                let mut call_sites = fe_commands.get(name).cloned().unwrap_or_default();
-                call_sites.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+    for (idx, ctx) in contexts.into_iter().enumerate() {
+        let RootContext {
+            root_path,
+            options,
+            analyses,
+            export_index,
+            _reexport_edges,
+            dynamic_summary,
+            cascades,
+            filtered_ranked,
+            graph_edges,
+            loc_map,
+            languages,
+            tsconfig_summary,
+            calls_with_generics,
+            renamed_handlers,
+            ..
+        } = ctx;
 
-                let language = canonical
-                    .as_ref()
-                    .and_then(|c| c.get("language").and_then(|v| v.as_str()))
-                    .map(|s| s.to_string())
-                    .or_else(|| {
-                        call_sites
-                            .first()
-                            .map(|(path, _, _)| language_from_path(path))
-                    })
-                    .unwrap_or_default();
+        let fe_commands = &global_fe_commands;
+        let be_commands = &global_be_commands;
+        let _fe_payloads = &global_fe_payloads;
+        let _be_payloads = &global_be_payloads;
 
-                let status = if missing_set.contains(name) {
-                    "missing_handler"
-                } else if unused_set.contains(name) {
-                    "unused_handler"
-                } else {
-                    "ok"
-                };
+        let mut analyses = analyses;
+        resolve_event_constants_across_files(&mut analyses);
 
-                commands2.push(json!({
-                    "name": name,
-                    "kind": if canonical.is_some() { "tauri_command" } else { "custom" },
-                    "language": language,
-                    "canonicalLocation": canonical,
-                    "callSites": call_sites.iter().map(|(path, line, symbol)| json!({
-                        "path": path,
-                        "line": line,
-                        "symbol": symbol,
-                        "language": language_from_path(path),
+        let duplicate_exports: Vec<_> = export_index
+            .into_iter()
+            .filter(|(_, files)| files.len() > 1)
+            .collect();
+
+        let reexport_files: HashSet<String> = analyses
+            .iter()
+            .filter(|a| !a.reexports.is_empty())
+            .map(|a| a.path.clone())
+            .collect();
+
+        let missing_handlers = global_missing_handlers.clone();
+        let unused_handlers = global_unused_handlers.clone();
+
+        let (graph_data, graph_warning) = if parsed.graph && options.report_path.is_some() {
+            build_graph_data(
+                &analyses,
+                &graph_edges,
+                &loc_map,
+                fe_commands,
+                be_commands,
+                options.max_graph_nodes.unwrap_or(MAX_GRAPH_NODES),
+                options.max_graph_edges.unwrap_or(MAX_GRAPH_EDGES),
+            )
+        } else {
+            (None, None)
+        };
+
+        let mut sorted_paths: Vec<String> = analyses.iter().map(|a| a.path.clone()).collect();
+        sorted_paths.sort();
+        let file_id_map: HashMap<String, usize> = sorted_paths
+            .iter()
+            .enumerate()
+            .map(|(idx, p)| (p.clone(), idx + 1))
+            .collect();
+
+        let analysis_by_path: HashMap<String, FileAnalysis> = analyses
+            .iter()
+            .map(|a| (a.path.clone(), a.clone()))
+            .collect();
+
+        let mut imports_targeted: HashSet<String> = HashSet::new();
+        let mut files_json: Vec<_> = Vec::new();
+        for path in &sorted_paths {
+            if let Some(a) = analysis_by_path.get(path) {
+                let mut imports = a.imports.clone();
+                imports.sort_by(|x, y| x.source.cmp(&y.source));
+
+                let mut reexports = a.reexports.clone();
+                reexports.sort_by(|x, y| x.source.cmp(&y.source));
+
+                let mut exports = a.exports.clone();
+                exports.sort_by(|x, y| x.name.cmp(&y.name));
+
+                let mut command_calls = a.command_calls.clone();
+                command_calls.sort_by(|x, y| x.line.cmp(&y.line).then(x.name.cmp(&y.name)));
+
+                let mut command_handlers = a.command_handlers.clone();
+                command_handlers.sort_by(|x, y| x.line.cmp(&y.line).then(x.name.cmp(&y.name)));
+
+                let mut event_emits = a.event_emits.clone();
+                event_emits.sort_by(|x, y| x.line.cmp(&y.line).then(x.name.cmp(&y.name)));
+
+                let mut event_listens = a.event_listens.clone();
+                event_listens.sort_by(|x, y| x.line.cmp(&y.line).then(x.name.cmp(&y.name)));
+
+                for imp in &imports {
+                    if let Some(resolved) = &imp.resolved_path {
+                        imports_targeted.insert(resolved.clone());
+                    }
+                }
+                for re in &reexports {
+                    if let Some(resolved) = &re.resolved {
+                        imports_targeted.insert(resolved.clone());
+                    }
+                }
+
+                files_json.push(json!({
+                    "id": file_id_map.get(&a.path).cloned().unwrap_or(0),
+                    "path": a.path,
+                    "loc": a.loc,
+                    "language": a.language,
+                    "kind": a.kind,
+                    "isTest": a.is_test,
+                    "isGenerated": a.is_generated,
+                    "imports": imports.iter().map(|i| json!({
+                        "source": i.source,
+                        "sourceRaw": i.source_raw,
+                        "kind": match i.kind { ImportKind::Static => "static", ImportKind::SideEffect => "side-effect" },
+                        "resolvedPath": i.resolved_path,
+                        "isBareModule": i.is_bare,
+                        "resolutionKind": match i.resolution {
+                            ImportResolutionKind::Local => "local",
+                            ImportResolutionKind::Stdlib => "stdlib",
+                            ImportResolutionKind::Dynamic => "dynamic",
+                            ImportResolutionKind::Unknown => "unknown",
+                        },
+                        "isTypeChecking": i.is_type_checking,
+                        "symbols": i.symbols.iter().map(|s| json!({"name": s.name, "alias": s.alias})).collect::<Vec<_>>(),
                     })).collect::<Vec<_>>(),
-                    "status": status,
+                    "reexports": reexports.iter().map(|r| {
+                        match &r.kind {
+                            ReexportKind::Star => json!({"source": r.source, "kind": "star", "resolved": r.resolved}),
+                            ReexportKind::Named(names) => json!({"source": r.source, "kind": "named", "names": names, "resolved": r.resolved})
+                        }
+                    }).collect::<Vec<_>>(),
+                    "dynamicImports": a.dynamic_imports,
+                    "exports": exports.iter().map(|e| json!({
+                        "name": e.name,
+                        "kind": e.kind,
+                        "exportType": e.export_type,
+                        "line": e.line,
+                    })).collect::<Vec<_>>(),
+                    "commandCalls": command_calls.iter().map(|c| json!({
+                        "name": c.name,
+                        "line": c.line,
+                        "genericType": c.generic_type,
+                        "payload": c.payload,
+                    })).collect::<Vec<_>>(),
+                    "commandHandlers": command_handlers.iter().map(|c| json!({
+                        "name": c.name,
+                        "line": c.line,
+                        "exposedName": c.exposed_name,
+                        "payload": c.payload,
+                    })).collect::<Vec<_>>(),
+                    "events": {
+                        "emit": event_emits.iter().map(|e| json!({
+                            "name": e.name,
+                            "rawName": e.raw_name,
+                            "line": e.line,
+                            "kind": e.kind,
+                            "payload": e.payload,
+                            "awaited": e.awaited,
+                        })).collect::<Vec<_>>(),
+                        "listen": event_listens.iter().map(|e| json!({
+                            "name": e.name,
+                            "rawName": e.raw_name,
+                            "line": e.line,
+                            "kind": e.kind,
+                            "payload": e.payload,
+                            "awaited": e.awaited,
+                        })).collect::<Vec<_>>(),
+                    },
                 }));
             }
+        }
 
-            let dup_score_map: HashMap<String, &RankedDup> = filtered_ranked
-                .iter()
-                .map(|d| (d.name.clone(), d))
-                .collect();
+        let mut languages_vec: Vec<_> = languages.iter().cloned().collect();
+        languages_vec.sort();
 
-            type SymbolOccurrence = (String, String, String, Option<usize>);
-            let mut symbol_occurrences: HashMap<String, Vec<SymbolOccurrence>> = HashMap::new();
-            for analysis in &analyses {
-                for exp in &analysis.exports {
-                    symbol_occurrences
-                        .entry(exp.name.clone())
-                        .or_default()
-                        .push((
-                            analysis.path.clone(),
-                            exp.export_type.clone(),
-                            exp.kind.clone(),
-                            exp.line,
-                        ));
-                }
-            }
+        let mut all_command_names: Vec<String> = fe_commands
+            .keys()
+            .chain(be_commands.keys())
+            .cloned()
+            .collect();
+        all_command_names.sort();
+        all_command_names.dedup();
 
-            let mut symbols_json = Vec::new();
-            let mut clusters_json = Vec::new();
-            let mut sorted_symbol_names: Vec<_> = symbol_occurrences.keys().cloned().collect();
-            sorted_symbol_names.sort();
+        let missing_set: HashSet<String> = missing_handlers.iter().map(|g| g.name.clone()).collect();
+        let unused_set: HashSet<String> = unused_handlers.iter().map(|g| g.name.clone()).collect();
 
-            let tsconfig_summary = summarize_tsconfig(root_path, &analyses);
-
-            let mut calls_with_generics = Vec::new();
-            for analysis in &analyses {
-                for call in &analysis.command_calls {
-                    if let Some(gen) = &call.generic_type {
-                        calls_with_generics.push(json!({
-                            "name": call.name,
-                            "path": analysis.path,
-                            "line": call.line,
-                            "genericType": gen,
-                        }));
-                    }
-                }
-            }
-
-            let mut renamed_handlers = Vec::new();
-            for analysis in &analyses {
-                for handler in &analysis.command_handlers {
-                    if let Some(exposed) = &handler.exposed_name {
-                        if exposed != &handler.name {
-                            renamed_handlers.push(json!({
-                                "path": analysis.path,
-                                "line": handler.line,
-                                "name": handler.name,
-                                "exposedName": exposed,
-                            }));
-                        }
-                    }
-                }
-            }
-
-            for name in &sorted_symbol_names {
-                if let Some(occ_list) = symbol_occurrences.get(name) {
-                    let canonical_idx = occ_list
-                        .iter()
-                        .enumerate()
-                        .find(|(_, (path, _, _, _))| {
-                            analysis_by_path
-                                .get(path)
-                                .map(|a| !a.is_test && !a.is_generated)
-                                .unwrap_or(false)
-                        })
-                        .map(|(idx, _)| idx)
-                        .unwrap_or(0);
-
-                    let mut occurrences_json = Vec::new();
-                    let mut occurrence_ids = Vec::new();
-                    for (idx, (path, export_type, kind, line)) in occ_list.iter().enumerate() {
-                        let analysis_meta = analysis_by_path.get(path);
-                        let id = format!("symbol:{}#{}", name, idx + 1);
-                        occurrence_ids.push(id.clone());
-                        occurrences_json.push(json!({
-                            "id": id,
-                            "fileId": file_id_map.get(path).cloned().unwrap_or(0),
-                            "path": path,
-                            "exportType": export_type,
-                            "kind": kind,
-                            "line": line,
-                            "isCanonical": idx == canonical_idx,
-                            "viaReexport": kind == "reexport",
-                            "isTestFile": analysis_meta.map(|a| a.is_test).unwrap_or(false),
-                            "isGenerated": analysis_meta.map(|a| a.is_generated).unwrap_or(false),
-                        }));
-                    }
-
-                    let canonical_path = occ_list
-                        .get(canonical_idx)
-                        .map(|(p, _, _, _)| p.clone())
-                        .unwrap_or_default();
-                    let public_surface = canonical_path.ends_with("index.ts")
-                        || canonical_path.ends_with("index.tsx")
-                        || canonical_path.ends_with("mod.rs")
-                        || canonical_path.ends_with("lib.rs");
-
-                    let score = dup_score_map
-                        .get(name)
-                        .map(|d| d.score)
-                        .unwrap_or(occ_list.len());
-                    let mut severity = if occ_list.len() > 5 {
-                        "high"
-                    } else if occ_list.len() > 2 {
-                        "medium"
-                    } else {
-                        "low"
-                    };
-                    if public_surface && occ_list.len() > 1 {
-                        severity = "high";
-                    }
-                    let reason = if occ_list.len() == 1 {
-                        "single_export"
-                    } else if occ_list.iter().any(|(_, _, kind, _)| kind == "reexport") {
-                        "reexport_chain"
-                    } else {
-                        "multiple_exports"
-                    };
-
-                    symbols_json.push(json!({
-                        "id": format!("symbol:{}", name),
-                        "name": name,
-                        "occurrences": occurrences_json,
-                        "duplicateScore": score,
-                        "severity": severity,
-                        "reason": reason,
-                        "publicSurface": public_surface,
-                    }));
-
-                    if occ_list.len() > 1 {
-                        clusters_json.push(json!({
-                            "symbolName": name,
-                            "symbolId": format!("symbol:{}", name),
-                            "occurrenceIds": occurrence_ids,
-                            "canonicalOccurrenceId": format!("symbol:{}#{}", name, canonical_idx + 1),
-                            "size": occ_list.len(),
-                            "severity": severity,
-                            "reason": reason,
-                            "publicSurface": public_surface,
-                        }));
-                    }
-                }
-            }
-
-            let mut default_export_chains: Vec<_> = cascades
-                .iter()
-                .map(|(from, to)| json!({"chain": [from, to], "length": 2}))
-                .collect();
-            default_export_chains
-                .sort_by(|a, b| a["chain"].to_string().cmp(&b["chain"].to_string()));
-
-            let mut suspicious_barrels = Vec::new();
-            for analysis in &analyses {
-                if !analysis.reexports.is_empty() {
-                    let star_count = analysis
-                        .reexports
-                        .iter()
-                        .filter(|r| matches!(r.kind, ReexportKind::Star))
-                        .count();
-                    if analysis.reexports.len() >= 3 || star_count > 0 {
-                        let dup_in_cluster = symbol_occurrences
-                            .iter()
-                            .filter(|(_, occs)| {
-                                occs.len() > 1
-                                    && occs.iter().any(|(path, _, _, _)| path == &analysis.path)
-                            })
-                            .count();
-                        suspicious_barrels.push(json!({
-                            "path": analysis.path,
-                            "reexportCount": analysis.reexports.len(),
-                            "exportStarCount": star_count,
-                            "duplicatesInClusterCount": dup_in_cluster,
-                        }));
-                    }
-                }
-            }
-            suspicious_barrels.sort_by(|a, b| {
-                let a_path = a["path"].as_str().unwrap_or("");
-                let b_path = b["path"].as_str().unwrap_or("");
-                a_path.cmp(b_path)
+        let mut commands2 = Vec::new();
+        for name in &all_command_names {
+            let mut handlers = be_commands.get(name).cloned().unwrap_or_default();
+            handlers.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+            let canonical = handlers.first().map(|(path, line, symbol)| {
+                json!({
+                    "path": path,
+                    "line": line,
+                    "symbol": symbol,
+                    "language": language_from_path(path),
+                })
             });
 
-            let mut dead_symbols = Vec::new();
-            if !parsed.skip_dead_symbols {
-                for (name, occs) in &symbol_occurrences {
-                    if occs
-                        .iter()
-                        .all(|(path, _, _, _)| !imports_targeted.contains(path))
-                    {
-                        let mut paths: Vec<_> = occs.iter().map(|(p, _, _, _)| p.clone()).collect();
-                        paths.sort();
-                        paths.dedup();
-                        let public_surface = paths.iter().any(|p| {
-                            p.ends_with("index.ts")
-                                || p.ends_with("index.tsx")
-                                || p.ends_with("mod.rs")
-                                || p.ends_with("lib.rs")
-                        });
-                        dead_symbols.push(
-                            json!({"name": name, "paths": paths, "publicSurface": public_surface}),
-                        );
-                    }
-                }
-                dead_symbols.sort_by(|a, b| {
-                    let a_name = a["name"].as_str().unwrap_or("");
-                    let b_name = b["name"].as_str().unwrap_or("");
-                    a_name.cmp(b_name)
-                });
-                dead_symbols.truncate(parsed.top_dead_symbols);
-            }
+            let mut call_sites = fe_commands.get(name).cloned().unwrap_or_default();
+            call_sites.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
 
-            let duplicate_clusters_count = clusters_json.len();
-            let max_cluster_size = symbol_occurrences
-                .values()
-                .map(|v| v.len())
-                .max()
-                .unwrap_or(0);
-            let mut top_clusters = Vec::new();
-            let mut sorted_by_size: Vec<_> = symbol_occurrences
-                .iter()
-                .filter(|(_, v)| v.len() > 1)
-                .collect();
-            sorted_by_size.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then(a.0.cmp(b.0)));
-            for (name, occs) in sorted_by_size.into_iter().take(5) {
-                let severity = if occs.len() > 5 {
+            let language = canonical
+                .as_ref()
+                .and_then(|c| c.get("language").and_then(|v| v.as_str()))
+                .map(|s| s.to_string())
+                .or_else(|| call_sites.first().map(|(path, _, _)| language_from_path(path)))
+                .unwrap_or_default();
+
+            let status = if missing_set.contains(name) {
+                "missing_handler"
+            } else if unused_set.contains(name) {
+                "unused_handler"
+            } else {
+                "ok"
+            };
+
+            commands2.push(json!({
+                "name": name,
+                "kind": if canonical.is_some() { "tauri_command" } else { "custom" },
+                "language": language,
+                "canonicalLocation": canonical,
+                "callSites": call_sites.iter().map(|(path, line, symbol)| json!({
+                    "path": path,
+                    "line": line,
+                    "symbol": symbol,
+                    "language": language_from_path(path),
+                })).collect::<Vec<_>>(),
+                "status": status,
+            }));
+        }
+
+        let dup_score_map: HashMap<String, &RankedDup> = filtered_ranked
+            .iter()
+            .map(|d| (d.name.clone(), d))
+            .collect();
+
+        type SymbolOccurrence = (String, String, String, Option<usize>);
+        let mut symbol_occurrences: HashMap<String, Vec<SymbolOccurrence>> = HashMap::new();
+        for analysis in &analyses {
+            for exp in &analysis.exports {
+                symbol_occurrences
+                    .entry(exp.name.clone())
+                    .or_default()
+                    .push((
+                        analysis.path.clone(),
+                        exp.export_type.clone(),
+                        exp.kind.clone(),
+                        exp.line,
+                    ));
+            }
+        }
+
+        let mut symbols_json = Vec::new();
+        let mut clusters_json = Vec::new();
+        let mut sorted_symbol_names: Vec<_> = symbol_occurrences.keys().cloned().collect();
+        sorted_symbol_names.sort();
+
+        for name in &sorted_symbol_names {
+            if let Some(occ_list) = symbol_occurrences.get(name) {
+                let canonical_idx = occ_list
+                    .iter()
+                    .enumerate()
+                    .find(|(_, (path, _, _, _))| {
+                        analysis_by_path
+                            .get(path)
+                            .map(|a| !a.is_test && !a.is_generated)
+                            .unwrap_or(false)
+                    })
+                    .map(|(idx, _)| idx)
+                    .unwrap_or(0);
+
+                let mut occurrences_json = Vec::new();
+                let mut occurrence_ids = Vec::new();
+                for (idx, (path, export_type, kind, line)) in occ_list.iter().enumerate() {
+                    let analysis_meta = analysis_by_path.get(path);
+                    let id = format!("symbol:{}#{}", name, idx + 1);
+                    occurrence_ids.push(id.clone());
+                    occurrences_json.push(json!({
+                        "id": id,
+                        "fileId": file_id_map.get(path).cloned().unwrap_or(0),
+                        "path": path,
+                        "exportType": export_type,
+                        "kind": kind,
+                        "line": line,
+                        "isCanonical": idx == canonical_idx,
+                        "viaReexport": kind == "reexport",
+                        "isTestFile": analysis_meta.map(|a| a.is_test).unwrap_or(false),
+                        "isGenerated": analysis_meta.map(|a| a.is_generated).unwrap_or(false),
+                    }));
+                }
+
+                let canonical_path = occ_list
+                    .get(canonical_idx)
+                    .map(|(p, _, _, _)| p.clone())
+                    .unwrap_or_default();
+                let public_surface = canonical_path.ends_with("index.ts")
+                    || canonical_path.ends_with("index.tsx")
+                    || canonical_path.ends_with("mod.rs")
+                    || canonical_path.ends_with("lib.rs");
+
+                let score = dup_score_map
+                    .get(name)
+                    .map(|d| d.score)
+                    .unwrap_or(occ_list.len());
+                let mut severity = if occ_list.len() > 5 {
                     "high"
-                } else if occs.len() > 2 {
+                } else if occ_list.len() > 2 {
                     "medium"
                 } else {
                     "low"
                 };
-                top_clusters.push(json!({
-                    "symbolName": name,
-                    "size": occs.len(),
+                if public_surface && occ_list.len() > 1 {
+                    severity = "high";
+                }
+                let reason = if occ_list.len() == 1 {
+                    "single_export"
+                } else if occ_list.iter().any(|(_, _, kind, _)| kind == "reexport") {
+                    "reexport_chain"
+                } else {
+                    "multiple_exports"
+                };
+
+                symbols_json.push(json!({
+                    "id": format!("symbol:{}", name),
+                    "name": name,
+                    "occurrences": occurrences_json,
+                    "duplicateScore": score,
                     "severity": severity,
+                    "reason": reason,
+                    "publicSurface": public_surface,
                 }));
+
+                if occ_list.len() > 1 {
+                    clusters_json.push(json!({
+                        "symbolName": name,
+                        "symbolId": format!("symbol:{}", name),
+                        "occurrenceIds": occurrence_ids,
+                        "canonicalOccurrenceId": format!("symbol:{}#{}", name, canonical_idx + 1),
+                        "size": occ_list.len(),
+                        "severity": severity,
+                        "reason": reason,
+                        "publicSurface": public_surface,
+                    }));
+                }
             }
+        }
 
-            let mut dynamic_imports_json = Vec::new();
-            for (file, sources) in &dynamic_summary {
-                let unique: HashSet<_> = sources.iter().collect();
-                dynamic_imports_json.push(json!({
-                    "file": file,
-                    "sources": sources,
-                    "manySources": sources.len() > 5,
-                    "selfImport": unique.len() < sources.len(),
-                }));
+        let mut default_export_chains: Vec<_> = cascades
+            .iter()
+            .map(|(from, to)| json!({"chain": [from, to], "length": 2}))
+            .collect();
+        default_export_chains
+            .sort_by(|a, b| a["chain"].to_string().cmp(&b["chain"].to_string()));
+
+        let mut suspicious_barrels = Vec::new();
+        for analysis in &analyses {
+            if !analysis.reexports.is_empty() {
+                let star_count = analysis
+                    .reexports
+                    .iter()
+                    .filter(|r| matches!(r.kind, ReexportKind::Star))
+                    .count();
+                if analysis.reexports.len() >= 3 || star_count > 0 {
+                    let dup_in_cluster = symbol_occurrences
+                        .iter()
+                        .filter(|(_, occs)| {
+                            occs.len() > 1
+                                && occs.iter().any(|(path, _, _, _)| path == &analysis.path)
+                        })
+                        .count();
+                    suspicious_barrels.push(json!({
+                        "path": analysis.path,
+                        "reexportCount": analysis.reexports.len(),
+                        "exportStarCount": star_count,
+                        "duplicatesInClusterCount": dup_in_cluster,
+                    }));
+                }
             }
+        }
+        suspicious_barrels.sort_by(|a, b| {
+            let a_path = a["path"].as_str().unwrap_or("");
+            let b_path = b["path"].as_str().unwrap_or("");
+            a_path.cmp(b_path)
+        });
 
-            let generated_at = OffsetDateTime::now_utc()
-                .format(&Rfc3339)
-                .unwrap_or_else(|_| String::new());
-
-            let ghost_events: Vec<_> = pipeline_summary["events"]["ghostEmits"]
-                .as_array()
-                .cloned()
-                .unwrap_or_default();
-            let orphan_listeners: Vec<_> = pipeline_summary["events"]["orphanListeners"]
-                .as_array()
-                .cloned()
-                .unwrap_or_default();
-            let pipeline_risks: Vec<_> = pipeline_summary["risks"]
-                .as_array()
-                .cloned()
-                .unwrap_or_default();
-
-            let bridge_limit = parsed.summary_limit.max(50);
-            let mut bridges_for_ai = Vec::new();
-            for cmd in commands2.iter().take(bridge_limit) {
-                bridges_for_ai.push(cmd.clone());
+        let mut dead_symbols = Vec::new();
+        if !parsed.skip_dead_symbols {
+            for (name, occs) in &symbol_occurrences {
+                if occs
+                    .iter()
+                    .all(|(path, _, _, _)| !imports_targeted.contains(path))
+                {
+                    let mut paths: Vec<_> = occs.iter().map(|(p, _, _, _)| p.clone()).collect();
+                    paths.sort();
+                    paths.dedup();
+                    let public_surface = paths.iter().any(|p| {
+                        p.ends_with("index.ts")
+                            || p.ends_with("index.tsx")
+                            || p.ends_with("mod.rs")
+                            || p.ends_with("lib.rs")
+                    });
+                    dead_symbols
+                        .push(json!({"name": name, "paths": paths, "publicSurface": public_surface}));
+                }
             }
+            dead_symbols.sort_by(|a, b| {
+                let a_name = a["name"].as_str().unwrap_or("");
+                let b_name = b["name"].as_str().unwrap_or("");
+                a_name.cmp(b_name)
+            });
+            dead_symbols.truncate(parsed.top_dead_symbols);
+        }
 
+        let duplicate_clusters_count = clusters_json.len();
+        let max_cluster_size = symbol_occurrences
+            .values()
+            .map(|v| v.len())
+            .max()
+            .unwrap_or(0);
+        let mut top_clusters = Vec::new();
+        let mut sorted_by_size: Vec<_> = symbol_occurrences
+            .iter()
+            .filter(|(_, v)| v.len() > 1)
+            .collect();
+        sorted_by_size.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then(a.0.cmp(b.0)));
+        for (name, occs) in sorted_by_size.into_iter().take(5) {
+            let severity = if occs.len() > 5 {
+                "high"
+            } else if occs.len() > 2 {
+                "medium"
+            } else {
+                "low"
+            };
+            top_clusters.push(json!({
+                "symbolName": name,
+                "size": occs.len(),
+                "severity": severity,
+            }));
+        }
+
+        let mut dynamic_imports_json = Vec::new();
+        for (file, sources) in &dynamic_summary {
+            let unique: HashSet<_> = sources.iter().collect();
+            dynamic_imports_json.push(json!({
+                "file": file,
+                "sources": sources,
+                "manySources": sources.len() > 5,
+                "selfImport": unique.len() < sources.len(),
+            }));
+        }
+
+        let generated_at = OffsetDateTime::now_utc()
+            .format(&Rfc3339)
+            .unwrap_or_else(|_| String::new());
+
+        let ghost_events: Vec<_> = pipeline_summary["events"]["ghostEmits"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let orphan_listeners: Vec<_> = pipeline_summary["events"]["orphanListeners"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let pipeline_risks: Vec<_> = pipeline_summary["risks"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+
+        let bridge_limit = parsed.summary_limit.max(50);
+        let mut bridges_for_ai = Vec::new();
+        for cmd in commands2.iter().take(bridge_limit) {
+            bridges_for_ai.push(cmd.clone());
+        }
+
+        if matches!(options.output, OutputMode::Json | OutputMode::Jsonl) {
             if parsed.ai_mode {
                 let top_limit = parsed.summary_limit;
                 let mut event_alerts = Vec::new();
@@ -1326,174 +1349,201 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                 if matches!(options.output, OutputMode::Jsonl) {
                     match serde_json::to_string(&ai_payload) {
                         Ok(line) => println!("{}", line),
-                        Err(err) => {
-                            eprintln!("[loctree][warn] failed to serialize JSONL line: {}", err)
-                        }
+                        Err(err) => eprintln!("[loctree][warn] failed to serialize JSONL line: {}", err),
                     }
                 } else {
                     json_results.push(ai_payload);
                 }
-                continue;
-            }
-
-            let payload = json!({
-                "schema": SCHEMA_NAME,
-                "schemaVersion": SCHEMA_VERSION,
-                "generatedAt": generated_at,
-                "rootDir": root_path,
-                "root": root_path,
-                "languages": languages_vec,
-                "filesAnalyzed": analyses.len(),
-                "duplicateExports": filtered_ranked
-                    .iter()
-                    .map(|dup| json!({"name": dup.name, "files": dup.files}))
-                    .collect::<Vec<_>>(),
-                "duplicateExportsRanked": filtered_ranked
-                    .iter()
-                    .map(|dup| json!({
-                        "name": dup.name,
-                        "files": dup.files,
-                        "score": dup.score,
-                        "nonDevCount": dup.prod_count,
-                        "devCount": dup.dev_count,
-                        "canonical": dup.canonical,
-                        "refactorTargets": dup.refactors,
-                    }))
-                    .collect::<Vec<_>>(),
-                "reexportCascades": cascades
-                    .iter()
-                    .map(|(from, to)| json!({"from": from, "to": to}))
-                    .collect::<Vec<_>>(),
-                "dynamicImports": dynamic_imports_json,
-                "commands": {
-                    "frontend": fe_commands.iter().map(|(k,v)| json!({"name": k, "locations": v})).collect::<Vec<_>>(),
-                    "backend": be_commands.iter().map(|(k,v)| json!({"name": k, "locations": v})).collect::<Vec<_>>(),
-                    "missingHandlers": missing_handlers.iter().map(|g| json!({"name": g.name, "locations": g.locations})).collect::<Vec<_>>(),
-                    "unusedHandlers": unused_handlers.iter().map(|g| json!({"name": g.name, "locations": g.locations})).collect::<Vec<_>>(),
-                },
-                "commands2": commands2,
-                "symbols": symbols_json,
-                "clusters": clusters_json,
-                "pipeline": pipeline_summary,
-                "aiViews": {
-                    "defaultExportChains": default_export_chains,
-                    "suspiciousBarrels": suspicious_barrels,
-                    "deadSymbols": dead_symbols,
-                    "coverage": {
-                        "frontendCommandCount": fe_commands.len(),
-                        "backendHandlerCount": be_commands.len(),
-                        "missingCount": missing_handlers.len(),
-                        "unusedCount": unused_handlers.len(),
-                        "renamedHandlers": renamed_handlers,
-                        "callsWithGenerics": calls_with_generics,
-                        "ghostEventCount": ghost_events.len(),
-                        "orphanListenerCount": orphan_listeners.len(),
-                    },
-                    "tsconfig": tsconfig_summary,
-                    "ciSummary": {
-                        "duplicateClustersCount": duplicate_clusters_count,
-                        "maxClusterSize": max_cluster_size,
-                        "topClusters": top_clusters,
-                    }
-                },
-                "files": files_json,
-            });
-
-            if matches!(options.output, OutputMode::Jsonl) {
-                match serde_json::to_string(&payload) {
-                    Ok(line) => println!("{}", line),
-                    Err(err) => {
-                        eprintln!("[loctree][warn] failed to serialize JSONL line: {}", err);
-                    }
-                }
             } else {
-                json_results.push(payload);
+                let payload = json!({
+                    "schema": SCHEMA_NAME,
+                    "schemaVersion": SCHEMA_VERSION,
+                    "generatedAt": generated_at,
+                    "rootDir": root_path,
+                    "root": root_path,
+                    "languages": languages_vec,
+                    "filesAnalyzed": analyses.len(),
+                    "duplicateExports": filtered_ranked
+                        .iter()
+                        .map(|dup| json!({"name": dup.name, "files": dup.files}))
+                        .collect::<Vec<_>>(),
+                    "duplicateExportsRanked": filtered_ranked
+                        .iter()
+                        .map(|dup| json!({
+                            "name": dup.name,
+                            "files": dup.files,
+                            "score": dup.score,
+                            "nonDevCount": dup.prod_count,
+                            "devCount": dup.dev_count,
+                            "canonical": dup.canonical,
+                            "refactorTargets": dup.refactors,
+                        }))
+                        .collect::<Vec<_>>(),
+                    "reexportCascades": cascades
+                        .iter()
+                        .map(|(from, to)| json!({"from": from, "to": to}))
+                        .collect::<Vec<_>>(),
+                    "dynamicImports": dynamic_imports_json,
+                    "commands": {
+                        "frontend": fe_commands.iter().map(|(k,v)| json!({"name": k, "locations": v})).collect::<Vec<_>>(),
+                        "backend": be_commands.iter().map(|(k,v)| json!({"name": k, "locations": v})).collect::<Vec<_>>(),
+                        "missingHandlers": missing_handlers.iter().map(|g| json!({"name": g.name, "locations": g.locations})).collect::<Vec<_>>(),
+                        "unusedHandlers": unused_handlers.iter().map(|g| json!({"name": g.name, "locations": g.locations})).collect::<Vec<_>>(),
+                    },
+                    "commands2": commands2,
+                    "symbols": symbols_json,
+                    "clusters": clusters_json,
+                    "pipeline": pipeline_summary,
+                    "aiViews": {
+                        "defaultExportChains": default_export_chains,
+                        "suspiciousBarrels": suspicious_barrels,
+                        "deadSymbols": dead_symbols,
+                        "coverage": {
+                            "frontendCommandCount": fe_commands.len(),
+                            "backendHandlerCount": be_commands.len(),
+                            "missingCount": missing_handlers.len(),
+                            "unusedCount": unused_handlers.len(),
+                            "renamedHandlers": renamed_handlers,
+                            "callsWithGenerics": calls_with_generics,
+                            "ghostEventCount": ghost_events.len(),
+                            "orphanListenerCount": orphan_listeners.len(),
+                        },
+                        "tsconfig": tsconfig_summary,
+                        "ciSummary": {
+                            "duplicateClustersCount": duplicate_clusters_count,
+                            "maxClusterSize": max_cluster_size,
+                            "topClusters": top_clusters,
+                        }
+                    },
+                    "files": files_json,
+                });
+
+                if matches!(options.output, OutputMode::Jsonl) {
+                    match serde_json::to_string(&payload) {
+                        Ok(line) => println!("{}", line),
+                        Err(err) => eprintln!("[loctree][warn] failed to serialize JSONL line: {}", err),
+                    }
+                } else {
+                    json_results.push(payload);
+                }
             }
-            continue;
-        }
+        } else {
+            if idx > 0 {
+                println!();
+            }
 
-        if idx > 0 {
-            println!();
-        }
+            println!("Import/export analysis for {}/", root_path.display());
+            println!("  Files analyzed: {}", analyses.len());
+            println!("  Duplicate exports: {}", filtered_ranked.len());
+            println!("  Files with re-exports: {}", reexport_files.len());
+            println!("  Dynamic imports: {}", dynamic_summary.len());
 
-        println!("Import/export analysis for {}/", root_path.display());
-        println!("  Files analyzed: {}", analyses.len());
-        println!("  Duplicate exports: {}", filtered_ranked.len());
-        println!("  Files with re-exports: {}", reexport_files.len());
-        println!("  Dynamic imports: {}", dynamic_summary.len());
-
-        if !duplicate_exports.is_empty() {
-            println!(
-                "\nTop duplicate exports (showing up to {}):",
-                options.analyze_limit
-            );
-            for dup in filtered_ranked.iter().take(options.analyze_limit) {
+            if !duplicate_exports.is_empty() {
                 println!(
-                    "  - {} (score {}, {} files: {} prod, {} dev) canonical: {} | refs: {}",
-                    dup.name,
-                    dup.score,
-                    dup.files.len(),
-                    dup.prod_count,
-                    dup.dev_count,
-                    dup.canonical,
-                    dup.refactors.join(", ")
+                    "
+Top duplicate exports (showing up to {}):",
+                    options.analyze_limit
                 );
+                for dup in filtered_ranked.iter().take(options.analyze_limit) {
+                    println!(
+                        "  - {} (score {}, {} files: {} prod, {} dev) canonical: {} | refs: {}",
+                        dup.name,
+                        dup.score,
+                        dup.files.len(),
+                        dup.prod_count,
+                        dup.dev_count,
+                        dup.canonical,
+                        dup.refactors.join(", ")
+                    );
+                }
             }
+
+            if !cascades.is_empty() {
+                println!("\nRe-export cascades:");
+                for (from, to) in &cascades {
+                    println!("  - {} -> {}", from, to);
+                }
+            }
+
+            if !dynamic_summary.is_empty() {
+                println!(
+                    "\nDynamic imports (showing up to {}):",
+                    options.analyze_limit
+                );
+                let mut sorted_dyn = dynamic_summary.clone();
+                sorted_dyn.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+                for (file, sources) in sorted_dyn.iter().take(options.analyze_limit) {
+                    println!(
+                        "  - {}: {}{}",
+                        file,
+                        sources.join(", "),
+                        if sources.len() > 5 { "  [many sources]" } else { "" }
+                    );
+                }
+            }
+
+            if !missing_handlers.is_empty() || !unused_handlers.is_empty() {
+                println!("\nTauri command coverage:");
+                if !missing_handlers.is_empty() {
+                    println!(
+                        "  Missing handlers (frontend calls without backend): {}",
+                        missing_handlers
+                            .iter()
+                            .map(|g| g.name.clone())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    );
+                }
+                if !unused_handlers.is_empty() {
+                    println!(
+                        "  Unused handlers (backend not called by FE): {}",
+                        unused_handlers
+                            .iter()
+                            .map(|g| g.name.clone())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    );
+                }
+            }
+
+            println!("\nTip: rerun with --json for machine-readable output.");
         }
 
-        if !cascades.is_empty() {
-            println!("\nRe-export cascades:");
-            for (from, to) in &cascades {
-                println!("  - {} -> {}", from, to);
-            }
-        }
-
-        if !dynamic_summary.is_empty() {
-            println!(
-                "\nDynamic imports (showing up to {}):",
-                options.analyze_limit
-            );
+        if options.report_path.is_some() {
             let mut sorted_dyn = dynamic_summary.clone();
             sorted_dyn.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
-            for (file, sources) in sorted_dyn.iter().take(options.analyze_limit) {
-                println!(
-                    "  - {}: {}{}",
-                    file,
-                    sources.join(", "),
-                    if sources.len() > 5 {
-                        "  [many sources]"
-                    } else {
-                        ""
-                    }
-                );
-            }
-        }
+            let insights = collect_ai_insights(
+                &analyses,
+                &filtered_ranked,
+                &cascades,
+                &missing_handlers,
+                &unused_handlers,
+            );
+            let mut missing_sorted = missing_handlers.clone();
+            missing_sorted.sort_by(|a, b| a.name.cmp(&b.name));
+            let mut unused_sorted = unused_handlers.clone();
+            unused_sorted.sort_by(|a, b| a.name.cmp(&b.name));
 
-        if !missing_handlers.is_empty() || !unused_handlers.is_empty() {
-            println!("\nTauri command coverage:");
-            if !missing_handlers.is_empty() {
-                println!(
-                    "  Missing handlers (frontend calls without backend): {}",
-                    missing_handlers
-                        .iter()
-                        .map(|g| g.name.clone())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                );
-            }
-            if !unused_handlers.is_empty() {
-                println!(
-                    "  Unused handlers (backend not called by FE): {}",
-                    unused_handlers
-                        .iter()
-                        .map(|g| g.name.clone())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                );
-            }
+            report_sections.push(ReportSection {
+                insights,
+                root: root_path.display().to_string(),
+                files_analyzed: analyses.len(),
+                ranked_dups: filtered_ranked.clone(),
+                cascades: cascades.clone(),
+                dynamic: sorted_dyn,
+                analyze_limit: options.analyze_limit,
+                missing_handlers: missing_sorted,
+                unused_handlers: unused_sorted,
+                command_counts: (fe_commands.len(), be_commands.len()),
+                open_base: if options.report_path.is_some() && options.serve {
+                    current_open_base()
+                } else {
+                    None
+                },
+                graph: graph_data.clone(),
+                graph_warning: graph_warning.clone(),
+            });
         }
-
-        println!("\nTip: rerun with --json for machine-readable output.");
     }
 
     if matches!(parsed.output, OutputMode::Json) {
@@ -1547,11 +1597,6 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             eprintln!("[loctree] HTML report written to {}", report_path.display());
         }
         open_in_browser(report_path);
-    }
-
-    if !fail_reasons.is_empty() {
-        eprintln!("[loctree][fail] {}", fail_reasons.join("; "));
-        std::process::exit(1);
     }
 
     if parsed.serve && !parsed.serve_once {

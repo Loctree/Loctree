@@ -436,7 +436,8 @@ mod tests {
 
         // FE file with matching emit/listen
         let mut fe = FileAnalysis::new("src/frontend.ts".into());
-        fe.event_emits.push(mk_event("vista://ok", 10, "emit_literal", false));
+        fe.event_emits
+            .push(mk_event("vista://ok", 10, "emit_literal", false));
         fe.event_listens
             .push(mk_event("vista://ok", 5, "listen_literal", true));
         fe.command_calls.push(CommandRef {
@@ -511,9 +512,7 @@ mod tests {
         assert_eq!(status_map.get("missing_cmd"), Some(&"missing_handler"));
         assert_eq!(status_map.get("unused_cmd"), Some(&"unused_handler"));
 
-        let risks = summary["risks"]
-            .as_array()
-            .expect("risks array present");
+        let risks = summary["risks"].as_array().expect("risks array present");
         assert!(risks.iter().any(|r| r["type"] == "invoke_before_listen"));
         assert!(risks.iter().any(|r| r["type"] == "listen_not_awaited"));
     }
