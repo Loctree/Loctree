@@ -53,7 +53,8 @@ pub(crate) fn regex_export_brace() -> &'static Regex {
 pub(crate) fn regex_safe_invoke() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        regex(r#"safeInvoke\s*(?:<(?P<generic>[^>]+)>+)?\(\s*["'](?P<cmd>[^"']+)["']\s*(?:,\s*(?P<payload>[^)\n]+))?"#)
+        // Recognize common Tauri wrappers used in FE: safeInvoke, invokeWithSession, withSessionPayload, invokeWithSessionPayload
+        regex(r#"(?:safeInvoke|invokeWithSession(?:Payload)?|withSessionPayload)\s*(?:<(?P<generic>[^>]+)>+)?\(\s*["'](?P<cmd>[^"']+)["']\s*(?:,\s*(?P<payload>[^)\n]+))?"#)
     })
 }
 
@@ -90,16 +91,16 @@ pub(crate) fn regex_tauri_invoke() -> &'static Regex {
 pub(crate) fn regex_event_emit_js() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        // @tauri-apps/api/event emit/emitTo/emitAll("event") or emit(EVENT_CONST)
-        regex(r#"(?m)(?:emit(?:All|To)?|app\.emit|window\.emit)\s*\(\s*(?P<target>["'][^"']+["']|[A-Za-z_][A-Za-z0-9_]*)\s*(?:,\s*(?P<payload>[^)\n]+))?"#)
+        // @tauri-apps/api/event emit/emitTo/emitAll("event") or emit(EVENT_CONST) + custom wrappers (emitTauriEvent)
+        regex(r#"(?m)(?:emit(?:All|To)?|app\.emit|window\.emit|emitTauriEvent)\s*\(\s*(?P<target>["'][^"']+["']|[A-Za-z_][A-Za-z0-9_]*)\s*(?:,\s*(?P<payload>[^)\n]+))?"#)
     })
 }
 
 pub(crate) fn regex_event_listen_js() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        // listen/once("event") or listen(EVENT_CONST)
-        regex(r#"(?m)(?:listen|once)\s*\(\s*(?P<target>["'][^"']+["']|[A-Za-z_][A-Za-z0-9_]*)"#)
+        // listen/once("event") or listen(EVENT_CONST) plus custom wrappers (listenToTauriEvent)
+        regex(r#"(?m)(?:listen|once|listenToTauriEvent)\s*\(\s*(?P<target>["'][^"']+["']|[A-Za-z_][A-Za-z0-9_]*)"#)
     })
 }
 

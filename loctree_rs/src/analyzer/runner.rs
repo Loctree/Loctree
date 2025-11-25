@@ -826,6 +826,11 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                             imports_targeted.insert(resolved.clone());
                         }
                     }
+                    for re in &reexports {
+                        if let Some(resolved) = &re.resolved {
+                            imports_targeted.insert(resolved.clone());
+                        }
+                    }
 
                     files_json.push(json!({
                         "id": file_id_map.get(&a.path).cloned().unwrap_or(0),
