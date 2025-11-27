@@ -22,6 +22,25 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 ### Fixed
 - `--fail-on-missing-handlers`, `--fail-on-ghost-events`, `--fail-on-races` flags now actually work: they return non-zero exit code when issues are detected (previously flags were parsed but had no effect).
 
+## [0.4.6] - 2025-11-27
+### Added
+- **Janitor Mode tools**:
+  - `--check <query>`: Finds existing components/symbols similar to the query (Levenshtein distance) to prevent duplication before writing new code.
+  - `--dead` (alias `--unused`): Lists potentially unused exports (defined but never imported).
+  - `--confidence <level>`: Filters dead exports (use `high` to hide implicit uses like `default` exports or re-exports).
+  - `--symbol <name>`: Quickly finds all occurrences of a symbol (definitions and usages) across the project.
+  - `--impact <file>`: Analyzes dependency graph to show what would break if the target file changed.
+  - `--scan-all`: Option to include `node_modules`, `target`, `.venv` in analysis (normally ignored by default).
+- **Pipeline Confidence**: "Ghost events" now include confidence scores and recommendations (`safe_to_remove` vs `verify_dynamic_value`).
+- **Graph UX**: Sticky tooltips on nodes (persist on hover/click) for easier reading and copying paths.
+### Changed
+- Default behavior: `loctree` (no args) now ignores `node_modules`, `target`, `.venv` by default to prevent massive snapshots. Use `--scan-all` to override.
+- CLI output: Removed emojis from standard output for cleaner, grep-friendly text.
+### Fixed
+- Fixed false positives in "dead exports" where re-exports were not counted as usage.
+- Fixed double-counting of named re-exports in parser.
+- Fixed tooltip flickering in HTML report graph.
+
 ## [0.4.4] - 2025-11-27
 
 ### Security

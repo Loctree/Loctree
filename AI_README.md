@@ -1,24 +1,31 @@
-# loctree – szybki przewodnik dla agentów (v0.4.3)
+# loctree – szybki przewodnik dla agentów (v0.4.6)
 
-Najważniejsze (0.4.3):
-- HTML raport przestał dublować kontrolki grafu: inline graph/toolbar są ukryte, zostaje tylko drawer na dole (koniec z podwójnym scrollem).
-- Multi-root FE↔BE coverage jest scalane globalnie, więc `commands2`/coverage w JSON/CLI nie raportują sztucznych braków/nieużyć między src vs src-tauri.
-- Duplikaty pomijają re-eksporty (barrels/index.ts) i `default` z plików deklaracji, redukując hałas z beczek TS.
-- Stałe eventów są rozwiązywane między plikami (TS/JS/Rust, także importowane), więc ghost/orphan w pipeline/aiViews są bliżej prawdy.
+Najważniejsze (0.4.6):
+- **Janitor Mode**: Nowe narzędzia do sprzątania: `--check` (szukaj podobnych), `--dead` (martwe eksporty), `--symbol` (szukaj użyć), `--impact` (co się zepsuje).
+- **Pipeline Confidence**: Ghost eventy mają ocenę pewności (`high` = safe to remove).
+- **Graph UX**: Sticky tooltips ułatwiające pracę z grafem.
+- **Default ignores**: `node_modules` są ignorowane domyślnie (użyj `--scan-all` aby wymusić).
 
 ## Instalacja / update (globalnie)
 ```bash
 cargo install --force --path loctree_rs
 # weryfikacja:
-loctree --version   # oczekiwane: 0.4.3
+loctree --version   # oczekiwane: 0.4.6
 ```
 
 ## Tryby
 - **Tree (domyślnie)** – drzewo plików z LOC highlight.
 - **Analyzer (`-A`)** – importy/eksporty, duplikaty, re-eksporty, dynamiczne importy, pokrycie komend Tauri, graf.
+- **Janitor** – dedykowane flagi sprzątające (implikuje `-A`).
 - **Preset Tauri** – `--preset-tauri` ustawia rozszerzenia + preset ignore-symbols i auto-ignore artefaktów buildowych.
 
 ## Kluczowe flagi
+### Janitor Mode (nowość 0.4.6)
+- `--check <query>` – "Already exists check". Znajduje podobne symbole/komponenty, aby uniknąć duplikacji.
+- `--dead` (alias `--unused`) – znajduje eksporty zdefiniowane, ale nigdzie nie importowane. Użyj `--confidence high` dla większej pewności.
+- `--symbol <name>` – znajduje definicje i użycia symbolu w całym projekcie (szybki grep strukturalny).
+- `--impact <file>` – analiza wpływu: co importuje ten plik (co się zepsuje, jak go usunę).
+
 ### Tree
 - `--summary[=N]` – podsumowanie + top duże pliki (domyślnie 5).
 - `--loc <n>` – próg LOC dla highlight (domyślnie 1000).
