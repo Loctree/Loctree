@@ -236,7 +236,8 @@ impl Snapshot {
 
     /// Print summary of the snapshot
     pub fn print_summary(&self) {
-        println!("⚡ Scanned {} files in {:.2}s",
+        println!(
+            "⚡ Scanned {} files in {:.2}s",
             self.metadata.file_count,
             self.metadata.scan_duration_ms as f64 / 1000.0
         );
@@ -244,12 +245,31 @@ impl Snapshot {
 
         let languages: Vec<_> = self.metadata.languages.iter().collect();
         if !languages.is_empty() {
-            println!("📝 Languages: {}", languages.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "));
+            println!(
+                "📝 Languages: {}",
+                languages
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
         }
 
-        let handler_count = self.command_bridges.iter().filter(|b| b.has_handler).count();
-        let missing_handlers = self.command_bridges.iter().filter(|b| !b.has_handler && b.is_called).count();
-        let unused_handlers = self.command_bridges.iter().filter(|b| b.has_handler && !b.is_called).count();
+        let handler_count = self
+            .command_bridges
+            .iter()
+            .filter(|b| b.has_handler)
+            .count();
+        let missing_handlers = self
+            .command_bridges
+            .iter()
+            .filter(|b| !b.has_handler && b.is_called)
+            .count();
+        let unused_handlers = self
+            .command_bridges
+            .iter()
+            .filter(|b| b.has_handler && !b.is_called)
+            .count();
 
         if handler_count > 0 || missing_handlers > 0 {
             print!("🔗 Commands: {} handlers", handler_count);
@@ -283,10 +303,10 @@ impl Snapshot {
 
 /// Run the init command: scan the project and save snapshot
 pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
-    use crate::analyzer::root_scan::{scan_roots, ScanConfig};
-    use crate::analyzer::scan::{opt_globset, python_stdlib};
-    use crate::analyzer::runner::default_analyzer_exts;
     use crate::analyzer::coverage::compute_command_gaps;
+    use crate::analyzer::root_scan::{scan_roots, ScanConfig};
+    use crate::analyzer::runner::default_analyzer_exts;
+    use crate::analyzer::scan::{opt_globset, python_stdlib};
 
     let start_time = Instant::now();
 
@@ -300,7 +320,10 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
     let focus_set = opt_globset(&parsed.focus_patterns);
     let exclude_set = opt_globset(&parsed.exclude_report_patterns);
 
-    let base_extensions = parsed.extensions.clone().or_else(|| Some(default_analyzer_exts()));
+    let base_extensions = parsed
+        .extensions
+        .clone()
+        .or_else(|| Some(default_analyzer_exts()));
 
     let scan_config = ScanConfig {
         roots: root_list,
@@ -317,9 +340,7 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
     let scan_results = scan_roots(scan_config)?;
 
     // Build the snapshot from scan results
-    let mut snapshot = Snapshot::new(
-        root_list.iter().map(|p| p.display().to_string()).collect()
-    );
+    let mut snapshot = Snapshot::new(root_list.iter().map(|p| p.display().to_string()).collect());
 
     // Populate files from all contexts
     for ctx in &scan_results.contexts {
@@ -336,7 +357,8 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
 
         // Add export index
         for (name, files) in &ctx.export_index {
-            snapshot.export_index
+            snapshot
+                .export_index
                 .entry(name.clone())
                 .or_insert_with(Vec::new)
                 .extend(files.clone());
@@ -376,12 +398,14 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
     }
 
     for cmd_name in all_commands {
-        let fe_calls: Vec<(String, usize)> = scan_results.global_fe_commands
+        let fe_calls: Vec<(String, usize)> = scan_results
+            .global_fe_commands
             .get(&cmd_name)
             .map(|v| v.iter().map(|(f, l, _)| (f.clone(), *l)).collect())
             .unwrap_or_default();
 
-        let be_handler: Option<(String, usize)> = scan_results.global_be_commands
+        let be_handler: Option<(String, usize)> = scan_results
+            .global_be_commands
             .get(&cmd_name)
             .and_then(|v| v.first())
             .map(|(f, l, _)| (f.clone(), *l));
@@ -424,8 +448,14 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
     for event_name in all_events {
         snapshot.event_bridges.push(EventBridge {
             name: event_name.clone(),
-            emits: event_emits_map.get(&event_name).cloned().unwrap_or_default(),
-            listens: event_listens_map.get(&event_name).cloned().unwrap_or_default(),
+            emits: event_emits_map
+                .get(&event_name)
+                .cloned()
+                .unwrap_or_default(),
+            listens: event_listens_map
+                .get(&event_name)
+                .cloned()
+                .unwrap_or_default(),
         });
     }
 
@@ -457,7 +487,9 @@ mod tests {
         snapshot.metadata.languages.insert("typescript".to_string());
 
         // Save
-        snapshot.save(root).expect("failed to save snapshot in roundtrip test");
+        snapshot
+            .save(root)
+            .expect("failed to save snapshot in roundtrip test");
 
         // Verify file exists
         assert!(Snapshot::exists(root));

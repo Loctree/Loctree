@@ -245,7 +245,10 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             .and_then(|v| v.as_u64())
             .unwrap_or(0);
         if ghost_count > 0 {
-            fail_reasons.push(format!("{} ghost event(s) (emitted but no listener)", ghost_count));
+            fail_reasons.push(format!(
+                "{} ghost event(s) (emitted but no listener)",
+                ghost_count
+            ));
         }
         if orphan_count > 0 {
             fail_reasons.push(format!("{} orphan listener(s) (no emitter)", orphan_count));
