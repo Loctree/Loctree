@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 use std::io;
-use std::path::PathBuf;
 
 use serde_json::json;
 use time::format_description::well_known::Rfc3339;
@@ -840,7 +839,7 @@ Top duplicate exports (showing up to {}):",
 }
 
 pub fn write_report(
-    report_path: &PathBuf,
+    report_path: &std::path::Path,
     sections: &[ReportSection],
     verbose: bool,
 ) -> io::Result<()> {

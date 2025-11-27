@@ -6,6 +6,10 @@ use std::path::PathBuf;
 use crate::args::{preset_ignore_symbols, ParsedArgs};
 use crate::types::OutputMode;
 
+use super::dead_parrots::{
+    analyze_impact, find_dead_exports, find_similar, print_dead_exports, print_impact_results,
+    print_similarity_results, print_symbol_results, search_symbol,
+};
 use super::open_server::{open_in_browser, start_open_server};
 use super::output::{process_root_context, write_report, RootArtifacts};
 use super::root_scan::{scan_roots, ScanConfig, ScanResults};
@@ -125,6 +129,34 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         global_be_payloads,
         global_analyses,
     } = scan_results;
+
+    if let Some(sym) = &parsed.symbol {
+        let result = search_symbol(sym, &global_analyses);
+        print_symbol_results(sym, &result, matches!(parsed.output, OutputMode::Json));
+        return Ok(());
+    }
+
+    if let Some(target_path) = &parsed.impact {
+        if let Some(result) = analyze_impact(target_path, &global_analyses, &contexts) {
+            print_impact_results(target_path, &result, matches!(parsed.output, OutputMode::Json));
+        } else {
+            eprintln!("Target file not found in scan results: {}", target_path);
+        }
+        return Ok(());
+    }
+
+    if let Some(query) = &parsed.check_sim {
+        let candidates = find_similar(query, &global_analyses);
+        print_similarity_results(query, &candidates, matches!(parsed.output, OutputMode::Json));
+        return Ok(());
+    }
+
+    if parsed.dead_exports {
+        let high_confidence = parsed.dead_confidence.as_deref() == Some("high");
+        let dead_exports = find_dead_exports(&global_analyses, high_confidence);
+        print_dead_exports(&dead_exports, parsed.output, high_confidence);
+        return Ok(());
+    }
 
     // Cross-root command gaps (fixes multi-root FP for missing/unused handlers)
     let (global_missing_handlers, global_unused_handlers) = compute_command_gaps(
@@ -269,10 +301,10 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
 
     if !fail_reasons.is_empty() {
         eprintln!("[loctree][fail] {}", fail_reasons.join("; "));
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
-            format!("Pipeline check failed: {}", fail_reasons.join("; ")),
-        ));
+        return Err(io::Error::other(format!(
+            "Pipeline check failed: {}",
+            fail_reasons.join("; ")
+        )));
     }
 
     Ok(())

@@ -160,7 +160,7 @@ pub(crate) fn analyze_js_file(
         let last_block_open = prefix.rfind("/*");
         let last_block_close = prefix.rfind("*/");
         if let Some(open_idx) = last_block_open {
-            if last_block_close.map_or(true, |c| c < open_idx) {
+            if last_block_close.is_none_or(|c| c < open_idx) {
                 return true;
             }
         }
@@ -380,6 +380,12 @@ pub(crate) fn analyze_js_file(
             .push(ExportSymbol::new(name, "default", "default", line));
     }
     for caps in regex_export_brace().captures_iter(content) {
+        let end = caps.get(0).map(|m| m.end()).unwrap_or(0);
+        let suffix = &content[end..];
+        if suffix.trim_start().starts_with("from") {
+            continue;
+        }
+
         let raw = caps.get(1).map(|m| m.as_str()).unwrap_or("");
         for name in brace_list_to_names(raw) {
             let line = caps.get(1).map(|m| offset_to_line(content, m.start()));

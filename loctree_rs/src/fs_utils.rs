@@ -139,13 +139,14 @@ pub fn gather_files(
             let name = entry.file_name();
             let name_str = name.to_string_lossy();
 
-            // Always ignore these common heavy directories to prevent massive snapshots
-            if name_str == "node_modules"
-                || name_str == ".git"
-                || name_str == "target"
-                || name_str == ".venv"
-                || name_str == "venv"
-                || name_str == "__pycache__"
+            // Skip common heavy directories unless --scan-all is set
+            if !options.scan_all
+                && (name_str == "node_modules"
+                    || name_str == ".git"
+                    || name_str == "target"
+                    || name_str == ".venv"
+                    || name_str == "venv"
+                    || name_str == "__pycache__")
             {
                 return false;
             }
@@ -251,6 +252,9 @@ mod tests {
             max_graph_nodes: None,
             max_graph_edges: None,
             verbose: false,
+            scan_all: false,
+            symbol: None,
+            impact: None,
         }
     }
 
@@ -312,6 +316,9 @@ mod tests {
             max_graph_nodes: None,
             max_graph_edges: None,
             verbose: false,
+            scan_all: false,
+            symbol: None,
+            impact: None,
         };
         let mut visited = HashSet::new();
         gather_files(root, &opts, 0, None, &mut visited, &mut files).expect("gather files");

@@ -1,6 +1,7 @@
 mod analyzer;
 mod args;
 mod fs_utils;
+mod similarity;
 mod snapshot;
 mod tree;
 mod types;
@@ -52,7 +53,10 @@ Analyzer options (-A):\n  \
   --html-report <file>      HTML report output\n  \
   --graph                   Embed import graph in report\n  \
   --serve                   Local server for editor integration\n  \
-  --json                    JSON output\n\n\
+  --json                    JSON output\n  \
+  --check <query>           Find similar existing components/symbols\n  \
+  --dead                    List potentially unused exports (Janitor mode)\n  \
+  --confidence <level>      Filter dead exports by confidence (normal|high)\n\n\
 Pipeline checks (CI-friendly):\n  \
   --fail-on-missing-handlers   Exit 1 if FE invokes missing BE handlers\n  \
   --fail-on-ghost-events       Exit 1 if events have no listeners/emitters\n  \
@@ -60,7 +64,7 @@ Pipeline checks (CI-friendly):\n  \
 Common:\n  \
   -I, --ignore <path>       Ignore path (repeatable)\n  \
   --gitignore, -g           Respect .gitignore\n  \
-  (Note: .git, node_modules, target, venv are always ignored)\n  \
+  --scan-all                Include node_modules, target, .venv (normally skipped)\n  \
   --verbose                 Show detailed progress\n  \
   --help, -h                Show this message\n  \
   --version                 Show version\n\n\
@@ -116,7 +120,7 @@ Graph limits:\n  \
 Common:\n  \
   -I, --ignore <path>       Ignore path (repeatable)\n  \
   --gitignore, -g           Respect .gitignore rules\n  \
-  (Note: .git, node_modules, target, venv, __pycache__ are always ignored)\n  \
+  --scan-all                Include node_modules, target, .venv, __pycache__ (normally skipped)\n  \
   --color[=mode]            Colorize output: auto|always|never (default auto)\n  \
   --editor-cmd <tpl>        Command template for opening files\n  \
   --verbose                 Show detailed progress and warnings\n  \

@@ -2,6 +2,7 @@ pub mod assets;
 pub mod classify;
 pub mod coverage;
 mod css;
+pub mod dead_parrots;
 mod graph;
 pub mod html;
 mod insights;

@@ -360,7 +360,7 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
             snapshot
                 .export_index
                 .entry(name.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .extend(files.clone());
         }
 
@@ -430,13 +430,13 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
         for emit in &file.event_emits {
             event_emits_map
                 .entry(emit.name.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push((file.path.clone(), emit.line, emit.kind.clone()));
         }
         for listen in &file.event_listens {
             event_listens_map
                 .entry(listen.name.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push((file.path.clone(), listen.line));
         }
     }

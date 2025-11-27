@@ -47,6 +47,9 @@ pub struct Options {
     pub max_graph_nodes: Option<usize>,
     pub max_graph_edges: Option<usize>,
     pub verbose: bool,
+    pub scan_all: bool,
+    pub symbol: Option<String>,
+    pub impact: Option<String>,
 }
 
 pub struct LineEntry {
@@ -55,6 +58,12 @@ pub struct LineEntry {
     pub relative_path: String,
     pub is_dir: bool,
     pub is_large: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SymbolMatch {
+    pub line: usize,
+    pub context: String,
 }
 
 pub struct LargeEntry {
@@ -166,6 +175,7 @@ pub struct FileAnalysis {
     pub event_emits: Vec<EventRef>,
     pub event_listens: Vec<EventRef>,
     pub event_consts: HashMap<String, String>,
+    pub matches: Vec<SymbolMatch>,
 }
 
 impl ImportEntry {
@@ -213,9 +223,12 @@ impl FileAnalysis {
             event_emits: Vec::new(),
             event_listens: Vec::new(),
             event_consts: HashMap::new(),
+            matches: Vec::new(),
         }
     }
 }
 
 // Convenience type aliases reused across modules
 pub type ExportIndex = HashMap<String, Vec<String>>;
+pub type PayloadEntry = (String, usize, Option<String>);
+pub type PayloadMap = HashMap<String, Vec<PayloadEntry>>;

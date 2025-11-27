@@ -7,7 +7,7 @@ use serde_json::json;
 
 use crate::args::ParsedArgs;
 use crate::fs_utils::{gather_files, normalise_ignore_patterns, GitIgnoreChecker};
-use crate::types::{ExportIndex, FileAnalysis, ImportKind, Options};
+use crate::types::{ExportIndex, FileAnalysis, ImportKind, Options, PayloadMap};
 
 use super::classify::is_dev_file;
 use super::resolvers::{
@@ -60,8 +60,8 @@ pub struct ScanResults {
     pub contexts: Vec<RootContext>,
     pub global_fe_commands: CommandUsage,
     pub global_be_commands: CommandUsage,
-    pub global_fe_payloads: HashMap<String, Vec<(String, usize, Option<String>)>>,
-    pub global_be_payloads: HashMap<String, Vec<(String, usize, Option<String>)>>,
+    pub global_fe_payloads: PayloadMap,
+    pub global_be_payloads: PayloadMap,
     pub global_analyses: Vec<FileAnalysis>,
 }
 
@@ -69,10 +69,8 @@ pub fn scan_roots(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
     let mut contexts: Vec<RootContext> = Vec::new();
     let mut global_fe_commands: CommandUsage = HashMap::new();
     let mut global_be_commands: CommandUsage = HashMap::new();
-    let mut global_fe_payloads: HashMap<String, Vec<(String, usize, Option<String>)>> =
-        HashMap::new();
-    let mut global_be_payloads: HashMap<String, Vec<(String, usize, Option<String>)>> =
-        HashMap::new();
+    let mut global_fe_payloads: PayloadMap = HashMap::new();
+    let mut global_be_payloads: PayloadMap = HashMap::new();
     let mut global_analyses: Vec<FileAnalysis> = Vec::new();
 
     for root_path in cfg.roots.iter() {
@@ -99,6 +97,9 @@ pub fn scan_roots(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
             max_graph_nodes: cfg.parsed.max_graph_nodes,
             max_graph_edges: cfg.parsed.max_graph_edges,
             verbose: cfg.parsed.verbose,
+            scan_all: cfg.parsed.scan_all,
+            symbol: cfg.parsed.symbol.clone(),
+            impact: cfg.parsed.impact.clone(),
         };
 
         if options.verbose {
@@ -169,8 +170,8 @@ pub fn scan_roots(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
         let mut dynamic_summary: Vec<(String, Vec<String>)> = Vec::new();
         let mut fe_commands: CommandUsage = HashMap::new();
         let mut be_commands: CommandUsage = HashMap::new();
-        let mut fe_payloads: HashMap<String, Vec<(String, usize, Option<String>)>> = HashMap::new();
-        let mut be_payloads: HashMap<String, Vec<(String, usize, Option<String>)>> = HashMap::new();
+        let mut fe_payloads: PayloadMap = HashMap::new();
+        let mut be_payloads: PayloadMap = HashMap::new();
         let mut graph_edges: Vec<(String, String, String)> = Vec::new();
         let mut loc_map: HashMap<String, usize> = HashMap::new();
         let mut languages: HashSet<String> = HashSet::new();
@@ -184,6 +185,7 @@ pub fn scan_roots(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
                 ts_resolver.as_ref(),
                 &py_roots,
                 cfg.py_stdlib,
+                options.symbol.as_deref(),
             )?;
             let abs_for_match = root_canon.join(&analysis.path);
             let is_excluded_for_commands = cfg
@@ -224,7 +226,7 @@ pub fn scan_roots(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
             }
             for re in &analysis.reexports {
                 reexport_edges.push((analysis.path.clone(), re.resolved.clone()));
-                if cfg.parsed.graph && options.report_path.is_some() {
+                if (cfg.parsed.graph && options.report_path.is_some()) || options.impact.is_some() {
                     if let Some(target) = &re.resolved {
                         graph_edges.push((
                             analysis.path.clone(),
@@ -237,7 +239,7 @@ pub fn scan_roots(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
             if !analysis.dynamic_imports.is_empty() {
                 dynamic_summary.push((analysis.path.clone(), analysis.dynamic_imports.clone()));
             }
-            if cfg.parsed.graph && options.report_path.is_some() {
+            if (cfg.parsed.graph && options.report_path.is_some()) || options.impact.is_some() {
                 let ext = file
                     .extension()
                     .and_then(|e| e.to_str())

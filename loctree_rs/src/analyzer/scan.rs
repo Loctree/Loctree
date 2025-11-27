@@ -133,6 +133,7 @@ pub fn analyze_file(
     ts_resolver: Option<&TsPathResolver>,
     py_roots: &[PathBuf],
     py_stdlib: &HashSet<String>,
+    symbol: Option<&str>,
 ) -> io::Result<FileAnalysis> {
     let canonical = path.canonicalize()?;
     if !canonical.starts_with(root_canon) {
@@ -171,6 +172,18 @@ pub fn analyze_file(
             relative,
         ),
     };
+
+    if let Some(sym) = symbol {
+        for (i, line) in content.lines().enumerate() {
+            if line.contains(sym) {
+                analysis.matches.push(crate::types::SymbolMatch {
+                    line: i + 1,
+                    context: line.trim().to_string(),
+                });
+            }
+        }
+    }
+
     analysis.loc = loc;
     analysis.language = detect_language(&ext);
     let (kind, is_test, is_generated) = file_kind(&analysis.path);
