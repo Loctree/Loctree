@@ -17,32 +17,32 @@ echo "Pushing to: $remote ($url)"
 
 # Run Rust checks (fmt + clippy + tests)
 echo ""
-echo "[1/5] Rust format check..."
+echo "[1/6] Rust format check..."
 (cd loctree_rs && cargo fmt -- --check)
 
 echo ""
-echo "[2/5] Rust clippy..."
+echo "[2/6] Rust clippy..."
 (cd loctree_rs && cargo clippy -- -D warnings)
 
 echo ""
-echo "[3/5] Rust tests..."
+echo "[3/6] Rust tests..."
 (cd loctree_rs && cargo test --quiet)
 
 # Run Node tests
 echo ""
-echo "[4/5] Node.js tests..."
+echo "[4/6] Node.js tests..."
 node tools/tests/test_loctree_node_unit.mjs
 node tools/tests/loctree-node.test.mjs
 
 # Run Python tests
 echo ""
-echo "[5/5] Python tests..."
+echo "[5/6] Python tests..."
 python3 tools/tests/test_loctree_py_unit.py
 node tools/tests/loctree-py.test.mjs
 
 # Run Rust integration tests
 echo ""
-echo "[6/5] Rust integration tests..."
+echo "[6/6] Rust integration tests..."
 node tools/tests/loctree-rs.test.mjs
 
 # Optional: Semgrep security scan (if installed)
