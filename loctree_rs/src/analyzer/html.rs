@@ -2,7 +2,7 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-use super::assets::CYTOSCAPE_JS;
+use super::assets::{CYTOSCAPE_COSE_BILKENT_JS, CYTOSCAPE_DAGRE_JS, CYTOSCAPE_JS, DAGRE_JS};
 use super::open_server::url_encode_component;
 use super::ReportSection;
 
@@ -288,7 +288,14 @@ fn render_section(out: &mut String, section: &ReportSection) {
 }
 
 fn render_graph_bootstrap(out: &mut String) {
+    // Load Cytoscape core
     out.push_str(r#"<script src="loctree-cytoscape.min.js"></script>"#);
+    // Load dagre (dependency for cytoscape-dagre)
+    out.push_str(r#"<script src="loctree-dagre.min.js"></script>"#);
+    // Load cytoscape-dagre extension (hierarchical layout)
+    out.push_str(r#"<script src="loctree-cytoscape-dagre.js"></script>"#);
+    // Load cytoscape-cose-bilkent extension (improved force-directed)
+    out.push_str(r#"<script src="loctree-cytoscape-cose-bilkent.js"></script>"#);
     out.push_str("<script>");
     out.push_str(GRAPH_BOOTSTRAP);
     out.push_str(
@@ -316,9 +323,25 @@ fn render_graph_bootstrap(out: &mut String) {
 pub(crate) fn render_html_report(path: &Path, sections: &[ReportSection]) -> io::Result<()> {
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
+        // Core Cytoscape library
         let js_path = dir.join("loctree-cytoscape.min.js");
         if !js_path.exists() {
             fs::write(&js_path, CYTOSCAPE_JS)?;
+        }
+        // Dagre layout library (dependency for cytoscape-dagre)
+        let dagre_path = dir.join("loctree-dagre.min.js");
+        if !dagre_path.exists() {
+            fs::write(&dagre_path, DAGRE_JS)?;
+        }
+        // Cytoscape-dagre extension (hierarchical layout)
+        let cy_dagre_path = dir.join("loctree-cytoscape-dagre.js");
+        if !cy_dagre_path.exists() {
+            fs::write(&cy_dagre_path, CYTOSCAPE_DAGRE_JS)?;
+        }
+        // Cytoscape-cose-bilkent extension (improved force-directed layout)
+        let cy_cose_bilkent_path = dir.join("loctree-cytoscape-cose-bilkent.js");
+        if !cy_cose_bilkent_path.exists() {
+            fs::write(&cy_cose_bilkent_path, CYTOSCAPE_COSE_BILKENT_JS)?;
         }
     }
 

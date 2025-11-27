@@ -19,6 +19,7 @@ pub struct ParsedArgs {
     pub summary: bool,
     pub summary_limit: usize,
     pub show_help: bool,
+    pub show_help_full: bool,
     pub show_version: bool,
     pub root_list: Vec<PathBuf>,
     pub py_roots: Vec<PathBuf>,
@@ -63,6 +64,7 @@ impl Default for ParsedArgs {
             summary: false,
             summary_limit: 5,
             show_help: false,
+            show_help_full: false,
             show_version: false,
             root_list: Vec::new(),
             py_roots: Vec::new(),
@@ -270,6 +272,14 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
             }
             "--help" | "-h" => {
                 parsed.show_help = true;
+                i += 1;
+            }
+            "--help-full" => {
+                parsed.show_help_full = true;
+                i += 1;
+            }
+            "--tree" | "tree" => {
+                parsed.mode = Mode::Tree;
                 i += 1;
             }
             "--version" | "-V" => {

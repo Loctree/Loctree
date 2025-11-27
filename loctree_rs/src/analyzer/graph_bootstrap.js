@@ -57,9 +57,20 @@
       <label>min degree:
         <input type="number" min="0" value="0" style="width:60px" data-role="min-degree" />
       </label>
+      <label>layout:
+        <select data-role="layout-select">
+          <option value="cose" selected>cose (force)</option>
+          <option value="dagre">dagre (hierarchy)</option>
+          <option value="cose-bilkent">cose-bilkent</option>
+          <option value="concentric">concentric</option>
+          <option value="breadthfirst">breadthfirst</option>
+          <option value="preset">preset (original)</option>
+        </select>
+      </label>
       <label><input type="checkbox" data-role="toggle-labels" checked /> labels</label>
       <span class="graph-controls">
         <button data-role="fit">fit</button>
+        <button data-role="relayout">relayout</button>
         <button data-role="reset">reset</button>
         <label><input type="checkbox" data-role="dark" /> dark</label>
         <button data-role="fullscreen">fullscreen</button>
@@ -136,6 +147,92 @@
       if (sizeOption) sizeOption.textContent = `Size ≤ ${safe}`;
     };
     syncSize(state.sizeThreshold);
+
+    // Layout configuration helper - supports multiple algorithms
+    const getLayoutConfig = (name, nodeCount) => {
+      const animate = nodeCount < 300;
+      const configs = {
+        cose: {
+          name: "cose",
+          animate,
+          animationDuration: animate ? 500 : 0,
+          fit: true,
+          padding: 30,
+          nodeRepulsion: function(node) { return 8000; },
+          idealEdgeLength: function(edge) { return 100; },
+          edgeElasticity: function(edge) { return 100; },
+          nestingFactor: 1.2,
+          gravity: 1,
+          numIter: 1000,
+          initialTemp: 1000,
+          coolingFactor: 0.99,
+          minTemp: 1.0,
+          randomize: false,
+        },
+        "cose-bilkent": {
+          name: "cose-bilkent",
+          animate,
+          animationDuration: animate ? 500 : 0,
+          fit: true,
+          padding: 30,
+          nodeRepulsion: 4500,
+          idealEdgeLength: 80,
+          edgeElasticity: 0.45,
+          nestingFactor: 0.1,
+          gravity: 0.25,
+          numIter: 2500,
+          tile: true,
+          tilingPaddingVertical: 10,
+          tilingPaddingHorizontal: 10,
+          gravityRangeCompound: 1.5,
+          gravityCompound: 1.0,
+          gravityRange: 3.8,
+          randomize: true,
+        },
+        dagre: {
+          name: "dagre",
+          animate,
+          animationDuration: animate ? 500 : 0,
+          fit: true,
+          padding: 30,
+          rankDir: "TB",  // top-to-bottom (hierarchy: caller → callee)
+          nodeSep: 50,
+          rankSep: 80,
+          edgeSep: 10,
+          ranker: "network-simplex",  // tight-tree, longest-path, network-simplex
+        },
+        concentric: {
+          name: "concentric",
+          animate,
+          animationDuration: animate ? 500 : 0,
+          fit: true,
+          padding: 30,
+          minNodeSpacing: 50,
+          concentric: function(node) { return node.data("degree") || 0; },
+          levelWidth: function(nodes) { return Math.max(1, Math.ceil(nodes.length / 8)); },
+          clockwise: true,
+          startAngle: 3 / 2 * Math.PI,
+        },
+        breadthfirst: {
+          name: "breadthfirst",
+          animate,
+          animationDuration: animate ? 500 : 0,
+          fit: true,
+          padding: 30,
+          directed: true,
+          spacingFactor: 1.5,
+          circle: false,
+          grid: false,
+          avoidOverlap: true,
+        },
+        preset: {
+          name: "preset",
+          animate: false,
+          fit: true,
+        },
+      };
+      return configs[name] || configs.preset;
+    };
 
     const buildElements = () => {
       const rawNodes = Array.isArray(g.nodes) ? g.nodes : [];
@@ -251,7 +348,10 @@
       }
     };
 
-    const applyFilters = () => {
+    const layoutSelect = toolbar.querySelector('[data-role="layout-select"]');
+    const getSelectedLayout = () => layoutSelect?.value || "cose";
+
+    const applyFilters = (runLayout = true) => {
       const text = (toolbar.querySelector('[data-role="filter-text"]')?.value || "").toLowerCase();
       const minDeg = parseInt(toolbar.querySelector('[data-role="min-degree"]')?.value || "0", 10) || 0;
       const allowedComponents = state.viewComponents;
@@ -290,12 +390,24 @@
       const labelsOn = showLabels && !autoHide;
       cy.style().selector("node").style("label", labelsOn ? "data(label)" : "").update();
 
-      cy.layout({ name: "preset", animate: false, fit: true }).run();
+      if (runLayout) {
+        const layoutName = getSelectedLayout();
+        const layoutConfig = getLayoutConfig(layoutName, nodes.length);
+        cy.layout(layoutConfig).run();
+      }
       applyHighlight();
     };
 
-    // Fit / reset / dark / fullscreen
+    const runRelayout = () => {
+      const layoutName = getSelectedLayout();
+      const nodeCount = cy.nodes().length;
+      const layoutConfig = getLayoutConfig(layoutName, nodeCount);
+      cy.layout(layoutConfig).run();
+    };
+
+    // Fit / reset / relayout / dark / fullscreen
     const fitBtn = toolbar.querySelector('[data-role="fit"]');
+    const relayoutBtn = toolbar.querySelector('[data-role="relayout"]');
     const resetBtn = toolbar.querySelector('[data-role="reset"]');
     const darkChk = toolbar.querySelector('[data-role="dark"]');
     const fsBtn = toolbar.querySelector('[data-role="fullscreen"]');
@@ -303,14 +415,17 @@
     const jsonBtn = toolbar.querySelector('[data-role="json"]');
 
     if (fitBtn) fitBtn.addEventListener("click", () => cy.fit());
+    if (relayoutBtn) relayoutBtn.addEventListener("click", runRelayout);
+    if (layoutSelect) layoutSelect.addEventListener("change", runRelayout);
     if (resetBtn)
       resetBtn.addEventListener("click", () => {
         cy.elements().remove();
         cy.add(original);
-        cy.layout({ name: "preset", animate: false, fit: true }).run();
         state.viewComponents = new Set();
         state.highlightComponents = new Set();
-        applyFilters();
+        layoutSelect.value = "preset";
+        applyFilters(false);
+        cy.layout({ name: "preset", animate: false, fit: true }).run();
       });
 
     if (pngBtn)
@@ -378,7 +493,7 @@
       });
     }
 
-    // Tooltip on hover/click
+    // Tooltip on hover/click (sticky behavior)
     const tooltip = document.createElement("div");
     tooltip.style.position = "fixed";
     tooltip.style.pointerEvents = "auto";
@@ -390,6 +505,31 @@
     tooltip.style.display = "none";
     tooltip.style.zIndex = 9999;
     document.body.appendChild(tooltip);
+
+    let nodeHover = false;
+    let tooltipHover = false;
+    let hideTimeout = null;
+
+    const hideTip = () => {
+      if (hideTimeout) {
+        clearTimeout(hideTimeout);
+        hideTimeout = null;
+      }
+      nodeHover = false;
+      tooltipHover = false;
+      tooltip.style.display = "none";
+    };
+
+    const scheduleHide = () => {
+      if (hideTimeout) {
+        clearTimeout(hideTimeout);
+      }
+      hideTimeout = setTimeout(() => {
+        if (!nodeHover && !tooltipHover) {
+          hideTip();
+        }
+      }, 220);
+    };
 
     const showTip = (evt, node) => {
       const data = node.data();
@@ -404,7 +544,8 @@
         <button data-role="copy-path" style="margin-top:4px;font-size:10px;cursor:pointer">copy path</button>
       `;
       const copyBtn = tooltip.querySelector('[data-role="copy-path"]');
-      if (copyBtn) copyBtn.addEventListener("click", () => navigator.clipboard.writeText(path));
+      if (copyBtn)
+        copyBtn.addEventListener("click", () => navigator.clipboard.writeText(path));
       const rect = container.getBoundingClientRect();
       const scrollX = window.scrollX || document.documentElement.scrollLeft || 0;
       const scrollY = window.scrollY || document.documentElement.scrollTop || 0;
@@ -415,19 +556,45 @@
       tooltip.style.left = left + "px";
       tooltip.style.top = top + "px";
       tooltip.style.display = "block";
+      nodeHover = true;
+      if (hideTimeout) {
+        clearTimeout(hideTimeout);
+        hideTimeout = null;
+      }
     };
-    const hideTip = () => {
-      tooltip.style.display = "none";
-    };
+
+    tooltip.addEventListener("mouseenter", () => {
+      tooltipHover = true;
+      if (hideTimeout) {
+        clearTimeout(hideTimeout);
+        hideTimeout = null;
+      }
+    });
+    tooltip.addEventListener("mouseleave", () => {
+      tooltipHover = false;
+      scheduleHide();
+    });
 
     cy.off("mouseover");
     cy.off("mouseout");
     cy.off("tap");
     cy.off("tapdrag");
-    cy.on("mouseover", "node", (evt) => showTip(evt, evt.target));
-    cy.on("mouseout", "node", hideTip);
-    cy.on("tap", "node", (evt) => showTip(evt, evt.target));
-    cy.on("tapdrag", "node", hideTip);
+    cy.on("mouseover", "node", (evt) => {
+      nodeHover = true;
+      showTip(evt, evt.target);
+    });
+    cy.on("mouseout", "node", () => {
+      nodeHover = false;
+      scheduleHide();
+    });
+    cy.on("tap", "node", (evt) => {
+      nodeHover = true;
+      showTip(evt, evt.target);
+    });
+    cy.on("tapdrag", "node", () => {
+      nodeHover = false;
+      hideTip();
+    });
 
     const updateComponentFilter = () => {
       const val = componentSelect.value;
@@ -602,9 +769,20 @@
     drawerToolbar.innerHTML = `
       <label>filter: <input type="text" size="16" data-role="drawer-filter" placeholder="substring" /></label>
       <label>min degree: <input type="number" min="0" value="0" style="width:60px" data-role="drawer-min-degree" /></label>
+      <label>layout:
+        <select data-role="drawer-layout-select">
+          <option value="cose" selected>cose (force)</option>
+          <option value="dagre">dagre (hierarchy)</option>
+          <option value="cose-bilkent">cose-bilkent</option>
+          <option value="concentric">concentric</option>
+          <option value="breadthfirst">breadthfirst</option>
+          <option value="preset">preset (original)</option>
+        </select>
+      </label>
       <label><input type="checkbox" data-role="drawer-labels" checked /> labels</label>
       <span class="graph-controls">
         <button data-role="drawer-fit">fit</button>
+        <button data-role="drawer-relayout">relayout</button>
         <button data-role="drawer-reset">reset</button>
         <label><input type="checkbox" data-role="drawer-dark" /> dark</label>
         <button data-role="drawer-fullscreen">fullscreen</button>
@@ -636,12 +814,102 @@
 
     const drawerFilter = drawerToolbar.querySelector('[data-role="drawer-filter"]');
     const drawerMinDeg = drawerToolbar.querySelector('[data-role="drawer-min-degree"]');
+    const drawerLayoutSelect = drawerToolbar.querySelector('[data-role="drawer-layout-select"]');
     const drawerLabels = drawerToolbar.querySelector('[data-role="drawer-labels"]');
     drawerDarkChk = drawerToolbar.querySelector('[data-role="drawer-dark"]');
     const drawerFit = drawerToolbar.querySelector('[data-role="drawer-fit"]');
+    const drawerRelayout = drawerToolbar.querySelector('[data-role="drawer-relayout"]');
     const drawerReset = drawerToolbar.querySelector('[data-role="drawer-reset"]');
     const drawerFs = drawerToolbar.querySelector('[data-role="drawer-fullscreen"]');
     const drawerPng = drawerToolbar.querySelector('[data-role="drawer-png"]');
+
+    const getDrawerSelectedLayout = () => drawerLayoutSelect?.value || "cose";
+
+    // Drawer layout configuration helper (same as main graph)
+    const getDrawerLayoutConfig = (name, nodeCount) => {
+      const animate = nodeCount < 300;
+      const configs = {
+        cose: {
+          name: "cose",
+          animate,
+          animationDuration: animate ? 500 : 0,
+          fit: true,
+          padding: 30,
+          nodeRepulsion: function(node) { return 8000; },
+          idealEdgeLength: function(edge) { return 100; },
+          edgeElasticity: function(edge) { return 100; },
+          nestingFactor: 1.2,
+          gravity: 1,
+          numIter: 1000,
+          initialTemp: 1000,
+          coolingFactor: 0.99,
+          minTemp: 1.0,
+          randomize: false,
+        },
+        "cose-bilkent": {
+          name: "cose-bilkent",
+          animate,
+          animationDuration: animate ? 500 : 0,
+          fit: true,
+          padding: 30,
+          nodeRepulsion: 4500,
+          idealEdgeLength: 80,
+          edgeElasticity: 0.45,
+          nestingFactor: 0.1,
+          gravity: 0.25,
+          numIter: 2500,
+          tile: true,
+          tilingPaddingVertical: 10,
+          tilingPaddingHorizontal: 10,
+          gravityRangeCompound: 1.5,
+          gravityCompound: 1.0,
+          gravityRange: 3.8,
+          randomize: true,
+        },
+        dagre: {
+          name: "dagre",
+          animate,
+          animationDuration: animate ? 500 : 0,
+          fit: true,
+          padding: 30,
+          rankDir: "TB",
+          nodeSep: 50,
+          rankSep: 80,
+          edgeSep: 10,
+          ranker: "network-simplex",
+        },
+        concentric: {
+          name: "concentric",
+          animate,
+          animationDuration: animate ? 500 : 0,
+          fit: true,
+          padding: 30,
+          minNodeSpacing: 50,
+          concentric: function(node) { return node.data("degree") || 0; },
+          levelWidth: function(nodes) { return Math.max(1, Math.ceil(nodes.length / 8)); },
+          clockwise: true,
+          startAngle: 3 / 2 * Math.PI,
+        },
+        breadthfirst: {
+          name: "breadthfirst",
+          animate,
+          animationDuration: animate ? 500 : 0,
+          fit: true,
+          padding: 30,
+          directed: true,
+          spacingFactor: 1.5,
+          circle: false,
+          grid: false,
+          avoidOverlap: true,
+        },
+        preset: {
+          name: "preset",
+          animate: false,
+          fit: true,
+        },
+      };
+      return configs[name] || configs.preset;
+    };
 
     const buildElements = (graph) => {
       const comps = Array.isArray(graph.components) ? graph.components : [];
@@ -707,7 +975,7 @@
       layout: { name: "preset", animate: false, fit: true },
     });
 
-    // Drawer tooltip
+    // Drawer tooltip (sticky behavior)
     const drawerTooltip = document.createElement("div");
     drawerTooltip.style.position = "fixed";
     drawerTooltip.style.pointerEvents = "auto";
@@ -719,6 +987,31 @@
     drawerTooltip.style.display = "none";
     drawerTooltip.style.zIndex = 9999;
     document.body.appendChild(drawerTooltip);
+
+    let drawerNodeHover = false;
+    let drawerTooltipHover = false;
+    let drawerHideTimeout = null;
+
+    const hideDrawerTip = () => {
+      if (drawerHideTimeout) {
+        clearTimeout(drawerHideTimeout);
+        drawerHideTimeout = null;
+      }
+      drawerNodeHover = false;
+      drawerTooltipHover = false;
+      drawerTooltip.style.display = "none";
+    };
+
+    const scheduleDrawerHide = () => {
+      if (drawerHideTimeout) {
+        clearTimeout(drawerHideTimeout);
+      }
+      drawerHideTimeout = setTimeout(() => {
+        if (!drawerNodeHover && !drawerTooltipHover) {
+          hideDrawerTip();
+        }
+      }, 220);
+    };
 
     const showDrawerTip = (evt, node) => {
       const data = node.data();
@@ -739,12 +1032,26 @@
       drawerTooltip.style.left = left + "px";
       drawerTooltip.style.top = top + "px";
       drawerTooltip.style.display = "block";
-    };
-    const hideDrawerTip = () => {
-      drawerTooltip.style.display = "none";
+      drawerNodeHover = true;
+      if (drawerHideTimeout) {
+        clearTimeout(drawerHideTimeout);
+        drawerHideTimeout = null;
+      }
     };
 
-    const applyDrawerFilters = (fit) => {
+    drawerTooltip.addEventListener("mouseenter", () => {
+      drawerTooltipHover = true;
+      if (drawerHideTimeout) {
+        clearTimeout(drawerHideTimeout);
+        drawerHideTimeout = null;
+      }
+    });
+    drawerTooltip.addEventListener("mouseleave", () => {
+      drawerTooltipHover = false;
+      scheduleDrawerHide();
+    });
+
+    const applyDrawerFilters = (runLayout = true) => {
       let nodes = drawerElements.nodes.map((n) => ({ data: { ...n.data }, position: { ...n.position } }));
       let edges = drawerElements.edges.map((e) => ({ data: { ...e.data } }));
       const txt = (drawerFilter?.value || "").toLowerCase();
@@ -766,18 +1073,32 @@
       cyDrawer.add({ nodes, edges });
       const labelsOn = drawerLabels?.checked && nodes.length <= 800;
       cyDrawer.style().selector("node").style("label", labelsOn ? "data(label)" : "").update();
-      if (fit) cyDrawer.fit();
+      if (runLayout) {
+        const layoutName = getDrawerSelectedLayout();
+        const layoutConfig = getDrawerLayoutConfig(layoutName, nodes.length);
+        cyDrawer.layout(layoutConfig).run();
+      }
+    };
+
+    const runDrawerRelayout = () => {
+      const layoutName = getDrawerSelectedLayout();
+      const nodeCount = cyDrawer.nodes().length;
+      const layoutConfig = getDrawerLayoutConfig(layoutName, nodeCount);
+      cyDrawer.layout(layoutConfig).run();
     };
 
     if (drawerFilter) drawerFilter.addEventListener("input", () => applyDrawerFilters(false));
     if (drawerMinDeg) drawerMinDeg.addEventListener("input", () => applyDrawerFilters(false));
     if (drawerLabels) drawerLabels.addEventListener("change", () => applyDrawerFilters(false));
+    if (drawerLayoutSelect) drawerLayoutSelect.addEventListener("change", runDrawerRelayout);
+    if (drawerRelayout) drawerRelayout.addEventListener("click", runDrawerRelayout);
     if (drawerFit) drawerFit.addEventListener("click", () => cyDrawer.fit());
     if (drawerReset)
       drawerReset.addEventListener("click", () => {
         drawerElements = buildElements(activeGraph);
         cyDrawer.elements().remove();
         cyDrawer.add(drawerElements);
+        drawerLayoutSelect.value = "preset";
         cyDrawer.layout({ name: "preset", animate: false, fit: true }).run();
         applyDrawerFilters(false);
       });
@@ -817,10 +1138,22 @@
       });
     applyDrawerFilters(true);
 
-    cyDrawer.on("mouseover", "node", (evt) => showDrawerTip(evt, evt.target));
-    cyDrawer.on("mouseout", "node", hideDrawerTip);
-    cyDrawer.on("tap", "node", (evt) => showDrawerTip(evt, evt.target));
-    cyDrawer.on("tapdrag", "node", hideDrawerTip);
+    cyDrawer.on("mouseover", "node", (evt) => {
+      drawerNodeHover = true;
+      showDrawerTip(evt, evt.target);
+    });
+    cyDrawer.on("mouseout", "node", () => {
+      drawerNodeHover = false;
+      scheduleDrawerHide();
+    });
+    cyDrawer.on("tap", "node", (evt) => {
+      drawerNodeHover = true;
+      showDrawerTip(evt, evt.target);
+    });
+    cyDrawer.on("tapdrag", "node", () => {
+      drawerNodeHover = false;
+      hideDrawerTip();
+    });
 
     if (select) {
       select.addEventListener("change", () => {
@@ -830,7 +1163,10 @@
         drawerElements = buildElements(activeGraph);
         cyDrawer.elements().remove();
         cyDrawer.add(drawerElements);
-        cyDrawer.layout({ name: "preset", animate: false, fit: true }).run();
+        // Use selected layout when switching graphs
+        const layoutName = getDrawerSelectedLayout();
+        const layoutConfig = getDrawerLayoutConfig(layoutName, drawerElements.nodes.length);
+        cyDrawer.layout(layoutConfig).run();
         applyDrawerFilters(false);
         hideDrawerTip();
       });
