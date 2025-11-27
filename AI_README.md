@@ -1,16 +1,16 @@
-# loctree – szybki przewodnik dla agentów (v0.4.1)
+# loctree – szybki przewodnik dla agentów (v0.4.3)
 
-Najważniejsze (0.4.1):
-- `--ai` zawiera kompaktową listę mostów FE↔BE (bridges), więc agent widzi komendę Tauri i jej call-site/handler w ~38 KB JSON.
-- `--preset-tauri` domyślnie ignoruje szum (`node_modules`, `dist`, `target`, `build`, `coverage`, `docs/*.json`).
-- Resolver TS czyta łańcuch `extends` w tsconfig i kanonikalizuje `baseUrl/paths`, więc aliasy `@/*` dostają `resolvedPath` zamiast `null`.
-- `loctree --help` jest podzielone na Tree / Analyzer / Common, raport HTML ma zakładki + dolny drawer z grafem.
+Najważniejsze (0.4.3):
+- HTML raport przestał dublować kontrolki grafu: inline graph/toolbar są ukryte, zostaje tylko drawer na dole (koniec z podwójnym scrollem).
+- Multi-root FE↔BE coverage jest scalane globalnie, więc `commands2`/coverage w JSON/CLI nie raportują sztucznych braków/nieużyć między src vs src-tauri.
+- Duplikaty pomijają re-eksporty (barrels/index.ts) i `default` z plików deklaracji, redukując hałas z beczek TS.
+- Stałe eventów są rozwiązywane między plikami (TS/JS/Rust, także importowane), więc ghost/orphan w pipeline/aiViews są bliżej prawdy.
 
 ## Instalacja / update (globalnie)
 ```bash
 cargo install --force --path loctree_rs
 # weryfikacja:
-loctree --version   # oczekiwane: 0.4.1
+loctree --version   # oczekiwane: 0.4.3
 ```
 
 ## Tryby

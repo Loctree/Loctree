@@ -238,6 +238,17 @@ pub(crate) fn resolve_with_extensions(
     if candidate.exists() {
         canonical_rel(&candidate, root).or_else(|| canonical_abs(&candidate))
     } else {
+        // Fallback: if this looks like a directory/module, try index.* inside it
+        if candidate.extension().is_none() {
+            let dir_path = candidate.clone();
+            for index_name in ["index.ts", "index.tsx", "index.js", "index.jsx"] {
+                let index_candidate = dir_path.join(index_name);
+                if index_candidate.exists() {
+                    return canonical_rel(&index_candidate, root)
+                        .or_else(|| canonical_abs(&index_candidate));
+                }
+            }
+        }
         None
     }
 }

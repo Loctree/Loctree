@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
+## [0.4.3] - 2025-11-26
+
+### Fixed
+- HTML report no longer renders duplicate graph toolbars; inline graph panels are hidden so the drawer is the single source of controls (no double scrollbars).
+
+### Changed
+- Documentation updated for the streamlined graph UI.
+
+## [0.4.2] - 2025-11-26
+
+### Fixed
+- Multi-root analyzer now merges frontend calls and backend handlers across roots, so Tauri coverage/commands summaries stop flagging cross-root missing/unused pairs.
+- Duplicate export detection skips re-exports and `default` exports from declaration files, reducing barrel/index.ts false positives.
+- Event names declared as constants (TS/JS/Rust, including imported consts) are resolved for emit/listen analysis, cutting ghost/orphan noise.
+
+### Changed
+- Analyzer scanning logic was extracted into dedicated modules (`scan.rs`/`root_scan.rs`), shrinking `runner.rs` and preparing the upcoming subcommands without changing CLI behavior.
+
 ## [0.4.1] - 2025-11-25
 
 ### Fixed

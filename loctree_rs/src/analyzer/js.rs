@@ -6,6 +6,8 @@ use crate::types::{
     ReexportEntry, ReexportKind,
 };
 
+use regex::Regex;
+
 use super::regexes::{
     regex_dynamic_import, regex_event_const_js, regex_event_emit_js, regex_event_listen_js,
     regex_export_brace, regex_export_default, regex_export_named_decl, regex_import,
@@ -141,6 +143,30 @@ pub(crate) fn analyze_js_file(
         }
         false
     };
+
+    let is_commented = |pos: usize| -> bool {
+        let prefix = &content[..pos];
+        let line_start = prefix.rfind('\n').map(|i| i + 1).unwrap_or(0);
+        let line_end = content[pos..]
+            .find('\n')
+            .map(|i| pos + i)
+            .unwrap_or_else(|| content.len());
+        let line = &content[line_start..line_end];
+        if let Some(idx) = line.find("//") {
+            if line_start + idx < pos {
+                return true;
+            }
+        }
+        let last_block_open = prefix.rfind("/*");
+        let last_block_close = prefix.rfind("*/");
+        if let Some(open_idx) = last_block_open {
+            if last_block_close.map_or(true, |c| c < open_idx) {
+                return true;
+            }
+        }
+        false
+    };
+
     let mut command_calls = Vec::new();
     let mut event_emits = Vec::new();
     let mut event_listens = Vec::new();
@@ -178,6 +204,9 @@ pub(crate) fn analyze_js_file(
     for caps in regex_safe_invoke().captures_iter(content) {
         if let Some(cmd) = caps.name("cmd") {
             let line = offset_to_line(content, cmd.start());
+            if is_commented(cmd.start()) {
+                continue;
+            }
             let generic = caps
                 .name("generic")
                 .map(|g| g.as_str().trim().to_string())
@@ -192,6 +221,9 @@ pub(crate) fn analyze_js_file(
     for caps in regex_tauri_invoke().captures_iter(content) {
         if let Some(cmd) = caps.get(1) {
             let line = offset_to_line(content, cmd.start());
+            if is_commented(cmd.start()) {
+                continue;
+            }
             let payload = caps
                 .name("payload")
                 .map(|p| p.as_str().trim().trim_end_matches(')').trim().to_string())
@@ -202,6 +234,9 @@ pub(crate) fn analyze_js_file(
     for caps in regex_invoke_audio().captures_iter(content) {
         if let Some(cmd) = caps.name("cmd") {
             let line = offset_to_line(content, cmd.start());
+            if is_commented(cmd.start()) {
+                continue;
+            }
             let generic = caps
                 .name("generic")
                 .map(|g| g.as_str().trim().to_string())
@@ -216,6 +251,9 @@ pub(crate) fn analyze_js_file(
     for caps in regex_invoke_snake().captures_iter(content) {
         if let Some(cmd) = caps.name("cmd") {
             let line = offset_to_line(content, cmd.start());
+            if is_commented(cmd.start()) {
+                continue;
+            }
             let generic = caps
                 .name("generic")
                 .map(|g| g.as_str().trim().to_string())
@@ -258,6 +296,9 @@ pub(crate) fn analyze_js_file(
 
     for caps in regex_event_emit_js().captures_iter(content) {
         if let Some(target) = caps.name("target") {
+            if is_commented(caps.get(0).map(|m| m.start()).unwrap_or(0)) {
+                continue;
+            }
             let (name, raw_name, source_kind) = resolve_event(target.as_str());
             let payload = caps
                 .name("payload")
@@ -276,8 +317,37 @@ pub(crate) fn analyze_js_file(
     }
     for caps in regex_event_listen_js().captures_iter(content) {
         if let Some(target) = caps.name("target") {
+            if is_commented(caps.get(0).map(|m| m.start()).unwrap_or(0)) {
+                continue;
+            }
             let (name, raw_name, source_kind) = resolve_event(target.as_str());
             let start = caps.get(0).map(|m| m.start()).unwrap_or(0);
+            let line = offset_to_line(content, start);
+            event_listens.push(EventRef {
+                raw_name,
+                name,
+                line,
+                kind: format!("listen_{}", source_kind),
+                awaited: is_awaited(start),
+                payload: None,
+            });
+        }
+    }
+
+    // Heuristic: custom listen wrappers (listenTo..., ...listen...) with literal event name
+    if let Ok(wrapper_re) =
+        Regex::new(r#"(?m)([A-Za-z0-9_]*listen[A-Za-z0-9_]*)\s*\(\s*['"]([^'"]+)['"]"#)
+    {
+        for caps in wrapper_re.captures_iter(content) {
+            let start = caps.get(0).map(|m| m.start()).unwrap_or(0);
+            if is_commented(start) {
+                continue;
+            }
+            let target = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+            if target.is_empty() {
+                continue;
+            }
+            let (name, raw_name, source_kind) = resolve_event(target);
             let line = offset_to_line(content, start);
             event_listens.push(EventRef {
                 raw_name,

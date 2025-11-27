@@ -552,12 +552,47 @@
       inp.addEventListener("change", () => applyFilters());
     });
 
-    // Drawer (floating) with minimal controls + graph
+    renderComponentTable();
+    applyFilters();
+  });
+
+  // Single shared drawer for all graphs (one instance, switchable per root)
+  if (graphs.length && !document.querySelector(".graph-drawer")) {
+    const graphMap = new Map(graphs.map((g) => [g.id, g]));
+    let cyDrawer = null;
+    let drawerDarkChk = null;
     const drawer = document.createElement("div");
     drawer.className = "graph-drawer";
     const header = document.createElement("div");
     header.className = "graph-drawer-header";
-    header.innerHTML = '<button data-role="drawer-toggle">hide graph</button><span>Import graph</span>';
+    const toggleBtn = document.createElement("button");
+    toggleBtn.dataset.role = "drawer-toggle";
+    toggleBtn.textContent = "hide graph";
+    const title = document.createElement("span");
+    title.textContent = "Import graph";
+    header.appendChild(toggleBtn);
+    header.appendChild(title);
+
+    const select = document.createElement("select");
+    select.style.minWidth = "160px";
+    graphs.forEach((g) => {
+      const opt = document.createElement("option");
+      opt.value = g.id;
+      opt.textContent = g.label || g.id;
+      select.appendChild(opt);
+    });
+    if (graphs.length > 1) {
+      const selectWrap = document.createElement("span");
+      selectWrap.style.display = "flex";
+      selectWrap.style.gap = "6px";
+      selectWrap.style.alignItems = "center";
+      const lbl = document.createElement("span");
+      lbl.textContent = "root:";
+      selectWrap.appendChild(lbl);
+      selectWrap.appendChild(select);
+      header.appendChild(selectWrap);
+    }
+
     const drawerBody = document.createElement("div");
     drawerBody.className = "graph-drawer-body";
     const drawerToolbar = document.createElement("div");
@@ -583,29 +618,19 @@
     drawer.appendChild(drawerBody);
     document.body.appendChild(drawer);
 
-    const toggle = header.querySelector('[data-role="drawer-toggle"]');
     let collapsed = false;
     const applyCollapse = () => {
       drawer.classList.toggle("collapsed", collapsed);
       drawerBody.style.display = collapsed ? "none" : "block";
-      toggle.textContent = collapsed ? "show graph" : "hide graph";
+      toggleBtn.textContent = collapsed ? "show graph" : "hide graph";
     };
-    header.addEventListener("click", () => {
+    header.addEventListener("click", (evt) => {
+      // avoid treating select change as toggle
+      if (evt.target === select) return;
       collapsed = !collapsed;
       applyCollapse();
     });
     applyCollapse();
-
-    const drawerElements = buildElements();
-    cyDrawer = cytoscape({
-      container: drawerCanvas,
-      elements: drawerElements,
-      style: [
-        { selector: "node", style: { label: "data(label)", "font-size": 10, "text-wrap": "wrap", "text-max-width": 120, "background-color": "data(color)", color: "#fff", width: "data(size)", height: "data(size)", "overlay-padding": 8, "overlay-opacity": 0 } },
-        { selector: "edge", style: { "curve-style": "bezier", width: 1.1, "line-color": "data(color)", "target-arrow-color": "data(color)", "target-arrow-shape": "triangle", "arrow-scale": 0.7, label: "", "font-size": 9, "text-background-color": "#fff", "text-background-opacity": 0.8, "text-background-padding": 2 } },
-      ],
-      layout: { name: "preset", animate: false, fit: true },
-    });
 
     const drawerFilter = drawerToolbar.querySelector('[data-role="drawer-filter"]');
     const drawerMinDeg = drawerToolbar.querySelector('[data-role="drawer-min-degree"]');
@@ -616,7 +641,107 @@
     const drawerFs = drawerToolbar.querySelector('[data-role="drawer-fullscreen"]');
     const drawerPng = drawerToolbar.querySelector('[data-role="drawer-png"]');
 
-    const applyDrawerFilters = () => {
+    const buildElements = (graph) => {
+      const comps = Array.isArray(graph.components) ? graph.components : [];
+      const compMap = new Map(comps.map((c) => [c.id, c]));
+      const detached = new Set(comps.filter((c) => c.detached).map((c) => c.id));
+      const rawNodes = Array.isArray(graph.nodes) ? graph.nodes : [];
+      const rawEdges = Array.isArray(graph.edges) ? graph.edges : [];
+      const nodes = rawNodes.map((n) => {
+        const size = Math.max(4, Math.min(30, Math.sqrt((n && n.loc) || 1)));
+        const comp = n.component || 0;
+        const compSize = (compMap.get(comp) || {}).size || 0;
+        const isDetached = detached.has(comp) || !!n.detached;
+        const isolate = (n.degree || 0) === 0 || compSize <= 2;
+        const id = n.id || "";
+        return {
+          data: {
+            id,
+            label: n.label || id || "",
+            loc: n.loc || 0,
+            size,
+            full: id || "",
+            component: comp,
+            degree: n.degree || 0,
+            detached: isDetached,
+            componentSize: compSize,
+            isolate: isolate ? 1 : 0,
+            color: isDetached ? "#d1830f" : "#4f81e1",
+          },
+          position: { x: n.x || 0, y: n.y || 0 },
+        };
+      });
+      const nodeToComponent = new Map(nodes.map((n) => [n.data.id, n.data.component]));
+      const edges = rawEdges.map((e, idx) => {
+        const kind = (e && e[2]) || "import";
+        const sourceComp = nodeToComponent.get(e[0]) || nodeToComponent.get(e[1]) || 0;
+        const isDetached = detached.has(sourceComp);
+        const color = isDetached ? "#d1830f" : kind === "reexport" ? "#e67e22" : "#888";
+        return {
+          data: {
+            id: "e" + idx,
+            source: e[0],
+            target: e[1],
+            label: kind,
+            kind,
+            color,
+            component: sourceComp,
+            detached: isDetached ? 1 : 0,
+          },
+        };
+      });
+      return { nodes, edges };
+    };
+
+    let activeGraph = graphs[0];
+    let drawerElements = buildElements(activeGraph);
+    cyDrawer = cytoscape({
+      container: drawerCanvas,
+      elements: drawerElements,
+      style: [
+        { selector: "node", style: { label: "data(label)", "font-size": 10, "text-wrap": "wrap", "text-max-width": 120, "background-color": "data(color)", color: "#fff", width: "data(size)", height: "data(size)", "overlay-padding": 8, "overlay-opacity": 0 } },
+        { selector: "edge", style: { "curve-style": "bezier", width: 1.1, "line-color": "data(color)", "target-arrow-color": "data(color)", "target-arrow-shape": "triangle", "arrow-scale": 0.7, label: "", "font-size": 9, "text-background-color": "#fff", "text-background-opacity": 0.8, "text-background-padding": 2 } },
+      ],
+      layout: { name: "preset", animate: false, fit: true },
+    });
+
+    // Drawer tooltip
+    const drawerTooltip = document.createElement("div");
+    drawerTooltip.style.position = "fixed";
+    drawerTooltip.style.pointerEvents = "auto";
+    drawerTooltip.style.background = "#111";
+    drawerTooltip.style.color = "#fff";
+    drawerTooltip.style.padding = "6px 8px";
+    drawerTooltip.style.borderRadius = "6px";
+    drawerTooltip.style.fontSize = "12px";
+    drawerTooltip.style.display = "none";
+    drawerTooltip.style.zIndex = 9999;
+    document.body.appendChild(drawerTooltip);
+
+    const showDrawerTip = (evt, node) => {
+      const data = node.data();
+      const path = data.full || data.id;
+      drawerTooltip.innerHTML = `
+        <div style="margin-bottom:4px"><strong>${escapeHtml(path)}</strong></div>
+        <div>LOC: ${data.loc || 0} | degree: ${data.degree || 0}</div>
+        <div>component: C${data.component || "?"}</div>
+      `;
+      const rect = drawerCanvas.getBoundingClientRect();
+      const scrollX = window.scrollX || document.documentElement.scrollLeft || 0;
+      const scrollY = window.scrollY || document.documentElement.scrollTop || 0;
+      let left = rect.left + evt.renderedPosition.x + 12 + scrollX;
+      let top = rect.top + evt.renderedPosition.y + 12 + scrollY;
+      const maxLeft = scrollX + window.innerWidth - 220;
+      if (left > maxLeft) left = maxLeft;
+      drawerTooltip.style.left = left + "px";
+      drawerTooltip.style.top = top + "px";
+      drawerTooltip.style.display = "block";
+    };
+    const hideDrawerTip = () => {
+      drawerTooltip.style.display = "none";
+    };
+
+    const applyDrawerFilters = (fit) => {
       let nodes = drawerElements.nodes.map((n) => ({ data: { ...n.data }, position: { ...n.position } }));
       let edges = drawerElements.edges.map((e) => ({ data: { ...e.data } }));
       const txt = (drawerFilter?.value || "").toLowerCase();
@@ -638,19 +763,20 @@
       cyDrawer.add({ nodes, edges });
       const labelsOn = drawerLabels?.checked && nodes.length <= 800;
       cyDrawer.style().selector("node").style("label", labelsOn ? "data(label)" : "").update();
-      cyDrawer.layout({ name: "preset", animate: false, fit: true }).run();
+      if (fit) cyDrawer.fit();
     };
 
-    if (drawerFilter) drawerFilter.addEventListener("input", applyDrawerFilters);
-    if (drawerMinDeg) drawerMinDeg.addEventListener("input", applyDrawerFilters);
-    if (drawerLabels) drawerLabels.addEventListener("change", applyDrawerFilters);
+    if (drawerFilter) drawerFilter.addEventListener("input", () => applyDrawerFilters(false));
+    if (drawerMinDeg) drawerMinDeg.addEventListener("input", () => applyDrawerFilters(false));
+    if (drawerLabels) drawerLabels.addEventListener("change", () => applyDrawerFilters(false));
     if (drawerFit) drawerFit.addEventListener("click", () => cyDrawer.fit());
     if (drawerReset)
       drawerReset.addEventListener("click", () => {
+        drawerElements = buildElements(activeGraph);
         cyDrawer.elements().remove();
         cyDrawer.add(drawerElements);
         cyDrawer.layout({ name: "preset", animate: false, fit: true }).run();
-        applyDrawerFilters();
+        applyDrawerFilters(false);
       });
     if (drawerPng)
       drawerPng.addEventListener("click", () => {
@@ -658,7 +784,7 @@
         const dataUrl = cyDrawer.png({ bg: dark ? "#0f1115" : "#ffffff", full: true, scale: 2 });
         const a = document.createElement("a");
         a.href = dataUrl;
-        a.download = `${g.id}-graph.png`;
+        a.download = `${activeGraph.id}-graph.png`;
         document.body.appendChild(a);
         a.click();
         a.remove();
@@ -676,10 +802,35 @@
         if (!document.fullscreenElement) cyDrawer.fit();
       });
     }
-    if (drawerDarkChk) drawerDarkChk.addEventListener("change", () => applyDark(drawerDarkChk.checked));
-    applyDrawerFilters();
+    if (drawerDarkChk)
+      drawerDarkChk.addEventListener("change", () => {
+        const on = drawerDarkChk.checked;
+        document.documentElement.classList.toggle("dark", on);
+        if (cyDrawer && typeof cyDrawer.style === "function") {
+          const style = cyDrawer.style();
+          style.selector("node").style("color", on ? "#eef2ff" : "#fff").update();
+          style.selector("edge").style("text-background-color", on ? "#0f1115" : "#fff").update();
+        }
+      });
+    applyDrawerFilters(true);
 
-    renderComponentTable();
-    applyFilters();
-  });
+    cyDrawer.on("mouseover", "node", (evt) => showDrawerTip(evt, evt.target));
+    cyDrawer.on("mouseout", "node", hideDrawerTip);
+    cyDrawer.on("tap", "node", (evt) => showDrawerTip(evt, evt.target));
+    cyDrawer.on("tapdrag", "node", hideDrawerTip);
+
+    if (select) {
+      select.addEventListener("change", () => {
+        const next = graphMap.get(select.value);
+        if (!next) return;
+        activeGraph = next;
+        drawerElements = buildElements(activeGraph);
+        cyDrawer.elements().remove();
+        cyDrawer.add(drawerElements);
+        cyDrawer.layout({ name: "preset", animate: false, fit: true }).run();
+        applyDrawerFilters(false);
+        hideDrawerTip();
+      });
+    }
+  }
 })();

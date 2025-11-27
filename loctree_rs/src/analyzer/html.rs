@@ -204,16 +204,18 @@ fn render_graph_stub(out: &mut String, section: &ReportSection) {
         let edges_json = serde_json::to_string(&graph.edges).unwrap_or("[]".into());
         let components_json = serde_json::to_string(&graph.components).unwrap_or("[]".into());
         let open_json = serde_json::to_string(&section.open_base).unwrap_or("null".into());
+        let label_json = serde_json::to_string(&section.root).unwrap_or("\"\"".into());
         out.push_str("<script>");
         out.push_str("window.__LOCTREE_GRAPHS = window.__LOCTREE_GRAPHS || [];");
         out.push_str("window.__LOCTREE_GRAPHS.push({");
         out.push_str(&format!(
-            "id:\"graph-{}\",nodes:{},edges:{},components:{},mainComponent:{},openBase:{}",
+            "id:\"graph-{}\",label:{},nodes:{},edges:{},components:{},mainComponent:{},openBase:{}",
             escape_html(
                 &section
                     .root
                     .replace(|c: char| !c.is_ascii_alphanumeric(), "_")
             ),
+            label_json,
             nodes_json,
             edges_json,
             components_json,
@@ -329,7 +331,7 @@ pub(crate) fn render_html_report(path: &Path, sections: &[ReportSection]) -> io:
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'none'; font-src 'self' data:;">
 <title>loctree import/export report</title>
 <style>
-body{font-family:system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif;margin:24px;line-height:1.5;padding-bottom:520px;}
+body{font-family:system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif;margin:24px;line-height:1.5;padding-bottom:140px;}
 h1,h2,h3{margin-bottom:0.2em;margin-top:0;}
 table{border-collapse:collapse;width:100%;margin:0.5em 0;}
 th,td{border:1px solid #ddd;padding:6px 8px;font-size:14px;}
@@ -372,6 +374,7 @@ code{background:#f6f8fa;padding:2px 4px;border-radius:4px;}
 .module-group{margin-bottom:10px;}
 .graph-anchor{margin-top:14px;font-size:13px;color:#444;}
 .graph-anchor .muted{display:block;margin-top:4px;}
+.report-section .graph,.report-section .graph-toolbar,.report-section .component-panel,.report-section .graph-hint{display:none;}
 .graph-drawer{position:fixed;left:16px;right:16px;bottom:12px;z-index:1100;background:#f5f7fb;border:1px solid #cfd4de;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.25);padding:8px 10px;}
 .graph-drawer{max-height:82vh;overflow:auto;}
 .graph-drawer.collapsed{opacity:0.9;}

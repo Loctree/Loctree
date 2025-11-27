@@ -70,3 +70,52 @@ jobs:
         run: python3 tools/tests/test_loctree_py_unit.py
       - name: Run python integration tests
         run: node tools/tests/loctree-py.test.mjs
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            loctree_rs/target
+          key: ubuntu-cargo-coverage-${{ hashFiles('loctree_rs/Cargo.lock') }}
+          restore-keys: |
+            ubuntu-cargo-coverage-
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-tarpaulin
+        run: cargo install cargo-tarpaulin --locked
+
+      - name: Run Rust coverage
+        run: |
+          cd loctree_rs
+          cargo tarpaulin --out Xml --output-dir ../coverage --skip-clean --timeout 300
+        continue-on-error: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python coverage
+        run: pip install coverage
+
+      - name: Run Python coverage
+        run: |
+          coverage run --source=. --omit="tools/*,loctree_rs/*" -m pytest tools/tests/test_loctree_py_unit.py 2>/dev/null || \
+          coverage run --source=. --omit="tools/*,loctree_rs/*" tools/tests/test_loctree_py_unit.py
+          coverage report --fail-under=50 || echo "Python coverage below threshold (informational)"
+          coverage xml -o coverage/python-coverage.xml
+        continue-on-error: true
+
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: coverage/
+          if-no-files-found: ignore

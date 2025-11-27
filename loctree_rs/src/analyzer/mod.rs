@@ -7,13 +7,16 @@ pub mod html;
 mod insights;
 pub mod js;
 pub mod open_server;
+mod output;
 mod pipelines;
 pub mod py;
 pub mod regexes;
 pub mod report;
 pub mod resolvers;
+mod root_scan;
 pub mod runner;
 pub mod rust;
+pub mod scan;
 mod tsconfig;
 
 pub(super) fn brace_list_to_names(raw: &str) -> Vec<String> {

@@ -161,6 +161,9 @@ pub fn build_pipeline_summary(
         }
         if status == "orphan" {
             for site in &listeners {
+                if site.raw.starts_with("tauri://") {
+                    continue;
+                }
                 orphan_listeners.push(json!({
                     "name": site.raw,
                     "path": site.path,
