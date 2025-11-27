@@ -60,6 +60,7 @@ Pipeline checks (CI-friendly):\n  \
 Common:\n  \
   -I, --ignore <path>       Ignore path (repeatable)\n  \
   --gitignore, -g           Respect .gitignore\n  \
+  (Note: .git, node_modules, target, venv are always ignored)\n  \
   --verbose                 Show detailed progress\n  \
   --help, -h                Show this message\n  \
   --version                 Show version\n\n\
@@ -115,6 +116,7 @@ Graph limits:\n  \
 Common:\n  \
   -I, --ignore <path>       Ignore path (repeatable)\n  \
   --gitignore, -g           Respect .gitignore rules\n  \
+  (Note: .git, node_modules, target, venv, __pycache__ are always ignored)\n  \
   --color[=mode]            Colorize output: auto|always|never (default auto)\n  \
   --editor-cmd <tpl>        Command template for opening files\n  \
   --verbose                 Show detailed progress and warnings\n  \

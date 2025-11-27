@@ -237,16 +237,16 @@ impl Snapshot {
     /// Print summary of the snapshot
     pub fn print_summary(&self) {
         println!(
-            "⚡ Scanned {} files in {:.2}s",
+            "Scanned {} files in {:.2}s",
             self.metadata.file_count,
             self.metadata.scan_duration_ms as f64 / 1000.0
         );
-        println!("🧠 Graph saved to ./{}/{}", SNAPSHOT_DIR, SNAPSHOT_FILE);
+        println!("Graph saved to ./{}/{}", SNAPSHOT_DIR, SNAPSHOT_FILE);
 
         let languages: Vec<_> = self.metadata.languages.iter().collect();
         if !languages.is_empty() {
             println!(
-                "📝 Languages: {}",
+                "Languages: {}",
                 languages
                     .iter()
                     .map(|s| s.as_str())
@@ -272,7 +272,7 @@ impl Snapshot {
             .count();
 
         if handler_count > 0 || missing_handlers > 0 {
-            print!("🔗 Commands: {} handlers", handler_count);
+            print!("Commands: {} handlers", handler_count);
             if missing_handlers > 0 {
                 print!(", {} missing", missing_handlers);
             }
@@ -284,16 +284,16 @@ impl Snapshot {
 
         let event_count = self.event_bridges.len();
         if event_count > 0 {
-            println!("📡 Events: {} tracked", event_count);
+            println!("Events: {} tracked", event_count);
         }
 
         // Check for cycles or issues
         let barrel_count = self.barrels.len();
         if barrel_count > 0 {
-            println!("📦 Barrels: {} detected", barrel_count);
+            println!("Barrels: {} detected", barrel_count);
         }
 
-        println!("🟢 Status: OK");
+        println!("Status: OK");
         println!();
         println!("Next steps:");
         println!("  loctree . -A --json          # Full analysis with JSON output");

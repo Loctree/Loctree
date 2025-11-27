@@ -138,6 +138,18 @@ pub fn gather_files(
         .filter(|entry| {
             let name = entry.file_name();
             let name_str = name.to_string_lossy();
+
+            // Always ignore these common heavy directories to prevent massive snapshots
+            if name_str == "node_modules"
+                || name_str == ".git"
+                || name_str == "target"
+                || name_str == ".venv"
+                || name_str == "venv"
+                || name_str == "__pycache__"
+            {
+                return false;
+            }
+
             let is_hidden = name_str.starts_with('.');
             options.show_hidden || !is_hidden || is_allowed_hidden(&name_str)
         })
