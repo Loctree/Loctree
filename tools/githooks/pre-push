@@ -1,0 +1,68 @@
+#!/bin/sh
+set -e
+
+# Pre-push hook: runs full validation before pushing to remote
+# This is more thorough than pre-commit to catch issues before they reach CI
+
+REPO_ROOT=$(git rev-parse --show-toplevel)
+cd "$REPO_ROOT"
+
+echo "=== Pre-push validation ==="
+
+# Get the remote and branch being pushed to
+remote="$1"
+url="$2"
+
+echo "Pushing to: $remote ($url)"
+
+# Run Rust checks (fmt + clippy + tests)
+echo ""
+echo "[1/6] Rust format check..."
+(cd loctree_rs && cargo fmt -- --check)
+
+echo ""
+echo "[2/6] Rust clippy..."
+(cd loctree_rs && cargo clippy -- -D warnings)
+
+echo ""
+echo "[3/6] Rust tests..."
+(cd loctree_rs && cargo test --quiet)
+
+# Run Node tests
+echo ""
+echo "[4/6] Node.js tests..."
+node tools/tests/test_loctree_node_unit.mjs
+node tools/tests/loctree-node.test.mjs
+
+# Run Python tests
+echo ""
+echo "[5/6] Python tests..."
+python3 tools/tests/test_loctree_py_unit.py
+node tools/tests/loctree-py.test.mjs
+
+# Run Rust integration tests
+echo ""
+echo "[6/6] Rust integration tests..."
+node tools/tests/loctree-rs.test.mjs
+
+# Optional: Semgrep security scan (if installed)
+if command -v semgrep >/dev/null 2>&1; then
+  echo ""
+  echo "[+] Semgrep security scan..."
+  semgrep \
+    --config p/secrets \
+    --config p/owasp-top-ten \
+    --config p/r2c-security-audit \
+    --error --metrics=off \
+    --exclude tests/fixtures --exclude loctree_rs/target \
+    --quiet || {
+      echo "Semgrep found issues. Fix them before pushing."
+      exit 1
+    }
+else
+  echo ""
+  echo "[~] Semgrep not installed; skipping security scan."
+fi
+
+echo ""
+echo "=== All pre-push checks passed ==="

@@ -8,15 +8,28 @@ designed to be fast, scriptable, and usable from multiple runtimes: Rust (native
 
 ## Overview
 
+Highlights (0.4.3):
+- HTML report graph controls are only in the drawer (no duplicated toolbars/scroll); inline graph panels are hidden.
+- Multi-root FE↔BE coverage is merged across roots, so `commands2`/coverage no longer report missing/unused handlers just because FE and BE live in different paths.
+- Duplicate export scoring skips re-exports (barrels/index.ts) and declaration `default` exports, reducing false-positive clusters.
+- Event constants are resolved across files/imports (TS/JS/Rust), shrinking ghost/orphan event noise; TS path resolver still follows `extends`/JSON5 `tsconfig` chains for stable alias resolution.
+
 - Filters by extension (`--ext rs,ts,tsx,py,...`) and prunes non-matching branches.
 - Respects `.gitignore` (`-g`), custom ignores (`-I`), and max depth (`-L`).
 - Human or JSON output; per-root summary with totals and large files (>= 1000 LOC).
 - Multi-root: pass several paths in one command.
 - Import/export analyzer mode (`-A/--analyze-imports`) surfaces duplicate exports, re-export chains, dynamic imports,
-  CSS `@import`, Rust `use/pub use`/public items, Python `import`/`from` (z `__all__` expansion, stdlib vs local tagging, TYPE_CHECKING-aware imports, dynamic `importlib`/`__import__`),
-  oraz mapuje komendy Tauri: wywołania FE (`safeInvoke`/`invokeSnake`) vs. backend `#[tauri::command]`
-  (brakujące/nieużywane handlery w CLI/JSON/HTML). Z `--serve` linki w HTML otwierają pliki w edytorze/OS (domyślnie
-  `code -g` lub `open`/`xdg-open`).
+  CSS `@import`, Rust `use/pub use`/public items, Python `import`/`from` (with `__all__` expansion, stdlib vs local tagging, TYPE_CHECKING-aware imports, dynamic `importlib`/`__import__`),
+  and maps Tauri commands: FE calls (`safeInvoke`/`invokeSnake`) vs. backend `#[tauri::command]`
+  (missing/unused handlers in CLI/JSON/HTML). With `--serve`, HTML links open files in editor/OS (default `code -g` or `open`/`xdg-open`).
+- Janitor Mode tools (`-A` implied):
+  - `--check <query>` finds existing components similar to your query to prevent duplication (e.g., before creating `ChatSurface`, check if `ViewSurface` or `ChatPanel` exists).
+  - `--dead` (alias `--unused`) lists exports that are defined but never imported (potential dead code). Use `--confidence high` to filter out implicit exports.
+  - `--symbol <name>` quickly finds usages and definitions of a symbol across the project.
+  - `--impact <file>` analyzes what files would break if the target file is changed/removed.
+- Pipeline checks:
+  - `--fail-on-missing-handlers`, `--fail-on-ghost-events`, `--fail-on-races` for CI gates.
+  - `--scan-all` forces scanning of normally ignored directories (`node_modules`, `target`, `.venv`) – useful for audits or monorepo dependency analysis.
 
 Common use cases:
 
@@ -157,10 +170,12 @@ Runtime-specific entry points:
     - `tools/install.sh` (Rust via `cargo install --git`)
     - `tools/install_node.sh` (downloads `loctree.mjs` and writes `loctree-node` wrapper)
     - `tools/install_py.sh` (downloads `loctree.py` and writes `loctree-py` wrapper)
-- CI: `.github/workflows/ci.yml` runs 3 jobs on pushes/PRs to `main`:
-    - Node tests: `node tools/tests/loctree-node.test.mjs` (Node 20)
-    - Python tests: `node tools/tests/loctree-py.test.mjs` (Python 3.11)
-    - Rust tests: `node tools/tests/loctree-rs.test.mjs` (Rust stable)
+- CI: `.github/workflows/ci.yml` runs jobs on pushes/PRs to `main`:
+    - Test matrix (ubuntu + macos): fmt, clippy, unit tests, integration tests for all runtimes
+    - Coverage job (ubuntu only): Rust coverage via cargo-tarpaulin, Python coverage
+- Git hooks: `tools/setup_hooks.sh` installs pre-commit and pre-push hooks
+    - `pre-commit`: runs unit tests (use `LOCTREE_FAST=1` for quick mode)
+    - `pre-push`: full validation (fmt, clippy, all tests, optional Semgrep)
 - Release helper:
     - `tools/release/update-tap.py` — prints a Homebrew formula body for release artifacts (manual step). TODO: wire a
       publishing workflow.
@@ -177,11 +192,22 @@ Dev/test helpers:
 
 ## Development and tests
 
+Setup git hooks (recommended):
+
+```bash
+./tools/setup_hooks.sh
+```
+
+This installs pre-commit and pre-push hooks for TDD workflow.
+
+Run tests manually:
+
 - Node: `node tools/tests/loctree-node.test.mjs`
 - Python: `node tools/tests/loctree-py.test.mjs`
-- Rust: `node tools/tests/loctree-rs.test.mjs` and `cargo check`
+- Rust: `node tools/tests/loctree-rs.test.mjs` and `cargo test`
+- All unit tests: `node tools/tests/test_loctree_node_unit.mjs && python3 tools/tests/test_loctree_py_unit.py && cd loctree_rs && cargo test`
 
-CI runs all three test scripts on PRs/pushes (see `.github/workflows/ci.yml`).
+CI runs all tests on PRs/pushes plus coverage reporting (see `.github/workflows/ci.yml`).
 
 Hidden files: `.env*`, `.loctree.*`, and `.example` are analyzed even when `--show-hidden` is off (so config-like files are not skipped).
 

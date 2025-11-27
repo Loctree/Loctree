@@ -9,3 +9,8 @@ loctree_rs/tarpaulin-report.json
 /.ai-agents
 /.ai-suite
 /.loctree
+/.benchmarks
+/agents
+/loctree_rs/logs
+/loctree_rs/.loctree
+*.log

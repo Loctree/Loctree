@@ -1,6 +1,8 @@
 mod analyzer;
 mod args;
 mod fs_utils;
+mod similarity;
+mod snapshot;
 mod tree;
 mod types;
 
@@ -31,7 +33,106 @@ fn install_broken_pipe_handler() {
 }
 
 fn format_usage() -> &'static str {
-    "loctree (Rust)\n\nUsage: loctree [root ...] [options]\n\nModes:\n  --analyze-imports, -A   Switch to import/export analyzer (duplicate exports, re-exports, dynamic imports).\n  --preset-tauri          Apply Tauri-friendly defaults (extensions + ignore-symbols preset).\n  --preset-styles         Apply CSS/Tailwind-friendly defaults (styles analyzer preset).\n  --ai                    Emit a compact, AI-friendly JSON summary (top issues only, no per-file payloads).\n\nTree mode (default):\n  --summary[=N]           Totals + top large files (N entries, default 5).\n  --loc <n>               Threshold (LOC) for large-file highlighting. Default 1000.\n  -L, --max-depth <n>     Limit recursion depth (0 = only direct children).\n  --show-hidden, -H       Include dotfiles.\n  --json                  Emit JSON instead of a tree view (single root => object, multi-root => array).\n\nAnalyzer mode (-A):\n  --ext <list>            Comma-separated extensions (default: ts,tsx,js,jsx,mjs,cjs,rs,css,py).\n  --limit <N>             Top-N duplicate exports / dynamic imports (default 8).\n  --top-dead-symbols <N>  Cap dead-symbol list (default 20). Use --skip-dead-symbols to omit entirely.\n  --skip-dead-symbols     Omit dead-symbol analysis (useful for huge repos / AI mode).\n  --ignore-symbols <l>    Comma-separated symbols to skip when counting duplicate exports.\n  --ignore-symbols-preset Presets: common | tauri (main,run,setup,__all__,test_* etc.).\n  --focus <glob[,..]>     Filter duplicate-export rows to matching globs (report/output filter only).\n  --exclude-report <glob[,..]> Drop duplicate rows whose files match these globs (e.g. **/__tests__/**).\n  --py-root <path>        Extra Python import roots (repeatable); pyproject roots are still inferred.\n  --html-report <file>    Write analyzer results to an HTML report file.\n  --graph                 Embed an import graph; report UI uses tabs + a bottom drawer for graph controls.\n  --serve                 Start a lightweight local server so report links can open files in your editor/OS handler (keeps running).\n  --serve-once            Start the server but exit after generation (no keepalive).\n  --port <n>              Optional port for --serve (default: random open port).\n  --editor <name>         Editor integration: code|cursor|windsurf|jetbrains|none (default: auto).\n  --fail-on-missing-handlers  Exit non-zero if frontend invoke calls lack backend handlers (pipeline check).\n  --fail-on-ghost-events     Exit non-zero if events are emitted with no listeners or listeners have no emitters.\n  --fail-on-races            Exit non-zero if basic listener/await race heuristics are detected.\n  --max-graph-nodes <N>   Skip graph if above this node count (safety guard).\n  --max-graph-edges <N>   Skip graph if above this edge count (safety guard).\n\nCommon:\n  -I, --ignore <path>     Ignore a folder/file (relative or absolute). Repeatable.\n  --gitignore, -g         Respect current Git ignore rules (requires git).\n  --color[=mode]          Colorize large files. mode: auto|always|never (default auto).\n  --editor-cmd <tpl>      Command template to open files (default: code -g {file}:{line}, fallback open/xdg-open).\n  --jsonl                 Emit one JSON object per line (per root) in analyzer mode.\n  --help, -h              Show this message.\n\nExamples:\n  loctree src --ext rs,ts --summary\n  loctree src packages/app src-tauri/src -I node_modules -L 2\n  loctree . --json > tree.json\n  loctree src apps/web -A --json --ext ts,tsx,css --limit 10 --serve --html-report /tmp/loctree.html\n  loctree backend -A --ext py --gitignore --limit 5 --py-root backend/src\n  loctree . -A --ext py --ignore-symbols main,run --graph --html-report /tmp/loctree.html\n  loctree src src-tauri/src -A --preset-tauri --graph --serve --html-report /tmp/loctree.html\n"
+    "loctree (Rust) - Scan once, slice many\n\n\
+Quick start:\n  \
+  loctree                   Scan current directory, write snapshot to .loctree/\n  \
+  loctree src               Scan 'src' directory\n  \
+  loctree -A --graph        Analyze imports + generate graph report\n\n\
+Usage: loctree [root ...] [options]\n\n\
+Modes:\n  \
+  init (default)            Scan and save snapshot to .loctree/snapshot.json\n  \
+  --analyze-imports, -A     Import/export analyzer (duplicates, dead symbols, FE↔BE coverage)\n  \
+  --tree                    Directory tree view with LOC counts\n\n\
+Presets (auto-configure extensions & ignores):\n  \
+  --preset-tauri            Tauri stack: ts,tsx,rs + Tauri ignore-symbols\n  \
+  --preset-styles           CSS/Tailwind: css,scss,ts,tsx\n  \
+  --ai                      Compact AI-friendly JSON (top issues only)\n\n\
+Analyzer options (-A):\n  \
+  --ext <list>              Extensions (default: ts,tsx,js,jsx,mjs,cjs,rs,css,py)\n  \
+  --limit <N>               Top-N duplicates (default 8)\n  \
+  --html-report <file>      HTML report output\n  \
+  --graph                   Embed import graph in report\n  \
+  --serve                   Local server for editor integration\n  \
+  --json                    JSON output\n  \
+  --check <query>           Find similar existing components/symbols\n  \
+  --dead                    List potentially unused exports (Janitor mode)\n  \
+  --confidence <level>      Filter dead exports by confidence (normal|high)\n\n\
+Pipeline checks (CI-friendly):\n  \
+  --fail-on-missing-handlers   Exit 1 if FE invokes missing BE handlers\n  \
+  --fail-on-ghost-events       Exit 1 if events have no listeners/emitters\n  \
+  --fail-on-races              Exit 1 if listener/await races detected\n\n\
+Common:\n  \
+  -I, --ignore <path>       Ignore path (repeatable)\n  \
+  --gitignore, -g           Respect .gitignore\n  \
+  --scan-all                Include node_modules, target, .venv (normally skipped)\n  \
+  --verbose                 Show detailed progress\n  \
+  --help, -h                Show this message\n  \
+  --version                 Show version\n\n\
+Examples:\n  \
+  loctree                                    # Quick snapshot of current dir\n  \
+  loctree src -A --graph --html-report r.html  # Full analysis with graph\n  \
+  loctree . --preset-tauri -A --serve        # Tauri project analysis\n\n\
+More: loctree --help-full for all options\n"
+}
+
+fn format_usage_full() -> &'static str {
+    "loctree (Rust) - Full options reference\n\n\
+Usage: loctree [root ...] [options]\n\n\
+Modes:\n  \
+  init (default)            Scan and save snapshot to .loctree/snapshot.json\n  \
+  --analyze-imports, -A     Import/export analyzer mode\n  \
+  --tree                    Directory tree view with LOC counts\n\n\
+Presets:\n  \
+  --preset-tauri            Tauri stack defaults (ts,tsx,rs + ignore-symbols)\n  \
+  --preset-styles           CSS/Tailwind defaults (css,scss,ts,tsx)\n  \
+  --ai                      Compact AI-friendly JSON output\n\n\
+Tree mode options:\n  \
+  --summary[=N]             Show totals + top N large files (default 5)\n  \
+  --loc <n>                 LOC threshold for large-file highlighting (default 1000)\n  \
+  -L, --max-depth <n>       Limit recursion depth (0 = direct children only)\n  \
+  --show-hidden, -H         Include dotfiles\n  \
+  --json                    JSON output instead of tree view\n\n\
+Analyzer mode options (-A):\n  \
+  --ext <list>              Comma-separated extensions (default: ts,tsx,js,jsx,mjs,cjs,rs,css,py)\n  \
+  --limit <N>               Top-N duplicate exports / dynamic imports (default 8)\n  \
+  --top-dead-symbols <N>    Cap dead-symbol list (default 20)\n  \
+  --skip-dead-symbols       Omit dead-symbol analysis entirely\n  \
+  --ignore-symbols <list>   Symbols to skip in duplicate counting\n  \
+  --ignore-symbols-preset <name>  Presets: common | tauri\n  \
+  --focus <glob[,..]>       Filter results to matching globs\n  \
+  --exclude-report <glob[,..]>  Exclude files from report (e.g. **/__tests__/**)\n  \
+  --py-root <path>          Extra Python import roots (repeatable)\n  \
+  --html-report <file>      Write HTML report to file\n  \
+  --graph                   Embed import graph in HTML report\n  \
+  --serve                   Start local server for editor integration\n  \
+  --serve-once              Start server, exit after report generation\n  \
+  --port <n>                Port for --serve (default: random)\n  \
+  --editor <name>           Editor: code|cursor|windsurf|jetbrains|none (default: auto)\n  \
+  --json                    JSON output\n  \
+  --jsonl                   JSON Lines output (one object per line)\n\n\
+Pipeline checks (CI):\n  \
+  --fail-on-missing-handlers   Exit 1 if FE invokes lack BE handlers\n  \
+  --fail-on-ghost-events       Exit 1 if events lack listeners/emitters\n  \
+  --fail-on-races              Exit 1 if listener/await races detected\n\n\
+Graph limits:\n  \
+  --max-graph-nodes <N>     Skip graph if above node count\n  \
+  --max-graph-edges <N>     Skip graph if above edge count\n\n\
+Common:\n  \
+  -I, --ignore <path>       Ignore path (repeatable)\n  \
+  --gitignore, -g           Respect .gitignore rules\n  \
+  --scan-all                Include node_modules, target, .venv, __pycache__ (normally skipped)\n  \
+  --color[=mode]            Colorize output: auto|always|never (default auto)\n  \
+  --editor-cmd <tpl>        Command template for opening files\n  \
+  --verbose                 Show detailed progress and warnings\n  \
+  --help, -h                Show quick help\n  \
+  --help-full               Show this full reference\n  \
+  --version                 Show version\n\n\
+Examples:\n  \
+  loctree                                        # Snapshot current dir\n  \
+  loctree src --tree --summary                   # Tree view with summary\n  \
+  loctree src -A --graph --html-report r.html    # Full analysis\n  \
+  loctree . --preset-tauri -A --serve            # Tauri project\n  \
+  loctree backend -A --ext py --py-root src      # Python project\n"
 }
 
 fn main() -> std::io::Result<()> {
@@ -47,6 +148,11 @@ fn main() -> std::io::Result<()> {
 
     if parsed.show_help {
         println!("{}", format_usage());
+        return Ok(());
+    }
+
+    if parsed.show_help_full {
+        println!("{}", format_usage_full());
         return Ok(());
     }
 
@@ -82,6 +188,7 @@ fn main() -> std::io::Result<()> {
     match parsed.mode {
         Mode::AnalyzeImports => analyzer::run_import_analyzer(&root_list, &parsed)?,
         Mode::Tree => tree::run_tree(&root_list, &parsed)?,
+        Mode::Init => snapshot::run_init(&root_list, &parsed)?,
     }
 
     Ok(())

@@ -19,6 +19,7 @@ pub struct ParsedArgs {
     pub summary: bool,
     pub summary_limit: usize,
     pub show_help: bool,
+    pub show_help_full: bool,
     pub show_version: bool,
     pub root_list: Vec<PathBuf>,
     pub py_roots: Vec<PathBuf>,
@@ -43,6 +44,12 @@ pub struct ParsedArgs {
     pub ai_mode: bool,
     pub top_dead_symbols: usize,
     pub skip_dead_symbols: bool,
+    pub scan_all: bool,
+    pub symbol: Option<String>,
+    pub impact: Option<String>,
+    pub check_sim: Option<String>,
+    pub dead_exports: bool,
+    pub dead_confidence: Option<String>,
 }
 
 impl Default for ParsedArgs {
@@ -63,6 +70,7 @@ impl Default for ParsedArgs {
             summary: false,
             summary_limit: 5,
             show_help: false,
+            show_help_full: false,
             show_version: false,
             root_list: Vec::new(),
             py_roots: Vec::new(),
@@ -87,6 +95,12 @@ impl Default for ParsedArgs {
             ai_mode: false,
             top_dead_symbols: 20,
             skip_dead_symbols: false,
+            scan_all: false,
+            symbol: None,
+            impact: None,
+            check_sim: None,
+            dead_exports: false,
+            dead_confidence: None,
         }
     }
 }
@@ -257,6 +271,10 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
                 parsed.mode = Mode::AnalyzeImports;
                 i += 1;
             }
+            "init" | "--init" => {
+                parsed.mode = Mode::Init;
+                i += 1;
+            }
             "--ai" => {
                 parsed.ai_mode = true;
                 parsed.output = OutputMode::Json;
@@ -266,6 +284,14 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
             }
             "--help" | "-h" => {
                 parsed.show_help = true;
+                i += 1;
+            }
+            "--help-full" => {
+                parsed.show_help_full = true;
+                i += 1;
+            }
+            "--tree" | "tree" => {
+                parsed.mode = Mode::Tree;
                 i += 1;
             }
             "--version" | "-V" => {
@@ -423,6 +449,71 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
                 parsed.skip_dead_symbols = true;
                 i += 1;
             }
+            "--scan-all" => {
+                parsed.scan_all = true;
+                i += 1;
+            }
+            "--symbol" => {
+                let next = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--symbol requires a value".to_string())?;
+                parsed.symbol = Some(next.clone());
+                i += 2;
+            }
+            _ if arg.starts_with("--symbol=") => {
+                let value = arg.trim_start_matches("--symbol=");
+                parsed.symbol = Some(value.to_string());
+                i += 1;
+            }
+            "--impact" => {
+                let next = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--impact requires a file path or glob".to_string())?;
+                parsed.impact = Some(next.clone());
+                i += 2;
+            }
+            _ if arg.starts_with("--impact=") => {
+                let value = arg.trim_start_matches("--impact=");
+                parsed.impact = Some(value.to_string());
+                i += 1;
+            }
+            "--check" | "--sim" | "--find-similar" => {
+                let next = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--check/--sim requires a query string".to_string())?;
+                parsed.check_sim = Some(next.clone());
+                parsed.mode = Mode::AnalyzeImports;
+                i += 2;
+            }
+            _ if arg.starts_with("--check=") => {
+                let value = arg.trim_start_matches("--check=");
+                parsed.check_sim = Some(value.to_string());
+                parsed.mode = Mode::AnalyzeImports;
+                i += 1;
+            }
+            _ if arg.starts_with("--sim=") => {
+                let value = arg.trim_start_matches("--sim=");
+                parsed.check_sim = Some(value.to_string());
+                parsed.mode = Mode::AnalyzeImports;
+                i += 1;
+            }
+            "--dead" | "--unused" => {
+                parsed.dead_exports = true;
+                parsed.mode = Mode::AnalyzeImports;
+                i += 1;
+            }
+            "--confidence" => {
+                let next = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--confidence requires a value".to_string())?;
+                parsed.dead_confidence = Some(next.clone());
+                i += 2;
+            }
+            _ if arg.starts_with("--confidence=") => {
+                let value = arg.trim_start_matches("--confidence=");
+                parsed.dead_confidence = Some(value.to_string());
+                i += 1;
+            }
             "--analyze-imports" | "-A" => {
                 parsed.mode = Mode::AnalyzeImports;
                 i += 1;
@@ -561,9 +652,34 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
         parsed.mode = Mode::AnalyzeImports;
         parsed.graph = true;
         parsed.use_gitignore = true;
+        if parsed.ignore_patterns.is_empty() {
+            parsed.ignore_patterns.extend(
+                [
+                    "node_modules",
+                    "dist",
+                    "target",
+                    "build",
+                    "coverage",
+                    "docs/*.json",
+                ]
+                .iter()
+                .map(|s| s.to_string()),
+            );
+        }
         if parsed.ignore_symbols.is_none() && parsed.ignore_symbols_preset.is_none() {
             parsed.ignore_symbols_preset = Some("tauri".to_string());
         }
+    }
+
+    // Default to Init mode when running bare `loctree` without any mode-setting flags
+    // This implements "scan once" - bare loctree creates/updates the snapshot
+    if roots.is_empty()
+        && matches!(parsed.mode, Mode::Tree)
+        && !parsed.summary
+        && parsed.extensions.is_none()
+    {
+        parsed.mode = Mode::Init;
+        parsed.use_gitignore = true;
     }
 
     if roots.is_empty() {

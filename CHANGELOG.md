@@ -4,14 +4,85 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
-## [0.3.9] - 2025-11-25
+## [Unreleased] - 0.5.0 (in progress)
+
+### Added
+- **Snapshot system** ("scan once, slice many"): Running bare `loctree` (no arguments) now scans the project and saves a complete graph snapshot to `.loctree/snapshot.json`.
+- New `init` command/mode: `loctree init [path]` explicitly creates or updates the snapshot.
+- Snapshot contains: file analyses (imports, exports, commands, events), graph edges, export index, command bridges (FE↔BE mappings), event bridges (emit↔listen), and barrel file detection.
+- Snapshot metadata includes: schema version, generation timestamp, detected languages, file count, total LOC, and scan duration.
+- Foundation for upcoming "holographic slice" feature (Vertical Slice 2) - context slicing from snapshot.
+
+### Changed
+- Default behavior: bare `loctree` without arguments now runs in Init mode (creates snapshot) instead of Tree mode.
+- Added `Serialize`/`Deserialize` derives to core analysis types for snapshot persistence.
+- Made `root_scan` and `coverage` modules public for snapshot building.
+- Snapshot summary now shows actionable next steps (`loctree . -A --json`, `loctree . -A --preset-tauri`) instead of not-yet-implemented slice command.
+
+### Fixed
+- `--fail-on-missing-handlers`, `--fail-on-ghost-events`, `--fail-on-races` flags now actually work: they return non-zero exit code when issues are detected (previously flags were parsed but had no effect).
+
+## [0.4.6] - 2025-11-27
+### Added
+- **Janitor Mode tools**:
+  - `--check <query>`: Finds existing components/symbols similar to the query (Levenshtein distance) to prevent duplication before writing new code.
+  - `--dead` (alias `--unused`): Lists potentially unused exports (defined but never imported).
+  - `--confidence <level>`: Filters dead exports (use `high` to hide implicit uses like `default` exports or re-exports).
+  - `--symbol <name>`: Quickly finds all occurrences of a symbol (definitions and usages) across the project.
+  - `--impact <file>`: Analyzes dependency graph to show what would break if the target file changed.
+  - `--scan-all`: Option to include `node_modules`, `target`, `.venv` in analysis (normally ignored by default).
+- **Pipeline Confidence**: "Ghost events" now include confidence scores and recommendations (`safe_to_remove` vs `verify_dynamic_value`).
+- **Graph UX**: Sticky tooltips on nodes (persist on hover/click) for easier reading and copying paths.
+### Changed
+- Default behavior: `loctree` (no args) now ignores `node_modules`, `target`, `.venv` by default to prevent massive snapshots. Use `--scan-all` to override.
+- CLI output: Removed emojis from standard output for cleaner, grep-friendly text.
+### Fixed
+- Fixed false positives in "dead exports" where re-exports were not counted as usage.
+- Fixed double-counting of named re-exports in parser.
+- Fixed tooltip flickering in HTML report graph.
+
+## [0.4.4] - 2025-11-27
+
+### Security
+- Replaced unmaintained `json5` crate (RUSTSEC-2025-0120) with actively maintained `json-five` for tsconfig.json parsing. No API or behavior changes.
+
+### Fixed
+- Added Semgrep suppression comments with safety justifications for `innerHTML` usage in `graph_bootstrap.js` (all user data is escaped via `escapeHtml()`; other values are numbers from analyzer).
+- Replaced bare `unwrap()` with `expect()` providing context in snapshot module tests to comply with project linting rules.
+
+## [0.4.3] - 2025-11-26
+
+### Fixed
+- HTML report no longer renders duplicate graph toolbars; inline graph panels are hidden so the drawer is the single source of controls (no double scrollbars).
+
+### Changed
+- Documentation updated for the streamlined graph UI.
+
+## [0.4.2] - 2025-11-26
+
+### Fixed
+- Multi-root analyzer now merges frontend calls and backend handlers across roots, so Tauri coverage/commands summaries stop flagging cross-root missing/unused pairs.
+- Duplicate export detection skips re-exports and `default` exports from declaration files, reducing barrel/index.ts false positives.
+- Event names declared as constants (TS/JS/Rust, including imported consts) are resolved for emit/listen analysis, cutting ghost/orphan noise.
+
+### Changed
+- Analyzer scanning logic was extracted into dedicated modules (`scan.rs`/`root_scan.rs`), shrinking `runner.rs` and preparing the upcoming subcommands without changing CLI behavior.
+
+## [0.4.1] - 2025-11-25
+
+### Fixed
+- TS path resolver now walks parent dirs to find `tsconfig.json` (or a base in parent), merges `extends`, parses JSONC/JSON5 (tsconfig with comments/trailing commas), and canonicalizes `baseUrl/paths`, so aliases like `@/*` resolve instead of returning null even when tsconfig lives above the scanned root.
+
+## [0.4.0] - 2025-11-25
 
 ### Added
 - `--ai` concise output mode that emits a compact JSON summary with top issues instead of full per-file payloads.
 - Dead-symbol controls: `--top-dead-symbols` (default 20) to cap lists and `--skip-dead-symbols` to omit them entirely.
+- AI/bridge payload now keeps a compact list of FE↔BE Tauri command mappings (`bridges`) so agents can jump to handlers/call-sites.
 
 ### Changed
 - AI/summary views respect the new limits to reduce noisy output; help/README refreshed to mention the AI flags and limits.
+- `--preset-tauri` now auto-ignores common build artifacts (`node_modules`, `dist`, `target`, `build`, `coverage`, `docs/*.json`) to cut report noise without extra flags.
 
 ### Fixed
 - Resolved clippy warning in the open-server editor launcher (mutable closure), no functional change.

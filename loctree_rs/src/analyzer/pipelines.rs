@@ -3,7 +3,8 @@ use std::collections::{HashMap, HashSet};
 use globset::GlobSet;
 use serde_json::json;
 
-use crate::types::FileAnalysis;
+use crate::analyzer::coverage::CommandUsage;
+use crate::types::{FileAnalysis, PayloadMap};
 
 fn normalize_event(name: &str) -> String {
     name.chars()
@@ -36,10 +37,10 @@ pub fn build_pipeline_summary(
     analyses: &[FileAnalysis],
     focus: &Option<GlobSet>,
     exclude: &Option<GlobSet>,
-    fe_commands: &HashMap<String, Vec<(String, usize, String)>>,
-    be_commands: &HashMap<String, Vec<(String, usize, String)>>,
-    fe_payloads: &HashMap<String, Vec<(String, usize, Option<String>)>>,
-    be_payloads: &HashMap<String, Vec<(String, usize, Option<String>)>>,
+    fe_commands: &CommandUsage,
+    be_commands: &CommandUsage,
+    fe_payloads: &PayloadMap,
+    be_payloads: &PayloadMap,
 ) -> serde_json::Value {
     #[derive(Clone)]
     struct Site {
@@ -106,9 +107,8 @@ pub fn build_pipeline_summary(
     let mut ghost_emits = Vec::new();
     let mut orphan_listeners = Vec::new();
     let mut risks = Vec::new();
-    let mut call_payloads: HashMap<String, Vec<(String, usize, Option<String>)>> = HashMap::new();
-    let mut handler_payloads: HashMap<String, Vec<(String, usize, Option<String>)>> =
-        HashMap::new();
+    let mut call_payloads: PayloadMap = HashMap::new();
+    let mut handler_payloads: PayloadMap = HashMap::new();
 
     for (name, entries) in fe_payloads {
         call_payloads
@@ -150,17 +150,41 @@ pub fn build_pipeline_summary(
 
         if status == "ghost" {
             for site in &emitters {
+                let mut confidence = "high";
+                let mut recommendation = "safe_to_remove";
+
+                let is_literal = site.raw.starts_with('"') || site.raw.starts_with('\'');
+                let is_tauri = site.raw.contains("tauri://");
+                let is_template = !is_literal && site.raw.contains('`');
+
+                if is_tauri {
+                    confidence = "low";
+                    recommendation = "check_system_docs";
+                } else if is_template || site.raw.contains("${") {
+                    confidence = "low";
+                    recommendation = "verify_dynamic_value";
+                } else if !is_literal {
+                    // Identifier or variable that wasn't resolved to a literal
+                    confidence = "low";
+                    recommendation = "verify_variable_value";
+                }
+
                 ghost_emits.push(json!({
                     "name": site.raw,
                     "path": site.path,
                     "line": site.line,
                     "normalized": norm,
                     "payload": site.payload,
+                    "confidence": confidence,
+                    "recommendation": recommendation,
                 }));
             }
         }
         if status == "orphan" {
             for site in &listeners {
+                if site.raw.starts_with("tauri://") {
+                    continue;
+                }
                 orphan_listeners.push(json!({
                     "name": site.raw,
                     "path": site.path,
@@ -436,7 +460,8 @@ mod tests {
 
         // FE file with matching emit/listen
         let mut fe = FileAnalysis::new("src/frontend.ts".into());
-        fe.event_emits.push(mk_event("vista://ok", 10, "emit_literal", false));
+        fe.event_emits
+            .push(mk_event("vista://ok", 10, "emit_literal", false));
         fe.event_listens
             .push(mk_event("vista://ok", 5, "listen_literal", true));
         fe.command_calls.push(CommandRef {
@@ -511,9 +536,7 @@ mod tests {
         assert_eq!(status_map.get("missing_cmd"), Some(&"missing_handler"));
         assert_eq!(status_map.get("unused_cmd"), Some(&"unused_handler"));
 
-        let risks = summary["risks"]
-            .as_array()
-            .expect("risks array present");
+        let risks = summary["risks"].as_array().expect("risks array present");
         assert!(risks.iter().any(|r| r["type"] == "invoke_before_listen"));
         assert!(risks.iter().any(|r| r["type"] == "listen_not_awaited"));
     }

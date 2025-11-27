@@ -272,14 +272,12 @@ fn open_file_in_editor(full_path: &Path, line: usize, cfg: &EditorConfig) -> io:
 
     if fallback {
         Ok(())
+    } else if tried {
+        Err(io::Error::other("could not open file via editor"))
     } else {
-        if tried {
-            Err(io::Error::other("could not open file via editor"))
-        } else {
-            Err(io::Error::other(
-                "no editor command succeeded (try --editor-cmd)",
-            ))
-        }
+        Err(io::Error::other(
+            "no editor command succeeded (try --editor-cmd)",
+        ))
     }
 }
 

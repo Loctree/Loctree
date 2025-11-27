@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use serde_json;
+use serde_json::Value;
 
 /// Simple TS/JS path resolver backed by tsconfig.json `baseUrl` and `paths`.
 /// Supports alias patterns with a single `*` and falls back to `baseUrl`.
@@ -22,12 +23,8 @@ struct AliasMapping {
 
 impl TsPathResolver {
     pub(crate) fn from_tsconfig(root: &Path) -> Option<Self> {
-        let ts_path = root.join("tsconfig.json");
-        if !ts_path.exists() {
-            return None;
-        }
-        let content = std::fs::read_to_string(&ts_path).ok()?;
-        let json: serde_json::Value = serde_json::from_str(&content).ok()?;
+        let ts_path = find_tsconfig(root)?;
+        let json = load_tsconfig_recursive(&ts_path)?;
         let compiler = json
             .get("compilerOptions")
             .and_then(|v| v.as_object())
@@ -38,7 +35,7 @@ impl TsPathResolver {
             .get("baseUrl")
             .and_then(|v| v.as_str())
             .unwrap_or(".");
-        let base_dir = root.join(base_url);
+        let base_dir = ts_path.parent().unwrap_or(root).join(base_url);
 
         let mut mappings = Vec::new();
         if let Some(paths) = compiler.get("paths").and_then(|p| p.as_object()) {
@@ -72,7 +69,7 @@ impl TsPathResolver {
         }
 
         Some(Self {
-            base_dir,
+            base_dir: base_dir.canonicalize().unwrap_or(base_dir),
             root: root.to_path_buf(),
             mappings,
         })
@@ -241,6 +238,17 @@ pub(crate) fn resolve_with_extensions(
     if candidate.exists() {
         canonical_rel(&candidate, root).or_else(|| canonical_abs(&candidate))
     } else {
+        // Fallback: if this looks like a directory/module, try index.* inside it
+        if candidate.extension().is_none() {
+            let dir_path = candidate.clone();
+            for index_name in ["index.ts", "index.tsx", "index.js", "index.jsx"] {
+                let index_candidate = dir_path.join(index_name);
+                if index_candidate.exists() {
+                    return canonical_rel(&index_candidate, root)
+                        .or_else(|| canonical_abs(&index_candidate));
+                }
+            }
+        }
         None
     }
 }
@@ -257,4 +265,103 @@ fn canonical_abs(path: &Path) -> Option<String> {
     path.canonicalize()
         .ok()
         .map(|p| p.to_string_lossy().to_string())
+}
+
+pub(crate) fn find_tsconfig(start: &Path) -> Option<PathBuf> {
+    let mut current = start
+        .canonicalize()
+        .ok()
+        .unwrap_or_else(|| start.to_path_buf());
+    loop {
+        let candidate = current.join("tsconfig.json");
+        if candidate.exists() {
+            return Some(candidate);
+        }
+        if let Some(parent) = current.parent() {
+            if parent == current {
+                break;
+            }
+            current = parent.to_path_buf();
+        } else {
+            break;
+        }
+    }
+    None
+}
+
+fn load_tsconfig_recursive(ts_path: &Path) -> Option<Value> {
+    let content = std::fs::read_to_string(ts_path).ok()?;
+    let mut current: Value = parse_tsconfig_value(&content)?;
+
+    // Merge extends (child overrides parent).
+    if let Some(ext) = current.get("extends").and_then(|v| v.as_str()) {
+        let base_path = if Path::new(ext).is_absolute() {
+            PathBuf::from(ext)
+        } else {
+            ts_path
+                .parent()
+                .map(|p| p.join(ext))
+                .unwrap_or_else(|| PathBuf::from(ext))
+        };
+        if base_path.exists() {
+            if let Some(parent) = load_tsconfig_recursive(&base_path) {
+                if let (Some(child_co), Some(parent_co)) = (
+                    current
+                        .get("compilerOptions")
+                        .and_then(|v| v.as_object())
+                        .cloned(),
+                    parent
+                        .get("compilerOptions")
+                        .and_then(|v| v.as_object())
+                        .cloned(),
+                ) {
+                    let merged = merge_compiler_options(&parent_co, &child_co);
+                    current["compilerOptions"] = Value::Object(merged);
+                } else if let Some(parent_co) = parent
+                    .get("compilerOptions")
+                    .and_then(|v| v.as_object())
+                    .cloned()
+                {
+                    current["compilerOptions"] = Value::Object(parent_co);
+                }
+            }
+        }
+    }
+
+    Some(current)
+}
+
+pub(crate) fn parse_tsconfig_value(content: &str) -> Option<Value> {
+    if let Ok(v) = serde_json::from_str(content) {
+        return Some(v);
+    }
+    if let Ok(v) = json_five::from_str::<serde_json::Value>(content) {
+        return Some(v);
+    }
+    None
+}
+
+fn merge_compiler_options(
+    parent: &serde_json::Map<String, Value>,
+    child: &serde_json::Map<String, Value>,
+) -> serde_json::Map<String, Value> {
+    let mut merged = parent.clone();
+    for (k, v) in child {
+        if k == "paths" {
+            let mut combined = parent
+                .get("paths")
+                .and_then(|v| v.as_object())
+                .cloned()
+                .unwrap_or_default();
+            if let Some(child_paths) = v.as_object() {
+                for (alias, targets) in child_paths {
+                    combined.insert(alias.clone(), targets.clone());
+                }
+            }
+            merged.insert(k.clone(), Value::Object(combined));
+        } else {
+            merged.insert(k.clone(), v.clone());
+        }
+    }
+    merged
 }

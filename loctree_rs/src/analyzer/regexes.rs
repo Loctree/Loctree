@@ -54,7 +54,9 @@ pub(crate) fn regex_safe_invoke() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
         // Recognize common Tauri wrappers used in FE: safeInvoke, invokeWithSession, withSessionPayload, invokeWithSessionPayload
-        regex(r#"(?:safeInvoke|invokeWithSession(?:Payload)?|withSessionPayload)\s*(?:<(?P<generic>[^>]+)>+)?\(\s*["'](?P<cmd>[^"']+)["']\s*(?:,\s*(?P<payload>[^)\n]+))?"#)
+        // Also handles this.invokeWithSession(...) pattern used in class methods
+        // Allows whitespace including newlines between function name, generics, and opening paren
+        regex(r#"(?:this\.)?(?:safeInvoke|invokeWithSession(?:Payload)?|withSessionPayload)\s*(?:<(?P<generic>[^>]+)>)?\s*\(\s*["'](?P<cmd>[^"']+)["']"#)
     })
 }
 
@@ -76,7 +78,9 @@ pub(crate) fn regex_invoke_audio() -> &'static Regex {
 pub(crate) fn regex_tauri_command_fn() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        regex(r#"(?m)#\s*\[\s*tauri::command([^\]]*)\]\s*(?:pub\s*(?:\([^)]*\)\s*)?)?(?:async\s+)?fn\s+([A-Za-z0-9_]+)\s*\((?P<params>[^)]*)\)"#)
+        // Matches #[tauri::command] followed by optional additional attributes like #[allow(...)]
+        // before the function definition
+        regex(r#"(?m)#\s*\[\s*tauri::command([^\]]*)\](?:\s*#\s*\[[^\]]*\])*\s*(?:pub\s*(?:\([^)]*\)\s*)?)?(?:async\s+)?fn\s+([A-Za-z0-9_]+)\s*\((?P<params>[^)]*)\)"#)
     })
 }
 

@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 pub const DEFAULT_LOC_THRESHOLD: usize = 1000;
@@ -22,6 +23,8 @@ pub enum OutputMode {
 pub enum Mode {
     Tree,
     AnalyzeImports,
+    /// Initialize/update snapshot (scan once)
+    Init,
 }
 
 #[derive(Clone)]
@@ -44,6 +47,9 @@ pub struct Options {
     pub max_graph_nodes: Option<usize>,
     pub max_graph_edges: Option<usize>,
     pub verbose: bool,
+    pub scan_all: bool,
+    pub symbol: Option<String>,
+    pub impact: Option<String>,
 }
 
 pub struct LineEntry {
@@ -52,6 +58,12 @@ pub struct LineEntry {
     pub relative_path: String,
     pub is_dir: bool,
     pub is_large: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SymbolMatch {
+    pub line: usize,
+    pub context: String,
 }
 
 pub struct LargeEntry {
@@ -73,7 +85,7 @@ pub struct Collectors<'a> {
     pub stats: &'a mut Stats,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ImportEntry {
     pub source: String,
     pub source_raw: String,
@@ -85,14 +97,14 @@ pub struct ImportEntry {
     pub is_type_checking: bool,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ImportKind {
     Static,
     SideEffect,
 }
 
 #[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ImportResolutionKind {
     Local,
     Stdlib,
@@ -100,26 +112,26 @@ pub enum ImportResolutionKind {
     Unknown,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ImportSymbol {
     pub name: String,
     pub alias: Option<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ReexportEntry {
     pub source: String,
     pub kind: ReexportKind,
     pub resolved: Option<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ReexportKind {
     Star,
     Named(Vec<String>),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ExportSymbol {
     pub name: String,
     pub kind: String,
@@ -127,7 +139,7 @@ pub struct ExportSymbol {
     pub line: Option<usize>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CommandRef {
     pub name: String,
     pub exposed_name: Option<String>,
@@ -136,7 +148,7 @@ pub struct CommandRef {
     pub payload: Option<String>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EventRef {
     pub raw_name: Option<String>,
     pub name: String,
@@ -146,7 +158,7 @@ pub struct EventRef {
     pub payload: Option<String>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FileAnalysis {
     pub path: String,
     pub loc: usize,
@@ -163,6 +175,7 @@ pub struct FileAnalysis {
     pub event_emits: Vec<EventRef>,
     pub event_listens: Vec<EventRef>,
     pub event_consts: HashMap<String, String>,
+    pub matches: Vec<SymbolMatch>,
 }
 
 impl ImportEntry {
@@ -210,9 +223,12 @@ impl FileAnalysis {
             event_emits: Vec::new(),
             event_listens: Vec::new(),
             event_consts: HashMap::new(),
+            matches: Vec::new(),
         }
     }
 }
 
 // Convenience type aliases reused across modules
 pub type ExportIndex = HashMap<String, Vec<String>>;
+pub type PayloadEntry = (String, usize, Option<String>);
+pub type PayloadMap = HashMap<String, Vec<PayloadEntry>>;
