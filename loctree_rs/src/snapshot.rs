@@ -428,10 +428,11 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
 
     for file in &snapshot.files {
         for emit in &file.event_emits {
-            event_emits_map
-                .entry(emit.name.clone())
-                .or_default()
-                .push((file.path.clone(), emit.line, emit.kind.clone()));
+            event_emits_map.entry(emit.name.clone()).or_default().push((
+                file.path.clone(),
+                emit.line,
+                emit.kind.clone(),
+            ));
         }
         for listen in &file.event_listens {
             event_listens_map

@@ -267,7 +267,7 @@ fn canonical_abs(path: &Path) -> Option<String> {
         .map(|p| p.to_string_lossy().to_string())
 }
 
-fn find_tsconfig(start: &Path) -> Option<PathBuf> {
+pub(crate) fn find_tsconfig(start: &Path) -> Option<PathBuf> {
     let mut current = start
         .canonicalize()
         .ok()
@@ -331,7 +331,7 @@ fn load_tsconfig_recursive(ts_path: &Path) -> Option<Value> {
     Some(current)
 }
 
-fn parse_tsconfig_value(content: &str) -> Option<Value> {
+pub(crate) fn parse_tsconfig_value(content: &str) -> Option<Value> {
     if let Ok(v) = serde_json::from_str(content) {
         return Some(v);
     }

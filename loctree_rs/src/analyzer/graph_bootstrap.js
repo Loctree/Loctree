@@ -3,6 +3,52 @@
   const escapeHtml = (value = "") =>
     String(value).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] || c));
   const formatNum = (n) => (typeof n === "number" && n.toLocaleString ? n.toLocaleString() : n || 0);
+  const cyInstances = new Set();
+  const darkToggles = new Set();
+  const filterElements = (elements, opts) => {
+    const text = (opts.text || "").toLowerCase();
+    const minDeg = parseInt(opts.minDeg || "0", 10) || 0;
+    const allowedComponents = opts.allowedComponents || new Set();
+    let nodes = elements.nodes.map((n) => ({ data: { ...n.data }, position: { ...n.position } }));
+    if (text) nodes = nodes.filter((n) => (n.data.id || "").toLowerCase().includes(text));
+    if (allowedComponents.size) nodes = nodes.filter((n) => allowedComponents.has(n.data.component));
+
+    let edges = elements.edges.map((e) => ({ data: { ...e.data } }));
+    const nodeSet = new Set(nodes.map((n) => n.data.id));
+    edges = edges.filter((e) => nodeSet.has(e.data.source) && nodeSet.has(e.data.target));
+
+    if (minDeg > 0) {
+      const deg = {};
+      edges.forEach((e) => {
+        deg[e.data.source] = (deg[e.data.source] || 0) + 1;
+        deg[e.data.target] = (deg[e.data.target] || 0) + 1;
+      });
+      nodes = nodes.filter((n) => (deg[n.data.id] || 0) >= minDeg);
+      const filteredSet = new Set(nodes.map((n) => n.data.id));
+      edges = edges.filter((e) => filteredSet.has(e.data.source) && filteredSet.has(e.data.target));
+    }
+    return { nodes, edges };
+  };
+
+  const applyDarkTheme = (on, graphs) => {
+    document.documentElement.classList.toggle("dark", on);
+    graphs
+      .filter(Boolean)
+      .forEach((inst) => {
+        if (inst && typeof inst.style === "function") {
+          const style = inst.style();
+          style.selector("node").style("color", on ? "#eef2ff" : "#fff").update();
+          style.selector("edge").style("text-background-color", on ? "#0f1115" : "#fff").update();
+        }
+      });
+  };
+  const setDarkMode = (on) => applyDarkTheme(on, Array.from(cyInstances));
+  const applyDarkShared = (on) => {
+    darkToggles.forEach((chk) => {
+      if (chk) chk.checked = on;
+    });
+    setDarkMode(on);
+  };
 
   graphs.forEach((g) => {
     const container = document.getElementById(g.id);
@@ -14,8 +60,6 @@
     components.forEach((c) => componentMap.set(c.id, c));
     const detachedSet = new Set(components.filter((c) => c.detached).map((c) => c.id));
     const openBase = g.openBase || null;
-    let cyDrawer = null;
-    let drawerDarkChk = null;
 
     const originalParent = container.parentNode;
     container.style.height = "520px";
@@ -305,6 +349,7 @@
       ],
       layout: { name: "preset", animate: false, fit: true },
     });
+    cyInstances.add(cy);
 
     const download = (filename, content, type) => {
       const blob = new Blob([content], { type });
@@ -355,25 +400,9 @@
       const text = (toolbar.querySelector('[data-role="filter-text"]')?.value || "").toLowerCase();
       const minDeg = parseInt(toolbar.querySelector('[data-role="min-degree"]')?.value || "0", 10) || 0;
       const allowedComponents = state.viewComponents;
-
-      let nodes = original.nodes.map((n) => ({ data: { ...n.data }, position: { ...n.position } }));
-      if (text) nodes = nodes.filter((n) => (n.data.id || "").toLowerCase().includes(text));
-      if (allowedComponents.size) nodes = nodes.filter((n) => allowedComponents.has(n.data.component));
-
-      let edges = original.edges.map((e) => ({ data: { ...e.data } }));
-      const nodeSet = new Set(nodes.map((n) => n.data.id));
-      edges = edges.filter((e) => nodeSet.has(e.data.source) && nodeSet.has(e.data.target));
-
-      if (minDeg > 0) {
-        const deg = {};
-        edges.forEach((e) => {
-          deg[e.data.source] = (deg[e.data.source] || 0) + 1;
-          deg[e.data.target] = (deg[e.data.target] || 0) + 1;
-        });
-        nodes = nodes.filter((n) => (deg[n.data.id] || 0) >= minDeg);
-        const filteredSet = new Set(nodes.map((n) => n.data.id));
-        edges = edges.filter((e) => filteredSet.has(e.data.source) && filteredSet.has(e.data.target));
-      }
+      const filtered = filterElements(original, { text, minDeg, allowedComponents });
+      let nodes = filtered.nodes;
+      let edges = filtered.edges;
 
       if (nodes.length === 0) {
         emptyOverlay.style.display = "block";
@@ -454,29 +483,10 @@
         download(`${g.id}-graph.json`, JSON.stringify(payload, null, 2), "application/json");
       });
 
-    const syncDarkToggles = (on) => {
-      if (darkChk) darkChk.checked = on;
-      if (drawerDarkChk) drawerDarkChk.checked = on;
-    };
-    const applyDark = (on) => {
-      syncDarkToggles(on);
-      document.documentElement.classList.toggle("dark", on);
-      if (cy && typeof cy.style === "function") {
-        const style = cy.style();
-        if (style) {
-          style.selector("node").style("color", on ? "#eef2ff" : "#fff").update();
-          style.selector("edge").style("text-background-color", on ? "#0f1115" : "#fff").update();
-        }
-      }
-      if (cyDrawer && typeof cyDrawer.style === "function") {
-        const style = cyDrawer.style();
-        if (style) {
-          style.selector("node").style("color", on ? "#eef2ff" : "#fff").update();
-          style.selector("edge").style("text-background-color", on ? "#0f1115" : "#fff").update();
-        }
-      }
-    };
-    if (darkChk) darkChk.addEventListener("change", () => applyDark(darkChk.checked));
+    if (darkChk) {
+      darkToggles.add(darkChk);
+      darkChk.addEventListener("change", () => applyDarkShared(darkChk.checked));
+    }
 
     const fsTarget = container;
     if (fsBtn && fsTarget && fsTarget.requestFullscreen) {
@@ -974,6 +984,7 @@
       ],
       layout: { name: "preset", animate: false, fit: true },
     });
+    cyInstances.add(cyDrawer);
 
     // Drawer tooltip (sticky behavior)
     const drawerTooltip = document.createElement("div");
@@ -1052,23 +1063,11 @@
     });
 
     const applyDrawerFilters = (runLayout = true) => {
-      let nodes = drawerElements.nodes.map((n) => ({ data: { ...n.data }, position: { ...n.position } }));
-      let edges = drawerElements.edges.map((e) => ({ data: { ...e.data } }));
       const txt = (drawerFilter?.value || "").toLowerCase();
       const minDeg = parseInt(drawerMinDeg?.value || "0", 10) || 0;
-      if (txt) nodes = nodes.filter((n) => (n.data.id || "").toLowerCase().includes(txt));
-      const nodeSet = new Set(nodes.map((n) => n.data.id));
-      edges = edges.filter((e) => nodeSet.has(e.data.source) && nodeSet.has(e.data.target));
-      if (minDeg > 0) {
-        const deg = {};
-        edges.forEach((e) => {
-          deg[e.data.source] = (deg[e.data.source] || 0) + 1;
-          deg[e.data.target] = (deg[e.data.target] || 0) + 1;
-        });
-        nodes = nodes.filter((n) => (deg[n.data.id] || 0) >= minDeg);
-        const filt = new Set(nodes.map((n) => n.data.id));
-        edges = edges.filter((e) => filt.has(e.data.source) && filt.has(e.data.target));
-      }
+      const filtered = filterElements(drawerElements, { text: txt, minDeg, allowedComponents: new Set() });
+      const nodes = filtered.nodes;
+      const edges = filtered.edges;
       cyDrawer.elements().remove();
       cyDrawer.add({ nodes, edges });
       const labelsOn = drawerLabels?.checked && nodes.length <= 800;
@@ -1126,16 +1125,10 @@
         if (!document.fullscreenElement) cyDrawer.fit();
       });
     }
-    if (drawerDarkChk)
-      drawerDarkChk.addEventListener("change", () => {
-        const on = drawerDarkChk.checked;
-        document.documentElement.classList.toggle("dark", on);
-        if (cyDrawer && typeof cyDrawer.style === "function") {
-          const style = cyDrawer.style();
-          style.selector("node").style("color", on ? "#eef2ff" : "#fff").update();
-          style.selector("edge").style("text-background-color", on ? "#0f1115" : "#fff").update();
-        }
-      });
+    if (drawerDarkChk) {
+      darkToggles.add(drawerDarkChk);
+      drawerDarkChk.addEventListener("change", () => applyDarkShared(drawerDarkChk.checked));
+    }
     applyDrawerFilters(true);
 
     cyDrawer.on("mouseover", "node", (evt) => {

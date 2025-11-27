@@ -138,7 +138,11 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
 
     if let Some(target_path) = &parsed.impact {
         if let Some(result) = analyze_impact(target_path, &global_analyses, &contexts) {
-            print_impact_results(target_path, &result, matches!(parsed.output, OutputMode::Json));
+            print_impact_results(
+                target_path,
+                &result,
+                matches!(parsed.output, OutputMode::Json),
+            );
         } else {
             eprintln!("Target file not found in scan results: {}", target_path);
         }
@@ -147,7 +151,11 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
 
     if let Some(query) = &parsed.check_sim {
         let candidates = find_similar(query, &global_analyses);
-        print_similarity_results(query, &candidates, matches!(parsed.output, OutputMode::Json));
+        print_similarity_results(
+            query,
+            &candidates,
+            matches!(parsed.output, OutputMode::Json),
+        );
         return Ok(());
     }
 

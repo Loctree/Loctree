@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use serde_json::json;
 
+use super::resolvers::{find_tsconfig, parse_tsconfig_value};
 use crate::types::FileAnalysis;
 
 fn build_globset(patterns: &[String]) -> Option<GlobSet> {
@@ -31,34 +32,6 @@ fn load_tsconfig(root: &Path) -> Option<serde_json::Value> {
     let ts_path = find_tsconfig(root)?;
     let content = std::fs::read_to_string(&ts_path).ok()?;
     parse_tsconfig_value(&content)
-}
-
-fn find_tsconfig(start: &Path) -> Option<PathBuf> {
-    let mut current = start
-        .canonicalize()
-        .ok()
-        .unwrap_or_else(|| start.to_path_buf());
-    loop {
-        let candidate = current.join("tsconfig.json");
-        if candidate.exists() {
-            return Some(candidate);
-        }
-        if let Some(parent) = current.parent() {
-            if parent == current {
-                break;
-            }
-            current = parent.to_path_buf();
-        } else {
-            break;
-        }
-    }
-    None
-}
-
-fn parse_tsconfig_value(content: &str) -> Option<serde_json::Value> {
-    serde_json::from_str(content)
-        .ok()
-        .or_else(|| json_five::from_str::<serde_json::Value>(content).ok())
 }
 
 pub fn summarize_tsconfig(root: &Path, analyses: &[FileAnalysis]) -> serde_json::Value {
@@ -124,7 +97,7 @@ pub fn summarize_tsconfig(root: &Path, analyses: &[FileAnalysis]) -> serde_json:
     let mut excluded_samples = Vec::new();
     for analysis in analyses {
         let rel = analysis.path.replace('\\', "/");
-        let path_obj = PathBuf::from(&rel);
+        let path_obj = PathBuf::from(rel.clone());
         let included = include_set
             .as_ref()
             .map(|set| set.is_match(&path_obj))

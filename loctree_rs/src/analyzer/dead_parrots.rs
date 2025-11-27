@@ -77,7 +77,11 @@ pub fn print_symbol_results(symbol: &str, result: &SymbolSearchResult, json_outp
             serde_json::to_string_pretty(&result.matches).unwrap_or_default()
         );
     } else {
-        println!("Symbol '{}' found in {} files:", symbol, result.matches.len());
+        println!(
+            "Symbol '{}' found in {} files:",
+            symbol,
+            result.matches.len()
+        );
         for m in &result.matches {
             let path = m["path"].as_str().unwrap_or_default();
             let items = m["matches"].as_array();
@@ -190,7 +194,11 @@ pub fn find_similar(query: &str, analyses: &[FileAnalysis]) -> Vec<SimilarityCan
         }
     }
 
-    candidates.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    candidates.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     candidates.dedup_by(|a, b| a.name == b.name && a.location == b.location);
     candidates.truncate(20);
 
@@ -198,7 +206,11 @@ pub fn find_similar(query: &str, analyses: &[FileAnalysis]) -> Vec<SimilarityCan
 }
 
 /// Print similarity check results to stdout
-pub fn print_similarity_results(query: &str, candidates: &[SimilarityCandidate], json_output: bool) {
+pub fn print_similarity_results(
+    query: &str,
+    candidates: &[SimilarityCandidate],
+    json_output: bool,
+) {
     if json_output {
         let json_items: Vec<_> = candidates
             .iter()
