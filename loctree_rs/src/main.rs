@@ -1,6 +1,7 @@
 mod analyzer;
 mod args;
 mod fs_utils;
+mod snapshot;
 mod tree;
 mod types;
 
@@ -82,6 +83,7 @@ fn main() -> std::io::Result<()> {
     match parsed.mode {
         Mode::AnalyzeImports => analyzer::run_import_analyzer(&root_list, &parsed)?,
         Mode::Tree => tree::run_tree(&root_list, &parsed)?,
+        Mode::Init => snapshot::run_init(&root_list, &parsed)?,
     }
 
     Ok(())

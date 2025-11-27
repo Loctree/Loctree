@@ -396,6 +396,7 @@
       const path = data.full || data.id;
       const comp = componentMap.get(data.component);
       const compLabel = comp ? `C${comp.id} (${comp.size} nodes${comp.detached ? ", detached" : ""})` : "—";
+      // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method -- SAFETY: path escaped via escapeHtml(); other values are numbers
       tooltip.innerHTML = `
         <div style="margin-bottom:4px"><strong>${escapeHtml(path)}</strong></div>
         <div>LOC: ${data.loc || 0} | degree: ${data.degree || 0}</div>
@@ -457,6 +458,7 @@
         const warn = comp.detached ? " ⚠️" : "";
         const tr = document.createElement("tr");
         const edgeCount = comp.edges !== undefined ? comp.edges : comp.edge_count;
+        // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method -- SAFETY: all values are numbers or escaped via escapeHtml()
         tr.innerHTML = `<td>C${comp.id}${warn}</td><td>${comp.size}</td><td>${sampleCell}</td><td>${comp.isolated_count}</td><td>${edgeCount || 0}</td><td>${formatNum(comp.loc_sum)}</td><td><button data-role="component-focus" data-comp="${comp.id}">Highlight</button></td>`;
         tableBody.appendChild(tr);
       });
@@ -721,6 +723,7 @@
     const showDrawerTip = (evt, node) => {
       const data = node.data();
       const path = data.full || data.id;
+      // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method -- SAFETY: path escaped via escapeHtml(); other values are numbers
       drawerTooltip.innerHTML = `
         <div style="margin-bottom:4px"><strong>${escapeHtml(path)}</strong></div>
         <div>LOC: ${data.loc || 0} | degree: ${data.degree || 0}</div>

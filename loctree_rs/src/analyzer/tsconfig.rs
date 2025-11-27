@@ -58,7 +58,7 @@ fn find_tsconfig(start: &Path) -> Option<PathBuf> {
 fn parse_tsconfig_value(content: &str) -> Option<serde_json::Value> {
     serde_json::from_str(content)
         .ok()
-        .or_else(|| json5::from_str::<serde_json::Value>(content).ok())
+        .or_else(|| json_five::from_str::<serde_json::Value>(content).ok())
 }
 
 pub fn summarize_tsconfig(root: &Path, analyses: &[FileAnalysis]) -> serde_json::Value {

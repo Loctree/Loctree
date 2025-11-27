@@ -217,5 +217,60 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         let _ = std::io::stdin().read(&mut [0u8]).ok();
     }
     drop(server_handle);
+
+    // Check --fail-on-* flags and return appropriate exit code
+    let mut fail_reasons: Vec<String> = Vec::new();
+
+    if parsed.fail_on_missing_handlers && !global_missing_handlers.is_empty() {
+        fail_reasons.push(format!(
+            "{} missing handler(s): {}",
+            global_missing_handlers.len(),
+            global_missing_handlers
+                .iter()
+                .map(|h| h.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+
+    if parsed.fail_on_ghost_events {
+        let ghost_count = pipeline_summary
+            .get("events")
+            .and_then(|e| e.get("ghostCount"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let orphan_count = pipeline_summary
+            .get("events")
+            .and_then(|e| e.get("orphanCount"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        if ghost_count > 0 {
+            fail_reasons.push(format!("{} ghost event(s) (emitted but no listener)", ghost_count));
+        }
+        if orphan_count > 0 {
+            fail_reasons.push(format!("{} orphan listener(s) (no emitter)", orphan_count));
+        }
+    }
+
+    if parsed.fail_on_races {
+        let race_count = pipeline_summary
+            .get("events")
+            .and_then(|e| e.get("races"))
+            .and_then(|v| v.as_array())
+            .map(|a| a.len())
+            .unwrap_or(0);
+        if race_count > 0 {
+            fail_reasons.push(format!("{} potential race(s) detected", race_count));
+        }
+    }
+
+    if !fail_reasons.is_empty() {
+        eprintln!("[loctree][fail] {}", fail_reasons.join("; "));
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("Pipeline check failed: {}", fail_reasons.join("; ")),
+        ));
+    }
+
     Ok(())
 }

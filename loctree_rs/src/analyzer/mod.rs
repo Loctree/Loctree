@@ -1,6 +1,6 @@
 pub mod assets;
 pub mod classify;
-mod coverage;
+pub mod coverage;
 mod css;
 mod graph;
 pub mod html;
@@ -13,7 +13,7 @@ pub mod py;
 pub mod regexes;
 pub mod report;
 pub mod resolvers;
-mod root_scan;
+pub mod root_scan;
 pub mod runner;
 pub mod rust;
 pub mod scan;

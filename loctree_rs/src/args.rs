@@ -257,6 +257,10 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
                 parsed.mode = Mode::AnalyzeImports;
                 i += 1;
             }
+            "init" | "--init" => {
+                parsed.mode = Mode::Init;
+                i += 1;
+            }
             "--ai" => {
                 parsed.ai_mode = true;
                 parsed.output = OutputMode::Json;
@@ -578,6 +582,17 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
         if parsed.ignore_symbols.is_none() && parsed.ignore_symbols_preset.is_none() {
             parsed.ignore_symbols_preset = Some("tauri".to_string());
         }
+    }
+
+    // Default to Init mode when running bare `loctree` without any mode-setting flags
+    // This implements "scan once" - bare loctree creates/updates the snapshot
+    if roots.is_empty()
+        && matches!(parsed.mode, Mode::Tree)
+        && !parsed.summary
+        && parsed.extensions.is_none()
+    {
+        parsed.mode = Mode::Init;
+        parsed.use_gitignore = true;
     }
 
     if roots.is_empty() {

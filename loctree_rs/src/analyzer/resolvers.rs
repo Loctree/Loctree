@@ -335,7 +335,7 @@ fn parse_tsconfig_value(content: &str) -> Option<Value> {
     if let Ok(v) = serde_json::from_str(content) {
         return Some(v);
     }
-    if let Ok(v) = json5::from_str::<serde_json::Value>(content) {
+    if let Ok(v) = json_five::from_str::<serde_json::Value>(content) {
         return Some(v);
     }
     None

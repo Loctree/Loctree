@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 pub const DEFAULT_LOC_THRESHOLD: usize = 1000;
@@ -22,6 +23,8 @@ pub enum OutputMode {
 pub enum Mode {
     Tree,
     AnalyzeImports,
+    /// Initialize/update snapshot (scan once)
+    Init,
 }
 
 #[derive(Clone)]
@@ -73,7 +76,7 @@ pub struct Collectors<'a> {
     pub stats: &'a mut Stats,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ImportEntry {
     pub source: String,
     pub source_raw: String,
@@ -85,14 +88,14 @@ pub struct ImportEntry {
     pub is_type_checking: bool,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ImportKind {
     Static,
     SideEffect,
 }
 
 #[allow(dead_code)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ImportResolutionKind {
     Local,
     Stdlib,
@@ -100,26 +103,26 @@ pub enum ImportResolutionKind {
     Unknown,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ImportSymbol {
     pub name: String,
     pub alias: Option<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ReexportEntry {
     pub source: String,
     pub kind: ReexportKind,
     pub resolved: Option<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ReexportKind {
     Star,
     Named(Vec<String>),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ExportSymbol {
     pub name: String,
     pub kind: String,
@@ -127,7 +130,7 @@ pub struct ExportSymbol {
     pub line: Option<usize>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CommandRef {
     pub name: String,
     pub exposed_name: Option<String>,
@@ -136,7 +139,7 @@ pub struct CommandRef {
     pub payload: Option<String>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EventRef {
     pub raw_name: Option<String>,
     pub name: String,
@@ -146,7 +149,7 @@ pub struct EventRef {
     pub payload: Option<String>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FileAnalysis {
     pub path: String,
     pub loc: usize,

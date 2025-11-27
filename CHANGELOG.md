@@ -4,6 +4,33 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
+## [Unreleased] - 0.5.0 (in progress)
+
+### Added
+- **Snapshot system** ("scan once, slice many"): Running bare `loctree` (no arguments) now scans the project and saves a complete graph snapshot to `.loctree/snapshot.json`.
+- New `init` command/mode: `loctree init [path]` explicitly creates or updates the snapshot.
+- Snapshot contains: file analyses (imports, exports, commands, events), graph edges, export index, command bridges (FE↔BE mappings), event bridges (emit↔listen), and barrel file detection.
+- Snapshot metadata includes: schema version, generation timestamp, detected languages, file count, total LOC, and scan duration.
+- Foundation for upcoming "holographic slice" feature (Vertical Slice 2) - context slicing from snapshot.
+
+### Changed
+- Default behavior: bare `loctree` without arguments now runs in Init mode (creates snapshot) instead of Tree mode.
+- Added `Serialize`/`Deserialize` derives to core analysis types for snapshot persistence.
+- Made `root_scan` and `coverage` modules public for snapshot building.
+- Snapshot summary now shows actionable next steps (`loctree . -A --json`, `loctree . -A --preset-tauri`) instead of not-yet-implemented slice command.
+
+### Fixed
+- `--fail-on-missing-handlers`, `--fail-on-ghost-events`, `--fail-on-races` flags now actually work: they return non-zero exit code when issues are detected (previously flags were parsed but had no effect).
+
+## [0.4.4] - 2025-11-27
+
+### Security
+- Replaced unmaintained `json5` crate (RUSTSEC-2025-0120) with actively maintained `json-five` for tsconfig.json parsing. No API or behavior changes.
+
+### Fixed
+- Added Semgrep suppression comments with safety justifications for `innerHTML` usage in `graph_bootstrap.js` (all user data is escaped via `escapeHtml()`; other values are numbers from analyzer).
+- Replaced bare `unwrap()` with `expect()` providing context in snapshot module tests to comply with project linting rules.
+
 ## [0.4.3] - 2025-11-26
 
 ### Fixed

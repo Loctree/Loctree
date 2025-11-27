@@ -10,3 +10,5 @@ loctree_rs/tarpaulin-report.json
 /.ai-suite
 /.loctree
 /.benchmarks
+/agents
+/loctree_rs/logs
