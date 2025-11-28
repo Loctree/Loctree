@@ -102,8 +102,23 @@ pub fn detect_stack(root: &Path) -> DetectedStack {
     if root.join("pyproject.toml").exists() || root.join("setup.py").exists() {
         result.extensions.insert("py".to_string());
         result.ignores.push(".venv".to_string());
+        result.ignores.push("venv".to_string());
         result.ignores.push("__pycache__".to_string());
         result.ignores.push(".pytest_cache".to_string());
+        result.ignores.push(".mypy_cache".to_string());
+        result.ignores.push(".ruff_cache".to_string());
+        result.ignores.push("*.egg-info".to_string());
+        result.ignores.push(".eggs".to_string());
+        result.ignores.push("dist".to_string());
+        result.ignores.push("build".to_string());
+        result.ignores.push(".tox".to_string());
+        // Common ML/data caches that often contain symlinks
+        result.ignores.push(".fastembed_cache".to_string());
+        result.ignores.push(".cache".to_string());
+        result.ignores.push("logs".to_string());
+        result.ignores.push("packaging".to_string());
+        // uv specific
+        result.ignores.push(".uv".to_string());
         detected_parts.push("Python");
     }
 
