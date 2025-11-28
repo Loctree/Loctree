@@ -119,7 +119,19 @@ checksum = "df1d3c3b53da64cf5760482273a98e575c651a67eec7f77df96b5b642de8f039"
 
 [[package]]
 name = "loctree"
+[[package]]
+name = "loctree"
 version = "0.5.0-rc"
+dependencies = [
+ "globset",
+ "heck",
+ "json-five",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "time",
+]
 dependencies = [
  "globset",
  "heck",

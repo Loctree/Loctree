@@ -139,7 +139,10 @@ pub fn print_sarif(inputs: SarifInputs) {
     let tool = json!({
         "driver": {
             "name": "loctree",
-            "informationUri": "https://github.com/LibraxisAI/loctree",
+println!(
+    "{}",
+    serde_json::to_string_pretty(&sarif).unwrap_or_default()
+);
             "version": env!("CARGO_PKG_VERSION"),
             "rules": [
                 { "id": "duplicate-export", "shortDescription": { "text": "Duplicate export detected" } },
@@ -163,6 +166,20 @@ pub fn print_sarif(inputs: SarifInputs) {
 
     println!(
         "{}",
-        serde_json::to_string_pretty(&sarif).expect("Failed to serialize SARIF report to JSON")
+let tool = json!({
+    "driver": {
+        "name": "loctree",
+        "informationUri": "https://github.com/LibraxisAI/loctree",
+        "version": env!("CARGO_PKG_VERSION"),
+        "rules": [
+            { "id": "duplicate-export", "shortDescription": { "text": "Duplicate export detected" } },
+            { "id": "missing-handler", "shortDescription": { "text": "Missing backend handler for frontend command" } },
+            { "id": "unused-handler", "shortDescription": { "text": "Unused backend handler" } },
+            { "id": "dead-export", "shortDescription": { "text": "Export defined but never imported" } },
+            { "id": "ghost-event", "shortDescription": { "text": "Event emitted but not listened to" } },
+            { "id": "orphan-listener", "shortDescription": { "text": "Event listener without emitter" } }
+        ]
+    }
+});
     );
 }

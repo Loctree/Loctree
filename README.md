@@ -28,8 +28,25 @@ curl -fsSL https://raw.githubusercontent.com/LibraxisAI/loctree/main/tools/insta
 cd your-project
 loctree
 
-# Extract context for AI agents
-loctree slice src/components/ChatPanel.tsx --consumers --json | claude
+- Filters by extension (`--ext rs,ts,tsx,py,...`) and prunes non-matching branches.
+- Respects `.gitignore` (`-g`), custom ignores (`-I`), and max depth (`-L`).
+- Human or JSON output; per-root summary with totals and large files (>= 1000 LOC).
+- Multi-root: pass several paths in one command.
+- Import/export analyzer mode (`-A/--analyze-imports`) surfaces duplicate exports, re-export chains, dynamic imports,
+  CSS `@import`, Rust `use/pub use`/public items, Python `import`/`from` (with `__all__` expansion, stdlib vs local tagging, TYPE_CHECKING-aware imports, dynamic `importlib`/`__import__`),
+  and maps Tauri commands: FE calls (`safeInvoke`/`invokeSnake`) vs. backend `#[tauri::command]`
+  (missing/unused handlers in CLI/JSON/HTML). With `--serve`, HTML links open files in editor/OS (default `code -g` or `open`/`xdg-open`).
+- Janitor Mode tools (`-A` implied):
+  - `--check <query>` finds existing components similar to your query to prevent duplication (e.g., before creating `ChatSurface`, check if `ViewSurface` or `ChatPanel` exists).
+  - `--dead` (alias `--unused`) lists exports that are defined but never imported (potential dead code). Use `--confidence high` to filter out implicit exports.
+  - `--symbol <name>` quickly finds usages and definitions of a symbol across the project.
+  - `--impact <file>` analyzes what files would break if the target file is changed/removed.
+  - `--circular` detects circular import cycles in the module graph.
+  - `--entrypoints` lists detected entry points (e.g. Python `__main__`, Rust `fn main` / `#[tokio::main]`).
+  - `--sarif` emits findings in SARIF 2.1.0 format for CI integrations.
+- Pipeline checks:
+  - `--fail-on-missing-handlers`, `--fail-on-ghost-events`, `--fail-on-races` for CI gates.
+  - `--scan-all` forces scanning of normally ignored directories (`node_modules`, `target`, `.venv`) – useful for audits or monorepo dependency analysis.
 
 # Find circular imports
 loctree -A --circular

@@ -76,7 +76,8 @@ Examples:\n  \
   loctree slice src/main.rs --consumers      # Extract context for AI\n  \
   loctree slice src/App.tsx --json | claude  # Pipe to Claude\n  \
   loctree -A --circular                      # Find circular imports\n  \
-  loctree -A --dead --confidence high        # Find dead exports\n\n\
+  loctree -A --dead --confidence high        # Find dead exports\n  \
+  loctree ~/iCloud --find-artifacts > trash.txt  # Find node_modules, target, .venv\n\n\
 More: loctree --help-full for all options\n"
 }
 

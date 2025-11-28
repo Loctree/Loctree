@@ -369,6 +369,17 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
                 parsed.mode = Mode::Tree; // Find-artifacts works in tree mode
                 i += 1;
             }
+            "--show-ignored" => {
+                parsed.show_ignored = true;
+                parsed.use_gitignore = true; // Required to know what's ignored
+                parsed.mode = Mode::Tree; // Show-ignored works in tree mode
+                i += 1;
+            }
+            "--find-artifacts" => {
+                parsed.find_artifacts = true;
+                parsed.mode = Mode::Tree; // Find-artifacts works in tree mode
+                i += 1;
+            }
             "--json" => {
                 parsed.output = OutputMode::Json;
                 if let Some(next) = args.get(i + 1) {
