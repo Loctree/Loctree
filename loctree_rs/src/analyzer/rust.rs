@@ -5,8 +5,9 @@ use crate::types::{
 
 use super::offset_to_line;
 use super::regexes::{
-    regex_event_const_rust, regex_event_emit_rust, regex_event_listen_rust, regex_rust_pub_use,
-    regex_rust_use, regex_tauri_command_fn, rust_pub_const_regexes, rust_pub_decl_regexes,
+    regex_event_const_rust, regex_event_emit_rust, regex_event_listen_rust,
+    regex_rust_async_main_attr, regex_rust_fn_main, regex_rust_pub_use, regex_rust_use,
+    regex_tauri_command_fn, rust_pub_const_regexes, rust_pub_decl_regexes,
 };
 
 fn split_words_lower(name: &str) -> Vec<String> {
@@ -322,6 +323,17 @@ pub(crate) fn analyze_rust_file(content: &str, relative: String) -> FileAnalysis
 
     analysis.event_emits = event_emits;
     analysis.event_listens = event_listens;
+
+    // Detect Rust entry points using proper regex (not contains - avoids false positives in comments/strings)
+    if regex_rust_fn_main().is_match(content) {
+        analysis.entry_points.push("main".to_string());
+    }
+    if regex_rust_async_main_attr().is_match(content)
+        && !analysis.entry_points.contains(&"async_main".to_string())
+    {
+        analysis.entry_points.push("async_main".to_string());
+    }
+
     analysis
 }
 
