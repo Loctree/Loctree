@@ -308,9 +308,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             .iter()
             .take(3)
             .map(|h| {
-                let loc = h
-                    .locations
-                    .first()
+                let loc = h.locations.first()
                     .map(|(path, line)| format!(" ({}:{})", path, line))
                     .unwrap_or_default();
                 format!("{}{}", h.name, loc)

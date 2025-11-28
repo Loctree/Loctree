@@ -397,8 +397,8 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
 
     // Try to load existing snapshot for incremental scanning
     let cached_analyses: Option<HashMap<String, FileAnalysis>> =
-        if !parsed.full_scan && Snapshot::exists(snapshot_root) {
-            match Snapshot::load(snapshot_root) {
+        if !parsed.full_scan && Snapshot::exists(&snapshot_root) {
+            match Snapshot::load(&snapshot_root) {
                 Ok(old_snapshot) => {
                     if parsed.verbose {
                         eprintln!(
@@ -421,6 +421,16 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
         } else {
             None
         };
+
+    // Log scan mode for clarity (especially in CI)
+    let scan_mode = if parsed.full_scan {
+        "full (--full-scan)"
+    } else if cached_analyses.is_some() {
+        "incremental (mtime-based)"
+    } else {
+        "fresh (no existing snapshot)"
+    };
+    eprintln!("[loctree] Scan mode: {}", scan_mode);
 
     // Prepare scan configuration (reusing existing infrastructure)
     let py_stdlib = python_stdlib();

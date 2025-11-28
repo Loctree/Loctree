@@ -476,7 +476,7 @@ pub fn run_slice(
         }
     }
 
-
+    let snapshot = Snapshot::load(&effective_root)?;
 
     let config = SliceConfig {
         include_consumers,
