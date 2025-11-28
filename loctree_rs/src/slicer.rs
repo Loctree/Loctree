@@ -421,9 +421,18 @@ pub fn run_slice(
     json_output: bool,
     parsed: &ParsedArgs,
 ) -> io::Result<()> {
+    // Search upward for .loctree/ directory (like git finds .git/)
+    let effective_root = Snapshot::find_loctree_root(root)
+        .or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .and_then(|cwd| Snapshot::find_loctree_root(&cwd))
+        })
+        .unwrap_or_else(|| root.to_path_buf());
+
     // Check if snapshot exists, prompt to create if not
-    if !Snapshot::exists(root) {
-        if prompt_create_snapshot(root, parsed)? {
+    if !Snapshot::exists(&effective_root) {
+        if prompt_create_snapshot(&effective_root, parsed)? {
             // Snapshot was created, continue
         } else {
             return Err(io::Error::new(
@@ -433,7 +442,7 @@ pub fn run_slice(
         }
     }
 
-    let snapshot = Snapshot::load(root)?;
+    let snapshot = Snapshot::load(&effective_root)?;
 
     let config = SliceConfig {
         include_consumers,
