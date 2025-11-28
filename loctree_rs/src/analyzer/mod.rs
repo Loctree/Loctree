@@ -2,7 +2,9 @@ pub mod assets;
 pub mod classify;
 pub mod coverage;
 mod css;
+pub mod cycles;
 pub mod dead_parrots;
+pub mod entrypoints;
 mod graph;
 pub mod html;
 mod insights;
@@ -17,6 +19,7 @@ pub mod resolvers;
 pub mod root_scan;
 pub mod runner;
 pub mod rust;
+pub mod sarif;
 pub mod scan;
 mod tsconfig;
 

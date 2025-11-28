@@ -11,7 +11,10 @@ use super::classify::{detect_language, file_kind};
 use super::css::analyze_css_file;
 use super::js::analyze_js_file;
 use super::py::{analyze_py_file, python_stdlib_set};
-use super::resolvers::{resolve_js_relative, resolve_python_relative, TsPathResolver};
+use super::resolvers::{
+    find_rust_crate_root, resolve_js_relative, resolve_python_relative, resolve_rust_import,
+    TsPathResolver,
+};
 use super::rust::analyze_rust_file;
 
 /// Build a globset from user patterns.
@@ -191,6 +194,20 @@ pub fn analyze_file(
     analysis.is_test = is_test;
     analysis.is_generated = is_generated;
 
+    // Resolve Rust imports
+    if ext == "rs" {
+        let crate_root = find_rust_crate_root(&canonical);
+        if let Some(ref crate_root) = crate_root {
+            for imp in analysis.imports.iter_mut() {
+                if imp.resolved_path.is_none() {
+                    imp.resolved_path =
+                        resolve_rust_import(&imp.source, &canonical, crate_root, root_canon);
+                }
+            }
+        }
+    }
+
+    // Resolve other language imports (relative paths)
     for imp in analysis.imports.iter_mut() {
         if imp.resolved_path.is_none() && imp.source.starts_with('.') {
             let resolved = match ext.as_str() {

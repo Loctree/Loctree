@@ -25,6 +25,8 @@ pub enum Mode {
     AnalyzeImports,
     /// Initialize/update snapshot (scan once)
     Init,
+    /// VS2 Holographic Slice - extract context for a file
+    Slice,
 }
 
 #[derive(Clone)]
@@ -178,6 +180,10 @@ pub struct FileAnalysis {
     pub event_listens: Vec<EventRef>,
     pub event_consts: HashMap<String, String>,
     pub matches: Vec<SymbolMatch>,
+    pub entry_points: Vec<String>,
+    /// File modification time (Unix timestamp) for incremental scanning
+    #[serde(default)]
+    pub mtime: u64,
 }
 
 impl ImportEntry {
@@ -226,6 +232,8 @@ impl FileAnalysis {
             event_listens: Vec::new(),
             event_consts: HashMap::new(),
             matches: Vec::new(),
+            entry_points: Vec::new(),
+            mtime: 0,
         }
     }
 }
