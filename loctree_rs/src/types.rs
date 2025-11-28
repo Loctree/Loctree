@@ -38,6 +38,7 @@ pub struct Options {
     pub summary: bool,
     pub summary_limit: usize,
     pub show_hidden: bool,
+    pub show_ignored: bool,
     pub loc_threshold: usize,
     pub analyze_limit: usize,
     pub report_path: Option<std::path::PathBuf>,
@@ -50,6 +51,7 @@ pub struct Options {
     pub scan_all: bool,
     pub symbol: Option<String>,
     pub impact: Option<String>,
+    pub find_artifacts: bool,
 }
 
 pub struct LineEntry {

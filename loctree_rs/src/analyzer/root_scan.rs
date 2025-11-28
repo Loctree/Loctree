@@ -89,6 +89,7 @@ pub fn scan_roots(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
             summary: cfg.parsed.summary,
             summary_limit: cfg.parsed.summary_limit,
             show_hidden: cfg.parsed.show_hidden,
+            show_ignored: false, // Only used in tree mode
             loc_threshold: cfg.parsed.loc_threshold,
             analyze_limit: cfg.parsed.analyze_limit,
             report_path: cfg.parsed.report_path.clone(),
@@ -100,6 +101,7 @@ pub fn scan_roots(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
             scan_all: cfg.parsed.scan_all,
             symbol: cfg.parsed.symbol.clone(),
             impact: cfg.parsed.impact.clone(),
+            find_artifacts: false, // Only used in tree mode
         };
 
         if options.verbose {

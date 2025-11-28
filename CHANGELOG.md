@@ -4,14 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
-## [Unreleased] - 0.5.0 (in progress)
+## [Unreleased]
+
+## [0.4.7] - 2025-11-28
 
 ### Added
 - **Snapshot system** ("scan once, slice many"): Running bare `loctree` (no arguments) now scans the project and saves a complete graph snapshot to `.loctree/snapshot.json`.
 - New `init` command/mode: `loctree init [path]` explicitly creates or updates the snapshot.
 - Snapshot contains: file analyses (imports, exports, commands, events), graph edges, export index, command bridges (FE↔BE mappings), event bridges (emit↔listen), and barrel file detection.
 - Snapshot metadata includes: schema version, generation timestamp, detected languages, file count, total LOC, and scan duration.
-- Foundation for upcoming "holographic slice" feature (Vertical Slice 2) - context slicing from snapshot.
+- Foundation for upcoming "holographic slice" feature (Vertical Slice 2) – context slicing from snapshot.
+- **Janitor: circular imports** – new `--circular` flag walks the import graph and reports strongly connected components (including self-loops) as cycles in CLI/JSON.
+- **Janitor: entry points** – new `--entrypoints` flag detects Python and Rust entry points (e.g. `if __name__ == "__main__"`, `fn main`, `#[tokio::main]`) to separate startup scripts from dead code.
+- **SARIF output for CI** – new `--sarif` flag emits findings (duplicate exports, missing/unused handlers, dead exports, ghost/orphan events) in SARIF 2.1.0 format for GitHub/GitLab integration.
+- **Find build artifacts** – new `--find-artifacts` flag finds common build artifact directories (`node_modules`, `.venv`, `target`, `dist`, `build`, `.cache`, `Pods`, `DerivedData`, etc.) and outputs their absolute paths one per line. Useful for cleaning up disk space or excluding from Spotlight indexing. Does not recurse into found directories (prune behavior).
 
 ### Changed
 - Default behavior: bare `loctree` without arguments now runs in Init mode (creates snapshot) instead of Tree mode.
@@ -21,6 +27,7 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Fixed
 - `--fail-on-missing-handlers`, `--fail-on-ghost-events`, `--fail-on-races` flags now actually work: they return non-zero exit code when issues are detected (previously flags were parsed but had no effect).
+- Python analyzer: fixed resolution of relative imports like `from . import mod` and `from .mod import name` so that star re-exports and `__all__` expansion are reflected correctly in the graph and dead-code analysis.
 
 ## [0.4.6] - 2025-11-27
 ### Added
