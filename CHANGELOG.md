@@ -40,9 +40,6 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 - Changed all test `unwrap()` to `expect()` with context for cleaner error messages.
 
 ## [0.4.7] - 2025-11-28
-## [Unreleased]
-
-## [0.4.7] - 2025-11-28
 
 ### Added
 - **Snapshot system** ("scan once, slice many"): Running bare `loctree` (no arguments) now scans the project and saves a complete graph snapshot to `.loctree/snapshot.json`.

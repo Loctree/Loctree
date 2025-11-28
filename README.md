@@ -18,35 +18,16 @@ loctree solves this by:
 3. **Slicing relevant context** — Extract just what an AI needs for a specific task
 4. **CI-friendly checks** — Fail builds on missing handlers, ghost events, or dependency cycles
 
+1. **Detecting what you already have** — Find existing components before creating duplicates
+2. **Exposing hidden dependencies** — See circular imports and orphaned code
+3. **Slicing relevant context** — Extract just what an AI needs for a specific task
+4. **CI-friendly checks** — Fail builds on missing handlers, ghost events, or dependency cycles
+
 ## Quick Start
 
-```bash
-# Install (Rust binary)
-curl -fsSL https://raw.githubusercontent.com/LibraxisAI/loctree/main/tools/install.sh | sh
 
-# Scan your project (creates .loctree/snapshot.json)
-cd your-project
-loctree
-
-- Filters by extension (`--ext rs,ts,tsx,py,...`) and prunes non-matching branches.
-- Respects `.gitignore` (`-g`), custom ignores (`-I`), and max depth (`-L`).
-- Human or JSON output; per-root summary with totals and large files (>= 1000 LOC).
-- Multi-root: pass several paths in one command.
-- Import/export analyzer mode (`-A/--analyze-imports`) surfaces duplicate exports, re-export chains, dynamic imports,
-  CSS `@import`, Rust `use/pub use`/public items, Python `import`/`from` (with `__all__` expansion, stdlib vs local tagging, TYPE_CHECKING-aware imports, dynamic `importlib`/`__import__`),
-  and maps Tauri commands: FE calls (`safeInvoke`/`invokeSnake`) vs. backend `#[tauri::command]`
-  (missing/unused handlers in CLI/JSON/HTML). With `--serve`, HTML links open files in editor/OS (default `code -g` or `open`/`xdg-open`).
-- Janitor Mode tools (`-A` implied):
-  - `--check <query>` finds existing components similar to your query to prevent duplication (e.g., before creating `ChatSurface`, check if `ViewSurface` or `ChatPanel` exists).
-  - `--dead` (alias `--unused`) lists exports that are defined but never imported (potential dead code). Use `--confidence high` to filter out implicit exports.
-  - `--symbol <name>` quickly finds usages and definitions of a symbol across the project.
-  - `--impact <file>` analyzes what files would break if the target file is changed/removed.
-  - `--circular` detects circular import cycles in the module graph.
-  - `--entrypoints` lists detected entry points (e.g. Python `__main__`, Rust `fn main` / `#[tokio::main]`).
-  - `--sarif` emits findings in SARIF 2.1.0 format for CI integrations.
-- Pipeline checks:
-  - `--fail-on-missing-handlers`, `--fail-on-ghost-events`, `--fail-on-races` for CI gates.
-  - `--scan-all` forces scanning of normally ignored directories (`node_modules`, `target`, `.venv`) – useful for audits or monorepo dependency analysis.
+# Extract context for AI agents
+loctree slice src/components/ChatPanel.tsx --consumers --json | claude
 
 # Find circular imports
 loctree -A --circular
@@ -56,58 +37,7 @@ loctree -A --dead --confidence high
 
 # CI check: fail if FE invokes missing BE handlers
 loctree -A --fail-on-missing-handlers
-```
 
-## Core Features
-
-### Holographic Slice (`slice` command)
-
-Extract 3-layer context for any file, perfect for AI conversations:
-
-```bash
-loctree slice src/App.tsx --consumers
-```
-
-Output:
-```
-Slice for: src/App.tsx
-
-Core (1 files, 150 LOC):
-  src/App.tsx (150 LOC, ts)
-
-Deps (3 files, 420 LOC):
-  [d1] src/hooks/useAuth.ts (80 LOC, ts)
-    [d2] src/contexts/AuthContext.tsx (200 LOC, ts)
-    [d2] src/utils/api.ts (140 LOC, ts)
-
-Consumers (2 files, 180 LOC):
-  src/main.tsx (30 LOC, ts)
-  src/routes/index.tsx (150 LOC, ts)
-
-Total: 6 files, 750 LOC
-```
-
-Pipe directly to AI:
-```bash
-loctree slice src/features/chat/ChatPanel.tsx --json | claude "refactor this to use React Query"
-```
-
-### Auto-Detect Stack
-
-loctree automatically detects your project type and configures sensible defaults:
-
-| Marker | Detected As | Auto-Ignores |
-|--------|-------------|--------------|
-| `Cargo.toml` | Rust | `target/` |
-| `tsconfig.json` | TypeScript | `node_modules/` |
-| `pyproject.toml` | Python | `.venv/`, `__pycache__/` |
-| `src-tauri/` | Tauri | All of the above |
-
-### Janitor Mode Tools
-
-Find problems before they become tech debt:
-
-```bash
 # Before creating a new component, check if similar exists
 loctree -A --check ChatSurface
 # Found: ChatPanel (distance: 2), ChatWindow (distance: 3)
@@ -126,71 +56,20 @@ loctree -A --impact src/utils/api.ts
 
 # Find a symbol across the codebase
 loctree -A --symbol useAuth
-```
 
-### Incremental Scanning
+Core (1 files, 150 LOC):
+  src/App.tsx (150 LOC, ts)
 
-After the first scan, loctree uses file modification times to skip unchanged files:
+Deps (3 files, 420 LOC):
+  [d1] src/hooks/useAuth.ts (80 LOC, ts)
+    [d2] src/contexts/AuthContext.tsx (200 LOC, ts)
+    [d2] src/utils/api.ts (140 LOC, ts)
 
-```
-$ loctree
-[loctree][detect] Detected: Tauri + Vite
-[loctree][progress] 32 cached, 1 fresh (touched: src/App.tsx)
-```
+Consumers (2 files, 180 LOC):
+  src/main.tsx (30 LOC, ts)
+  src/routes/index.tsx (150 LOC, ts)
 
-Use `--full-scan` to force re-analysis of everything.
-
-### CI Pipeline Checks
-
-```bash
-# Fail if frontend invokes backend handlers that don't exist
-loctree -A --fail-on-missing-handlers
-
-# Fail if events are emitted but never listened to (or vice versa)
-loctree -A --fail-on-ghost-events
-
-# Fail if potential race conditions detected in event listeners
-loctree -A --fail-on-races
-
-# Output in SARIF 2.1.0 format for GitHub/GitLab integration
-loctree -A --sarif > results.sarif
-```
-
-## CLI Reference
-
-```
-loctree (Rust) - AI-oriented Project Analyzer
-
-Modes:
-  init (default)            Scan and save snapshot to .loctree/snapshot.json
-  slice <file>              Holographic slice: extract context for AI agents
-  -A, --analyze-imports     Import/export analyzer
-
-Slice options:
-  --consumers               Include files that import the target
-  --json                    Output as JSON (for piping to AI)
-
-Analyzer options (-A):
-  --circular                Find circular imports
-  --entrypoints             List entry points
-  --dead                    List potentially unused exports
-  --sarif                   SARIF 2.1.0 output for CI
-  --check <query>           Find similar existing components
-  --impact <file>           Show what imports the target
-  --symbol <name>           Search for symbol
-
-Pipeline checks:
-  --fail-on-missing-handlers
-  --fail-on-ghost-events
-  --fail-on-races
-
-Common:
-  --gitignore, -g           Respect .gitignore
-  --full-scan               Ignore mtime cache, re-analyze all
-  --verbose                 Show detailed progress
-```
-
-Full reference: `loctree --help-full`
+Total: 6 files, 750 LOC
 
 ## Installation
 

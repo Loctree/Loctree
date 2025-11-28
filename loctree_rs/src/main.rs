@@ -73,11 +73,11 @@ Common:\n  \
   --version                 Show version\n\n\
 Examples:\n  \
   loctree                                    # Quick snapshot of current dir\n  \
-  loctree slice src/main.rs --consumers      # Extract context for AI\n  \
-  loctree slice src/App.tsx --json | claude  # Pipe to Claude\n  \
-  loctree -A --circular                      # Find circular imports\n  \
-  loctree -A --dead --confidence high        # Find dead exports\n  \
-  loctree ~/iCloud --find-artifacts > trash.txt  # Find node_modules, target, .venv\n\n\
+  loctree slice src/main.rs --consumers      # Extract context for AI
+  loctree slice src/App.tsx --json | claude  # Pipe to Claude
+  loctree -A --circular                      # Find circular imports
+  loctree -A --dead --confidence high        # Find dead exports
+  loctree ~/iCloud --find-artifacts > trash.txt  # Find node_modules, target, .venv
 More: loctree --help-full for all options\n"
 }
 
