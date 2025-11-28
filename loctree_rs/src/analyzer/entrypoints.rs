@@ -26,7 +26,8 @@ pub fn print_entrypoints(entrypoints: &[(String, Vec<String>)], json_output: boo
             .collect();
         println!(
             "{}",
-            serde_json::to_string_pretty(&json!({ "entryPoints": items })).unwrap_or_default()
+            serde_json::to_string_pretty(&json!({ "entryPoints": items }))
+                .expect("Failed to serialize entry points to JSON")
         );
     } else if entrypoints.is_empty() {
         println!("No entry points detected.");

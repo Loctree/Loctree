@@ -123,7 +123,8 @@ pub fn print_cycles(cycles: &[Vec<String>], json_output: bool) {
     if json_output {
         println!(
             "{}",
-            serde_json::to_string_pretty(&json!({ "circularImports": cycles })).unwrap_or_default()
+            serde_json::to_string_pretty(&json!({ "circularImports": cycles }))
+                .expect("Failed to serialize circular imports to JSON")
         );
     } else if cycles.is_empty() {
         println!("No circular imports detected.");
@@ -131,8 +132,7 @@ pub fn print_cycles(cycles: &[Vec<String>], json_output: bool) {
         println!("Circular imports detected ({} cycles):", cycles.len());
         for (i, cycle) in cycles.iter().enumerate() {
             let mut c = cycle.clone();
-            c.reverse(); // Tarjan pops in reverse topological order? SCC order within stack is arbitrary but connected.
-                         // Let's just print them joined.
+            c.reverse(); // Reverse to show cycle in discovery order for readability
             println!("  Cycle {}: {}", i + 1, c.join(" -> "));
         }
     }

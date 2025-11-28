@@ -303,6 +303,19 @@ pub(crate) fn analyze_py_file(
         }
     }
 
+    // Detect Python entry points
+    // 1. __main__.py files are package entry points
+    if analysis.path.ends_with("__main__.py") {
+        analysis.entry_points.push("__main__".to_string());
+    }
+    // 2. if __name__ == "__main__": is a script entry point
+    if content.contains("if __name__")
+        && (content.contains("__main__") || content.contains("'__main__'"))
+        && !analysis.entry_points.contains(&"script".to_string())
+    {
+        analysis.entry_points.push("script".to_string());
+    }
+
     analysis
 }
 

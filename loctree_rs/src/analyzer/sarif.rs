@@ -139,7 +139,7 @@ pub fn print_sarif(inputs: SarifInputs) {
     let tool = json!({
         "driver": {
             "name": "loctree",
-            "informationUri": "https://github.com/...",
+            "informationUri": "https://github.com/LibraxisAI/loctree",
             "version": env!("CARGO_PKG_VERSION"),
             "rules": [
                 { "id": "duplicate-export", "shortDescription": { "text": "Duplicate export detected" } },
@@ -163,6 +163,6 @@ pub fn print_sarif(inputs: SarifInputs) {
 
     println!(
         "{}",
-        serde_json::to_string_pretty(&sarif).unwrap_or_default()
+        serde_json::to_string_pretty(&sarif).expect("Failed to serialize SARIF report to JSON")
     );
 }
