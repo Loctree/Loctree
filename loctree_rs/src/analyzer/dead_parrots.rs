@@ -74,7 +74,8 @@ pub fn print_symbol_results(symbol: &str, result: &SymbolSearchResult, json_outp
     if json_output {
         println!(
             "{}",
-            serde_json::to_string_pretty(&result.matches).unwrap_or_default()
+            serde_json::to_string_pretty(&result.matches)
+                .expect("Failed to serialize symbol search results to JSON")
         );
     } else {
         println!(
@@ -224,7 +225,8 @@ pub fn print_similarity_results(
             .collect();
         println!(
             "{}",
-            serde_json::to_string_pretty(&json_items).unwrap_or_default()
+            serde_json::to_string_pretty(&json_items)
+                .expect("Failed to serialize similarity results to JSON")
         );
     } else {
         println!("Checking for '{}' (similarity > 0.3):", query);
@@ -344,7 +346,8 @@ pub fn print_dead_exports(dead_exports: &[DeadExport], output: OutputMode, high_
             .collect();
         println!(
             "{}",
-            serde_json::to_string_pretty(&json_items).unwrap_or_default()
+            serde_json::to_string_pretty(&json_items)
+                .expect("Failed to serialize dead exports to JSON")
         );
     } else {
         let count = dead_exports.len();

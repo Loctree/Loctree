@@ -121,7 +121,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         ignore_prefixes,
         py_stdlib: &py_stdlib,
         cached_analyses: None, // Runner mode doesn't use incremental caching
-        collect_edges: false,  // Only collect edges when --graph or --impact is set
+        collect_edges: parsed.graph || parsed.impact.is_some() || parsed.circular,
     })?;
     let ScanResults {
         contexts,
