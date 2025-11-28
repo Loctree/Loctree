@@ -17,33 +17,42 @@ echo "Pushing to: $remote ($url)"
 
 # Run Rust checks (fmt + clippy + tests)
 echo ""
-echo "[1/6] Rust format check..."
-(cd loctree_rs && cargo fmt -- --check)
+echo "[1/7] Rust format (auto-fix)..."
+(cd loctree_rs && cargo fmt)
 
 echo ""
-echo "[2/6] Rust clippy..."
+echo "[2/7] Rust clippy..."
 (cd loctree_rs && cargo clippy -- -D warnings)
 
 echo ""
-echo "[3/6] Rust tests..."
+echo "[3/7] Rust tests..."
 (cd loctree_rs && cargo test --quiet)
 
 # Run Node tests
 echo ""
-echo "[4/6] Node.js tests..."
+echo "[4/7] Node.js tests..."
 node tools/tests/test_loctree_node_unit.mjs
 node tools/tests/loctree-node.test.mjs
 
 # Run Python tests
 echo ""
-echo "[5/6] Python tests..."
+echo "[5/7] Python tests..."
 python3 tools/tests/test_loctree_py_unit.py
 node tools/tests/loctree-py.test.mjs
 
 # Run Rust integration tests
 echo ""
-echo "[6/6] Rust integration tests..."
+echo "[6/7] Rust integration tests..."
 node tools/tests/loctree-rs.test.mjs
+
+# Loctree dogfooding - analyze itself
+echo ""
+echo "[7/7] Loctree dogfooding..."
+(cd loctree_rs && cargo build --release --quiet)
+./loctree_rs/target/release/loctree loctree_rs/src -A --ext rs --circular --dead || {
+  echo "❌ Loctree dogfooding failed!"
+  exit 1
+}
 
 # Optional: Semgrep security scan (if installed)
 if command -v semgrep >/dev/null 2>&1; then
