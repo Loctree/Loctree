@@ -21,3 +21,6 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 *.pyc
+/landing-leptos/target
+/landing-leptos/dist
+/loctree_rs/src/.loctree
