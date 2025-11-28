@@ -6,6 +6,25 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+## [0.5.1-rc] - 2025-11-28
+
+### Added
+- **Entry point detection**: Proper regex-based detection for Python and Rust entry points:
+  - Python: `__main__.py` files and `if __name__ == "__main__":` blocks
+  - Rust: `fn main(` and async runtime attributes (`#[tokio::main]`, `#[async_std::main]`)
+  - Uses regex with line-start anchors to avoid false positives in comments/strings
+
+### Changed
+- **Python stack detection**: Extended default ignores for Python projects:
+  - Added: `packaging`, `logs`, `.fastembed_cache`, `.cache`, `.uv`
+  - Covers common ML/data caches and uv package manager artifacts
+- **Git hooks restructured**:
+  - `pre-commit`: Fast checks on staged files only (fmt auto-fix, cargo check, unit tests)
+  - `pre-push`: Comprehensive validation (clippy -D warnings, full tests, integration tests, dogfooding, semgrep)
+
+### Fixed
+- **Slice file matching**: Now prioritizes exact path match over `ends_with` match; warns when multiple files match the same target to avoid selecting wrong file (e.g., `backend.py` picking monorepo's root instead of src).
+
 ## [0.5.0-rc] - 2025-11-28
 
 ### Added
