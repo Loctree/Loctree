@@ -304,14 +304,26 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
     let mut fail_reasons: Vec<String> = Vec::new();
 
     if parsed.fail_on_missing_handlers && !global_missing_handlers.is_empty() {
+        let examples: Vec<String> = global_missing_handlers
+            .iter()
+            .take(3)
+            .map(|h| {
+                let loc = h.locations.first()
+                    .map(|(path, line)| format!(" ({}:{})", path, line))
+                    .unwrap_or_default();
+                format!("{}{}", h.name, loc)
+            })
+            .collect();
+        let more = if global_missing_handlers.len() > 3 {
+            format!(" (+{} more)", global_missing_handlers.len() - 3)
+        } else {
+            String::new()
+        };
         fail_reasons.push(format!(
-            "{} missing handler(s): {}",
+            "{} missing handler(s): {}{}",
             global_missing_handlers.len(),
-            global_missing_handlers
-                .iter()
-                .map(|h| h.name.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
+            examples.join(", "),
+            more
         ));
     }
 

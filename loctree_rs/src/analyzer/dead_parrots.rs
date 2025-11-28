@@ -106,7 +106,15 @@ pub fn analyze_impact(
 ) -> Option<ImpactResult> {
     let mut targets = Vec::new();
     for analysis in analyses {
-        if analysis.path.contains(target_path) {
+        // Match paths flexibly (handles "App.tsx" vs "src/App.tsx" when root differs)
+        let matches = analysis.path == target_path
+            || target_path.ends_with(&format!("/{}", analysis.path))
+            || target_path.ends_with(&format!("\\{}", analysis.path))
+            || analysis.path.ends_with(&format!("/{}", target_path))
+            || analysis.path.ends_with(&format!("\\{}", target_path))
+            || analysis.path.contains(target_path)
+            || target_path.contains(&analysis.path);
+        if matches {
             targets.push(analysis.path.clone());
         }
     }

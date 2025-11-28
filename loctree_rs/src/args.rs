@@ -731,6 +731,21 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
         if parsed.ignore_symbols.is_none() && parsed.ignore_symbols_preset.is_none() {
             parsed.ignore_symbols_preset = Some("tauri".to_string());
         }
+        // Sanity check: warn if Tauri structure not detected
+        let check_root = roots.first().cloned().unwrap_or_else(|| PathBuf::from("."));
+        let has_tauri_backend = check_root.join("src-tauri/Cargo.toml").exists()
+            || check_root.join("src-tauri").exists();
+        let has_frontend = check_root.join("src").exists()
+            || check_root.join("package.json").exists();
+        if !has_tauri_backend {
+            eprintln!(
+                "[loctree][warn] --preset-tauri: No src-tauri/ found. Preset may produce empty results."
+            );
+        } else if !has_frontend {
+            eprintln!(
+                "[loctree][warn] --preset-tauri: No src/ or package.json found for frontend."
+            );
+        }
     }
 
     // Default to Init mode when running bare `loctree` without any mode-setting flags
