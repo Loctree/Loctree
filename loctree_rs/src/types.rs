@@ -207,22 +207,39 @@ pub struct EventRef {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FileAnalysis {
+    #[serde(default)]
     pub path: String,
+    #[serde(default)]
     pub loc: usize,
+    #[serde(default)]
     pub language: String,
+    #[serde(default)]
     pub kind: String,
+    #[serde(default)]
     pub is_test: bool,
+    #[serde(default)]
     pub is_generated: bool,
+    #[serde(default)]
     pub imports: Vec<ImportEntry>,
+    #[serde(default)]
     pub reexports: Vec<ReexportEntry>,
+    #[serde(default)]
     pub dynamic_imports: Vec<String>,
+    #[serde(default)]
     pub exports: Vec<ExportSymbol>,
+    #[serde(default)]
     pub command_calls: Vec<CommandRef>,
+    #[serde(default)]
     pub command_handlers: Vec<CommandRef>,
+    #[serde(default)]
     pub event_emits: Vec<EventRef>,
+    #[serde(default)]
     pub event_listens: Vec<EventRef>,
+    #[serde(default)]
     pub event_consts: HashMap<String, String>,
+    #[serde(default)]
     pub matches: Vec<SymbolMatch>,
+    #[serde(default)]
     pub entry_points: Vec<String>,
     /// Names of Rust functions registered via `tauri::generate_handler![...]` in this file
     #[serde(default)]

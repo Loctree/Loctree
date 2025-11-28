@@ -895,27 +895,15 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
         let check_root = roots.first().cloned().unwrap_or_else(|| PathBuf::from("."));
         let has_tauri_backend = check_root.join("src-tauri/Cargo.toml").exists()
             || check_root.join("src-tauri").exists();
+        let has_frontend = check_root.join("src").exists()
+            || check_root.join("package.json").exists();
         if !has_tauri_backend {
-            // Detect what the project actually is
-            let has_python =
-                check_root.join("pyproject.toml").exists() || check_root.join("setup.py").exists();
-            let has_rust = check_root.join("Cargo.toml").exists();
-            let has_ts = check_root.join("tsconfig.json").exists()
-                || check_root.join("package.json").exists();
-
-            let suggestion = if has_python {
-                "Try: loctree init  (Python auto-detected)"
-            } else if has_rust {
-                "Try: loctree init  (Rust auto-detected)"
-            } else if has_ts {
-                "Try: loctree init  (TypeScript auto-detected)"
-            } else {
-                "Try: loctree init --ext py,rs,ts  (specify extensions)"
-            };
-
             eprintln!(
-                "[loctree][warn] --preset-tauri: No src-tauri/ found. {}",
-                suggestion
+                "[loctree][warn] --preset-tauri: No src-tauri/ found. Preset may produce empty results."
+            );
+        } else if !has_frontend {
+            eprintln!(
+                "[loctree][warn] --preset-tauri: No src/ or package.json found for frontend."
             );
         }
     }
