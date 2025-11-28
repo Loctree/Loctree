@@ -116,6 +116,9 @@ pub fn detect_stack(root: &Path) -> DetectedStack {
         result.ignores.push(".fastembed_cache".to_string());
         result.ignores.push(".cache".to_string());
         result.ignores.push("logs".to_string());
+        result.ignores.push("packaging".to_string());
+        // uv specific
+        result.ignores.push(".uv".to_string());
         detected_parts.push("Python");
     }
 
