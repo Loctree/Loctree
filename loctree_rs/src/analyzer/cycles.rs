@@ -132,8 +132,7 @@ pub fn print_cycles(cycles: &[Vec<String>], json_output: bool) {
         println!("Circular imports detected ({} cycles):", cycles.len());
         for (i, cycle) in cycles.iter().enumerate() {
             let mut c = cycle.clone();
-            c.reverse(); // Tarjan pops in reverse topological order? SCC order within stack is arbitrary but connected.
-                         // Let's just print them joined.
+            c.reverse(); // Reverse to show cycle in discovery order for readability
             println!("  Cycle {}: {}", i + 1, c.join(" -> "));
         }
     }
