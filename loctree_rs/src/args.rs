@@ -50,6 +50,8 @@ pub struct ParsedArgs {
     pub check_sim: Option<String>,
     pub dead_exports: bool,
     pub dead_confidence: Option<String>,
+    pub show_ignored: bool,
+    pub find_artifacts: bool,
 }
 
 impl Default for ParsedArgs {
@@ -101,6 +103,8 @@ impl Default for ParsedArgs {
             check_sim: None,
             dead_exports: false,
             dead_confidence: None,
+            show_ignored: false,
+            find_artifacts: false,
         }
     }
 }
@@ -340,6 +344,17 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
             }
             "--show-hidden" | "-H" => {
                 parsed.show_hidden = true;
+                i += 1;
+            }
+            "--show-ignored" => {
+                parsed.show_ignored = true;
+                parsed.use_gitignore = true; // Required to know what's ignored
+                parsed.mode = Mode::Tree; // Show-ignored works in tree mode
+                i += 1;
+            }
+            "--find-artifacts" => {
+                parsed.find_artifacts = true;
+                parsed.mode = Mode::Tree; // Find-artifacts works in tree mode
                 i += 1;
             }
             "--json" => {

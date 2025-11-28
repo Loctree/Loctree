@@ -71,7 +71,8 @@ Common:\n  \
 Examples:\n  \
   loctree                                    # Quick snapshot of current dir\n  \
   loctree src -A --graph --html-report r.html  # Full analysis with graph\n  \
-  loctree . --preset-tauri -A --serve        # Tauri project analysis\n\n\
+  loctree . --preset-tauri -A --serve        # Tauri project analysis\n  \
+  loctree ~/iCloud --find-artifacts > trash.txt  # Find node_modules, target, .venv\n\n\
 More: loctree --help-full for all options\n"
 }
 
@@ -91,6 +92,7 @@ Tree mode options:\n  \
   --loc <n>                 LOC threshold for large-file highlighting (default 1000)\n  \
   -L, --max-depth <n>       Limit recursion depth (0 = direct children only)\n  \
   --show-hidden, -H         Include dotfiles\n  \
+  --find-artifacts          Find build artifact dirs (node_modules, target, .venv, etc.)\n  \
   --json                    JSON output instead of tree view\n\n\
 Analyzer mode options (-A):\n  \
   --ext <list>              Comma-separated extensions (default: ts,tsx,js,jsx,mjs,cjs,rs,css,py)\n  \

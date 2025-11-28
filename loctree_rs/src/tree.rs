@@ -14,6 +14,56 @@ use crate::types::{
     COLOR_RESET,
 };
 
+/// List of common build artifact directory names that typically contain
+/// millions of files and slow down tools like Spotlight.
+const BUILD_ARTIFACT_DIRS: &[&str] = &[
+    // JavaScript/Node.js
+    "node_modules",
+    ".pnpm-store",
+    // PHP
+    "vendor",
+    // Python
+    ".venv",
+    "venv",
+    "env",
+    "ENV",
+    // Rust
+    "target",
+    // General build outputs
+    "dist",
+    "build",
+    "out",
+    // Testing/Coverage
+    "coverage",
+    ".tox",
+    ".mypy_cache",
+    ".pytest_cache",
+    // Java/Gradle
+    ".gradle",
+    // JavaScript bundlers
+    ".parcel-cache",
+    ".next",
+    ".nuxt",
+    ".turbo",
+    ".cache",
+    // Dart/Flutter
+    ".dart_tool",
+    // Terraform
+    ".terraform",
+    ".terraform.d",
+    // iOS/macOS
+    "Pods",
+    "DerivedData",
+    // React Native/Expo
+    ".expo",
+    ".expo-shared",
+    // Svelte/Angular/Vercel/Serverless
+    ".svelte-kit",
+    ".angular",
+    ".vercel",
+    ".serverless",
+];
+
 #[allow(clippy::too_many_arguments, clippy::only_used_in_recursion)]
 fn walk(
     dir: &Path,
@@ -70,7 +120,86 @@ fn walk(
             .strip_prefix(root_canon)
             .unwrap_or(&path)
             .to_path_buf();
-        if should_ignore(&path, options, git_checker) {
+
+        // Handle --find-artifacts mode: find build artifact directories
+        if options.find_artifacts {
+            let is_dir = path.is_dir();
+            // Skip files - we only care about directories
+            if !is_dir {
+                continue;
+            }
+            // Check if this directory is a build artifact
+            let is_artifact = BUILD_ARTIFACT_DIRS.contains(&name.as_str());
+            if is_artifact {
+                // Found an artifact directory - output its path and DON'T recurse into it (prune)
+                let relative_display = if relative.as_os_str().is_empty() {
+                    name.clone()
+                } else {
+                    relative.to_string_lossy().to_string()
+                };
+                collectors.entries.push(LineEntry {
+                    label: relative_display.clone(),
+                    loc: None,
+                    relative_path: relative_display,
+                    is_dir: true,
+                    is_large: false,
+                });
+                collectors.stats.directories += 1;
+                any_included = true;
+                // Don't recurse - prune this directory
+                continue;
+            }
+            // Not an artifact - recurse to find artifacts inside
+            if options.max_depth.is_none_or(|max| depth < max) {
+                prefix_parts.push(!is_last);
+                let child_has = walk(
+                    &path,
+                    options,
+                    prefix_parts,
+                    collectors,
+                    depth + 1,
+                    root,
+                    root_canon,
+                    git_checker,
+                    visited,
+                )?;
+                prefix_parts.pop();
+                if child_has {
+                    any_included = true;
+                }
+            }
+            continue;
+        }
+
+        // Handle --show-ignored mode: show ONLY gitignored files
+        if options.show_ignored {
+            // In show_ignored mode, we want to show files that ARE ignored
+            // Check if this file is ignored by gitignore
+            let is_gitignored = git_checker
+                .map(|checker| checker.is_ignored(&path))
+                .unwrap_or(false);
+            // Skip files that are NOT ignored (we only want ignored files)
+            if !is_gitignored {
+                // But still recurse into directories to find ignored files within
+                if path.is_dir() && options.max_depth.is_none_or(|max| depth < max) {
+                    prefix_parts.push(!is_last);
+                    let _ = walk(
+                        &path,
+                        options,
+                        prefix_parts,
+                        collectors,
+                        depth + 1,
+                        root,
+                        root_canon,
+                        git_checker,
+                        visited,
+                    );
+                    prefix_parts.pop();
+                }
+                continue;
+            }
+        } else if should_ignore(&path, options, git_checker) {
+            // Normal mode: skip ignored files
             continue;
         }
 
@@ -163,6 +292,7 @@ pub fn run_tree(root_list: &[PathBuf], parsed: &crate::args::ParsedArgs) -> io::
         summary: parsed.summary,
         summary_limit: parsed.summary_limit,
         show_hidden: parsed.show_hidden,
+        show_ignored: parsed.show_ignored,
         loc_threshold: parsed.loc_threshold,
         analyze_limit: parsed.analyze_limit,
         report_path: None,
@@ -174,6 +304,7 @@ pub fn run_tree(root_list: &[PathBuf], parsed: &crate::args::ParsedArgs) -> io::
         scan_all: parsed.scan_all,
         symbol: None,
         impact: None,
+        find_artifacts: parsed.find_artifacts,
     };
 
     let mut json_results = Vec::new();
@@ -218,6 +349,16 @@ pub fn run_tree(root_list: &[PathBuf], parsed: &crate::args::ParsedArgs) -> io::
             git_checker.as_ref(),
             &mut visited,
         )?;
+
+        // Special output for --find-artifacts: just paths, one per line
+        if root_options.find_artifacts {
+            for entry in &entries {
+                // Output absolute path for easy use with rm/trash commands
+                let abs_path = root_canon.join(&entry.relative_path);
+                println!("{}", abs_path.display());
+            }
+            continue;
+        }
 
         let mut sorted_large = large_entries;
         sorted_large.sort_by(|a, b| b.loc.cmp(&a.loc));

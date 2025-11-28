@@ -27,6 +27,9 @@ Highlights (0.4.3):
   - `--dead` (alias `--unused`) lists exports that are defined but never imported (potential dead code). Use `--confidence high` to filter out implicit exports.
   - `--symbol <name>` quickly finds usages and definitions of a symbol across the project.
   - `--impact <file>` analyzes what files would break if the target file is changed/removed.
+  - `--circular` detects circular import cycles in the module graph.
+  - `--entrypoints` lists detected entry points (e.g. Python `__main__`, Rust `fn main` / `#[tokio::main]`).
+  - `--sarif` emits findings in SARIF 2.1.0 format for CI integrations.
 - Pipeline checks:
   - `--fail-on-missing-handlers`, `--fail-on-ghost-events`, `--fail-on-races` for CI gates.
   - `--scan-all` forces scanning of normally ignored directories (`node_modules`, `target`, `.venv`) – useful for audits or monorepo dependency analysis.

@@ -244,6 +244,7 @@ mod tests {
             summary: false,
             summary_limit: 5,
             show_hidden: false,
+            show_ignored: false,
             loc_threshold: crate::types::DEFAULT_LOC_THRESHOLD,
             analyze_limit: 8,
             report_path: None,
@@ -255,6 +256,7 @@ mod tests {
             scan_all: false,
             symbol: None,
             impact: None,
+            find_artifacts: false,
         }
     }
 
@@ -308,6 +310,7 @@ mod tests {
             summary: false,
             summary_limit: 5,
             show_hidden: false,
+            show_ignored: false,
             loc_threshold: crate::types::DEFAULT_LOC_THRESHOLD,
             analyze_limit: 8,
             report_path: None,
@@ -319,6 +322,7 @@ mod tests {
             scan_all: false,
             symbol: None,
             impact: None,
+            find_artifacts: false,
         };
         let mut visited = HashSet::new();
         gather_files(root, &opts, 0, None, &mut visited, &mut files).expect("gather files");
