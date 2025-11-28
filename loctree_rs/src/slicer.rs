@@ -135,12 +135,46 @@ impl HolographicSlice {
         }
 
         // Find the target file in snapshot
-        let target_file = snapshot.files.iter().find(|f| {
-            let path_normalized = f.path.trim_start_matches("./").replace('\\', "/");
-            path_normalized == normalized
-                || path_normalized.ends_with(&normalized)
-                || normalized.ends_with(&path_normalized)
-        })?;
+        // Priority: exact match > ends_with match
+        // Warn if multiple matches found
+        let matches: Vec<_> = snapshot
+            .files
+            .iter()
+            .filter(|f| {
+                let path_normalized = f.path.trim_start_matches("./").replace('\\', "/");
+                path_normalized == normalized
+                    || path_normalized.ends_with(&normalized)
+                    || normalized.ends_with(&path_normalized)
+            })
+            .collect();
+
+        if matches.is_empty() {
+            return None;
+        }
+
+        // Prefer exact match
+        let target_file = matches
+            .iter()
+            .find(|f| {
+                let path_normalized = f.path.trim_start_matches("./").replace('\\', "/");
+                path_normalized == normalized
+            })
+            .copied()
+            .or_else(|| {
+                // Fallback to longest path match (most specific)
+                if matches.len() > 1 {
+                    eprintln!(
+                        "[loctree][warn] Multiple files match '{}': {}. Using longest path.",
+                        target_path,
+                        matches
+                            .iter()
+                            .map(|f| f.path.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    );
+                }
+                matches.iter().max_by_key(|f| f.path.len()).copied()
+            })?;
 
         let target_path_norm = target_file.path.clone();
         // Also create stripped version for edge lookup
