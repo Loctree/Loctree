@@ -225,3 +225,16 @@ pub(crate) fn regex_py_class() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| regex(r#"(?m)^\s*class\s+([A-Za-z_][A-Za-z0-9_]*)"#))
 }
+
+// Rust entry point detection regexes
+pub(crate) fn regex_rust_fn_main() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    // Match fn main() at start of line (with optional pub and async)
+    RE.get_or_init(|| regex(r#"(?m)^(?:pub\s+)?(?:async\s+)?fn\s+main\s*\("#))
+}
+
+pub(crate) fn regex_rust_async_main_attr() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    // Match #[tokio::main] or #[async_std::main] attributes
+    RE.get_or_init(|| regex(r#"(?m)^#\[(tokio|async_std)::main\]"#))
+}

@@ -6,7 +6,9 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 cd "$REPO_ROOT"
 
 if [ "${LOCTREE_FAST:-0}" != "0" ]; then
-  echo "LOCTREE_FAST=1 -> running fast checks (unit tests only, skipping Semgrep + integration)"
+  echo "LOCTREE_FAST=1 -> running fast checks (fmt + clippy + unit tests, skipping Semgrep + integration)"
+  (cd loctree_rs && cargo fmt --check) || { echo "❌ Run: cargo fmt"; exit 1; }
+  (cd loctree_rs && cargo clippy --quiet -- -D warnings) || { echo "❌ Clippy warnings"; exit 1; }
   node tools/tests/test_loctree_node_unit.mjs
   python3 tools/tests/test_loctree_py_unit.py
   (cd loctree_rs && cargo test --quiet)
@@ -19,8 +21,28 @@ node tools/tests/test_loctree_node_unit.mjs
 echo "Running Python unit tests..."
 python3 tools/tests/test_loctree_py_unit.py
 
+echo "Running Rust fmt check..."
+(cd loctree_rs && cargo fmt --check) || {
+  echo "❌ Rust formatting issues. Run: cd loctree_rs && cargo fmt"
+  exit 1
+}
+
+echo "Running Rust clippy..."
+(cd loctree_rs && cargo clippy --quiet -- -D warnings) || {
+  echo "❌ Clippy warnings. Fix them before committing."
+  exit 1
+}
+
 echo "Running Rust unit tests..."
 (cd loctree_rs && cargo test --quiet)
+
+echo "Running loctree self-analysis (dogfooding)..."
+(cd loctree_rs && cargo build --release --quiet)
+./loctree_rs/target/release/loctree init loctree_rs/src
+./loctree_rs/target/release/loctree loctree_rs/src -A --circular || {
+  echo "❌ Circular imports detected! Fix before committing."
+  exit 1
+}
 
 if command -v semgrep >/dev/null 2>&1; then
   echo "Running Semgrep (global + local rules)..."
