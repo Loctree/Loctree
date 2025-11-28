@@ -6,6 +6,39 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+## [0.5.0-rc] - 2025-11-28
+
+### Added
+- **Holographic Slice** (`slice` command): Extract 3-layer context for AI agents from any file:
+  - **Core**: Target file itself (full content)
+  - **Deps**: Files imported by target (BFS traversal up to depth 2)
+  - **Consumers**: Files that import target (with `--consumers` flag)
+  - JSON output for piping directly to AI: `loctree slice src/App.tsx --json | claude`
+- **Auto-detect stack**: Automatically detects project type from:
+  - `Cargo.toml` → Rust (adds `target/` to ignores)
+  - `tsconfig.json` / `vite.config.*` → TypeScript (adds `node_modules/` to ignores)
+  - `pyproject.toml` → Python (adds `.venv/`, `__pycache__/` to ignores)
+  - `src-tauri/` → Tauri hybrid (sets `--preset-tauri` automatically)
+- **Incremental scanning**: Uses file mtime to skip unchanged files. Typical re-scans now show "32 cached, 1 fresh" instead of re-parsing everything.
+- **`--full-scan` flag**: Forces re-analysis of all files, bypassing mtime cache.
+- **`--consumers` flag**: Include consumer layer in slice output.
+- Wired existing modules to CLI:
+  - `--circular`: Find circular imports using SCC algorithm
+  - `--entrypoints`: List entry points (main, __main__, index)
+  - `--sarif`: SARIF 2.1.0 output for CI integration
+
+### Changed
+- Rebranded as "AI-oriented Project Analyzer" to reflect the primary use case.
+- Help text completely rewritten with slice examples: `loctree slice src/main.rs --consumers`
+- Snapshot now stores file mtime for incremental scanning.
+- Snapshot edges are always collected (previously only with `--graph`).
+
+### Fixed
+- Slice now correctly matches files when edges store paths without extensions.
+- Removed unused `SliceConfig` fields (`target`, `json_output`, `deep`).
+- Removed unused `Snapshot::file_mtimes()` method.
+- Changed all test `unwrap()` to `expect()` with context for cleaner error messages.
+
 ## [0.4.7] - 2025-11-28
 
 ### Added

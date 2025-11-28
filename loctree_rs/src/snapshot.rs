@@ -220,6 +220,14 @@ impl Snapshot {
         Ok(snapshot)
     }
 
+    /// Get map of file path -> FileAnalysis for incremental reuse
+    pub fn cached_analyses(&self) -> HashMap<String, FileAnalysis> {
+        self.files
+            .iter()
+            .map(|f| (f.path.clone(), f.clone()))
+            .collect()
+    }
+
     /// Update metadata after scan
     pub fn finalize_metadata(&mut self, scan_duration_ms: u64) {
         self.metadata.file_count = self.files.len();
@@ -315,6 +323,33 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
         io::Error::new(io::ErrorKind::InvalidInput, "No root directory specified")
     })?;
 
+    // Try to load existing snapshot for incremental scanning
+    let cached_analyses: Option<HashMap<String, FileAnalysis>> =
+        if !parsed.full_scan && Snapshot::exists(snapshot_root) {
+            match Snapshot::load(snapshot_root) {
+                Ok(old_snapshot) => {
+                    if parsed.verbose {
+                        eprintln!(
+                            "[loctree][incremental] Loaded existing snapshot ({} files cached)",
+                            old_snapshot.files.len()
+                        );
+                    }
+                    Some(old_snapshot.cached_analyses())
+                }
+                Err(e) => {
+                    if parsed.verbose {
+                        eprintln!(
+                            "[loctree][warn] Could not load snapshot for incremental: {}",
+                            e
+                        );
+                    }
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
     // Prepare scan configuration (reusing existing infrastructure)
     let py_stdlib = python_stdlib();
     let focus_set = opt_globset(&parsed.focus_patterns);
@@ -334,6 +369,8 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
         ignore_exact: HashSet::new(),
         ignore_prefixes: Vec::new(),
         py_stdlib: &py_stdlib,
+        cached_analyses: cached_analyses.as_ref(),
+        collect_edges: true, // Always collect edges for snapshot (needed by slice)
     };
 
     // Perform the scan

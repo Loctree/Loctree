@@ -52,6 +52,12 @@ pub struct ParsedArgs {
     pub dead_confidence: Option<String>,
     pub show_ignored: bool,
     pub find_artifacts: bool,
+    pub circular: bool,
+    pub entrypoints: bool,
+    pub sarif: bool,
+    pub full_scan: bool,
+    pub slice_target: Option<String>,
+    pub slice_consumers: bool,
 }
 
 impl Default for ParsedArgs {
@@ -105,6 +111,12 @@ impl Default for ParsedArgs {
             dead_confidence: None,
             show_ignored: false,
             find_artifacts: false,
+            circular: false,
+            entrypoints: false,
+            sarif: false,
+            full_scan: false,
+            slice_target: None,
+            slice_consumers: false,
         }
     }
 }
@@ -515,6 +527,41 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
             "--dead" | "--unused" => {
                 parsed.dead_exports = true;
                 parsed.mode = Mode::AnalyzeImports;
+                i += 1;
+            }
+            "--circular" => {
+                parsed.circular = true;
+                parsed.mode = Mode::AnalyzeImports;
+                i += 1;
+            }
+            "--entrypoints" => {
+                parsed.entrypoints = true;
+                parsed.mode = Mode::AnalyzeImports;
+                i += 1;
+            }
+            "--sarif" => {
+                parsed.sarif = true;
+                parsed.output = OutputMode::Json;
+                parsed.mode = Mode::AnalyzeImports;
+                i += 1;
+            }
+            "--full-scan" => {
+                parsed.full_scan = true;
+                i += 1;
+            }
+            "--consumers" => {
+                parsed.slice_consumers = true;
+                i += 1;
+            }
+            "slice" | "--slice" => {
+                parsed.mode = Mode::Slice;
+                if let Some(next) = args.get(i + 1) {
+                    if !next.starts_with('-') {
+                        parsed.slice_target = Some(next.clone());
+                        i += 2;
+                        continue;
+                    }
+                }
                 i += 1;
             }
             "--confidence" => {

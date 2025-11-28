@@ -36,7 +36,15 @@ pub fn print_entrypoints(entrypoints: &[(String, Vec<String>)], json_output: boo
             let unique: std::collections::HashSet<_> = types.iter().collect();
             let mut sorted: Vec<_> = unique.into_iter().collect();
             sorted.sort();
-            println!("  - {}: {}", path, sorted.into_iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "));
+            println!(
+                "  - {}: {}",
+                path,
+                sorted
+                    .into_iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
         }
     }
 }

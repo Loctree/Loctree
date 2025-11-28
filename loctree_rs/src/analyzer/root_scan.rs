@@ -27,6 +27,10 @@ pub struct ScanConfig<'a> {
     pub ignore_exact: HashSet<String>,
     pub ignore_prefixes: Vec<String>,
     pub py_stdlib: &'a HashSet<String>,
+    /// Cached file analyses from previous snapshot for incremental scanning
+    pub cached_analyses: Option<&'a HashMap<String, crate::types::FileAnalysis>>,
+    /// Force collection of graph edges (for Init mode snapshots)
+    pub collect_edges: bool,
 }
 
 pub struct RootContext {
@@ -179,16 +183,77 @@ pub fn scan_roots(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
         let mut languages: HashSet<String> = HashSet::new();
         let mut barrels: Vec<BarrelInfo> = Vec::new();
 
+        let mut cached_hits = 0usize;
+        let mut fresh_scans = 0usize;
+
         for file in files {
-            let analysis = analyze_file(
-                &file,
-                &root_canon,
-                options.extensions.as_ref(),
-                ts_resolver.as_ref(),
-                &py_roots,
-                cfg.py_stdlib,
-                options.symbol.as_deref(),
-            )?;
+            // Get current file mtime for incremental scanning
+            let current_mtime = std::fs::metadata(&file)
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+
+            // Compute relative path for cache lookup
+            let rel_path = file
+                .strip_prefix(&root_canon)
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| file.to_string_lossy().to_string())
+                .replace('\\', "/");
+
+            // Check if we can use cached analysis
+            let analysis = if let Some(cache) = cfg.cached_analyses {
+                if let Some(cached) = cache.get(&rel_path) {
+                    if cached.mtime > 0 && cached.mtime == current_mtime {
+                        // File unchanged - reuse cached analysis
+                        cached_hits += 1;
+                        cached.clone()
+                    } else {
+                        // File changed - re-analyze
+                        fresh_scans += 1;
+                        let mut a = analyze_file(
+                            &file,
+                            &root_canon,
+                            options.extensions.as_ref(),
+                            ts_resolver.as_ref(),
+                            &py_roots,
+                            cfg.py_stdlib,
+                            options.symbol.as_deref(),
+                        )?;
+                        a.mtime = current_mtime;
+                        a
+                    }
+                } else {
+                    // New file - analyze
+                    fresh_scans += 1;
+                    let mut a = analyze_file(
+                        &file,
+                        &root_canon,
+                        options.extensions.as_ref(),
+                        ts_resolver.as_ref(),
+                        &py_roots,
+                        cfg.py_stdlib,
+                        options.symbol.as_deref(),
+                    )?;
+                    a.mtime = current_mtime;
+                    a
+                }
+            } else {
+                // No cache - fresh scan
+                fresh_scans += 1;
+                let mut a = analyze_file(
+                    &file,
+                    &root_canon,
+                    options.extensions.as_ref(),
+                    ts_resolver.as_ref(),
+                    &py_roots,
+                    cfg.py_stdlib,
+                    options.symbol.as_deref(),
+                )?;
+                a.mtime = current_mtime;
+                a
+            };
             let abs_for_match = root_canon.join(&analysis.path);
             let is_excluded_for_commands = cfg
                 .exclude_set
@@ -228,7 +293,10 @@ pub fn scan_roots(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
             }
             for re in &analysis.reexports {
                 reexport_edges.push((analysis.path.clone(), re.resolved.clone()));
-                if (cfg.parsed.graph && options.report_path.is_some()) || options.impact.is_some() {
+                let collect_edges = cfg.collect_edges
+                    || (cfg.parsed.graph && options.report_path.is_some())
+                    || options.impact.is_some();
+                if collect_edges {
                     if let Some(target) = &re.resolved {
                         graph_edges.push((
                             analysis.path.clone(),
@@ -241,7 +309,10 @@ pub fn scan_roots(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
             if !analysis.dynamic_imports.is_empty() {
                 dynamic_summary.push((analysis.path.clone(), analysis.dynamic_imports.clone()));
             }
-            if (cfg.parsed.graph && options.report_path.is_some()) || options.impact.is_some() {
+            let should_collect_edges = cfg.collect_edges
+                || (cfg.parsed.graph && options.report_path.is_some())
+                || options.impact.is_some();
+            if should_collect_edges {
                 let ext = file
                     .extension()
                     .and_then(|e| e.to_str())
@@ -513,6 +584,15 @@ pub fn scan_roots(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
         });
 
         let tsconfig_summary = super::tsconfig::summarize_tsconfig(root_path, &analyses);
+
+        // Log incremental scan stats if verbose
+        if options.verbose && cfg.cached_analyses.is_some() {
+            let total = cached_hits + fresh_scans;
+            eprintln!(
+                "[loctree][incremental] {} cached, {} fresh ({} total files)",
+                cached_hits, fresh_scans, total
+            );
+        }
 
         let mut calls_with_generics = Vec::new();
         for analysis in &analyses {

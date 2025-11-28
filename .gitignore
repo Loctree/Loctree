@@ -14,3 +14,10 @@ loctree_rs/tarpaulin-report.json
 /loctree_rs/logs
 /loctree_rs/.loctree
 *.log
+/.claude
+
+# Python cache
+__pycache__/
+.mypy_cache/
+.ruff_cache/
+*.pyc

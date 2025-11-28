@@ -1,258 +1,254 @@
-# loctree — LOC-aware tree for codebases
+# loctree — AI-oriented Project Analyzer
 
 [![CI](https://github.com/LibraxisAI/loctree/actions/workflows/ci.yml/badge.svg)](https://github.com/LibraxisAI/loctree/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-loctree prints a directory tree that includes per-file line counts (LOC), totals, and highlights “large” files. It’s
-designed to be fast, scriptable, and usable from multiple runtimes: Rust (native), Node.js, and Python.
+**loctree** is a static analysis tool designed for AI agents and non-programmers building production-ready software. It helps overcome the common AI tendency to generate excessive artifacts that lead to re-export cascades, circular imports, and spaghetti dependencies.
 
-## Overview
+**Scan once, slice many.** Run `loctree` to capture your project's true structure, then use `loctree slice` to extract focused context for any AI conversation.
 
-Highlights (0.4.3):
-- HTML report graph controls are only in the drawer (no duplicated toolbars/scroll); inline graph panels are hidden.
-- Multi-root FE↔BE coverage is merged across roots, so `commands2`/coverage no longer report missing/unused handlers just because FE and BE live in different paths.
-- Duplicate export scoring skips re-exports (barrels/index.ts) and declaration `default` exports, reducing false-positive clusters.
-- Event constants are resolved across files/imports (TS/JS/Rust), shrinking ghost/orphan event noise; TS path resolver still follows `extends`/JSON5 `tsconfig` chains for stable alias resolution.
+## Why loctree?
 
-- Filters by extension (`--ext rs,ts,tsx,py,...`) and prunes non-matching branches.
-- Respects `.gitignore` (`-g`), custom ignores (`-I`), and max depth (`-L`).
-- Human or JSON output; per-root summary with totals and large files (>= 1000 LOC).
-- Multi-root: pass several paths in one command.
-- Import/export analyzer mode (`-A/--analyze-imports`) surfaces duplicate exports, re-export chains, dynamic imports,
-  CSS `@import`, Rust `use/pub use`/public items, Python `import`/`from` (with `__all__` expansion, stdlib vs local tagging, TYPE_CHECKING-aware imports, dynamic `importlib`/`__import__`),
-  and maps Tauri commands: FE calls (`safeInvoke`/`invokeSnake`) vs. backend `#[tauri::command]`
-  (missing/unused handlers in CLI/JSON/HTML). With `--serve`, HTML links open files in editor/OS (default `code -g` or `open`/`xdg-open`).
-- Janitor Mode tools (`-A` implied):
-  - `--check <query>` finds existing components similar to your query to prevent duplication (e.g., before creating `ChatSurface`, check if `ViewSurface` or `ChatPanel` exists).
-  - `--dead` (alias `--unused`) lists exports that are defined but never imported (potential dead code). Use `--confidence high` to filter out implicit exports.
-  - `--symbol <name>` quickly finds usages and definitions of a symbol across the project.
-  - `--impact <file>` analyzes what files would break if the target file is changed/removed.
-  - `--circular` detects circular import cycles in the module graph.
-  - `--entrypoints` lists detected entry points (e.g. Python `__main__`, Rust `fn main` / `#[tokio::main]`).
-  - `--sarif` emits findings in SARIF 2.1.0 format for CI integrations.
-- Pipeline checks:
-  - `--fail-on-missing-handlers`, `--fail-on-ghost-events`, `--fail-on-races` for CI gates.
-  - `--scan-all` forces scanning of normally ignored directories (`node_modules`, `target`, `.venv`) – useful for audits or monorepo dependency analysis.
+AI agents and vibe-coders face a common problem: **context drift**. Without understanding the real dependency graph, AI generates new components instead of reusing existing ones, creates barrel files that re-export everything, and builds circular dependencies that compile but break at runtime.
 
-Common use cases:
+loctree solves this by:
 
-- Pre-review hygiene: quickly spot oversized files or heavy folders (`--summary`, color highlights for >= 1000 LOC).
-- Language-focused sweeps: `--ext ts,tsx` for FE, `--ext rs` for Rust, `--ext py` for Python modules, `--ext css` for
-  styling audits.
-- CI scripting: `--json` feeds automated checks (e.g., fail if any file > N LOC or if new files appear outside an
-  allowlist).
-- General repo hygiene: combine `--gitignore` and repeated `-I` to skip generated/build/output trees.
+1. **Detecting what you already have** — Find existing components before creating duplicates
+2. **Exposing hidden dependencies** — See circular imports and orphaned code
+3. **Slicing relevant context** — Extract just what an AI needs for a specific task
+4. **CI-friendly checks** — Fail builds on missing handlers, ghost events, or dependency cycles
 
-## Stack and entry points
+## Quick Start
 
-- Rust (primary native CLI)
-    - Package: `loctree_rs` (Cargo binary `loctree` at `loctree_rs/src/main.rs`)
-- Node.js (ESM script)
-    - Entry: `loctree.mjs`
-- Python (single-file script)
-    - Entry: `loctree.py`
-- Shell helper
-    - `loctree.sh` is an example script aimed at a specific path (`src-tauri/src`); not part of the cross-runtime CLI.
+```bash
+# Install (Rust binary)
+curl -fsSL https://raw.githubusercontent.com/LibraxisAI/loctree/main/tools/install.sh | sh
 
-## Requirements
+# Scan your project (creates .loctree/snapshot.json)
+cd your-project
+loctree
 
-- Rust toolchain: cargo + rustc (edition 2021)
-    - Tested in CI on “stable” via `dtolnay/rust-toolchain@stable`
-- Node.js: v20.x (per CI) or newer
-    - Note: the code uses ESM (`import`), so Node must support ESM
-- Python: 3.11 (per CI) or newer
+# Extract context for AI agents
+loctree slice src/components/ChatPanel.tsx --consumers --json | claude
 
-Optional tools used by installers:
+# Find circular imports
+loctree -A --circular
 
-- curl or wget (to fetch scripts)
+# Check for dead exports
+loctree -A --dead --confidence high
 
-TODOs
+# CI check: fail if FE invokes missing BE handlers
+loctree -A --fail-on-missing-handlers
+```
 
-- Specify minimal Rust version (MSRV). Currently not pinned. TODO: decide and document.
-- Windows support notes. TODO: verify behavior of `--gitignore` on Windows shells.
-- Prebuilt release artifacts/Homebrew tap automation. A helper exists, but publishing is manual for now.
+## Core Features
+
+### Holographic Slice (`slice` command)
+
+Extract 3-layer context for any file, perfect for AI conversations:
+
+```bash
+loctree slice src/App.tsx --consumers
+```
+
+Output:
+```
+Slice for: src/App.tsx
+
+Core (1 files, 150 LOC):
+  src/App.tsx (150 LOC, ts)
+
+Deps (3 files, 420 LOC):
+  [d1] src/hooks/useAuth.ts (80 LOC, ts)
+    [d2] src/contexts/AuthContext.tsx (200 LOC, ts)
+    [d2] src/utils/api.ts (140 LOC, ts)
+
+Consumers (2 files, 180 LOC):
+  src/main.tsx (30 LOC, ts)
+  src/routes/index.tsx (150 LOC, ts)
+
+Total: 6 files, 750 LOC
+```
+
+Pipe directly to AI:
+```bash
+loctree slice src/features/chat/ChatPanel.tsx --json | claude "refactor this to use React Query"
+```
+
+### Auto-Detect Stack
+
+loctree automatically detects your project type and configures sensible defaults:
+
+| Marker | Detected As | Auto-Ignores |
+|--------|-------------|--------------|
+| `Cargo.toml` | Rust | `target/` |
+| `tsconfig.json` | TypeScript | `node_modules/` |
+| `pyproject.toml` | Python | `.venv/`, `__pycache__/` |
+| `src-tauri/` | Tauri | All of the above |
+
+### Janitor Mode Tools
+
+Find problems before they become tech debt:
+
+```bash
+# Before creating a new component, check if similar exists
+loctree -A --check ChatSurface
+# Found: ChatPanel (distance: 2), ChatWindow (distance: 3)
+
+# Find potentially unused exports
+loctree -A --dead
+
+# Detect circular import cycles
+loctree -A --circular
+
+# List entry points (main functions)
+loctree -A --entrypoints
+
+# Analyze impact of changing a file
+loctree -A --impact src/utils/api.ts
+
+# Find a symbol across the codebase
+loctree -A --symbol useAuth
+```
+
+### Incremental Scanning
+
+After the first scan, loctree uses file modification times to skip unchanged files:
+
+```
+$ loctree
+[loctree][detect] Detected: Tauri + Vite
+[loctree][progress] 32 cached, 1 fresh (touched: src/App.tsx)
+```
+
+Use `--full-scan` to force re-analysis of everything.
+
+### CI Pipeline Checks
+
+```bash
+# Fail if frontend invokes backend handlers that don't exist
+loctree -A --fail-on-missing-handlers
+
+# Fail if events are emitted but never listened to (or vice versa)
+loctree -A --fail-on-ghost-events
+
+# Fail if potential race conditions detected in event listeners
+loctree -A --fail-on-races
+
+# Output in SARIF 2.1.0 format for GitHub/GitLab integration
+loctree -A --sarif > results.sarif
+```
+
+## CLI Reference
+
+```
+loctree (Rust) - AI-oriented Project Analyzer
+
+Modes:
+  init (default)            Scan and save snapshot to .loctree/snapshot.json
+  slice <file>              Holographic slice: extract context for AI agents
+  -A, --analyze-imports     Import/export analyzer
+
+Slice options:
+  --consumers               Include files that import the target
+  --json                    Output as JSON (for piping to AI)
+
+Analyzer options (-A):
+  --circular                Find circular imports
+  --entrypoints             List entry points
+  --dead                    List potentially unused exports
+  --sarif                   SARIF 2.1.0 output for CI
+  --check <query>           Find similar existing components
+  --impact <file>           Show what imports the target
+  --symbol <name>           Search for symbol
+
+Pipeline checks:
+  --fail-on-missing-handlers
+  --fail-on-ghost-events
+  --fail-on-races
+
+Common:
+  --gitignore, -g           Respect .gitignore
+  --full-scan               Ignore mtime cache, re-analyze all
+  --verbose                 Show detailed progress
+```
+
+Full reference: `loctree --help-full`
 
 ## Installation
 
-Recommended (Rust native binary):
+### Rust (Recommended)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/LibraxisAI/loctree/main/tools/install.sh | sh
-# Pin a branch/SHA if needed (defaults to develop when run from that ref):
-# LOCTREE_REF=main curl -fsSL https://raw.githubusercontent.com/LibraxisAI/loctree/main/tools/install.sh | sh
 ```
 
-# Env overrides:
-
-# INSTALL_DIR=$HOME/.local/bin  CARGO_HOME=$HOME/.cargo  curl -fsSL ... | sh
-
-Alternatives (wrappers around repo scripts):
-
-- Node wrapper:
-  ```bash
-  curl -fsSL https://raw.githubusercontent.com/LibraxisAI/loctree/main/tools/install_node.sh | sh
-  ```
-- Python wrapper:
-  ```bash
-  curl -fsSL https://raw.githubusercontent.com/LibraxisAI/loctree/main/tools/install_py.sh | sh
-  ```
-
-Each installer drops a small wrapper into `$HOME/.local/bin` by default and will hint if your PATH needs updating.
-
-Environment variables recognized by installers:
-
-- `INSTALL_DIR` — where to place the runnable wrapper (default: `$HOME/.local/bin`)
-- `CARGO_HOME` — cargo home for Rust install (default: `~/.cargo`) [Rust installer]
-- `LOCTREE_REF` — branch/commit passed to `cargo install --git` (default: `develop` when invoked from that ref; override to `main`/SHA for stable).
-- `LOCTREE_NO_LOCK` — set to `1` to skip `--locked` during install (not recommended).
-- `LOCTREE_HOME` — where to store downloaded script file [Node: `$HOME/.local/lib/loctree-node` | Python:
-  `$HOME/.local/lib/loctree-py`]
-
-## Usage
-
-Quick start:
+### From source
 
 ```bash
-loctree src --ext rs,tsx --summary
-loctree src src-tauri/src -I node_modules -L 2
-loctree . --json > tree.json
-loctree packages/app -A --ext ts,tsx --json   # import/export analyzer
+git clone https://github.com/LibraxisAI/loctree
+cd loctree/loctree_rs
+cargo install --path .
 ```
 
-JSON shape: single root -> object; multi-root -> array. Large files (>= 1000 LOC) are listed separately and colored when
-`--color` (or `-c`) is on.
+### Alternative runtimes
 
-Analyzer JSON hints (schema v1.1.0):
-- Top-level metadata: `schema`, `schemaVersion`, `generatedAt`, `rootDir`, sorted `languages`.
-- Each file: `id`, `path`, `loc`, `language`, `kind` (`code|test|story|config|generated`), `isTest`, `isGenerated`, imports with `sourceRaw|resolvedPath|isBareModule|symbols`, exports with `exportType` + `line`.
-- Derived views: `commands2` (canonical handler + call sites + status), `symbols`/`clusters`, `aiViews` (default export chains, suspicious barrels, dead symbols, coverage summary incl. renamed handlers + generic call sites, tsconfig summary, ciSummary). Legacy sections remain for compatibility.
-
-CLI flags (all runtimes):
-
-- `--ext <list>`         Comma-separated extensions; prunes others (analyzer defaults to ts,tsx,js,jsx,mjs,cjs,rs,css,py).
-- `-I, --ignore <path>`  Ignore path (repeatable; abs or relative).
-- `-g, --gitignore`      Respect gitignore via `git check-ignore`.
-- `-L, --max-depth <n>`  Limit recursion depth.
-- `-H, --show-hidden`    Show dotfiles and `.DS_Store`.
-- `--color[=mode]`       `auto|always|never` (default `auto`); `-c` = always.
-- `--loc <n>`            Large-file threshold for highlighting (tree mode). Default 1000.
-- `--json`               Machine-readable output.
-- `--jsonl`              Analyzer: one JSON object per line (per root).
-- `--html-report <file>` Write analyzer results to an HTML report file.
-- `--graph`              Embed an interactive import graph in the HTML report (Cytoscape.js is self-hosted for CSP/offline).
-- `--verbose`            Extra debug logs (paths for outputs, graph warnings).
-- `--max-nodes <n>`      Override graph safety limit (default 8000).
-- `--max-edges <n>`      Override graph safety limit (default 12000).
-- `--serve`              Start a tiny local server that hosts the HTML report and opens links in your editor/OS.
-- `--editor-cmd <tpl>`   Command template for opening files (`{file}`, `{line}`), default tries `code -g`.
-- `--ignore-symbols <l>` Analyzer mode: comma-separated symbol names to skip in duplicate-export detection (case-insensitive).
-- `--ignore-symbols-preset <name>` Analyzer mode: predefined ignore set (currently `common` → `main,run,setup,test_*`).
-- `--focus <glob[,..]>`  Analyzer: show only duplicates where at least one file matches the globs.
-- `--exclude-report <glob[,..]>` Analyzer: exclude from the report duplicates whose files match the globs (e.g., `**/__tests__/**`).
-- `--summary[=N]`        Totals + top-N large files (default 5).
-- `-A, --analyze-imports` Import/export analyzer mode (duplicate exports, re-export cascades, dynamic imports).
-- `--limit <N>`          Analyzer: cap top lists for duplicates/dynamic imports (default 8).
-- `--ai`                 Analyzer: emit a compact AI-friendly JSON (top issues only, no per-file payloads).
-- `--top-dead-symbols <N>` Limit dead-symbol list (default 20); `--skip-dead-symbols` omits it entirely.
-- `--fail-on-duplicates <N>` Analyzer: exit 2 if duplicate-export groups exceed N (for CI).
-- `--fail-on-dynamic <N>`   Analyzer: exit 2 if files with dynamic imports exceed N (for CI).
-- `--json-out <file>`    Analyzer: write JSON to a file (creates parent dirs; warns on overwrite; rejects directory paths).
-- `--html-report <file>` Analyzer: write HTML report (parent dirs created automatically).
-
-Runtime-specific entry points:
-
-- Rust: `loctree_rs/` via cargo
-    - Run: `cargo run --quiet --manifest-path loctree_rs/Cargo.toml -- . --summary`
-    - Build binary locally: `cargo build --release --manifest-path loctree_rs/Cargo.toml`
-- Node: `node loctree.mjs . --summary`
-- Python: `python3 loctree.py . --summary`
-
-## Scripts and automation
-
-- Installers:
-    - `tools/install.sh` (Rust via `cargo install --git`)
-    - `tools/install_node.sh` (downloads `loctree.mjs` and writes `loctree-node` wrapper)
-    - `tools/install_py.sh` (downloads `loctree.py` and writes `loctree-py` wrapper)
-- CI: `.github/workflows/ci.yml` runs jobs on pushes/PRs to `main`:
-    - Test matrix (ubuntu + macos): fmt, clippy, unit tests, integration tests for all runtimes
-    - Coverage job (ubuntu only): Rust coverage via cargo-tarpaulin, Python coverage
-- Git hooks: `tools/setup_hooks.sh` installs pre-commit and pre-push hooks
-    - `pre-commit`: runs unit tests (use `LOCTREE_FAST=1` for quick mode)
-    - `pre-push`: full validation (fmt, clippy, all tests, optional Semgrep)
-- Release helper:
-    - `tools/release/update-tap.py` — prints a Homebrew formula body for release artifacts (manual step). TODO: wire a
-      publishing workflow.
-
-## Environment variables
-
-The CLI itself does not require environment variables for normal operation.
-
-Install-time variables (see Installation above): `INSTALL_DIR`, `CARGO_HOME`, `LOCTREE_HOME`.
-
-Dev/test helpers:
-
-- `LOCTREE_FAST=1` — run a fast pre-commit hook (unit tests only; skips Semgrep + integration to keep commit latency <3s).
-
-## Development and tests
-
-Setup git hooks (recommended):
+Node.js and Python wrappers are available for environments where Rust isn't practical:
 
 ```bash
-./tools/setup_hooks.sh
+# Node.js
+curl -fsSL https://raw.githubusercontent.com/LibraxisAI/loctree/main/tools/install_node.sh | sh
+
+# Python
+curl -fsSL https://raw.githubusercontent.com/LibraxisAI/loctree/main/tools/install_py.sh | sh
 ```
 
-This installs pre-commit and pre-push hooks for TDD workflow.
-
-Run tests manually:
-
-- Node: `node tools/tests/loctree-node.test.mjs`
-- Python: `node tools/tests/loctree-py.test.mjs`
-- Rust: `node tools/tests/loctree-rs.test.mjs` and `cargo test`
-- All unit tests: `node tools/tests/test_loctree_node_unit.mjs && python3 tools/tests/test_loctree_py_unit.py && cd loctree_rs && cargo test`
-
-CI runs all tests on PRs/pushes plus coverage reporting (see `.github/workflows/ci.yml`).
-
-Hidden files: `.env*`, `.loctree.*`, and `.example` are analyzed even when `--show-hidden` is off (so config-like files are not skipped).
-
-## Graph asset: self-hosted Cytoscape.js
-
-We bundle Cytoscape.js in the repo (written to `loctree-cytoscape.min.js` next to the HTML report) instead of loading it from a CDN because:
-
-- CSP compliance: no external script sources required; reports work with `script-src 'self'`.
-- Offline use: graphs render when browsing reports without internet access.
-- Reliability: avoids CDN downtime and version drift.
-
-Trade-offs:
-
-- Slightly larger repository size and HTML output directory (one JS asset).
-- We own updates: when bumping Cytoscape.js, download the new minified build from <https://js.cytoscape.org/>, verify checksum, and replace the embedded asset in `loctree_rs/src/analyzer/assets/cytoscape.min.js` (the pre-commit hook will copy it next to the HTML report).
-
-## Project structure
-
-Selected files and directories:
+## Project Structure
 
 ```
 .
-├─ loctree.mjs            # Node.js ESM CLI
-├─ loctree.py             # Python CLI
-├─ loctree.sh             # Example shell helper (not part of main CLI)
-├─ loctree_rs/           # Rust crate (binary `loctree`)
-│  ├─ Cargo.toml
-│  └─ src/main.rs
-├─ tools/
-│  ├─ install.sh          # Rust installer (cargo install --git)
-│  ├─ install_node.sh     # Node wrapper installer
-│  ├─ install_py.sh       # Python wrapper installer
-│  ├─ fixtures/basic-tree # Test fixtures
-│  └─ tests/              # Test runners (Node)
-└─ .github/workflows/ci.yml
+├── loctree_rs/          # Rust crate (primary)
+│   ├── src/
+│   │   ├── main.rs      # CLI entry point
+│   │   ├── slicer.rs    # Holographic slice implementation
+│   │   ├── detect.rs    # Auto-detect stack
+│   │   ├── snapshot.rs  # Snapshot persistence
+│   │   └── analyzer/    # Import/export analysis
+│   └── Cargo.toml
+├── loctree.mjs          # Node.js wrapper
+├── loctree.py           # Python wrapper
+├── tools/               # Installers and test runners
+└── .github/workflows/   # CI configuration
 ```
 
-## Patch helper
+## Development
 
-`tools/apply_patch.py` applies Codex-style `*** Begin Patch` blocks (stdin, arg string, or file). Useful for scripted
-edits/CI.
+```bash
+# Setup git hooks
+./tools/setup_hooks.sh
+
+# Run tests
+cd loctree_rs && cargo test
+
+# Run all checks (fmt, clippy, tests, semgrep)
+cargo fmt && cargo clippy -- -D warnings && cargo test
+cd .. && semgrep scan --config auto --config .semgrep.yaml loctree_rs/src/
+```
+
+## Philosophy
+
+> "The goal isn't 'make it work'. The goal is: we know WHY it works (or doesn't)."
+
+loctree embodies this principle by making the invisible visible:
+- **Import graphs** show real dependencies, not assumed ones
+- **Dead code detection** finds what you forgot you wrote
+- **Circular import detection** catches runtime bombs before they explode
+- **Context slicing** gives AI agents exactly what they need, no more
 
 ## License
 
-MIT — reuse it, fork it, wire it into your own scripts. See [LICENSE](LICENSE).
+MIT — use it, fork it, improve it. See [LICENSE](LICENSE).
+
+---
+
+**Created by M&K (c)2025 The LibraxisAI Team**
