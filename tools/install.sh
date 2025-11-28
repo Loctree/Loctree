@@ -13,7 +13,7 @@ INSTALL_DIR=${INSTALL_DIR:-"$HOME/.local/bin"}
 CARGO_HOME=${CARGO_HOME:-"$HOME/.cargo"}
 CARGO_BIN="$CARGO_HOME/bin"
 REPO_URL="https://github.com/LibraxisAI/loctree"
-# Allow pinning a branch, tag, or commit; defaults to 'main' regardless of which branch this script is fetched from.
+# Allow pinning a branch, tag, or commit; defaults to main for stable releases.
 LOCTREE_REF=${LOCTREE_REF:-"main"}
 
 info() { printf "[loctree] %s\n" "$*"; }
