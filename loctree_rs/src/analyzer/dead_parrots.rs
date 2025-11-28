@@ -74,7 +74,8 @@ pub fn print_symbol_results(symbol: &str, result: &SymbolSearchResult, json_outp
     if json_output {
         println!(
             "{}",
-            serde_json::to_string_pretty(&result.matches).unwrap_or_default()
+            serde_json::to_string_pretty(&result.matches)
+                .expect("Failed to serialize symbol search results to JSON")
         );
     } else {
         println!(
@@ -105,7 +106,15 @@ pub fn analyze_impact(
 ) -> Option<ImpactResult> {
     let mut targets = Vec::new();
     for analysis in analyses {
-        if analysis.path.contains(target_path) {
+        // Match paths flexibly (handles "App.tsx" vs "src/App.tsx" when root differs)
+        let matches = analysis.path == target_path
+            || target_path.ends_with(&format!("/{}", analysis.path))
+            || target_path.ends_with(&format!("\\{}", analysis.path))
+            || analysis.path.ends_with(&format!("/{}", target_path))
+            || analysis.path.ends_with(&format!("\\{}", target_path))
+            || analysis.path.contains(target_path)
+            || target_path.contains(&analysis.path);
+        if matches {
             targets.push(analysis.path.clone());
         }
     }
@@ -224,7 +233,8 @@ pub fn print_similarity_results(
             .collect();
         println!(
             "{}",
-            serde_json::to_string_pretty(&json_items).unwrap_or_default()
+            serde_json::to_string_pretty(&json_items)
+                .expect("Failed to serialize similarity results to JSON")
         );
     } else {
         println!("Checking for '{}' (similarity > 0.3):", query);
@@ -344,7 +354,8 @@ pub fn print_dead_exports(dead_exports: &[DeadExport], output: OutputMode, high_
             .collect();
         println!(
             "{}",
-            serde_json::to_string_pretty(&json_items).unwrap_or_default()
+            serde_json::to_string_pretty(&json_items)
+                .expect("Failed to serialize dead exports to JSON")
         );
     } else {
         let count = dead_exports.len();

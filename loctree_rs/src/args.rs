@@ -50,6 +50,14 @@ pub struct ParsedArgs {
     pub check_sim: Option<String>,
     pub dead_exports: bool,
     pub dead_confidence: Option<String>,
+    pub show_ignored: bool,
+    pub find_artifacts: bool,
+    pub circular: bool,
+    pub entrypoints: bool,
+    pub sarif: bool,
+    pub full_scan: bool,
+    pub slice_target: Option<String>,
+    pub slice_consumers: bool,
 }
 
 impl Default for ParsedArgs {
@@ -101,6 +109,14 @@ impl Default for ParsedArgs {
             check_sim: None,
             dead_exports: false,
             dead_confidence: None,
+            show_ignored: false,
+            find_artifacts: false,
+            circular: false,
+            entrypoints: false,
+            sarif: false,
+            full_scan: false,
+            slice_target: None,
+            slice_consumers: false,
         }
     }
 }
@@ -342,6 +358,17 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
                 parsed.show_hidden = true;
                 i += 1;
             }
+            "--show-ignored" => {
+                parsed.show_ignored = true;
+                parsed.use_gitignore = true; // Required to know what's ignored
+                parsed.mode = Mode::Tree; // Show-ignored works in tree mode
+                i += 1;
+            }
+            "--find-artifacts" => {
+                parsed.find_artifacts = true;
+                parsed.mode = Mode::Tree; // Find-artifacts works in tree mode
+                i += 1;
+            }
             "--json" => {
                 parsed.output = OutputMode::Json;
                 if let Some(next) = args.get(i + 1) {
@@ -500,6 +527,41 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
             "--dead" | "--unused" => {
                 parsed.dead_exports = true;
                 parsed.mode = Mode::AnalyzeImports;
+                i += 1;
+            }
+            "--circular" => {
+                parsed.circular = true;
+                parsed.mode = Mode::AnalyzeImports;
+                i += 1;
+            }
+            "--entrypoints" => {
+                parsed.entrypoints = true;
+                parsed.mode = Mode::AnalyzeImports;
+                i += 1;
+            }
+            "--sarif" => {
+                parsed.sarif = true;
+                parsed.output = OutputMode::Json;
+                parsed.mode = Mode::AnalyzeImports;
+                i += 1;
+            }
+            "--full-scan" => {
+                parsed.full_scan = true;
+                i += 1;
+            }
+            "--consumers" => {
+                parsed.slice_consumers = true;
+                i += 1;
+            }
+            "slice" | "--slice" => {
+                parsed.mode = Mode::Slice;
+                if let Some(next) = args.get(i + 1) {
+                    if !next.starts_with('-') {
+                        parsed.slice_target = Some(next.clone());
+                        i += 2;
+                        continue;
+                    }
+                }
                 i += 1;
             }
             "--confidence" => {
@@ -668,6 +730,33 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
         }
         if parsed.ignore_symbols.is_none() && parsed.ignore_symbols_preset.is_none() {
             parsed.ignore_symbols_preset = Some("tauri".to_string());
+        }
+        // Sanity check: warn if Tauri structure not detected
+        let check_root = roots.first().cloned().unwrap_or_else(|| PathBuf::from("."));
+        let has_tauri_backend = check_root.join("src-tauri/Cargo.toml").exists()
+            || check_root.join("src-tauri").exists();
+        if !has_tauri_backend {
+            // Detect what the project actually is
+            let has_python =
+                check_root.join("pyproject.toml").exists() || check_root.join("setup.py").exists();
+            let has_rust = check_root.join("Cargo.toml").exists();
+            let has_ts = check_root.join("tsconfig.json").exists()
+                || check_root.join("package.json").exists();
+
+            let suggestion = if has_python {
+                "Try: loctree init  (Python auto-detected)"
+            } else if has_rust {
+                "Try: loctree init  (Rust auto-detected)"
+            } else if has_ts {
+                "Try: loctree init  (TypeScript auto-detected)"
+            } else {
+                "Try: loctree init --ext py,rs,ts  (specify extensions)"
+            };
+
+            eprintln!(
+                "[loctree][warn] --preset-tauri: No src-tauri/ found. {}",
+                suggestion
+            );
         }
     }
 

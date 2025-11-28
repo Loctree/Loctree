@@ -4,14 +4,53 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
-## [Unreleased] - 0.5.0 (in progress)
+## [Unreleased]
+
+## [0.5.0-rc] - 2025-11-28
+
+### Added
+- **Holographic Slice** (`slice` command): Extract 3-layer context for AI agents from any file:
+  - **Core**: Target file itself (full content)
+  - **Deps**: Files imported by target (BFS traversal up to depth 2)
+  - **Consumers**: Files that import target (with `--consumers` flag)
+  - JSON output for piping directly to AI: `loctree slice src/App.tsx --json | claude`
+- **Auto-detect stack**: Automatically detects project type from:
+  - `Cargo.toml` → Rust (adds `target/` to ignores)
+  - `tsconfig.json` / `vite.config.*` → TypeScript (adds `node_modules/` to ignores)
+  - `pyproject.toml` → Python (adds `.venv/`, `__pycache__/` to ignores)
+  - `src-tauri/` → Tauri hybrid (sets `--preset-tauri` automatically)
+- **Incremental scanning**: Uses file mtime to skip unchanged files. Typical re-scans now show "32 cached, 1 fresh" instead of re-parsing everything.
+- **`--full-scan` flag**: Forces re-analysis of all files, bypassing mtime cache.
+- **`--consumers` flag**: Include consumer layer in slice output.
+- Wired existing modules to CLI:
+  - `--circular`: Find circular imports using SCC algorithm
+  - `--entrypoints`: List entry points (main, __main__, index)
+  - `--sarif`: SARIF 2.1.0 output for CI integration
+
+### Changed
+- Rebranded as "AI-oriented Project Analyzer" to reflect the primary use case.
+- Help text completely rewritten with slice examples: `loctree slice src/main.rs --consumers`
+- Snapshot now stores file mtime for incremental scanning.
+- Snapshot edges are always collected (previously only with `--graph`).
+
+### Fixed
+- Slice now correctly matches files when edges store paths without extensions.
+- Removed unused `SliceConfig` fields (`target`, `json_output`, `deep`).
+- Removed unused `Snapshot::file_mtimes()` method.
+- Changed all test `unwrap()` to `expect()` with context for cleaner error messages.
+
+## [0.4.7] - 2025-11-28
 
 ### Added
 - **Snapshot system** ("scan once, slice many"): Running bare `loctree` (no arguments) now scans the project and saves a complete graph snapshot to `.loctree/snapshot.json`.
 - New `init` command/mode: `loctree init [path]` explicitly creates or updates the snapshot.
 - Snapshot contains: file analyses (imports, exports, commands, events), graph edges, export index, command bridges (FE↔BE mappings), event bridges (emit↔listen), and barrel file detection.
 - Snapshot metadata includes: schema version, generation timestamp, detected languages, file count, total LOC, and scan duration.
-- Foundation for upcoming "holographic slice" feature (Vertical Slice 2) - context slicing from snapshot.
+- Foundation for upcoming "holographic slice" feature (Vertical Slice 2) – context slicing from snapshot.
+- **Janitor: circular imports** – new `--circular` flag walks the import graph and reports strongly connected components (including self-loops) as cycles in CLI/JSON.
+- **Janitor: entry points** – new `--entrypoints` flag detects Python and Rust entry points (e.g. `if __name__ == "__main__"`, `fn main`, `#[tokio::main]`) to separate startup scripts from dead code.
+- **SARIF output for CI** – new `--sarif` flag emits findings (duplicate exports, missing/unused handlers, dead exports, ghost/orphan events) in SARIF 2.1.0 format for GitHub/GitLab integration.
+- **Find build artifacts** – new `--find-artifacts` flag finds common build artifact directories (`node_modules`, `.venv`, `target`, `dist`, `build`, `.cache`, `Pods`, `DerivedData`, etc.) and outputs their absolute paths one per line. Useful for cleaning up disk space or excluding from Spotlight indexing. Does not recurse into found directories (prune behavior).
 
 ### Changed
 - Default behavior: bare `loctree` without arguments now runs in Init mode (creates snapshot) instead of Tree mode.
@@ -21,6 +60,7 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Fixed
 - `--fail-on-missing-handlers`, `--fail-on-ghost-events`, `--fail-on-races` flags now actually work: they return non-zero exit code when issues are detected (previously flags were parsed but had no effect).
+- Python analyzer: fixed resolution of relative imports like `from . import mod` and `from .mod import name` so that star re-exports and `__all__` expansion are reflected correctly in the graph and dead-code analysis.
 
 ## [0.4.6] - 2025-11-27
 ### Added

@@ -120,6 +120,8 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         ignore_exact,
         ignore_prefixes,
         py_stdlib: &py_stdlib,
+        cached_analyses: None, // Runner mode doesn't use incremental caching
+        collect_edges: parsed.graph || parsed.impact.is_some() || parsed.circular,
     })?;
     let ScanResults {
         contexts,
@@ -166,6 +168,24 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         return Ok(());
     }
 
+    // Collect all graph edges for cycle detection
+    let all_graph_edges: Vec<(String, String, String)> = contexts
+        .iter()
+        .flat_map(|ctx| ctx.graph_edges.clone())
+        .collect();
+
+    if parsed.circular {
+        let cycles = super::cycles::find_cycles(&all_graph_edges);
+        super::cycles::print_cycles(&cycles, matches!(parsed.output, OutputMode::Json));
+        return Ok(());
+    }
+
+    if parsed.entrypoints {
+        let eps = super::entrypoints::find_entrypoints(&global_analyses);
+        super::entrypoints::print_entrypoints(&eps, matches!(parsed.output, OutputMode::Json));
+        return Ok(());
+    }
+
     // Cross-root command gaps (fixes multi-root FP for missing/unused handlers)
     let (global_missing_handlers, global_unused_handlers) = compute_command_gaps(
         &global_fe_commands,
@@ -183,6 +203,28 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         &global_fe_payloads,
         &global_be_payloads,
     );
+
+    // Handle SARIF output
+    if parsed.sarif {
+        // Collect duplicate exports from all contexts
+        let all_ranked_dups: Vec<_> = contexts
+            .iter()
+            .flat_map(|ctx| ctx.filtered_ranked.clone())
+            .collect();
+
+        // Get dead exports
+        let high_confidence = parsed.dead_confidence.as_deref() == Some("high");
+        let dead_exports = find_dead_exports(&global_analyses, high_confidence);
+
+        super::sarif::print_sarif(super::sarif::SarifInputs {
+            duplicate_exports: &all_ranked_dups,
+            missing_handlers: &global_missing_handlers,
+            unused_handlers: &global_unused_handlers,
+            dead_exports: &dead_exports,
+            pipeline_summary: &pipeline_summary,
+        });
+        return Ok(());
+    }
 
     for (idx, ctx) in contexts.into_iter().enumerate() {
         let RootArtifacts {
@@ -262,14 +304,28 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
     let mut fail_reasons: Vec<String> = Vec::new();
 
     if parsed.fail_on_missing_handlers && !global_missing_handlers.is_empty() {
+        let examples: Vec<String> = global_missing_handlers
+            .iter()
+            .take(3)
+            .map(|h| {
+                let loc = h
+                    .locations
+                    .first()
+                    .map(|(path, line)| format!(" ({}:{})", path, line))
+                    .unwrap_or_default();
+                format!("{}{}", h.name, loc)
+            })
+            .collect();
+        let more = if global_missing_handlers.len() > 3 {
+            format!(" (+{} more)", global_missing_handlers.len() - 3)
+        } else {
+            String::new()
+        };
         fail_reasons.push(format!(
-            "{} missing handler(s): {}",
+            "{} missing handler(s): {}{}",
             global_missing_handlers.len(),
-            global_missing_handlers
-                .iter()
-                .map(|h| h.name.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
+            examples.join(", "),
+            more
         ));
     }
 

@@ -15,7 +15,7 @@ use crate::args::ParsedArgs;
 use crate::types::FileAnalysis;
 
 /// Current schema version for snapshot format
-pub const SNAPSHOT_SCHEMA_VERSION: &str = "0.5.0-dev";
+pub const SNAPSHOT_SCHEMA_VERSION: &str = "0.5.0-rc";
 
 /// Default snapshot directory name
 pub const SNAPSHOT_DIR: &str = ".loctree";
@@ -27,20 +27,28 @@ pub const SNAPSHOT_FILE: &str = "snapshot.json";
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SnapshotMetadata {
     /// Schema version for compatibility checking
+    #[serde(default)]
     pub schema_version: String,
     /// Timestamp when snapshot was generated (ISO 8601)
+    #[serde(default)]
     pub generated_at: String,
     /// Root path(s) that were scanned
+    #[serde(default)]
     pub roots: Vec<String>,
     /// Detected languages in the project
+    #[serde(default)]
     pub languages: HashSet<String>,
     /// Total number of files scanned
+    #[serde(default)]
     pub file_count: usize,
     /// Total lines of code
+    #[serde(default)]
     pub total_loc: usize,
     /// Scan duration in milliseconds
+    #[serde(default)]
     pub scan_duration_ms: u64,
     /// Resolver configuration (tsconfig paths, etc.)
+    #[serde(default)]
     pub resolver_config: Option<ResolverConfig>,
 }
 
@@ -110,16 +118,22 @@ pub struct Snapshot {
     /// Snapshot metadata
     pub metadata: SnapshotMetadata,
     /// All file analyses (nodes in the graph)
+    #[serde(default)]
     pub files: Vec<FileAnalysis>,
     /// Graph edges (import relationships)
+    #[serde(default)]
     pub edges: Vec<GraphEdge>,
     /// Export index (symbol -> files mapping)
+    #[serde(default)]
     pub export_index: HashMap<String, Vec<String>>,
     /// Command bridges (FE <-> BE)
+    #[serde(default)]
     pub command_bridges: Vec<CommandBridge>,
     /// Event bridges (emit <-> listen)
+    #[serde(default)]
     pub event_bridges: Vec<EventBridge>,
     /// Detected barrel files
+    #[serde(default)]
     pub barrels: Vec<BarrelFile>,
 }
 
@@ -175,6 +189,21 @@ impl Snapshot {
         Self::snapshot_path(root).exists()
     }
 
+    /// Search upward for .loctree directory (like git finds .git/)
+    /// Returns the directory containing .loctree/, or None if not found.
+    pub fn find_loctree_root(start: &Path) -> Option<PathBuf> {
+        let mut current = start.canonicalize().ok()?;
+        loop {
+            if current.join(SNAPSHOT_DIR).exists() {
+                return Some(current);
+            }
+            match current.parent() {
+                Some(parent) if parent != current => current = parent.to_path_buf(),
+                _ => return None,
+            }
+        }
+    }
+
     /// Save snapshot to disk
     pub fn save(&self, root: &Path) -> io::Result<()> {
         let snapshot_dir = root.join(SNAPSHOT_DIR);
@@ -218,6 +247,14 @@ impl Snapshot {
         }
 
         Ok(snapshot)
+    }
+
+    /// Get map of file path -> FileAnalysis for incremental reuse
+    pub fn cached_analyses(&self) -> HashMap<String, FileAnalysis> {
+        self.files
+            .iter()
+            .map(|f| (f.path.clone(), f.clone()))
+            .collect()
     }
 
     /// Update metadata after scan
@@ -310,10 +347,53 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
 
     let start_time = Instant::now();
 
-    // Use the first root as the snapshot location
-    let snapshot_root = root_list.first().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidInput, "No root directory specified")
-    })?;
+    // Snapshot always saves to CWD (one snapshot per repo)
+    let snapshot_root = std::env::current_dir()?;
+
+    // Validate at least one root was specified
+    if root_list.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "No root directory specified",
+        ));
+    }
+
+    // Try to load existing snapshot for incremental scanning
+    let cached_analyses: Option<HashMap<String, FileAnalysis>> =
+        if !parsed.full_scan && Snapshot::exists(&snapshot_root) {
+            match Snapshot::load(&snapshot_root) {
+                Ok(old_snapshot) => {
+                    if parsed.verbose {
+                        eprintln!(
+                            "[loctree][incremental] Loaded existing snapshot ({} files cached)",
+                            old_snapshot.files.len()
+                        );
+                    }
+                    Some(old_snapshot.cached_analyses())
+                }
+                Err(e) => {
+                    if parsed.verbose {
+                        eprintln!(
+                            "[loctree][warn] Could not load snapshot for incremental: {}",
+                            e
+                        );
+                    }
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+    // Log scan mode for clarity (especially in CI)
+    let scan_mode = if parsed.full_scan {
+        "full (--full-scan)"
+    } else if cached_analyses.is_some() {
+        "incremental (mtime-based)"
+    } else {
+        "fresh (no existing snapshot)"
+    };
+    eprintln!("[loctree] Scan mode: {}", scan_mode);
 
     // Prepare scan configuration (reusing existing infrastructure)
     let py_stdlib = python_stdlib();
@@ -334,6 +414,8 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
         ignore_exact: HashSet::new(),
         ignore_prefixes: Vec::new(),
         py_stdlib: &py_stdlib,
+        cached_analyses: cached_analyses.as_ref(),
+        collect_edges: true, // Always collect edges for snapshot (needed by slice)
     };
 
     // Perform the scan
@@ -465,7 +547,7 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
     snapshot.finalize_metadata(duration_ms);
 
     // Save snapshot
-    snapshot.save(snapshot_root)?;
+    snapshot.save(&snapshot_root)?;
 
     // Print summary
     snapshot.print_summary();

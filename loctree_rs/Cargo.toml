@@ -1,6 +1,6 @@
 [package]
 name = "loctree"
-version = "0.4.6"
+version = "0.5.0-rc"
 edition = "2021"
 
 [[bin]]

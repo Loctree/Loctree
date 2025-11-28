@@ -365,3 +365,88 @@ fn merge_compiler_options(
     }
     merged
 }
+
+/// Resolve Rust module imports to file paths.
+/// Handles: `crate::foo`, `super::bar`, `self::baz`
+pub(crate) fn resolve_rust_import(
+    source: &str,
+    file_path: &Path,
+    crate_root: &Path,
+    root: &Path,
+) -> Option<String> {
+    // Skip stdlib and external crates
+    if source.starts_with("std::")
+        || source.starts_with("core::")
+        || source.starts_with("alloc::")
+        || !source.contains("::")
+    {
+        return None;
+    }
+
+    let module_path = if source.starts_with("crate::") {
+        // crate::foo::bar -> src/foo/bar or src/foo.rs
+        let remainder = source.strip_prefix("crate::")?;
+        resolve_rust_module_path(remainder, crate_root)
+    } else if source.starts_with("super::") {
+        // super::foo -> parent_dir/foo
+        let remainder = source.strip_prefix("super::")?;
+        let parent = file_path.parent()?.parent()?; // Go up from file to parent module
+        resolve_rust_module_path(remainder, parent)
+    } else if source.starts_with("self::") {
+        // self::foo -> current_module/foo
+        let remainder = source.strip_prefix("self::")?;
+        let current_dir = if file_path.file_name()?.to_str()? == "mod.rs" {
+            file_path.parent()?
+        } else {
+            // For src/foo.rs, self:: refers to src/foo/ directory
+            let stem = file_path.file_stem()?.to_str()?;
+            &file_path.parent()?.join(stem)
+        };
+        resolve_rust_module_path(remainder, current_dir)
+    } else {
+        // Could be external crate or local module without prefix
+        // Try resolving as crate-relative
+        resolve_rust_module_path(source, crate_root)
+    };
+
+    module_path.and_then(|p| canonical_rel(&p, root).or_else(|| canonical_abs(&p)))
+}
+
+/// Resolve a Rust module path (e.g., "foo::bar") to a file path.
+fn resolve_rust_module_path(module: &str, base: &Path) -> Option<PathBuf> {
+    // Take only the first segment for file resolution
+    // e.g., "args::parse_args" -> "args"
+    let first_segment = module.split("::").next()?;
+
+    // Try: base/segment.rs
+    let as_file = base.join(format!("{}.rs", first_segment));
+    if as_file.exists() {
+        return Some(as_file);
+    }
+
+    // Try: base/segment/mod.rs
+    let as_mod = base.join(first_segment).join("mod.rs");
+    if as_mod.exists() {
+        return Some(as_mod);
+    }
+
+    None
+}
+
+/// Find the crate root (directory containing Cargo.toml) for a Rust file.
+pub(crate) fn find_rust_crate_root(file_path: &Path) -> Option<PathBuf> {
+    let mut current = file_path.parent()?;
+    loop {
+        // Check for Cargo.toml
+        if current.join("Cargo.toml").exists() {
+            // Crate root is usually src/ under Cargo.toml
+            let src_dir = current.join("src");
+            if src_dir.exists() && src_dir.is_dir() {
+                return Some(src_dir);
+            }
+            // Fallback to directory with Cargo.toml
+            return Some(current.to_path_buf());
+        }
+        current = current.parent()?;
+    }
+}

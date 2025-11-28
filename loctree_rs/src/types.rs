@@ -25,6 +25,8 @@ pub enum Mode {
     AnalyzeImports,
     /// Initialize/update snapshot (scan once)
     Init,
+    /// VS2 Holographic Slice - extract context for a file
+    Slice,
 }
 
 #[derive(Clone)]
@@ -38,6 +40,7 @@ pub struct Options {
     pub summary: bool,
     pub summary_limit: usize,
     pub show_hidden: bool,
+    pub show_ignored: bool,
     pub loc_threshold: usize,
     pub analyze_limit: usize,
     pub report_path: Option<std::path::PathBuf>,
@@ -50,6 +53,7 @@ pub struct Options {
     pub scan_all: bool,
     pub symbol: Option<String>,
     pub impact: Option<String>,
+    pub find_artifacts: bool,
 }
 
 pub struct LineEntry {
@@ -160,22 +164,43 @@ pub struct EventRef {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FileAnalysis {
+    #[serde(default)]
     pub path: String,
+    #[serde(default)]
     pub loc: usize,
+    #[serde(default)]
     pub language: String,
+    #[serde(default)]
     pub kind: String,
+    #[serde(default)]
     pub is_test: bool,
+    #[serde(default)]
     pub is_generated: bool,
+    #[serde(default)]
     pub imports: Vec<ImportEntry>,
+    #[serde(default)]
     pub reexports: Vec<ReexportEntry>,
+    #[serde(default)]
     pub dynamic_imports: Vec<String>,
+    #[serde(default)]
     pub exports: Vec<ExportSymbol>,
+    #[serde(default)]
     pub command_calls: Vec<CommandRef>,
+    #[serde(default)]
     pub command_handlers: Vec<CommandRef>,
+    #[serde(default)]
     pub event_emits: Vec<EventRef>,
+    #[serde(default)]
     pub event_listens: Vec<EventRef>,
+    #[serde(default)]
     pub event_consts: HashMap<String, String>,
+    #[serde(default)]
     pub matches: Vec<SymbolMatch>,
+    #[serde(default)]
+    pub entry_points: Vec<String>,
+    /// File modification time (Unix timestamp) for incremental scanning
+    #[serde(default)]
+    pub mtime: u64,
 }
 
 impl ImportEntry {
@@ -224,6 +249,8 @@ impl FileAnalysis {
             event_listens: Vec::new(),
             event_consts: HashMap::new(),
             matches: Vec::new(),
+            entry_points: Vec::new(),
+            mtime: 0,
         }
     }
 }
