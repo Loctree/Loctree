@@ -209,7 +209,6 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             }
         }
     }
-
     // Cross-root command gaps (fixes multi-root FP for missing/unused handlers)
     // Pass analyses for confidence scoring on unused handlers
     let (global_missing_handlers, global_unused_handlers) = compute_command_gaps_with_confidence(

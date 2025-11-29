@@ -1,7 +1,7 @@
 {
   "metadata": {
     "schema_version": "0.5.0-rc",
-    "generated_at": "2025-11-29T11:30:53.764442000Z",
+    "generated_at": "2025-11-29T23:08:58.148383000Z",
     "roots": [
       "/Users/maciejgad/hosted/loctree/loctree_rs/tests/fixtures/tauri_app"
     ],
@@ -11,7 +11,7 @@
     ],
     "file_count": 2,
     "total_loc": 45,
-    "scan_duration_ms": 65,
+    "scan_duration_ms": 63,
     "resolver_config": null
   },
   "files": [
@@ -149,18 +149,6 @@
       "is_called": false
     },
     {
-      "name": "missing_handler",
-      "frontend_calls": [
-        [
-          "src/App.tsx",
-          16
-        ]
-      ],
-      "backend_handler": null,
-      "has_handler": false,
-      "is_called": true
-    },
-    {
       "name": "greet",
       "frontend_calls": [
         [
@@ -188,6 +176,18 @@
         9
       ],
       "has_handler": true,
+      "is_called": true
+    },
+    {
+      "name": "missing_handler",
+      "frontend_calls": [
+        [
+          "src/App.tsx",
+          16
+        ]
+      ],
+      "backend_handler": null,
+      "has_handler": false,
       "is_called": true
     }
   ],
