@@ -352,11 +352,11 @@ pub fn scan_roots(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
                         _ => None,
                     });
                     if let Some(target) = resolved {
-                        let src_id = normalize_module_id(&analysis.path);
-                        let tgt_id = normalize_module_id(&target);
+                        // Use full paths for edges (slice module needs exact paths)
+                        // Note: normalize_module_id strips /index suffix which breaks slice lookups
                         graph_edges.push((
-                            src_id,
-                            tgt_id,
+                            analysis.path.clone(),
+                            target,
                             match imp.kind {
                                 ImportKind::Static | ImportKind::SideEffect => "import".to_string(),
                                 ImportKind::Dynamic => "dynamic_import".to_string(),

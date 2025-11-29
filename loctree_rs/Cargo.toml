@@ -30,3 +30,5 @@ leptos-reports = ["dep:report-leptos"]
 
 [dev-dependencies]
 tempfile = "3"
+assert_cmd = "2.0"
+predicates = "3.1"

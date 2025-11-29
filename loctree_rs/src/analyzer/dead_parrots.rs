@@ -123,13 +123,21 @@ pub fn analyze_impact(
         return None;
     }
 
+    // Build target sets for both normalized and full paths
     let normalized_targets: HashSet<String> =
         targets.iter().map(|t| normalize_module_id(t)).collect();
+    let full_targets: HashSet<String> = targets.iter().cloned().collect();
     let mut dependent_ids = HashSet::new();
 
     for ctx in contexts {
         for (source, target, _weight) in &ctx.graph_edges {
-            if normalized_targets.contains(target) {
+            // Match against both normalized module IDs and full paths
+            // (edges may use full paths after snapshot format changes)
+            let target_normalized = normalize_module_id(target);
+            if normalized_targets.contains(target)
+                || normalized_targets.contains(&target_normalized)
+                || full_targets.contains(target)
+            {
                 dependent_ids.insert(source.clone());
             }
         }
@@ -137,8 +145,9 @@ pub fn analyze_impact(
 
     let mut deps = Vec::new();
     for analysis in analyses {
+        // Match against both full path and normalized (edges may use either)
         let id = normalize_module_id(&analysis.path);
-        if dependent_ids.contains(&id) {
+        if dependent_ids.contains(&id) || dependent_ids.contains(&analysis.path) {
             deps.push(analysis.path.clone());
         }
     }

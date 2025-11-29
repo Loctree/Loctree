@@ -1,0 +1,7 @@
+[package]
+name = "tauri-test-app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tauri = "2.0"
