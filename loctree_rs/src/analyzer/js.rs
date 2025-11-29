@@ -11,8 +11,9 @@ use regex::Regex;
 use super::regexes::{
     regex_dynamic_import, regex_event_const_js, regex_event_emit_js, regex_event_listen_js,
     regex_export_brace, regex_export_default, regex_export_named_decl, regex_import,
-    regex_invoke_audio, regex_invoke_snake, regex_lazy_import_then, regex_reexport_named,
-    regex_reexport_star, regex_safe_invoke, regex_side_effect_import, regex_tauri_invoke,
+    regex_invoke_audio, regex_invoke_snake, regex_invoke_wrapper, regex_lazy_import_then,
+    regex_reexport_named, regex_reexport_star, regex_safe_invoke, regex_side_effect_import,
+    regex_tauri_invoke,
 };
 use super::resolvers::{TsPathResolver, resolve_reexport_target};
 use super::{brace_list_to_names, offset_to_line};
@@ -265,6 +266,24 @@ pub(crate) fn analyze_js_file(
             add_call(cmd.as_str(), line, generic, payload);
         }
     }
+    // Detect wrapper functions like invokePinCommand('get_pin_status', ...)
+    for caps in regex_invoke_wrapper().captures_iter(content) {
+        if let Some(cmd) = caps.name("cmd") {
+            let line = offset_to_line(content, cmd.start());
+            if is_commented(cmd.start()) {
+                continue;
+            }
+            let generic = caps
+                .name("generic")
+                .map(|g| g.as_str().trim().to_string())
+                .filter(|s| !s.is_empty());
+            let payload = caps
+                .name("payload")
+                .map(|p| p.as_str().trim().trim_end_matches(')').trim().to_string())
+                .filter(|s| !s.is_empty());
+            add_call(cmd.as_str(), line, generic, payload);
+        }
+    }
 
     for caps in regex_reexport_star().captures_iter(content) {
         let source = caps.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
@@ -463,6 +482,10 @@ safeInvoke<Foo.Bar>("cmd_generic_safe");
 invokeSnake<MyType>("cmd_generic_snake");
 invoke<Inline<Ok>>("cmd_generic_invoke");
 invokeAudioCamel<Baz>("cmd_audio_generic");
+// Wrapper function patterns (Bug #2 fix)
+invokePinCommand('get_pin_status', () => ({}));
+myInvokeHelper<Response>('some_command', payload);
+customCommandWrapper("another_cmd", options);
         "#;
 
         let analysis = analyze_js_file(
@@ -500,6 +523,19 @@ invokeAudioCamel<Baz>("cmd_audio_generic");
         assert!(commands.contains(&"cmd_generic_snake".to_string()));
         assert!(commands.contains(&"cmd_generic_invoke".to_string()));
         assert!(commands.contains(&"cmd_audio_generic".to_string()));
+        // Wrapper function patterns (Bug #2 fix)
+        assert!(
+            commands.contains(&"get_pin_status".to_string()),
+            "Should detect invokePinCommand wrapper"
+        );
+        assert!(
+            commands.contains(&"some_command".to_string()),
+            "Should detect myInvokeHelper wrapper"
+        );
+        assert!(
+            commands.contains(&"another_cmd".to_string()),
+            "Should detect customCommandWrapper"
+        );
 
         let generics: Vec<_> = analysis
             .command_calls

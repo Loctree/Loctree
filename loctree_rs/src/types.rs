@@ -27,6 +27,10 @@ pub enum Mode {
     Init,
     /// VS2 Holographic Slice - extract context for a file
     Slice,
+    /// Trace a handler - show full investigation path and WHY it's unused/missing
+    Trace,
+    /// AI-optimized hierarchical output with quick wins and slice references
+    ForAi,
 }
 
 #[derive(Clone)]

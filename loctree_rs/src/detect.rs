@@ -130,6 +130,23 @@ pub fn detect_stack(root: &Path) -> DetectedStack {
         }
     }
 
+    // Common dev/test directories to ignore (reduces noise in dead export reports)
+    if !result.ignores.is_empty() {
+        // These often contain test fixtures, mocks, or platform-specific code
+        for dir in &[
+            "e2e",
+            "scripts",
+            "mobile",
+            "__mocks__",
+            "__fixtures__",
+            "fixtures",
+        ] {
+            if !result.ignores.contains(&dir.to_string()) {
+                result.ignores.push(dir.to_string());
+            }
+        }
+    }
+
     // Build description
     if !detected_parts.is_empty() {
         result.description = format!("Detected: {}", detected_parts.join(" + "));

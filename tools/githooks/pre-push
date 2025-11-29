@@ -17,8 +17,11 @@ echo "Pushing to: $remote ($url)"
 
 # Run Rust checks (fmt + clippy + tests)
 echo ""
-echo "[1/7] Rust format (auto-fix)..."
-(cd loctree_rs && cargo fmt)
+echo "[1/7] Rust format check..."
+(cd loctree_rs && cargo fmt -- --check) || {
+  echo "❌ Rust formatting issues. Run: cd loctree_rs && cargo fmt"
+  exit 1
+}
 
 echo ""
 echo "[2/7] Rust clippy..."
@@ -49,7 +52,7 @@ node tools/tests/loctree-rs.test.mjs
 echo ""
 echo "[7/7] Loctree dogfooding..."
 (cd loctree_rs && cargo build --release --quiet)
-./loctree_rs/target/release/loctree loctree_rs/src -A --ext rs --circular --dead || {
+"$REPO_ROOT/loctree_rs/target/release/loctree" "$REPO_ROOT/loctree_rs/src" -A --ext rs --circular --dead || {
   echo "❌ Loctree dogfooding failed!"
   exit 1
 }

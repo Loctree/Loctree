@@ -7,7 +7,9 @@ use crate::args::{ParsedArgs, preset_ignore_symbols};
 use crate::types::OutputMode;
 
 use super::ReportSection;
-use super::coverage::{CommandUsage, compute_command_gaps, compute_unregistered_handlers};
+use super::coverage::{
+    CommandUsage, compute_command_gaps_with_confidence, compute_unregistered_handlers,
+};
 use super::dead_parrots::{
     analyze_impact, find_dead_exports, find_similar, print_dead_exports, print_impact_results,
     print_similarity_results, print_symbol_results, search_symbol,
@@ -209,11 +211,13 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
     }
 
     // Cross-root command gaps (fixes multi-root FP for missing/unused handlers)
-    let (global_missing_handlers, global_unused_handlers) = compute_command_gaps(
+    // Pass analyses for confidence scoring on unused handlers
+    let (global_missing_handlers, global_unused_handlers) = compute_command_gaps_with_confidence(
         &global_fe_commands,
         &global_be_registered_commands,
         &focus_set,
         &exclude_set,
+        &global_analyses,
     );
 
     // Handlers that have #[tauri::command] but are never registered via generate_handler!.

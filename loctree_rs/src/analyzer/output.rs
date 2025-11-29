@@ -609,10 +609,19 @@ pub fn process_root_context(
                         "name": g.name,
                         "locations": g.locations,
                     })).collect::<Vec<_>>(),
-                    "unusedHandlers": unused_handlers.iter().take(top_limit).map(|g| json!({
-                        "name": g.name,
-                        "locations": g.locations,
-                    })).collect::<Vec<_>>(),
+                    "unusedHandlers": unused_handlers.iter().take(top_limit).map(|g| {
+                        let mut obj = json!({
+                            "name": g.name,
+                            "locations": g.locations,
+                        });
+                        if let Some(conf) = &g.confidence {
+                            obj["confidence"] = json!(conf.to_string());
+                        }
+                        if !g.string_literal_matches.is_empty() {
+                            obj["stringLiteralMatches"] = json!(g.string_literal_matches.len());
+                        }
+                        obj
+                    }).collect::<Vec<_>>(),
                     "events": event_alerts,
                     "pipelineRisks": pipeline_risks.iter().take(top_limit).cloned().collect::<Vec<_>>(),
                     "deadSymbols": dead_symbols.iter().take(parsed.top_dead_symbols).cloned().collect::<Vec<_>>(),
@@ -672,7 +681,18 @@ pub fn process_root_context(
                     "frontend": fe_commands.iter().map(|(k,v)| json!({"name": k, "locations": v})).collect::<Vec<_>>(),
                     "backend": be_commands.iter().map(|(k,v)| json!({"name": k, "locations": v})).collect::<Vec<_>>(),
                     "missingHandlers": missing_handlers.iter().map(|g| json!({"name": g.name, "locations": g.locations})).collect::<Vec<_>>(),
-                    "unusedHandlers": unused_handlers.iter().map(|g| json!({"name": g.name, "locations": g.locations})).collect::<Vec<_>>(),
+                    "unusedHandlers": unused_handlers.iter().map(|g| {
+                        let mut obj = json!({"name": g.name, "locations": g.locations});
+                        if let Some(conf) = &g.confidence {
+                            obj["confidence"] = json!(conf.to_string());
+                        }
+                        if !g.string_literal_matches.is_empty() {
+                            obj["stringLiteralMatches"] = json!(g.string_literal_matches.iter().map(|m| {
+                                json!({"file": m.file, "line": m.line, "context": m.context})
+                            }).collect::<Vec<_>>());
+                        }
+                        obj
+                    }).collect::<Vec<_>>(),
                 },
                 "commands2": commands2,
                 "symbols": symbols_json,
@@ -789,14 +809,46 @@ Top duplicate exports (showing up to {}):",
                 );
             }
             if !unused_handlers.is_empty() {
-                println!(
-                    "  Unused handlers (backend not called by FE): {}",
-                    unused_handlers
-                        .iter()
-                        .map(|g| g.name.clone())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                );
+                use crate::analyzer::report::Confidence;
+                let high_conf: Vec<_> = unused_handlers
+                    .iter()
+                    .filter(|g| g.confidence == Some(Confidence::High))
+                    .map(|g| g.name.clone())
+                    .collect();
+                let low_conf: Vec<_> = unused_handlers
+                    .iter()
+                    .filter(|g| g.confidence == Some(Confidence::Low))
+                    .collect();
+
+                if !high_conf.is_empty() {
+                    println!(
+                        "  Unused handlers (HIGH confidence): {}",
+                        high_conf.join(", ")
+                    );
+                }
+                if !low_conf.is_empty() {
+                    println!("  Unused handlers (LOW confidence - possible dynamic usage):");
+                    for g in &low_conf {
+                        let matches_note = if !g.string_literal_matches.is_empty() {
+                            format!(
+                                " ({} string literal matches)",
+                                g.string_literal_matches.len()
+                            )
+                        } else {
+                            String::new()
+                        };
+                        println!("    - {}{}", g.name, matches_note);
+                    }
+                }
+                // Fallback for handlers without confidence (shouldn't happen but be safe)
+                let no_conf: Vec<_> = unused_handlers
+                    .iter()
+                    .filter(|g| g.confidence.is_none())
+                    .map(|g| g.name.clone())
+                    .collect();
+                if !no_conf.is_empty() {
+                    println!("  Unused handlers: {}", no_conf.join(", "));
+                }
             }
         }
 

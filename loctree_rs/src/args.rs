@@ -58,6 +58,7 @@ pub struct ParsedArgs {
     pub full_scan: bool,
     pub slice_target: Option<String>,
     pub slice_consumers: bool,
+    pub trace_handler: Option<String>,
 }
 
 impl Default for ParsedArgs {
@@ -117,6 +118,7 @@ impl Default for ParsedArgs {
             full_scan: false,
             slice_target: None,
             slice_consumers: false,
+            trace_handler: None,
         }
     }
 }
@@ -554,6 +556,22 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
                     i += 2;
                     continue;
                 }
+                i += 1;
+            }
+            "trace" | "--trace" => {
+                parsed.mode = Mode::Trace;
+                if let Some(next) = args.get(i + 1)
+                    && !next.starts_with('-')
+                {
+                    parsed.trace_handler = Some(next.clone());
+                    i += 2;
+                    continue;
+                }
+                i += 1;
+            }
+            "--for-ai" | "for-ai" => {
+                parsed.mode = Mode::ForAi;
+                parsed.output = OutputMode::Json;
                 i += 1;
             }
             "--confidence" => {

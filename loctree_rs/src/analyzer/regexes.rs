@@ -32,14 +32,19 @@ pub(crate) fn regex_dynamic_import() -> &'static Regex {
 }
 
 /// Captures lazy import patterns like:
-/// `import('./Foo').then((m) => ({ default: m.Bar }))`
-/// `import('./Foo').then(m => ({ default: m.Bar }))`
-/// source: module path, export: accessed symbol name
+/// - `import('./Foo').then((m) => ({ default: m.Bar }))`
+/// - `import('./Foo').then(m => ({ default: m.Bar }))`
+/// - `import('./Foo').then(m => { return { default: m.Bar } })`
+///
+/// Captures: source (module path), export (accessed symbol name)
+///
+/// Note: The pattern intentionally doesn't require closing braces/parens
+/// to handle various callback body styles (concise vs block return).
 pub(crate) fn regex_lazy_import_then() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     // Note: Rust regex doesn't support backreferences, so we match any word for callback param
     RE.get_or_init(|| {
-        regex(r#"import\s*\(\s*["'](?P<source>[^"']+)["']\s*\)\s*\.\s*then\s*\(\s*\(?\s*\w+\s*\)?\s*=>\s*\(?\s*\{\s*default\s*:\s*\w+\.(?P<export>\w+)"#)
+        regex(r#"import\s*\(\s*["'](?P<source>[^"']+)["']\s*\)\s*\.\s*then\s*\(\s*\(?\s*\w+\s*\)?\s*=>\s*[({]\s*(?:return\s+)?\{?\s*default\s*:\s*\w+\.(?P<export>\w+)"#)
     })
 }
 
@@ -84,6 +89,22 @@ pub(crate) fn regex_invoke_audio() -> &'static Regex {
     // capture invokeAudio(...) and invokeAudioCamel(...) helpers used by FE audio API
     RE.get_or_init(|| {
         regex(r#"invokeAudio(?:Camel)?\s*(?:<(?P<generic>[^>]+)>+)?\(\s*["'](?P<cmd>[^"']+)["']\s*(?:,\s*(?P<payload>[^)\n]+))?"#)
+    })
+}
+
+/// Matches wrapper functions containing "invoke" or "Command" in their name
+/// where the first argument is a string literal that looks like a Tauri command.
+/// Examples:
+/// - `invokePinCommand('get_pin_status', ...)`
+/// - `invokeHelper<T>('some_command', ...)`
+/// - `myInvokeWrapper('cmd_name', ...)`
+pub(crate) fn regex_invoke_wrapper() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        // Match function names containing "invoke" or "Command" (case insensitive via pattern)
+        // followed by optional generics and a string literal first argument
+        // The command name must be a valid identifier (alphanumeric + underscores, no spaces)
+        regex(r#"(?i)[a-z_][a-z0-9_]*(?:invoke|command)[a-z0-9_]*\s*(?:<(?P<generic>[^>]+)>)?\s*\(\s*["'](?P<cmd>[a-z][a-z0-9_]*)["']\s*(?:,\s*(?P<payload>[^)\n]+))?"#)
     })
 }
 

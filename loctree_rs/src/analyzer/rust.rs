@@ -144,6 +144,57 @@ fn parse_rust_brace_names(raw: &str) -> Vec<String> {
         .collect()
 }
 
+/// Find the position of the closing `]` that balances the opening one.
+/// Returns the index of that `]` in the input, or 0 if not found.
+fn find_balanced_bracket(s: &str) -> usize {
+    let mut depth = 0i32;
+    for (i, ch) in s.char_indices() {
+        match ch {
+            '[' => depth += 1,
+            ']' => {
+                if depth == 0 {
+                    return i;
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+    }
+    0
+}
+
+/// Strip `#[...]` attributes from a string (handles nested brackets).
+fn strip_cfg_attributes(s: &str) -> String {
+    let mut result = String::new();
+    let mut chars = s.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == '#' {
+            // Check if next char is '['
+            if chars.peek() == Some(&'[') {
+                chars.next(); // consume '['
+                let mut depth = 1;
+                // Skip until we find the matching ']'
+                while let Some(inner) = chars.next() {
+                    match inner {
+                        '[' => depth += 1,
+                        ']' => {
+                            depth -= 1;
+                            if depth == 0 {
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                continue;
+            }
+        }
+        result.push(ch);
+    }
+    result
+}
+
 pub(crate) fn analyze_rust_file(content: &str, relative: String) -> FileAnalysis {
     let mut analysis = FileAnalysis::new(relative);
     let mut event_emits = Vec::new();
@@ -323,18 +374,32 @@ pub(crate) fn analyze_rust_file(content: &str, relative: String) -> FileAnalysis
     }
 
     // Tauri generate_handler! registrations
+    // The generate_handler! macro may span multiple lines and contain #[cfg(...)] attributes.
+    // We need to handle nested brackets by finding balanced pairs.
     for caps in regex_tauri_generate_handler().captures_iter(content) {
-        if let Some(list) = caps.get(1) {
-            let raw = list.as_str();
-            for part in raw.split(',') {
+        if let Some(list_match) = caps.get(1) {
+            let start_pos = list_match.start();
+            // Find the actual end by matching balanced brackets from the start
+            let remaining = &content[start_pos..];
+            let balanced_end = find_balanced_bracket(remaining);
+            let raw = if balanced_end > 0 {
+                &remaining[..balanced_end]
+            } else {
+                list_match.as_str()
+            };
+            // Strip #[...] attributes from the handler list
+            let cleaned = strip_cfg_attributes(raw);
+            for part in cleaned.split(',') {
                 let ident = part.trim();
                 if ident.is_empty() {
                     continue;
                 }
                 // Strip potential trailing generics or module qualifiers (foo::<T>, module::foo)
+                // Use .last() to get the function name from paths like commands::foo::bar
                 let base = ident
                     .split(|c: char| c == ':' || c.is_whitespace() || c == '<')
-                    .next()
+                    .filter(|s| !s.is_empty())
+                    .last()
                     .unwrap_or("")
                     .trim();
                 if base.is_empty() {
@@ -379,6 +444,71 @@ pub(crate) fn analyze_rust_file(content: &str, relative: String) -> FileAnalysis
 #[cfg(test)]
 mod tests {
     use super::analyze_rust_file;
+
+    #[test]
+    fn parses_generate_handler_multiline() {
+        let content = r#"
+tauri::generate_handler![
+    // Comment
+    alpha_status_command,
+    commands::foo::bar,
+    simple_cmd,
+]
+"#;
+        let analysis = analyze_rust_file(content, "lib.rs".to_string());
+        assert!(
+            analysis
+                .tauri_registered_handlers
+                .contains(&"alpha_status_command".to_string()),
+            "Should contain alpha_status_command, got: {:?}",
+            analysis.tauri_registered_handlers
+        );
+        assert!(
+            analysis
+                .tauri_registered_handlers
+                .contains(&"bar".to_string()),
+            "Should contain bar from module path"
+        );
+        assert!(
+            analysis
+                .tauri_registered_handlers
+                .contains(&"simple_cmd".to_string()),
+            "Should contain simple_cmd"
+        );
+    }
+
+    #[test]
+    fn parses_generate_handler_with_cfg_attributes() {
+        let content = r#"
+tauri::generate_handler![
+    normal_command,
+    #[cfg(target_os = "macos")]
+    macos_only_command,
+    #[cfg(target_os = "windows")]
+    windows_only_command,
+    another_normal_command,
+]
+"#;
+        let analysis = analyze_rust_file(content, "lib.rs".to_string());
+        let handlers = &analysis.tauri_registered_handlers;
+        assert!(
+            handlers.contains(&"normal_command".to_string()),
+            "Should contain normal_command, got: {:?}",
+            handlers
+        );
+        assert!(
+            handlers.contains(&"macos_only_command".to_string()),
+            "Should contain macos_only_command even with #[cfg]"
+        );
+        assert!(
+            handlers.contains(&"windows_only_command".to_string()),
+            "Should contain windows_only_command even with #[cfg]"
+        );
+        assert!(
+            handlers.contains(&"another_normal_command".to_string()),
+            "Should contain another_normal_command after #[cfg] items"
+        );
+    }
 
     #[test]
     fn parses_exports_and_tauri_commands() {
