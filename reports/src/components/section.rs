@@ -2,13 +2,12 @@
 //!
 //! Implements the "Section View" layout with a sticky header and scrollable content.
 
-use super::{
-    AiInsightsPanel, AnalysisSummary, CascadesList, Crowds, Cycles, DeadCode,
-    DuplicateExportsTable, DynamicImportsTable, GraphContainer, QuickCommandsPanel, TabContent,
-    TauriCommandCoverage, TreeView, Twins,
-};
-use crate::types::ReportSection;
 use leptos::prelude::*;
+use crate::types::ReportSection;
+use super::{
+    TabContent, AiInsightsPanel, AnalysisSummary, DuplicateExportsTable,
+    CascadesList, DynamicImportsTable, TauriCommandCoverage, GraphContainer
+};
 
 /// Shorten a path for display: "vista/src" instead of "/Users/maciej/hosted/vista/src"
 fn shorten_path(path: &str) -> String {
@@ -17,8 +16,7 @@ fn shorten_path(path: &str) -> String {
     if parts.len() <= 3 {
         path.to_string()
     } else {
-        parts
-            .iter()
+        parts.iter()
             .rev()
             .take(3)
             .collect::<Vec<_>>()
@@ -32,32 +30,18 @@ fn shorten_path(path: &str) -> String {
 
 /// A complete report section for one analyzed root
 #[component]
-pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) -> impl IntoView {
-    let root_id = section
-        .root
+pub fn ReportSectionView(
+    section: ReportSection,
+    active: bool,
+    view_id: String,
+) -> impl IntoView {
+    let root_id = section.root
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
         .collect::<String>();
-    let root_id_value = root_id.clone();
-    let root_id_overview = root_id_value.clone();
-    let root_id_dups = root_id_value.clone();
-    let root_id_dynamic = root_id_value.clone();
-    let root_id_commands = root_id_value.clone();
-    let root_id_crowds = root_id_value.clone();
-    let root_id_cycles = root_id_value.clone();
-    let root_id_dead = root_id_value.clone();
-    let root_id_twins = root_id_value.clone();
-    let root_id_graph = root_id_value.clone();
-    let root_id_graph_tab = root_id_graph.clone();
-    let root_id_graph_container = root_id_graph.clone();
-    let root_id_tree = root_id_value.clone();
 
     let section_clone = section.clone();
-    let view_class = if active {
-        "section-view active"
-    } else {
-        "section-view"
-    };
+    let view_class = if active { "section-view active" } else { "section-view" };
 
     // Stats for header - extract before view! macro to avoid borrow issues
     let file_count = section.files_analyzed;
@@ -66,17 +50,7 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
     let reexport_files_count = section.reexport_files_count;
     let dynamic_imports_count = section.dynamic_imports_count;
 
-    // QuickCommands panel flags (computed before view! to avoid move issues)
-    let has_duplicates = duplicate_exports_count > 0;
-    let has_command_issues =
-        !section.missing_handlers.is_empty() || !section.unused_handlers.is_empty();
-
     let short_path = shorten_path(&section.root);
-    let git_label = match (section.git_branch.clone(), section.git_commit.clone()) {
-        (Some(b), Some(c)) => format!("{}@{}", b, c),
-        (Some(b), None) => b,
-        _ => String::new(),
-    };
 
     view! {
         <div id=view_id class=view_class>
@@ -84,11 +58,6 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
                 <div class="header-title">
                     <h1>{short_path}</h1>
                     <p class="header-path" title=section.root.clone()>{section.root.clone()}</p>
-                    {(!git_label.is_empty()).then(|| view! {
-                        <p class="header-path" style="margin-top:4px;color:var(--theme-text-tertiary)" title="git branch @ commit">
-                            {git_label.clone()}
-                        </p>
-                    })}
                 </div>
                 <div class="header-stats">
                     <span class="stat-badge">
@@ -108,7 +77,7 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
 
             <div class="app-content">
                 <TabContent
-                    root_id=root_id_overview
+                    root_id=root_id.clone()
                     tab_name="overview"
                     active=true
                 >
@@ -121,16 +90,11 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
                             dynamic_imports=dynamic_imports_count
                         />
                         <AiInsightsPanel insights=section.insights.clone() />
-                        <QuickCommandsPanel
-                            root=section.root.clone()
-                            has_duplicates=has_duplicates
-                            has_command_issues=has_command_issues
-                        />
                     </div>
                 </TabContent>
 
                 <TabContent
-                    root_id=root_id_dups
+                    root_id=root_id.clone()
                     tab_name="dups"
                     active=false
                 >
@@ -143,7 +107,7 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
                 </TabContent>
 
                 <TabContent
-                    root_id=root_id_dynamic
+                    root_id=root_id.clone()
                     tab_name="dynamic"
                     active=false
                 >
@@ -155,7 +119,7 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
                 </TabContent>
 
                 <TabContent
-                    root_id=root_id_commands
+                    root_id=root_id.clone()
                     tab_name="commands"
                     active=false
                 >
@@ -171,69 +135,15 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
                 </TabContent>
 
                 <TabContent
-                    root_id=root_id_crowds
-                    tab_name="crowds"
-                    active=false
-                >
-                    <Crowds crowds=section.crowds.clone() />
-                </TabContent>
-
-                <TabContent
-                    root_id=root_id_cycles
-                    tab_name="cycles"
-                    active=false
-                >
-                    <div class="content-container">
-                        <Cycles
-                            strict_cycles=section.circular_imports.clone()
-                            lazy_cycles=section.lazy_circular_imports.clone()
-                        />
-                    </div>
-                </TabContent>
-
-                <TabContent
-                    root_id=root_id_dead
-                    tab_name="dead"
-                    active=false
-                >
-                    <div class="content-container">
-                        <DeadCode dead_exports=section.dead_exports.clone() />
-                    </div>
-                </TabContent>
-
-                <TabContent
-                    root_id=root_id_twins
-                    tab_name="twins"
-                    active=false
-                >
-                    <div class="content-container">
-                        <Twins twins=section.twins.clone() />
-                    </div>
-                </TabContent>
-
-                <TabContent
-                    root_id=root_id_graph_tab
+                    root_id=root_id.clone()
                     tab_name="graph"
                     active=false
                 >
                     // Graph takes full width/height, so no content-container
                     <GraphContainer
                         section=section_clone
-                        root_id=root_id_graph_container
+                        root_id=root_id
                     />
-                </TabContent>
-
-                <TabContent
-                    root_id=root_id_tree
-                    tab_name="tree"
-                    active=false
-                >
-                    <div class="content-container">
-                        <TreeView
-                            root_id=root_id_value
-                            tree=section.tree.clone().unwrap_or_default()
-                        />
-                    </div>
                 </TabContent>
             </div>
         </div>
