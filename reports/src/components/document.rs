@@ -39,7 +39,7 @@ pub fn ReportDocument(
                                 </svg>
                             </button>
                         </div>
-                        
+
                         <nav class="sidebar-nav">
                             <button class="nav-item active" data-tab="overview">
                                 <Icon path=ICON_SQUARES_FOUR class="icon-sm" />
@@ -75,10 +75,10 @@ pub fn ReportDocument(
                             let view_id = format!("section-view-{}", idx);
                             let active = idx == 0;
                             view! {
-                                <ReportSectionView 
-                                    section=section 
-                                    active=active 
-                                    view_id=view_id 
+                                <ReportSectionView
+                                    section=section
+                                    active=active
+                                    view_id=view_id
                                 />
                             }
                         }).collect::<Vec<_>>()}

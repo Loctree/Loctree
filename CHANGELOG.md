@@ -37,6 +37,8 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 - **Slice file matching**: Now prioritizes exact path match over `ends_with` match; warns when multiple files match the same target to avoid selecting wrong file (e.g., `backend.py` picking monorepo's root instead of src).
 - **Tauri generate_handler! parsing**: Fixed extraction of function names from module-qualified paths (e.g., `commands::foo::bar` now correctly registers `bar` instead of `commands`). Also handles `#[cfg(...)]` attributes inside the macro block without breaking the parser.
 
+## [Unreleased]
+
 ## [0.5.0-rc] - 2025-11-28
 
 ### Added

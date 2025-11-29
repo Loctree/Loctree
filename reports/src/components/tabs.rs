@@ -14,11 +14,11 @@ pub fn TabContent(
     children: Children,
 ) -> impl IntoView {
     let class = if active { "tab-panel active" } else { "tab-panel" };
-    
+
     view! {
-        <div 
-            class=class 
-            data-tab-scope=root_id 
+        <div
+            class=class
+            data-tab-scope=root_id
             data-tab-name=tab_name
         >
             {children()}

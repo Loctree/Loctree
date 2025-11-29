@@ -118,9 +118,9 @@ pub fn ReportSectionView(
                     </div>
                 </TabContent>
 
-                <TabContent 
-                    root_id=root_id.clone() 
-                    tab_name="commands" 
+                <TabContent
+                    root_id=root_id.clone()
+                    tab_name="commands"
                     active=false
                 >
                     <div class="content-container">
@@ -128,16 +128,15 @@ pub fn ReportSectionView(
                             missing=section.missing_handlers.clone()
                             unused=section.unused_handlers.clone()
                             unregistered=section.unregistered_handlers.clone()
-                            bridges=section.command_bridges.clone()
                             counts=section.command_counts
                             open_base=section.open_base.clone()
                         />
                     </div>
                 </TabContent>
 
-                <TabContent 
-                    root_id=root_id.clone() 
-                    tab_name="graph" 
+                <TabContent
+                    root_id=root_id.clone()
+                    tab_name="graph"
                     active=false
                 >
                     // Graph takes full width/height, so no content-container
