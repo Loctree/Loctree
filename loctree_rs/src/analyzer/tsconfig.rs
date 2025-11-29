@@ -21,11 +21,7 @@ fn build_globset(patterns: &[String]) -> Option<GlobSet> {
             Err(err) => eprintln!("[loctree][warn] invalid glob '{}': {}", pat, err),
         }
     }
-    if !added {
-        None
-    } else {
-        builder.build().ok()
-    }
+    if !added { None } else { builder.build().ok() }
 }
 
 fn load_tsconfig(root: &Path) -> Option<serde_json::Value> {
@@ -54,19 +50,19 @@ pub fn summarize_tsconfig(root: &Path, analyses: &[FileAnalysis]) -> serde_json:
     let mut alias_entries = Vec::new();
     if let Some(paths) = compiler.get("paths").and_then(|p| p.as_object()) {
         for (alias, targets) in paths.iter() {
-            if let Some(first) = targets.as_array().and_then(|arr| arr.first()) {
-                if let Some(target_str) = first.as_str() {
-                    let normalized = target_str.replace('\\', "/");
-                    let target_dir = normalized.replace("/*", "").replace('*', "");
-                    let resolved = base_path.join(&target_dir);
-                    let exists = resolved.exists();
-                    alias_entries.push(json!({
-                        "alias": alias,
-                        "target": target_str,
-                        "resolved": resolved.display().to_string(),
-                        "exists": exists,
-                    }));
-                }
+            if let Some(first) = targets.as_array().and_then(|arr| arr.first())
+                && let Some(target_str) = first.as_str()
+            {
+                let normalized = target_str.replace('\\', "/");
+                let target_dir = normalized.replace("/*", "").replace('*', "");
+                let resolved = base_path.join(&target_dir);
+                let exists = resolved.exists();
+                alias_entries.push(json!({
+                    "alias": alias,
+                    "target": target_str,
+                    "resolved": resolved.display().to_string(),
+                    "exists": exists,
+                }));
             }
         }
     }
@@ -175,10 +171,12 @@ mod tests {
         analyses.push(FileAnalysis::new("outside/file.ts".into()));
 
         let summary = summarize_tsconfig(dir.path(), &analyses);
-        assert!(summary
-            .get("found")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false));
+        assert!(
+            summary
+                .get("found")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+        );
         assert_eq!(summary.get("aliasCount").and_then(|v| v.as_u64()), Some(1));
 
         let binding: Vec<serde_json::Value> = Vec::new();
@@ -194,17 +192,21 @@ mod tests {
             .get("outsideIncludeSamples")
             .and_then(|v| v.as_array())
             .unwrap_or(&outside_binding);
-        assert!(outside
-            .iter()
-            .any(|v| v.as_str() == Some("outside/file.ts")));
+        assert!(
+            outside
+                .iter()
+                .any(|v| v.as_str() == Some("outside/file.ts"))
+        );
 
         let excluded_binding: Vec<serde_json::Value> = Vec::new();
         let excluded = summary
             .get("excludedSamples")
             .and_then(|v| v.as_array())
             .unwrap_or(&excluded_binding);
-        assert!(excluded
-            .iter()
-            .any(|v| v.as_str() == Some("ignored/file.ts")));
+        assert!(
+            excluded
+                .iter()
+                .any(|v| v.as_str() == Some("ignored/file.ts"))
+        );
     }
 }

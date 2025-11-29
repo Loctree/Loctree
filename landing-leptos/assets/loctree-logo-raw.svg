@@ -1,0 +1,36 @@
+<svg width="360" height="360" viewBox="0 0 360 360" xmlns="http://www.w3.org/2000/svg">
+  <title>loctree — raw chaos before order</title>
+
+  <!-- Brutal dark background -->
+  <rect width="360" height="360" fill="#0a0a0a" rx="20"/>
+
+  <!-- Single trunk line — the only order -->
+  <line x1="180" y1="290" x2="180" y2="210"
+        stroke="#c0c0c0" stroke-width="2.5" stroke-linecap="round"/>
+
+  <!-- Nodes scattered — no visible connections, implied chaos -->
+  <!-- This mimics your PNG prototype exactly -->
+
+  <!-- Root/entry point — bottom center -->
+  <circle cx="180" cy="300" r="9" fill="#e8e8e8"/>
+
+  <!-- Junction point -->
+  <circle cx="180" cy="200" r="7" fill="#d0d0d0"/>
+
+  <!-- Second row — spread -->
+  <circle cx="100" cy="180" r="7" fill="#b8b8b8"/>
+  <circle cx="180" cy="150" r="6" fill="#a0a0a0"/>
+  <circle cx="260" cy="180" r="7" fill="#b8b8b8"/>
+
+  <!-- Top row — scattered, orphan-like -->
+  <circle cx="70" cy="90" r="7" fill="#909090"/>
+  <circle cx="140" cy="80" r="6" fill="#888888"/>
+  <circle cx="180" cy="70" r="6" fill="#808080"/>
+  <circle cx="220" cy="80" r="6" fill="#888888"/>
+  <circle cx="290" cy="90" r="7" fill="#909090"/>
+
+  <!-- Far edges — truly orphaned -->
+  <circle cx="50" cy="140" r="5" fill="#606060"/>
+  <circle cx="310" cy="140" r="5" fill="#606060"/>
+
+</svg>

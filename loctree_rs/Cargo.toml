@@ -1,7 +1,14 @@
 [package]
 name = "loctree"
-version = "0.5.0-rc"
-edition = "2021"
+version = "0.5.1"
+edition = "2024"
+authors = ["LibraxisAI <the1st@whoai.am>"]
+description = "Fast, language-aware codebase analyzer for detecting dead exports, circular imports, and generating dependency graphs"
+license = "MIT"
+repository = "https://github.com/LibraxisAI/Loctree"
+readme = "../README.md"
+keywords = ["static-analysis", "dead-code", "imports", "exports", "codebase"]
+categories = ["development-tools", "command-line-utilities"]
 
 [[bin]]
 name = "loctree"
@@ -15,6 +22,13 @@ regex = "1.12"
 globset = "0.4"
 heck = "0.5"
 time = { version = "0.3", features = ["formatting"] }
+report-leptos = { version = "0.1", path = "../report-leptos", optional = true }
+
+[features]
+default = ["leptos-reports"]
+leptos-reports = ["dep:report-leptos"]
 
 [dev-dependencies]
 tempfile = "3"
+assert_cmd = "2.0"
+predicates = "3.1"

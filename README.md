@@ -1,7 +1,12 @@
 # loctree — AI-oriented Project Analyzer
 
 [![CI](https://github.com/LibraxisAI/loctree/actions/workflows/ci.yml/badge.svg)](https://github.com/LibraxisAI/loctree/actions/workflows/ci.yml)
+[![Crates.io](https://img.shields.io/crates/v/loctree.svg)](https://crates.io/crates/loctree)
+[![Downloads](https://img.shields.io/crates/d/loctree.svg)](https://crates.io/crates/loctree)
+[![docs.rs](https://docs.rs/loctree/badge.svg)](https://docs.rs/loctree)
+[![Semgrep](https://img.shields.io/badge/semgrep-scanned-blue?logo=semgrep)](https://semgrep.dev)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![loctree](https://img.shields.io/badge/analyzed_with-loctree-a8a8a8?style=flat&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgdmlld0JveD0iMCAwIDE2IDE2Ij48cmVjdCB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIGZpbGw9IiMwMDAiLz48dGV4dCB4PSI4IiB5PSIxMiIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMCIgZmlsbD0iI2E4YThhOCIgdGV4dC1hbmNob3I9Im1pZGRsZSI+TDwvdGV4dD48L3N2Zz4=)](https://loctree.io)
 
 **loctree** is a static analysis tool designed for AI agents and non-programmers building production-ready software. It helps overcome the common AI tendency to generate excessive artifacts that lead to re-export cascades, circular imports, and spaghetti dependencies.
 
@@ -140,6 +145,16 @@ loctree embodies this principle by making the invisible visible:
 - **Dead code detection** finds what you forgot you wrote
 - **Circular import detection** catches runtime bombs before they explode
 - **Context slicing** gives AI agents exactly what they need, no more
+
+## Badge for Your Project
+
+Show that your project is analyzed with loctree:
+
+```markdown
+[![loctree](https://raw.githubusercontent.com/LibraxisAI/loctree/main/assets/loctree-badge.svg)](https://loctree.io)
+```
+
+[![loctree](https://raw.githubusercontent.com/LibraxisAI/loctree/main/assets/loctree-badge.svg)](https://loctree.io)
 
 ## License
 

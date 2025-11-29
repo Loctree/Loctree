@@ -1,0 +1,88 @@
+/* ============================================
+   Features Section
+   Created by M&K (c)2025
+   ============================================ */
+
+.features {
+    padding: var(--section-padding) 0;
+    border-top: 1px solid var(--border-subtle);
+}
+
+.features-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1px;
+    background: var(--border-subtle);
+}
+
+.feature-card {
+    background: var(--bg-black);
+    padding: 24px;
+    transition: background 0.2s;
+}
+
+.feature-card:hover {
+    background: var(--bg-dark);
+}
+
+.feature-icon {
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    margin-bottom: 16px;
+    filter: grayscale(1) brightness(0.7);
+}
+
+.feature-title {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: var(--text-bright);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.feature-description {
+    font-size: 13px;
+    color: var(--text-dim);
+    line-height: 1.6;
+}
+
+.feature-code-box {
+    margin-top: 12px;
+    display: flex;
+    align-items: center;
+    background: var(--bg-dark);
+    border: 1px solid var(--border-subtle);
+}
+
+.feature-code-text {
+    flex: 1;
+    padding: 8px 12px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    overflow-x: auto;
+    white-space: nowrap;
+}
+
+.feature-copy-btn {
+    padding: 8px 10px;
+    background: transparent;
+    border: none;
+    border-left: 1px solid var(--border-subtle);
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.feature-copy-btn:hover {
+    color: var(--text-dim);
+    background: rgba(168, 168, 168, 0.05);
+}

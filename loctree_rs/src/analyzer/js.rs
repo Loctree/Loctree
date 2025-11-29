@@ -11,10 +11,11 @@ use regex::Regex;
 use super::regexes::{
     regex_dynamic_import, regex_event_const_js, regex_event_emit_js, regex_event_listen_js,
     regex_export_brace, regex_export_default, regex_export_named_decl, regex_import,
-    regex_invoke_audio, regex_invoke_snake, regex_reexport_named, regex_reexport_star,
-    regex_safe_invoke, regex_side_effect_import, regex_tauri_invoke,
+    regex_invoke_audio, regex_invoke_snake, regex_invoke_wrapper, regex_lazy_import_then,
+    regex_reexport_named, regex_reexport_star, regex_safe_invoke, regex_side_effect_import,
+    regex_tauri_invoke,
 };
-use super::resolvers::{resolve_reexport_target, TsPathResolver};
+use super::resolvers::{TsPathResolver, resolve_reexport_target};
 use super::{brace_list_to_names, offset_to_line};
 
 fn parse_import_symbols(raw: &str) -> Vec<ImportSymbol> {
@@ -51,25 +52,25 @@ fn parse_import_symbols(raw: &str) -> Vec<ImportSymbol> {
         default_done = true;
     }
 
-    if let Some(start) = trimmed.find('{') {
-        if let Some(end) = trimmed[start..].find('}') {
-            let inner = &trimmed[start + 1..start + end];
-            for part in inner.split(',') {
-                let part = part.trim();
-                if part.is_empty() {
-                    continue;
-                }
-                if let Some((name, alias)) = part.split_once(" as ") {
-                    symbols.push(ImportSymbol {
-                        name: name.trim().to_string(),
-                        alias: Some(alias.trim().to_string()),
-                    });
-                } else {
-                    symbols.push(ImportSymbol {
-                        name: part.to_string(),
-                        alias: None,
-                    });
-                }
+    if let Some(start) = trimmed.find('{')
+        && let Some(end) = trimmed[start..].find('}')
+    {
+        let inner = &trimmed[start + 1..start + end];
+        for part in inner.split(',') {
+            let part = part.trim();
+            if part.is_empty() {
+                continue;
+            }
+            if let Some((name, alias)) = part.split_once(" as ") {
+                symbols.push(ImportSymbol {
+                    name: name.trim().to_string(),
+                    alias: Some(alias.trim().to_string()),
+                });
+            } else {
+                symbols.push(ImportSymbol {
+                    name: part.to_string(),
+                    alias: None,
+                });
             }
         }
     }
@@ -152,17 +153,17 @@ pub(crate) fn analyze_js_file(
             .map(|i| pos + i)
             .unwrap_or_else(|| content.len());
         let line = &content[line_start..line_end];
-        if let Some(idx) = line.find("//") {
-            if line_start + idx < pos {
-                return true;
-            }
+        if let Some(idx) = line.find("//")
+            && line_start + idx < pos
+        {
+            return true;
         }
         let last_block_open = prefix.rfind("/*");
         let last_block_close = prefix.rfind("*/");
-        if let Some(open_idx) = last_block_open {
-            if last_block_close.is_none_or(|c| c < open_idx) {
-                return true;
-            }
+        if let Some(open_idx) = last_block_open
+            && last_block_close.is_none_or(|c| c < open_idx)
+        {
+            return true;
         }
         false
     };
@@ -265,6 +266,24 @@ pub(crate) fn analyze_js_file(
             add_call(cmd.as_str(), line, generic, payload);
         }
     }
+    // Detect wrapper functions like invokePinCommand('get_pin_status', ...)
+    for caps in regex_invoke_wrapper().captures_iter(content) {
+        if let Some(cmd) = caps.name("cmd") {
+            let line = offset_to_line(content, cmd.start());
+            if is_commented(cmd.start()) {
+                continue;
+            }
+            let generic = caps
+                .name("generic")
+                .map(|g| g.as_str().trim().to_string())
+                .filter(|s| !s.is_empty());
+            let payload = caps
+                .name("payload")
+                .map(|p| p.as_str().trim().trim_end_matches(')').trim().to_string())
+                .filter(|s| !s.is_empty());
+            add_call(cmd.as_str(), line, generic, payload);
+        }
+    }
 
     for caps in regex_reexport_star().captures_iter(content) {
         let source = caps.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
@@ -292,6 +311,34 @@ pub(crate) fn analyze_js_file(
     for caps in regex_dynamic_import().captures_iter(content) {
         let source = caps.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
         analysis.dynamic_imports.push(source);
+    }
+
+    // Lazy imports with .then() pattern: import('./X').then(m => ({ default: m.Y }))
+    // These are common in React.lazy() and should be tracked as proper imports
+    for caps in regex_lazy_import_then().captures_iter(content) {
+        if let (Some(source), Some(export_name)) = (caps.name("source"), caps.name("export")) {
+            let source_str = source.as_str().to_string();
+            let export_str = export_name.as_str().to_string();
+
+            // Add to dynamic_imports if not already present
+            if !analysis.dynamic_imports.contains(&source_str) {
+                analysis.dynamic_imports.push(source_str.clone());
+            }
+
+            // Create a proper import entry with the symbol being accessed
+            let mut entry = ImportEntry::new(source_str.clone(), ImportKind::Dynamic);
+            entry.symbols.push(ImportSymbol {
+                name: export_str,
+                alias: None,
+            });
+            entry.resolved_path = resolve_reexport_target(path, root, &source_str, extensions)
+                .or_else(|| ts_resolver.and_then(|r| r.resolve(&source_str, extensions)))
+                .or_else(|| {
+                    super::resolvers::resolve_js_relative(path, root, &source_str, extensions)
+                });
+            entry.is_bare = !source_str.starts_with('.') && !source_str.starts_with('/');
+            analysis.imports.push(entry);
+        }
     }
 
     for caps in regex_event_emit_js().captures_iter(content) {
@@ -435,6 +482,10 @@ safeInvoke<Foo.Bar>("cmd_generic_safe");
 invokeSnake<MyType>("cmd_generic_snake");
 invoke<Inline<Ok>>("cmd_generic_invoke");
 invokeAudioCamel<Baz>("cmd_audio_generic");
+// Wrapper function patterns (Bug #2 fix)
+invokePinCommand('get_pin_status', () => ({}));
+myInvokeHelper<Response>('some_command', payload);
+customCommandWrapper("another_cmd", options);
         "#;
 
         let analysis = analyze_js_file(
@@ -446,15 +497,16 @@ invokeAudioCamel<Baz>("cmd_audio_generic");
             "app.tsx".to_string(),
         );
 
-        assert!(analysis
-            .imports
-            .iter()
-            .any(|i| i.source == "./dep" && matches!(i.kind, crate::types::ImportKind::Static)));
-        assert!(analysis
-            .imports
-            .iter()
-            .any(|i| i.source == "./side.css"
-                && matches!(i.kind, crate::types::ImportKind::SideEffect)));
+        assert!(
+            analysis
+                .imports
+                .iter()
+                .any(|i| i.source == "./dep" && matches!(i.kind, crate::types::ImportKind::Static))
+        );
+        assert!(
+            analysis.imports.iter().any(|i| i.source == "./side.css"
+                && matches!(i.kind, crate::types::ImportKind::SideEffect))
+        );
         assert!(analysis.reexports.iter().any(|r| r.source == "./reexports"));
         assert!(analysis.reexports.iter().any(|r| r.source == "./star"));
         assert!(analysis.dynamic_imports.iter().any(|s| s == "./lazy"));
@@ -471,6 +523,19 @@ invokeAudioCamel<Baz>("cmd_audio_generic");
         assert!(commands.contains(&"cmd_generic_snake".to_string()));
         assert!(commands.contains(&"cmd_generic_invoke".to_string()));
         assert!(commands.contains(&"cmd_audio_generic".to_string()));
+        // Wrapper function patterns (Bug #2 fix)
+        assert!(
+            commands.contains(&"get_pin_status".to_string()),
+            "Should detect invokePinCommand wrapper"
+        );
+        assert!(
+            commands.contains(&"some_command".to_string()),
+            "Should detect myInvokeHelper wrapper"
+        );
+        assert!(
+            commands.contains(&"another_cmd".to_string()),
+            "Should detect customCommandWrapper"
+        );
 
         let generics: Vec<_> = analysis
             .command_calls

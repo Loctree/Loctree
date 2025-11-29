@@ -341,7 +341,7 @@ impl Snapshot {
 /// Run the init command: scan the project and save snapshot
 pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
     use crate::analyzer::coverage::compute_command_gaps;
-    use crate::analyzer::root_scan::{scan_roots, ScanConfig};
+    use crate::analyzer::root_scan::{ScanConfig, scan_roots};
     use crate::analyzer::runner::default_analyzer_exts;
     use crate::analyzer::scan::{opt_globset, python_stdlib};
 
@@ -431,7 +431,6 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
         "fresh (no existing snapshot)"
     };
     eprintln!("[loctree] Scan mode: {}", scan_mode);
-
     // Prepare scan configuration (reusing existing infrastructure)
     let py_stdlib = python_stdlib();
     let focus_set = opt_globset(&parsed.focus_patterns);

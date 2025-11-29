@@ -2,12 +2,46 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-use super::assets::{CYTOSCAPE_COSE_BILKENT_JS, CYTOSCAPE_DAGRE_JS, CYTOSCAPE_JS, DAGRE_JS};
-use super::open_server::url_encode_component;
 use super::ReportSection;
+use super::assets::{CYTOSCAPE_COSE_BILKENT_JS, CYTOSCAPE_DAGRE_JS, CYTOSCAPE_JS, DAGRE_JS};
+#[cfg(not(feature = "leptos-reports"))]
+use super::open_server::url_encode_component;
 
+#[cfg(not(feature = "leptos-reports"))]
 const GRAPH_BOOTSTRAP: &str = include_str!("graph_bootstrap.js");
 
+/// Render HTML report using Leptos SSR (when feature enabled)
+#[cfg(feature = "leptos-reports")]
+fn render_with_leptos(path: &Path, sections: &[ReportSection]) -> io::Result<()> {
+    // Convert loctree types to report-leptos types via JSON serialization
+    let json = serde_json::to_string(sections).map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Failed to serialize sections: {}", e),
+        )
+    })?;
+
+    let leptos_sections: Vec<report_leptos::types::ReportSection> = serde_json::from_str(&json)
+        .map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Failed to deserialize to Leptos types: {}", e),
+            )
+        })?;
+
+    // Configure JS asset paths (relative to output file)
+    let js_assets = report_leptos::JsAssets {
+        cytoscape_path: "loctree-cytoscape.min.js".into(),
+        dagre_path: "loctree-dagre.min.js".into(),
+        cytoscape_dagre_path: "loctree-cytoscape-dagre.js".into(),
+        cytoscape_cose_bilkent_path: "loctree-cytoscape-cose-bilkent.js".into(),
+    };
+
+    let html = report_leptos::render_report(&leptos_sections, &js_assets);
+    fs::write(path, html)
+}
+
+#[cfg(not(feature = "leptos-reports"))]
 fn escape_html(raw: &str) -> String {
     raw.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -16,6 +50,7 @@ fn escape_html(raw: &str) -> String {
         .replace('\'', "&#x27;")
 }
 
+#[cfg(not(feature = "leptos-reports"))]
 fn linkify(base: Option<&str>, file: &str, line: usize) -> String {
     if let Some(base) = base {
         let href = format!("{}/open?f={}&l={}", base, url_encode_component(file), line);
@@ -25,6 +60,7 @@ fn linkify(base: Option<&str>, file: &str, line: usize) -> String {
     }
 }
 
+#[cfg(not(feature = "leptos-reports"))]
 fn render_ai_insights(out: &mut String, section: &ReportSection) {
     if section.insights.is_empty() {
         return;
@@ -46,6 +82,7 @@ fn render_ai_insights(out: &mut String, section: &ReportSection) {
     out.push_str("</ul>");
 }
 
+#[cfg(not(feature = "leptos-reports"))]
 fn render_duplicate_exports(out: &mut String, section: &ReportSection) {
     out.push_str("<h3>Top duplicate exports</h3>");
     if section.ranked_dups.is_empty() {
@@ -67,6 +104,7 @@ fn render_duplicate_exports(out: &mut String, section: &ReportSection) {
     }
 }
 
+#[cfg(not(feature = "leptos-reports"))]
 fn render_cascades(out: &mut String, section: &ReportSection) {
     out.push_str("<h3>Re-export cascades</h3>");
     if section.cascades.is_empty() {
@@ -84,6 +122,7 @@ fn render_cascades(out: &mut String, section: &ReportSection) {
     }
 }
 
+#[cfg(not(feature = "leptos-reports"))]
 fn render_dynamic_imports(out: &mut String, section: &ReportSection) {
     out.push_str("<h3>Dynamic imports</h3>");
     if section.dynamic.is_empty() {
@@ -101,14 +140,20 @@ fn render_dynamic_imports(out: &mut String, section: &ReportSection) {
     }
 }
 
+#[cfg(not(feature = "leptos-reports"))]
 fn render_command_coverage(out: &mut String, section: &ReportSection) {
     out.push_str("<h3>Tauri command coverage</h3>");
     if section.command_counts == (0, 0) {
         out.push_str("<p class=\"muted\">No Tauri commands detected in this root.</p>");
         return;
     }
-    if section.missing_handlers.is_empty() && section.unused_handlers.is_empty() {
-        out.push_str("<p class=\"muted\">All frontend calls have matching handlers.</p>");
+    if section.missing_handlers.is_empty()
+        && section.unused_handlers.is_empty()
+        && section.unregistered_handlers.is_empty()
+    {
+        out.push_str(
+            "<p class=\"muted\">All frontend calls have matching registered handlers.</p>",
+        );
         return;
     }
 
@@ -173,15 +218,16 @@ fn render_command_coverage(out: &mut String, section: &ReportSection) {
         }
     };
 
-    out.push_str(
-        "<table class=\"command-table\"><tr><th>Missing handlers (FE→BE)</th><th>Handlers unused by FE</th></tr><tr><td>",
-    );
+    out.push_str("<table class=\"command-table\"><tr><th>Missing handlers (FE→BE)</th><th>Handlers unused by FE</th><th>Handlers not registered in Tauri</th></tr><tr><td>");
     render_grouped(&section.missing_handlers, out);
     out.push_str("</td><td>");
     render_grouped(&section.unused_handlers, out);
+    out.push_str("</td><td>");
+    render_grouped(&section.unregistered_handlers, out);
     out.push_str("</td></tr></table>");
 }
 
+#[cfg(not(feature = "leptos-reports"))]
 fn render_graph_stub(out: &mut String, section: &ReportSection) {
     if let Some(warn) = &section.graph_warning {
         out.push_str(&format!(
@@ -226,6 +272,7 @@ fn render_graph_stub(out: &mut String, section: &ReportSection) {
     }
 }
 
+#[cfg(not(feature = "leptos-reports"))]
 fn render_section(out: &mut String, section: &ReportSection) {
     let root_id = section
         .root
@@ -287,6 +334,7 @@ fn render_section(out: &mut String, section: &ReportSection) {
     out.push_str("</section>");
 }
 
+#[cfg(not(feature = "leptos-reports"))]
 fn render_graph_bootstrap(out: &mut String) {
     // Load Cytoscape core
     out.push_str(r#"<script src="loctree-cytoscape.min.js"></script>"#);
@@ -320,31 +368,51 @@ fn render_graph_bootstrap(out: &mut String) {
     out.push_str("</script>");
 }
 
+/// Write JS assets to output directory
+fn write_js_assets(dir: &Path) -> io::Result<()> {
+    fs::create_dir_all(dir)?;
+    // Core Cytoscape library
+    let js_path = dir.join("loctree-cytoscape.min.js");
+    if !js_path.exists() {
+        fs::write(&js_path, CYTOSCAPE_JS)?;
+    }
+    // Dagre layout library (dependency for cytoscape-dagre)
+    let dagre_path = dir.join("loctree-dagre.min.js");
+    if !dagre_path.exists() {
+        fs::write(&dagre_path, DAGRE_JS)?;
+    }
+    // Cytoscape-dagre extension (hierarchical layout)
+    let cy_dagre_path = dir.join("loctree-cytoscape-dagre.js");
+    if !cy_dagre_path.exists() {
+        fs::write(&cy_dagre_path, CYTOSCAPE_DAGRE_JS)?;
+    }
+    // Cytoscape-cose-bilkent extension (improved force-directed layout)
+    let cy_cose_bilkent_path = dir.join("loctree-cytoscape-cose-bilkent.js");
+    if !cy_cose_bilkent_path.exists() {
+        fs::write(&cy_cose_bilkent_path, CYTOSCAPE_COSE_BILKENT_JS)?;
+    }
+    Ok(())
+}
+
 pub(crate) fn render_html_report(path: &Path, sections: &[ReportSection]) -> io::Result<()> {
     if let Some(dir) = path.parent() {
-        fs::create_dir_all(dir)?;
-        // Core Cytoscape library
-        let js_path = dir.join("loctree-cytoscape.min.js");
-        if !js_path.exists() {
-            fs::write(&js_path, CYTOSCAPE_JS)?;
-        }
-        // Dagre layout library (dependency for cytoscape-dagre)
-        let dagre_path = dir.join("loctree-dagre.min.js");
-        if !dagre_path.exists() {
-            fs::write(&dagre_path, DAGRE_JS)?;
-        }
-        // Cytoscape-dagre extension (hierarchical layout)
-        let cy_dagre_path = dir.join("loctree-cytoscape-dagre.js");
-        if !cy_dagre_path.exists() {
-            fs::write(&cy_dagre_path, CYTOSCAPE_DAGRE_JS)?;
-        }
-        // Cytoscape-cose-bilkent extension (improved force-directed layout)
-        let cy_cose_bilkent_path = dir.join("loctree-cytoscape-cose-bilkent.js");
-        if !cy_cose_bilkent_path.exists() {
-            fs::write(&cy_cose_bilkent_path, CYTOSCAPE_COSE_BILKENT_JS)?;
-        }
+        write_js_assets(dir)?;
     }
 
+    // Use Leptos renderer when feature is enabled
+    #[cfg(feature = "leptos-reports")]
+    {
+        render_with_leptos(path, sections)
+    }
+
+    #[cfg(not(feature = "leptos-reports"))]
+    {
+        render_html_report_legacy(path, sections)
+    }
+}
+
+#[cfg(not(feature = "leptos-reports"))]
+fn render_html_report_legacy(path: &Path, sections: &[ReportSection]) -> io::Result<()> {
     let mut out = String::new();
     out.push_str(
         r#"<!DOCTYPE html>
@@ -463,6 +531,7 @@ mod tests {
             dynamic: vec![("dyn.ts".into(), vec!["./lazy".into()])],
             analyze_limit: 5,
             missing_handlers: Vec::new(),
+            unregistered_handlers: Vec::new(),
             unused_handlers: Vec::new(),
             command_counts: (0, 0),
             open_base: None,
@@ -495,6 +564,7 @@ mod tests {
             dynamic: Vec::new(),
             analyze_limit: 1,
             missing_handlers: Vec::new(),
+            unregistered_handlers: Vec::new(),
             unused_handlers: Vec::new(),
             command_counts: (0, 0),
             open_base: None,
@@ -508,8 +578,16 @@ mod tests {
 
         render_html_report(&out_path, &[section]).expect("render html");
         let html = fs::read_to_string(&out_path).expect("read html");
-        assert!(!html.contains(malicious));
-        assert!(html.contains("&lt;script&gt;alert(&#x27;x&#x27;)&lt;/script&gt;"));
+        // Security: raw script must not appear
+        assert!(
+            !html.contains(malicious),
+            "XSS: raw script tag should be escaped"
+        );
+        // Verify it's escaped (both legacy &#x27; and Leptos ' formats are valid)
+        assert!(
+            html.contains("&lt;script&gt;") && html.contains("&lt;/script&gt;"),
+            "Script tags should be HTML-escaped"
+        );
         assert!(html.contains("Graph skipped"));
     }
 }
