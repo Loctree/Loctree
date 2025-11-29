@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
 
-use crate::fs_utils::{gather_files, GitIgnoreChecker};
+use crate::fs_utils::{GitIgnoreChecker, gather_files};
 use crate::types::{FileAnalysis, Options};
 
 use super::classify::{detect_language, file_kind};
@@ -12,8 +12,8 @@ use super::css::analyze_css_file;
 use super::js::analyze_js_file;
 use super::py::{analyze_py_file, python_stdlib_set};
 use super::resolvers::{
-    find_rust_crate_root, resolve_js_relative, resolve_python_relative, resolve_rust_import,
-    TsPathResolver,
+    TsPathResolver, find_rust_crate_root, resolve_js_relative, resolve_python_relative,
+    resolve_rust_import,
 };
 use super::rust::analyze_rust_file;
 
@@ -33,11 +33,7 @@ pub fn build_globset(patterns: &[String]) -> Option<GlobSet> {
             Err(err) => eprintln!("[loctree][warn] invalid glob '{}': {}", pat, err),
         }
     }
-    if !added {
-        None
-    } else {
-        builder.build().ok()
-    }
+    if !added { None } else { builder.build().ok() }
 }
 
 pub fn opt_globset(globs: &[String]) -> Option<GlobSet> {
@@ -101,12 +97,11 @@ pub fn resolve_event_constants_across_files(analyses: &mut [FileAnalysis]) {
                     if let Some(resolved_path) = &imp.resolved_path {
                         for sym in &imp.symbols {
                             let alias = sym.alias.as_ref().unwrap_or(&sym.name);
-                            if alias == &raw {
-                                if let Some(map) = consts_by_path.get(resolved_path) {
-                                    if let Some(val) = map.get(&sym.name) {
-                                        found = Some(val.clone());
-                                    }
-                                }
+                            if alias == &raw
+                                && let Some(map) = consts_by_path.get(resolved_path)
+                                && let Some(val) = map.get(&sym.name)
+                            {
+                                found = Some(val.clone());
                             }
                         }
                     }

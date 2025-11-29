@@ -6,12 +6,12 @@ use serde_json::json;
 use std::io::IsTerminal;
 
 use crate::fs_utils::{
-    count_lines, is_allowed_hidden, normalise_ignore_patterns, should_ignore, sort_dir_entries,
-    GitIgnoreChecker,
+    GitIgnoreChecker, count_lines, is_allowed_hidden, normalise_ignore_patterns, should_ignore,
+    sort_dir_entries,
 };
 use crate::types::{
-    Collectors, ColorMode, LargeEntry, LineEntry, Options, OutputMode, Stats, COLOR_RED,
-    COLOR_RESET,
+    COLOR_RED, COLOR_RESET, Collectors, ColorMode, LargeEntry, LineEntry, Options, OutputMode,
+    Stats,
 };
 
 /// List of common build artifact directory names that typically contain
@@ -247,6 +247,9 @@ fn walk(
         let is_large = loc.is_some_and(|v| v >= options.loc_threshold);
 
         if is_dir && options.max_depth.is_none_or(|max| depth < max) {
+            // Save position BEFORE recursing so we can insert directory entry
+            // before its children (not after, which causes inverted hierarchy)
+            let insert_pos = collectors.entries.len();
             prefix_parts.push(!is_last);
             let child_has = walk(
                 &path,
@@ -262,11 +265,21 @@ fn walk(
             prefix_parts.pop();
             if child_has {
                 collectors.stats.directories += 1;
-                include_current = true;
+                // Insert directory BEFORE its children (at saved position)
+                collectors.entries.insert(
+                    insert_pos,
+                    LineEntry {
+                        label,
+                        loc,
+                        relative_path: relative_display,
+                        is_dir,
+                        is_large,
+                    },
+                );
+                any_included = true;
             }
-        }
-
-        if include_current {
+        } else if include_current {
+            // Files: push at end (correct order)
             collectors.entries.push(LineEntry {
                 label,
                 loc,

@@ -49,6 +49,43 @@ impl GitIgnoreChecker {
     }
 }
 
+/// Load patterns from `.loctreeignore` file in root directory.
+/// Supports gitignore-style syntax: one pattern per line, # comments, empty lines ignored.
+/// Returns empty vec if file doesn't exist.
+pub fn load_loctreeignore(root: &Path) -> Vec<String> {
+    let ignore_file = root.join(".loctreeignore");
+    if !ignore_file.exists() {
+        return Vec::new();
+    }
+
+    let file = match File::open(&ignore_file) {
+        Ok(f) => f,
+        Err(_) => return Vec::new(),
+    };
+
+    let reader = BufReader::new(file);
+    let mut patterns = Vec::new();
+
+    for line in reader.lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+
+        let trimmed = line.trim();
+
+        // Skip empty lines and comments
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        // Treat each line as an ignore pattern
+        patterns.push(trimmed.to_string());
+    }
+
+    patterns
+}
+
 pub fn normalise_ignore_patterns(patterns: &[String], root: &Path) -> Vec<PathBuf> {
     patterns
         .iter()
@@ -110,12 +147,11 @@ pub fn should_ignore(
     {
         return true;
     }
-    if options.use_gitignore {
-        if let Some(checker) = git_checker {
-            if checker.is_ignored(full_path) {
-                return true;
-            }
-        }
+    if options.use_gitignore
+        && let Some(checker) = git_checker
+        && checker.is_ignored(full_path)
+    {
+        return true;
     }
     false
 }

@@ -38,12 +38,16 @@ fn format_usage() -> &'static str {
     "loctree (Rust) - AI-oriented Project Analyzer\n\n\
 Quick start:\n  \
   loctree                   Scan current directory, write snapshot to .loctree/\n  \
+  loctree --for-ai          AI summary with quick wins and hub files (JSON)\n  \
   loctree slice <file>      Extract context for AI agents (deps + consumers)\n  \
+  loctree trace <handler>   Investigate WHY a handler is unused/missing\n  \
   loctree -A --graph        Analyze imports + generate graph report\n\n\
 Usage: loctree [root ...] [options]\n\n\
 Modes:\n  \
   init (default)            Scan and save snapshot to .loctree/snapshot.json\n  \
   slice <file>              Holographic slice: extract core + deps + consumers for AI\n  \
+  trace <handler>           Trace handler: show BE definition, FE invokes, verdict\n  \
+  --for-ai                  AI summary: quick wins, hub files, slice commands (JSON)\n  \
   --analyze-imports, -A     Import/export analyzer (duplicates, dead symbols, FE↔BE coverage)\n  \
   --tree                    Directory tree view with LOC counts\n\n\
 Slice options:\n  \
@@ -66,6 +70,7 @@ Pipeline checks (CI-friendly):\n  \
   --fail-on-races              Exit 1 if listener/await races detected\n\n\
 Common:\n  \
   -I, --ignore <path>       Ignore path (repeatable)\n  \
+  .loctreeignore            Auto-loaded if exists (gitignore-style patterns)\n  \
   --gitignore, -g           Respect .gitignore\n  \
   --full-scan               Ignore mtime, re-analyze all files\n  \
   --verbose                 Show detailed progress\n  \
@@ -140,6 +145,7 @@ Graph limits:\n  \
   --max-graph-edges <N>     Skip graph if above edge count\n\n\
 Common:\n  \
   -I, --ignore <path>       Ignore path (repeatable)\n  \
+  .loctreeignore            Auto-loaded if exists (gitignore-style patterns)\n  \
   --gitignore, -g           Respect .gitignore rules\n  \
   --scan-all                Include node_modules, target, .venv, __pycache__ (normally skipped)\n  \
   --full-scan               Ignore mtime cache, re-analyze all files\n  \
@@ -180,6 +186,18 @@ fn main() -> std::io::Result<()> {
             &mut parsed.tauri_preset,
             parsed.verbose,
         );
+
+        // Load .loctreeignore from root (if exists)
+        let loctreeignore_patterns = fs_utils::load_loctreeignore(&parsed.root_list[0]);
+        if !loctreeignore_patterns.is_empty() {
+            if parsed.verbose {
+                eprintln!(
+                    "[loctree] loaded {} patterns from .loctreeignore",
+                    loctreeignore_patterns.len()
+                );
+            }
+            parsed.ignore_patterns.extend(loctreeignore_patterns);
+        }
     }
 
     if parsed.show_help {
@@ -239,7 +257,203 @@ fn main() -> std::io::Result<()> {
             let json_output = matches!(parsed.output, types::OutputMode::Json);
             slicer::run_slice(&root, target, parsed.slice_consumers, json_output, &parsed)?;
         }
+        Mode::Trace => {
+            let handler_name = parsed.trace_handler.as_ref().ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "trace requires a handler name, e.g.: loctree trace toggle_assistant",
+                )
+            })?;
+            run_trace(&root_list, handler_name, &parsed)?;
+        }
+        Mode::ForAi => {
+            run_for_ai(&root_list, &parsed)?;
+        }
     }
+
+    Ok(())
+}
+
+fn run_trace(
+    root_list: &[PathBuf],
+    handler_name: &str,
+    parsed: &args::ParsedArgs,
+) -> std::io::Result<()> {
+    use analyzer::root_scan::{ScanConfig, ScanResults, scan_roots};
+    use analyzer::trace::{print_trace_human, print_trace_json, trace_handler};
+    use std::collections::HashSet;
+
+    // Prepare scan config - reuse logic from runner
+    let extensions = parsed.extensions.clone().or_else(|| {
+        Some(
+            ["ts", "tsx", "js", "jsx", "mjs", "cjs", "rs", "css", "py"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        )
+    });
+
+    let py_stdlib = analyzer::scan::python_stdlib();
+
+    let scan_results = scan_roots(ScanConfig {
+        roots: root_list,
+        parsed,
+        extensions,
+        focus_set: &None,
+        exclude_set: &None,
+        ignore_exact: HashSet::new(),
+        ignore_prefixes: Vec::new(),
+        py_stdlib: &py_stdlib,
+        cached_analyses: None,
+        collect_edges: false,
+    })?;
+
+    let ScanResults {
+        global_fe_commands,
+        global_be_commands,
+        global_analyses,
+        ..
+    } = scan_results;
+
+    // Get registered handlers
+    let registered_impls: HashSet<String> = global_analyses
+        .iter()
+        .flat_map(|a| a.tauri_registered_handlers.iter().cloned())
+        .collect();
+
+    let result = trace_handler(
+        handler_name,
+        &global_analyses,
+        &global_fe_commands,
+        &global_be_commands,
+        &registered_impls,
+    );
+
+    if matches!(parsed.output, types::OutputMode::Json) {
+        print_trace_json(&result);
+    } else {
+        print_trace_human(&result);
+    }
+
+    Ok(())
+}
+
+fn run_for_ai(root_list: &[PathBuf], parsed: &args::ParsedArgs) -> std::io::Result<()> {
+    use analyzer::coverage::{compute_command_gaps_with_confidence, compute_unregistered_handlers};
+    use analyzer::for_ai::{generate_for_ai_report, print_for_ai_json};
+    use analyzer::output::process_root_context;
+    use analyzer::root_scan::{ScanConfig, ScanResults, scan_roots};
+    use analyzer::scan::{opt_globset, python_stdlib};
+    use std::collections::HashSet;
+
+    let extensions = parsed.extensions.clone().or_else(|| {
+        Some(
+            ["ts", "tsx", "js", "jsx", "mjs", "cjs", "rs", "css", "py"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        )
+    });
+
+    let py_stdlib = python_stdlib();
+    let focus_set = opt_globset(&parsed.focus_patterns);
+    let exclude_set = opt_globset(&parsed.exclude_report_patterns);
+
+    let scan_results = scan_roots(ScanConfig {
+        roots: root_list,
+        parsed,
+        extensions,
+        focus_set: &focus_set,
+        exclude_set: &exclude_set,
+        ignore_exact: HashSet::new(),
+        ignore_prefixes: Vec::new(),
+        py_stdlib: &py_stdlib,
+        cached_analyses: None,
+        collect_edges: true, // Need edges for hub files
+    })?;
+
+    let ScanResults {
+        contexts,
+        global_fe_commands,
+        global_be_commands,
+        global_analyses,
+        ..
+    } = scan_results;
+
+    // Get registered handlers
+    let registered_impls: HashSet<String> = global_analyses
+        .iter()
+        .flat_map(|a| a.tauri_registered_handlers.iter().cloned())
+        .collect();
+
+    // Filter BE commands to registered only
+    let mut global_be_registered: analyzer::coverage::CommandUsage =
+        std::collections::HashMap::new();
+    for (name, locs) in &global_be_commands {
+        for (path, line, impl_name) in locs {
+            if registered_impls.is_empty() || registered_impls.contains(impl_name) {
+                global_be_registered.entry(name.clone()).or_default().push((
+                    path.clone(),
+                    *line,
+                    impl_name.clone(),
+                ));
+            }
+        }
+    }
+
+    // Compute gaps
+    let (global_missing, global_unused) = compute_command_gaps_with_confidence(
+        &global_fe_commands,
+        &global_be_registered,
+        &focus_set,
+        &exclude_set,
+        &global_analyses,
+    );
+
+    let global_unregistered = compute_unregistered_handlers(
+        &global_be_commands,
+        &registered_impls,
+        &focus_set,
+        &exclude_set,
+    );
+
+    // Build report sections
+    let mut report_sections = Vec::new();
+    for (idx, ctx) in contexts.into_iter().enumerate() {
+        let artifacts = process_root_context(
+            idx,
+            ctx,
+            parsed,
+            &global_fe_commands,
+            &global_be_commands,
+            &global_missing,
+            &global_unregistered,
+            &global_unused,
+            &analyzer::pipelines::build_pipeline_summary(
+                &global_analyses,
+                &focus_set,
+                &exclude_set,
+                &global_fe_commands,
+                &global_be_commands,
+                &std::collections::HashMap::new(),
+                &std::collections::HashMap::new(),
+            ),
+            "loctree-json",
+            "1.2.0",
+        );
+        if let Some(section) = artifacts.report_section {
+            report_sections.push(section);
+        }
+    }
+
+    // Generate AI report
+    let project_root = root_list
+        .first()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| ".".to_string());
+
+    let report = generate_for_ai_report(&project_root, &report_sections, &global_analyses);
+    print_for_ai_json(&report);
 
     Ok(())
 }

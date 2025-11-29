@@ -179,10 +179,10 @@ fn open_file_in_editor(full_path: &Path, line: usize, cfg: &EditorConfig) -> io:
         Ok(status.success())
     };
 
-    if let Some((prog, args)) = template_result {
-        if try_commands(&prog, &args)? {
-            return Ok(());
-        }
+    if let Some((prog, args)) = template_result
+        && try_commands(&prog, &args)?
+    {
+        return Ok(());
     }
 
     let location_arg = format!("{}:{}", full_path.to_string_lossy(), line.max(1));
@@ -337,19 +337,19 @@ fn handle_open_request(
     let mut candidate = None;
     let path_obj = PathBuf::from(&rel_or_abs);
     if path_obj.is_absolute() {
-        if let Ok(canon) = path_obj.canonicalize() {
-            if roots.iter().any(|r| canon.starts_with(r)) {
-                candidate = Some(canon);
-            }
+        if let Ok(canon) = path_obj.canonicalize()
+            && roots.iter().any(|r| canon.starts_with(r))
+        {
+            candidate = Some(canon);
         }
     } else {
         for root in roots {
             let joined = root.join(&path_obj);
-            if let Ok(canon) = joined.canonicalize() {
-                if canon.starts_with(root) {
-                    candidate = Some(canon);
-                    break;
-                }
+            if let Ok(canon) = joined.canonicalize()
+                && canon.starts_with(root)
+            {
+                candidate = Some(canon);
+                break;
             }
         }
     }
@@ -460,10 +460,10 @@ fn handle_request(
         return;
     }
 
-    if let Some(report) = report_path {
-        if serve_report(stream, target, report, is_head) {
-            return;
-        }
+    if let Some(report) = report_path
+        && serve_report(stream, target, report, is_head)
+    {
+        return;
     }
 
     write_response(

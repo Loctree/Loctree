@@ -84,19 +84,18 @@ impl TsPathResolver {
 
         for mapping in &self.mappings {
             if mapping.has_wildcard {
-                if let Some(rest) = normalized.strip_prefix(&mapping.prefix) {
-                    if rest.ends_with(&mapping.suffix) {
-                        let mid = rest
-                            .strip_suffix(&mapping.suffix)
-                            .unwrap_or(rest)
-                            .to_string();
-                        for target in &mapping.targets {
-                            let replaced = target.replace('*', &mid);
-                            let candidate = self.base_dir.join(replaced);
-                            if let Some(res) = resolve_with_extensions(candidate, &self.root, exts)
-                            {
-                                return Some(res);
-                            }
+                if let Some(rest) = normalized.strip_prefix(&mapping.prefix)
+                    && rest.ends_with(&mapping.suffix)
+                {
+                    let mid = rest
+                        .strip_suffix(&mapping.suffix)
+                        .unwrap_or(rest)
+                        .to_string();
+                    for target in &mapping.targets {
+                        let replaced = target.replace('*', &mid);
+                        let candidate = self.base_dir.join(replaced);
+                        if let Some(res) = resolve_with_extensions(candidate, &self.root, exts) {
+                            return Some(res);
                         }
                     }
                 }
@@ -224,13 +223,13 @@ pub(crate) fn resolve_with_extensions(
     root: &Path,
     exts: Option<&HashSet<String>>,
 ) -> Option<String> {
-    if candidate.extension().is_none() {
-        if let Some(set) = exts {
-            for ext in set {
-                let with_ext = candidate.with_extension(ext);
-                if with_ext.exists() {
-                    return canonical_rel(&with_ext, root).or_else(|| canonical_abs(&with_ext));
-                }
+    if candidate.extension().is_none()
+        && let Some(set) = exts
+    {
+        for ext in set {
+            let with_ext = candidate.with_extension(ext);
+            if with_ext.exists() {
+                return canonical_rel(&with_ext, root).or_else(|| canonical_abs(&with_ext));
             }
         }
     }
@@ -303,27 +302,27 @@ fn load_tsconfig_recursive(ts_path: &Path) -> Option<Value> {
                 .map(|p| p.join(ext))
                 .unwrap_or_else(|| PathBuf::from(ext))
         };
-        if base_path.exists() {
-            if let Some(parent) = load_tsconfig_recursive(&base_path) {
-                if let (Some(child_co), Some(parent_co)) = (
-                    current
-                        .get("compilerOptions")
-                        .and_then(|v| v.as_object())
-                        .cloned(),
-                    parent
-                        .get("compilerOptions")
-                        .and_then(|v| v.as_object())
-                        .cloned(),
-                ) {
-                    let merged = merge_compiler_options(&parent_co, &child_co);
-                    current["compilerOptions"] = Value::Object(merged);
-                } else if let Some(parent_co) = parent
+        if base_path.exists()
+            && let Some(parent) = load_tsconfig_recursive(&base_path)
+        {
+            if let (Some(child_co), Some(parent_co)) = (
+                current
                     .get("compilerOptions")
                     .and_then(|v| v.as_object())
-                    .cloned()
-                {
-                    current["compilerOptions"] = Value::Object(parent_co);
-                }
+                    .cloned(),
+                parent
+                    .get("compilerOptions")
+                    .and_then(|v| v.as_object())
+                    .cloned(),
+            ) {
+                let merged = merge_compiler_options(&parent_co, &child_co);
+                current["compilerOptions"] = Value::Object(merged);
+            } else if let Some(parent_co) = parent
+                .get("compilerOptions")
+                .and_then(|v| v.as_object())
+                .cloned()
+            {
+                current["compilerOptions"] = Value::Object(parent_co);
             }
         }
     }

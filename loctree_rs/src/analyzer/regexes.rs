@@ -31,6 +31,23 @@ pub(crate) fn regex_dynamic_import() -> &'static Regex {
     RE.get_or_init(|| regex(r#"import\s*\(\s*["']([^"']+)["']\s*\)"#))
 }
 
+/// Captures lazy import patterns like:
+/// - `import('./Foo').then((m) => ({ default: m.Bar }))`
+/// - `import('./Foo').then(m => ({ default: m.Bar }))`
+/// - `import('./Foo').then(m => { return { default: m.Bar } })`
+///
+/// Captures: source (module path), export (accessed symbol name)
+///
+/// Note: The pattern intentionally doesn't require closing braces/parens
+/// to handle various callback body styles (concise vs block return).
+pub(crate) fn regex_lazy_import_then() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    // Note: Rust regex doesn't support backreferences, so we match any word for callback param
+    RE.get_or_init(|| {
+        regex(r#"import\s*\(\s*["'](?P<source>[^"']+)["']\s*\)\s*\.\s*then\s*\(\s*\(?\s*\w+\s*\)?\s*=>\s*[({]\s*(?:return\s+)?\{?\s*default\s*:\s*\w+\.(?P<export>\w+)"#)
+    })
+}
+
 pub(crate) fn regex_export_named_decl() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
@@ -75,12 +92,38 @@ pub(crate) fn regex_invoke_audio() -> &'static Regex {
     })
 }
 
+/// Matches wrapper functions containing "invoke" or "Command" in their name
+/// where the first argument is a string literal that looks like a Tauri command.
+/// Examples:
+/// - `invokePinCommand('get_pin_status', ...)`
+/// - `invokeHelper<T>('some_command', ...)`
+/// - `myInvokeWrapper('cmd_name', ...)`
+pub(crate) fn regex_invoke_wrapper() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        // Match function names containing "invoke" or "Command" (case insensitive via pattern)
+        // followed by optional generics and a string literal first argument
+        // The command name must be a valid identifier (alphanumeric + underscores, no spaces)
+        regex(r#"(?i)[a-z_][a-z0-9_]*(?:invoke|command)[a-z0-9_]*\s*(?:<(?P<generic>[^>]+)>)?\s*\(\s*["'](?P<cmd>[a-z][a-z0-9_]*)["']\s*(?:,\s*(?P<payload>[^)\n]+))?"#)
+    })
+}
+
 pub(crate) fn regex_tauri_command_fn() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
         // Matches #[tauri::command] followed by optional additional attributes like #[allow(...)]
         // before the function definition
         regex(r#"(?m)#\s*\[\s*tauri::command([^\]]*)\](?:\s*#\s*\[[^\]]*\])*\s*(?:pub\s*(?:\([^)]*\)\s*)?)?(?:async\s+)?fn\s+([A-Za-z0-9_]+)\s*\((?P<params>[^)]*)\)"#)
+    })
+}
+
+/// Matches Tauri registrations like `tauri::generate_handler![foo, bar]` or `generate_handler![foo, bar]`.
+/// Captures the comma-separated list of function identifiers inside the brackets.
+pub(crate) fn regex_tauri_generate_handler() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        // Supports optional `tauri::` prefix and arbitrary whitespace/newlines around the list.
+        regex(r#"(?m)(?:tauri::)?generate_handler!\s*\[([^\]]+)\]"#)
     })
 }
 

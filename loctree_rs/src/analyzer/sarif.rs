@@ -1,8 +1,8 @@
 use serde_json::json;
 
+use crate::analyzer::RankedDup;
 use crate::analyzer::dead_parrots::DeadExport;
 use crate::analyzer::report::CommandGap;
-use crate::analyzer::RankedDup;
 
 pub struct SarifInputs<'a> {
     pub duplicate_exports: &'a [RankedDup],

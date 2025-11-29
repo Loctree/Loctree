@@ -5,13 +5,14 @@ mod css;
 pub mod cycles;
 pub mod dead_parrots;
 pub mod entrypoints;
+pub mod for_ai;
 mod graph;
 pub mod html;
 mod insights;
 pub mod js;
 pub mod open_server;
-mod output;
-mod pipelines;
+pub mod output;
+pub mod pipelines;
 pub mod py;
 pub mod regexes;
 pub mod report;
@@ -21,6 +22,7 @@ pub mod runner;
 pub mod rust;
 pub mod sarif;
 pub mod scan;
+pub mod trace;
 mod tsconfig;
 
 pub(super) fn brace_list_to_names(raw: &str) -> Vec<String> {

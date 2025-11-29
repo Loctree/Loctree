@@ -1,0 +1,59 @@
+/* ============================================
+   CLI Reference Section
+   Created by M&K (c)2025
+   ============================================ */
+
+.cli-reference {
+    padding: var(--section-padding) 0;
+    background: var(--bg-dark);
+    border-top: 1px solid var(--border-subtle);
+}
+
+.cli-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 32px;
+    margin-top: 32px;
+}
+
+.cli-group {
+    background: var(--bg-black);
+    border: 1px solid var(--border-subtle);
+    padding: 20px;
+}
+
+.cli-group-title {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    color: var(--text-bright);
+    margin-bottom: 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.cli-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 12px;
+}
+
+.cli-item:last-child {
+    margin-bottom: 0;
+}
+
+.cli-cmd {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-bright);
+    background: var(--bg-dark);
+    padding: 4px 8px;
+    display: inline-block;
+    border: 1px solid var(--border-subtle);
+}
+
+.cli-desc {
+    font-size: 11px;
+    color: var(--text-dim);
+}
