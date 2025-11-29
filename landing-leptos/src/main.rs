@@ -13,11 +13,11 @@ fn App() -> impl IntoView {
     view! {
         <Nav />
         <main>
-            <AgentPromptHero />
             <Hero />
             <Features />
             <SliceDemo />
             <StackDetection />
+            <CliReference />
             <InstallSection />
         </main>
         <Footer />
@@ -25,115 +25,104 @@ fn App() -> impl IntoView {
 }
 
 // ============================================
-// Install Hero — Tabbed: For Humans / For AI Agents
+// Navigation with Dropdown Installer
 // ============================================
 #[component]
-fn AgentPromptHero() -> impl IntoView {
-    let (active_tab, set_active_tab) = signal("agents");
-    let (copied, set_copied) = signal(false);
+fn Nav() -> impl IntoView {
+    let (drawer_open, set_drawer_open) = signal(false);
+    let (active_tab, set_active_tab) = signal("humans");
+    let (install_copied, set_install_copied) = signal(false);
+    let (prompt_copied, set_prompt_copied) = signal(false);
+    let (expanded, set_expanded) = signal(false);
 
-    let human_content = r#"# Quick Start
+    let install_command = "curl -fsSL https://raw.githubusercontent.com/LibraxisAI/loctree/main/tools/install.sh | sh";
 
-# Install
-curl -fsSL https://raw.githubusercontent.com/LibraxisAI/loctree/main/tools/install.sh | sh
+    let agent_prompt_short = r#"## loctree — AI Agent Quick Reference
+**Scan once, slice many.** Install: `curl -fsSL .../install.sh | sh`
 
-# Full analysis (auto-detects stack)
-loctree . -A
+### Key Commands
+- `loctree` — scan project, save to .loctree/snapshot.json
+- `loctree slice <file> --consumers --json` — 3-layer context for AI
+- `loctree -A --check <Name>` — find similar components (avoid duplicates)
+- `loctree -A --symbol <Name>` — find symbol definitions & usage
+- `loctree -A --circular` — detect import cycles
+- `loctree -A --dead` — find unused exports
+- `loctree -A --impact <file>` — what breaks if removed
+- `loctree -A --entrypoints` — list main/script entry points
+- `loctree -A --preset-tauri src src-tauri/src` — Tauri FE<>BE coverage
+- `loctree -A --fail-on-missing-handlers --sarif` — CI checks"#;
 
-# Slice context for a file
-loctree slice src/App.tsx --consumers"#;
+    let agent_prompt_full = r#"## loctree — AI Agent Quick Reference
 
-    let agent_prompt = r#"## loctree — Build tool awareness
+**Scan once, slice many.** Capture structure, extract focused context.
 
-Install and scan:
+### Install & Scan
 ```bash
 curl -fsSL https://raw.githubusercontent.com/LibraxisAI/loctree/main/tools/install.sh | sh
-loctree . -A
+loctree          # creates .loctree/snapshot.json
 ```
 
-Save to .claude/LOCTREE.md or equivalent:
-
 ### Before creating new components
-`loctree -A --check-sim <Name>` — find similar code first
-`loctree -A --symbol <Name>` — find symbol usages
+```bash
+loctree -A --check <Name>   # find similar (avoids duplicates)
+loctree -A --symbol <Name>  # find symbol definitions & usage
+```
 
 ### Before refactoring
-`loctree slice <file> --consumers` — see what depends on it
-`loctree -A --circular` — detect import cycles
+```bash
+loctree slice <file> --consumers  # what depends on it
+loctree -A --impact <file>        # what breaks if removed
+loctree -A --circular             # detect import cycles
+```
 
 ### Dead code detection
-`loctree -A --dead` — find unused exports
-`loctree -A --entrypoints` — find main/script entry points
+```bash
+loctree -A --dead                 # unused exports
+loctree -A --entrypoints          # main/script entry points
+```
 
-### For focused context
-`loctree slice <file> --consumers --json`
+### Focused AI context
+```bash
+loctree slice <file> --consumers --json | claude
+```
 
 ### Tauri FE<>BE coverage
-`loctree -A --preset-tauri` — command/event bridge analysis
+```bash
+loctree -A --preset-tauri src src-tauri/src
+```
 
-### CI checks
-`loctree -A --fail-on-missing-handlers --sarif`"#;
+### CI pipeline checks
+```bash
+loctree -A --fail-on-missing-handlers   # FE->BE integrity
+loctree -A --fail-on-ghost-events       # unused events
+loctree -A --sarif > results.sarif      # SARIF output
+```"#;
 
-    let copy_content = move |_| {
+    let copy_install = move |_| {
         if let Some(window) = web_sys::window() {
             let clipboard = window.navigator().clipboard();
-            let content = if active_tab.get() == "humans" {
-                human_content
-            } else {
-                agent_prompt
-            };
-            let _ = clipboard.write_text(content);
-            set_copied.set(true);
+            let _ = clipboard.write_text(install_command);
+            set_install_copied.set(true);
             set_timeout(
-                move || set_copied.set(false),
+                move || set_install_copied.set(false),
                 std::time::Duration::from_millis(2000),
             );
         }
     };
 
-    view! {
-        <section class="agent-hero">
-            <div class="container">
-                <div class="agent-hero-inner">
-                    // Tab switcher
-                    <div class="hero-tabs">
-                        <button
-                            class=move || if active_tab.get() == "humans" { "hero-tab active" } else { "hero-tab" }
-                            on:click=move |_| set_active_tab.set("humans")
-                        >
-                            "FOR HUMANS"
-                        </button>
-                        <button
-                            class=move || if active_tab.get() == "agents" { "hero-tab active" } else { "hero-tab" }
-                            on:click=move |_| set_active_tab.set("agents")
-                        >
-                            <span class="blink">"_"</span>
-                            " FOR AI AGENTS"
-                        </button>
-                    </div>
+    let copy_prompt = move |_| {
+        if let Some(window) = web_sys::window() {
+            let clipboard = window.navigator().clipboard();
+            let content = if expanded.get() { agent_prompt_full } else { agent_prompt_short };
+            let _ = clipboard.write_text(content);
+            set_prompt_copied.set(true);
+            set_timeout(
+                move || set_prompt_copied.set(false),
+                std::time::Duration::from_millis(2000),
+            );
+        }
+    };
 
-                    // Content
-                    <Show when=move || active_tab.get() == "humans">
-                        <pre class="agent-hero-prompt">{human_content}</pre>
-                    </Show>
-                    <Show when=move || active_tab.get() == "agents">
-                        <pre class="agent-hero-prompt">{agent_prompt}</pre>
-                    </Show>
-
-                    <button class="copy-btn" on:click=copy_content>
-                        {move || if copied.get() { "COPIED" } else { "COPY TO CLIPBOARD" }}
-                    </button>
-                </div>
-            </div>
-        </section>
-    }
-}
-
-// ============================================
-// Navigation
-// ============================================
-#[component]
-fn Nav() -> impl IntoView {
     view! {
         <nav class="nav">
             <div class="nav-inner">
@@ -146,11 +135,80 @@ fn Nav() -> impl IntoView {
                 </a>
                 <div class="nav-links">
                     <a href="#features" class="nav-link">"Features"</a>
-                    <a href="#slice" class="nav-link">"Slice Mode"</a>
+                    <a href="#slice" class="nav-link">"Slice"</a>
+                    <a href="#cli" class="nav-link">"CLI"</a>
                     <a href="https://github.com/LibraxisAI/loctree" target="_blank" class="nav-link">"GitHub"</a>
-                    <a href="#install" class="nav-cta">"Install"</a>
+                    <button
+                        class=move || if drawer_open.get() { "nav-cta active" } else { "nav-cta" }
+                        on:click=move |_| set_drawer_open.update(|o| *o = !*o)
+                    >
+                        {move || if drawer_open.get() { "Close" } else { "Install" }}
+                    </button>
                 </div>
             </div>
+
+            // Dropdown drawer overlay
+            <Show when=move || drawer_open.get()>
+                <div class="nav-drawer">
+                    <div class="nav-drawer-inner">
+                        // Tab switcher
+                        <div class="drawer-tabs">
+                            <button
+                                class=move || if active_tab.get() == "humans" { "drawer-tab active" } else { "drawer-tab" }
+                                on:click=move |_| set_active_tab.set("humans")
+                            >
+                                "FOR HUMANS"
+                            </button>
+                            <button
+                                class=move || if active_tab.get() == "agents" { "drawer-tab active" } else { "drawer-tab" }
+                                on:click=move |_| set_active_tab.set("agents")
+                            >
+                                <span class="blink">"_"</span>
+                                " FOR AI AGENTS"
+                            </button>
+                        </div>
+
+                        // Content - FOR HUMANS
+                        <Show when=move || active_tab.get() == "humans">
+                            <div class="drawer-content">
+                                <div class="code-block-with-copy">
+                                    <code class="code-block-content">{install_command}</code>
+                                    <button class="code-copy-btn" on:click=copy_install>
+                                        {move || if install_copied.get() { "copied" } else { "copy" }}
+                                    </button>
+                                </div>
+                                <p class="prompt-cta">
+                                    "Or paste "
+                                    <button class="prompt-link" on:click=move |_| set_active_tab.set("agents")>
+                                        "this prompt"
+                                    </button>
+                                    " to your AI Agent. "
+                                    <span class="prompt-cta-dim">"Loctree is agentic-friendly by design."</span>
+                                </p>
+                            </div>
+                        </Show>
+
+                        // Content - FOR AI AGENTS
+                        <Show when=move || active_tab.get() == "agents">
+                            <div class="drawer-content">
+                                <div class="prompt-box">
+                                    <div class="prompt-box-inner">
+                                        <pre class="prompt-content">
+                                            {move || if expanded.get() { agent_prompt_full } else { agent_prompt_short }}
+                                        </pre>
+                                        <button class="prompt-copy-btn" on:click=copy_prompt>
+                                            {move || if prompt_copied.get() { "copied" } else { "copy" }}
+                                        </button>
+                                    </div>
+                                    <button class="prompt-expand-btn" on:click=move |_| set_expanded.update(|e| *e = !*e)>
+                                        {move || if expanded.get() { "[ - collapse ]" } else { "[ + expand full prompt ]" }}
+                                    </button>
+                                </div>
+                            </div>
+                        </Show>
+                    </div>
+                </div>
+            </Show>
         </nav>
     }
 }
@@ -258,7 +316,7 @@ fn Features() -> impl IntoView {
         <section id="features" class="features">
             <div class="container">
                 <div class="section-header">
-                    <p class="section-eyebrow">"Features"</p>
+                    <p class="section-eyebrow">"v0.5.0-rc Features"</p>
                     <h2 class="section-title">"Built for AI agents and vibe-coders"</h2>
                     <p class="section-description">
                         "Solve context drift. Find existing components before creating duplicates. "
@@ -267,46 +325,76 @@ fn Features() -> impl IntoView {
                 </div>
                 <div class="features-grid">
                     <FeatureCard
-                        icon="🔬"
-                        icon_class="green"
+                        icon="[1]"
                         title="Holographic Slice"
-                        description="Extract 3-layer context for any file: Core (target), Deps (imports), Consumers (what uses it). Perfect for AI conversations."
-                        code=Some("loctree slice src/App.tsx --consumers --json | claude")
+                        description="3-layer context extraction: Core (target), Deps (imports), Consumers (what uses it). Pipe directly to AI."
+                        code=Some("loctree slice src/App.tsx --consumers --json")
                     />
                     <FeatureCard
-                        icon="🔍"
-                        icon_class="cyan"
+                        icon="[2]"
                         title="Auto-detect Stack"
-                        description="Automatically detects Rust, TypeScript, Python, or Tauri projects. Configures sensible ignores (node_modules, target, .venv)."
-                        code=None
+                        description="Detects Rust, TypeScript, Python, Tauri. Configures sensible ignores automatically."
+                        code=Some("Cargo.toml -> Rust | tsconfig.json -> TS")
                     />
                     <FeatureCard
-                        icon="🔄"
-                        icon_class="purple"
+                        icon="[3]"
+                        title="Duplicate Detection"
+                        description="Before creating new components, find similar existing ones. Prevents AI code duplication."
+                        code=Some("loctree -A --check ChatSurface")
+                    />
+                    <FeatureCard
+                        icon="[4]"
                         title="Circular Import Detection"
-                        description="Find circular dependencies that compile but break at runtime. Uses SCC algorithm for accurate cycle detection."
+                        description="Find circular dependencies that compile but break at runtime. Uses SCC algorithm."
                         code=Some("loctree -A --circular")
                     />
                     <FeatureCard
-                        icon="🧹"
-                        icon_class="orange"
-                        title="Janitor Mode"
-                        description="Find dead exports, check for similar components before creating new ones, analyze impact of changes."
-                        code=Some("loctree -A --dead --check ChatSurface")
+                        icon="[5]"
+                        title="Dead Code Detection"
+                        description="Find unused exports and orphaned code. Clean up before it becomes tech debt."
+                        code=Some("loctree -A --dead --confidence high")
                     />
                     <FeatureCard
-                        icon="⚡"
-                        icon_class="green"
+                        icon="[6]"
+                        title="Impact Analysis"
+                        description="See what breaks if you change a file. Understand dependencies before refactoring."
+                        code=Some("loctree -A --impact src/utils/api.ts")
+                    />
+                    <FeatureCard
+                        icon="[7]"
+                        title="Symbol Search"
+                        description="Find where any symbol is defined and used across the codebase."
+                        code=Some("loctree -A --symbol useAuth")
+                    />
+                    <FeatureCard
+                        icon="[8]"
                         title="Incremental Scanning"
-                        description="After first scan, uses file mtime to skip unchanged files. Typical re-scans: \"47 cached, 3 fresh\"."
-                        code=None
+                        description="After first scan, uses mtime to skip unchanged files. Typical: \"47 cached, 3 fresh\"."
+                        code=Some("--full-scan to force re-analysis")
                     />
                     <FeatureCard
-                        icon="🔗"
-                        icon_class="cyan"
+                        icon="[9]"
+                        title="Entry Points"
+                        description="List all main functions and script entry points in your project."
+                        code=Some("loctree -A --entrypoints")
+                    />
+                    <FeatureCard
+                        icon="[10]"
+                        title="Tauri Bridge Analysis"
+                        description="FE<>BE coverage for Tauri projects. Find missing handlers and ghost events."
+                        code=Some("loctree -A --preset-tauri src src-tauri/src")
+                    />
+                    <FeatureCard
+                        icon="[11]"
                         title="CI Pipeline Checks"
-                        description="Fail builds on missing handlers, ghost events, or race conditions. SARIF output for GitHub/GitLab integration."
-                        code=Some("loctree -A --fail-on-missing-handlers --sarif")
+                        description="Fail builds on missing handlers, ghost events, or race conditions."
+                        code=Some("--fail-on-missing-handlers")
+                    />
+                    <FeatureCard
+                        icon="[12]"
+                        title="SARIF Output"
+                        description="SARIF 2.1.0 output for GitHub Actions, GitLab CI, and other CI/CD systems."
+                        code=Some("loctree -A --sarif > results.sarif")
                     />
                 </div>
             </div>
@@ -317,20 +405,38 @@ fn Features() -> impl IntoView {
 #[component]
 fn FeatureCard(
     icon: &'static str,
-    icon_class: &'static str,
     title: &'static str,
     description: &'static str,
     code: Option<&'static str>,
 ) -> impl IntoView {
+    let (copied, set_copied) = signal(false);
+
     view! {
         <article class="feature-card">
-            <div class=format!("feature-icon {}", icon_class)>
-                {icon}
-            </div>
+            <div class="feature-icon">{icon}</div>
             <h3 class="feature-title">{title}</h3>
             <p class="feature-description">{description}</p>
-            {code.map(|c| view! {
-                <div class="feature-code">{c}</div>
+            {code.map(|c| {
+                let code_text = c;
+                let copy_code = move |_| {
+                    if let Some(window) = web_sys::window() {
+                        let clipboard = window.navigator().clipboard();
+                        let _ = clipboard.write_text(code_text);
+                        set_copied.set(true);
+                        set_timeout(
+                            move || set_copied.set(false),
+                            std::time::Duration::from_millis(1500),
+                        );
+                    }
+                };
+                view! {
+                    <div class="feature-code-box">
+                        <code class="feature-code-text">{c}</code>
+                        <button class="feature-copy-btn" on:click=copy_code>
+                            {move || if copied.get() { "ok" } else { "cp" }}
+                        </button>
+                    </div>
+                }
             })}
         </article>
     }
@@ -439,6 +545,120 @@ fn StackCard(
             <div class="stack-marker">{marker}</div>
             <div class="stack-ignores">"→ ignores "{ignores}</div>
         </div>
+    }
+}
+
+// ============================================
+// CLI Reference Section
+// ============================================
+#[component]
+fn CliReference() -> impl IntoView {
+    view! {
+        <section id="cli" class="cli-reference">
+            <div class="container">
+                <div class="section-header">
+                    <p class="section-eyebrow">"CLI Reference"</p>
+                    <h2 class="section-title">"Full command reference"</h2>
+                </div>
+                <div class="cli-grid">
+                    <div class="cli-group">
+                        <h3 class="cli-group-title">"Modes"</h3>
+                        <div class="cli-item">
+                            <code class="cli-cmd">"loctree"</code>
+                            <span class="cli-desc">"Scan and save snapshot (default)"</span>
+                        </div>
+                        <div class="cli-item">
+                            <code class="cli-cmd">"loctree slice <file>"</code>
+                            <span class="cli-desc">"Holographic slice for AI context"</span>
+                        </div>
+                        <div class="cli-item">
+                            <code class="cli-cmd">"loctree -A"</code>
+                            <span class="cli-desc">"Import/export analyzer mode"</span>
+                        </div>
+                    </div>
+
+                    <div class="cli-group">
+                        <h3 class="cli-group-title">"Slice Options"</h3>
+                        <div class="cli-item">
+                            <code class="cli-cmd">"--consumers"</code>
+                            <span class="cli-desc">"Include files that import target"</span>
+                        </div>
+                        <div class="cli-item">
+                            <code class="cli-cmd">"--json"</code>
+                            <span class="cli-desc">"JSON output for piping to AI"</span>
+                        </div>
+                    </div>
+
+                    <div class="cli-group">
+                        <h3 class="cli-group-title">"Analyzer Options (-A)"</h3>
+                        <div class="cli-item">
+                            <code class="cli-cmd">"--circular"</code>
+                            <span class="cli-desc">"Find circular imports"</span>
+                        </div>
+                        <div class="cli-item">
+                            <code class="cli-cmd">"--dead"</code>
+                            <span class="cli-desc">"Find unused exports"</span>
+                        </div>
+                        <div class="cli-item">
+                            <code class="cli-cmd">"--entrypoints"</code>
+                            <span class="cli-desc">"List entry points"</span>
+                        </div>
+                        <div class="cli-item">
+                            <code class="cli-cmd">"--check <query>"</code>
+                            <span class="cli-desc">"Find similar components"</span>
+                        </div>
+                        <div class="cli-item">
+                            <code class="cli-cmd">"--impact <file>"</code>
+                            <span class="cli-desc">"Show what imports target"</span>
+                        </div>
+                        <div class="cli-item">
+                            <code class="cli-cmd">"--symbol <name>"</code>
+                            <span class="cli-desc">"Search for symbol"</span>
+                        </div>
+                        <div class="cli-item">
+                            <code class="cli-cmd">"--sarif"</code>
+                            <span class="cli-desc">"SARIF 2.1.0 output for CI"</span>
+                        </div>
+                    </div>
+
+                    <div class="cli-group">
+                        <h3 class="cli-group-title">"Pipeline Checks"</h3>
+                        <div class="cli-item">
+                            <code class="cli-cmd">"--fail-on-missing-handlers"</code>
+                            <span class="cli-desc">"FE->BE integrity"</span>
+                        </div>
+                        <div class="cli-item">
+                            <code class="cli-cmd">"--fail-on-ghost-events"</code>
+                            <span class="cli-desc">"Unused events"</span>
+                        </div>
+                        <div class="cli-item">
+                            <code class="cli-cmd">"--fail-on-races"</code>
+                            <span class="cli-desc">"Race conditions"</span>
+                        </div>
+                    </div>
+
+                    <div class="cli-group">
+                        <h3 class="cli-group-title">"Common Flags"</h3>
+                        <div class="cli-item">
+                            <code class="cli-cmd">"-g, --gitignore"</code>
+                            <span class="cli-desc">"Respect .gitignore"</span>
+                        </div>
+                        <div class="cli-item">
+                            <code class="cli-cmd">"--full-scan"</code>
+                            <span class="cli-desc">"Ignore mtime cache"</span>
+                        </div>
+                        <div class="cli-item">
+                            <code class="cli-cmd">"--verbose"</code>
+                            <span class="cli-desc">"Detailed progress"</span>
+                        </div>
+                        <div class="cli-item">
+                            <code class="cli-cmd">"--preset-tauri"</code>
+                            <span class="cli-desc">"Tauri FE<>BE mode"</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
     }
 }
 
