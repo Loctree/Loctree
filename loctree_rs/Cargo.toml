@@ -22,7 +22,7 @@ regex = "1.12"
 globset = "0.4"
 heck = "0.5"
 time = { version = "0.3", features = ["formatting"] }
-report-leptos = { version = "0.1", path = "../report-leptos", optional = true }
+report-leptos = { version = "0.1", path = "../reports", optional = true }
 
 [features]
 default = ["leptos-reports"]

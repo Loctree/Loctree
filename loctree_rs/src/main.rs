@@ -200,7 +200,6 @@ fn main() -> std::io::Result<()> {
             parsed.ignore_patterns.extend(loctreeignore_patterns);
         }
     }
-
     if parsed.show_help {
         println!("{}", format_usage());
         return Ok(());
