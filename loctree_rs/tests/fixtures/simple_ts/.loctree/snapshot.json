@@ -1,7 +1,7 @@
 {
   "metadata": {
     "schema_version": "0.5.0-rc",
-    "generated_at": "2025-11-29T11:30:53.514738000Z",
+    "generated_at": "2025-11-29T23:08:58.138476000Z",
     "roots": [
       "/Users/maciejgad/hosted/loctree/loctree_rs/tests/fixtures/simple_ts"
     ],
@@ -10,7 +10,7 @@
     ],
     "file_count": 3,
     "total_loc": 26,
-    "scan_duration_ms": 56,
+    "scan_duration_ms": 61,
     "resolver_config": null
   },
   "files": [
@@ -155,20 +155,20 @@
     }
   ],
   "export_index": {
-    "farewell": [
-      "src/utils/greeting.ts"
-    ],
     "parseDate": [
       "src/utils/date.ts"
     ],
-    "formatDate": [
-      "src/utils/date.ts"
+    "main": [
+      "src/index.ts"
     ],
     "greet": [
       "src/utils/greeting.ts"
     ],
-    "main": [
-      "src/index.ts"
+    "farewell": [
+      "src/utils/greeting.ts"
+    ],
+    "formatDate": [
+      "src/utils/date.ts"
     ]
   },
   "command_bridges": [],
