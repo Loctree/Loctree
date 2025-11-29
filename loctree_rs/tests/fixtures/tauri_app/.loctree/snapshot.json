@@ -1,17 +1,17 @@
 {
   "metadata": {
     "schema_version": "0.5.0-rc",
-    "generated_at": "2025-11-29T23:08:58.148383000Z",
+    "generated_at": "2025-11-29T23:48:57.628351000Z",
     "roots": [
-      "/Users/maciejgad/hosted/loctree/loctree_rs/tests/fixtures/tauri_app"
+      "/Users/maciejgad/.claude-worktrees/loctree/awesome-gauss/loctree_rs/tests/fixtures/tauri_app"
     ],
     "languages": [
-      "ts",
-      "rs"
+      "rs",
+      "ts"
     ],
     "file_count": 2,
     "total_loc": 45,
-    "scan_duration_ms": 63,
+    "scan_duration_ms": 46,
     "resolver_config": null
   },
   "files": [
@@ -79,7 +79,7 @@
       "matches": [],
       "entry_points": [],
       "tauri_registered_handlers": [],
-      "mtime": 1764415308
+      "mtime": 1764458929
     },
     {
       "path": "src-tauri/src/main.rs",
@@ -128,7 +128,7 @@
         "save_data",
         "unused_handler"
       ],
-      "mtime": 1764415312
+      "mtime": 1764458929
     }
   ],
   "edges": [],
@@ -139,28 +139,15 @@
   },
   "command_bridges": [
     {
-      "name": "unused_handler",
-      "frontend_calls": [],
-      "backend_handler": [
-        "src-tauri/src/main.rs",
-        16
-      ],
-      "has_handler": true,
-      "is_called": false
-    },
-    {
-      "name": "greet",
+      "name": "missing_handler",
       "frontend_calls": [
         [
           "src/App.tsx",
-          6
+          16
         ]
       ],
-      "backend_handler": [
-        "src-tauri/src/main.rs",
-        4
-      ],
-      "has_handler": true,
+      "backend_handler": null,
+      "has_handler": false,
       "is_called": true
     },
     {
@@ -179,16 +166,29 @@
       "is_called": true
     },
     {
-      "name": "missing_handler",
+      "name": "greet",
       "frontend_calls": [
         [
           "src/App.tsx",
-          16
+          6
         ]
       ],
-      "backend_handler": null,
-      "has_handler": false,
+      "backend_handler": [
+        "src-tauri/src/main.rs",
+        4
+      ],
+      "has_handler": true,
       "is_called": true
+    },
+    {
+      "name": "unused_handler",
+      "frontend_calls": [],
+      "backend_handler": [
+        "src-tauri/src/main.rs",
+        16
+      ],
+      "has_handler": true,
+      "is_called": false
     }
   ],
   "event_bridges": [],
