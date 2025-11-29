@@ -6,12 +6,12 @@ use serde_json::json;
 use std::io::IsTerminal;
 
 use crate::fs_utils::{
-    count_lines, is_allowed_hidden, normalise_ignore_patterns, should_ignore, sort_dir_entries,
-    GitIgnoreChecker,
+    GitIgnoreChecker, count_lines, is_allowed_hidden, normalise_ignore_patterns, should_ignore,
+    sort_dir_entries,
 };
 use crate::types::{
-    Collectors, ColorMode, LargeEntry, LineEntry, Options, OutputMode, Stats, COLOR_RED,
-    COLOR_RESET,
+    COLOR_RED, COLOR_RESET, Collectors, ColorMode, LargeEntry, LineEntry, Options, OutputMode,
+    Stats,
 };
 
 /// List of common build artifact directory names that typically contain

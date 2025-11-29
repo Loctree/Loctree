@@ -16,7 +16,7 @@ use serde_json::json;
 use crate::similarity::similarity;
 use crate::types::{FileAnalysis, OutputMode, ReexportKind};
 
-use super::root_scan::{normalize_module_id, RootContext};
+use super::root_scan::{RootContext, normalize_module_id};
 
 /// Result of symbol search across the codebase
 pub struct SymbolSearchResult {
