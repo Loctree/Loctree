@@ -177,10 +177,10 @@ pub fn apply_detected_stack(
     }
 
     // Apply preset
-    if let Some(preset) = detected.preset_name {
-        if preset == "tauri" {
-            *tauri_preset = true;
-        }
+    if let Some(preset) = detected.preset_name
+        && preset == "tauri"
+    {
+        *tauri_preset = true;
     }
 }
 

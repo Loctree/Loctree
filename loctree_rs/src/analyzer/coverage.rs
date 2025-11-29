@@ -33,15 +33,15 @@ fn strip_excluded_paths(
         .iter()
         .filter_map(|(p, line, _)| {
             let pb = std::path::Path::new(p);
-            if let Some(ex) = exclude {
-                if ex.is_match(pb) {
-                    return None;
-                }
+            if let Some(ex) = exclude
+                && ex.is_match(pb)
+            {
+                return None;
             }
-            if let Some(focus_globs) = focus {
-                if !focus_globs.is_match(pb) {
-                    return None;
-                }
+            if let Some(focus_globs) = focus
+                && !focus_globs.is_match(pb)
+            {
+                return None;
             }
             Some((p.clone(), *line))
         })
@@ -120,6 +120,51 @@ pub fn compute_command_gaps(
         .collect();
 
     (missing_handlers, unused_handlers)
+}
+
+/// Compute gaps for backend handlers that are defined but never registered with Tauri.
+///
+/// `be_commands` is the full backend command usage map (including both registered and
+/// unregistered handlers). `registered_impls` is the set of Rust function names that
+/// are actually registered via `tauri::generate_handler![...]` across the project.
+///
+/// We treat a command name as "unregistered" if **none** of its implementation symbols
+/// appear in `registered_impls`. Paths are filtered through `focus_set` / `exclude_set`
+/// in the same way as in `compute_command_gaps`.
+pub fn compute_unregistered_handlers(
+    be_commands: &CommandUsage,
+    registered_impls: &std::collections::HashSet<String>,
+    focus_set: &Option<GlobSet>,
+    exclude_set: &Option<GlobSet>,
+) -> Vec<CommandGap> {
+    be_commands
+        .iter()
+        .filter_map(|(name, locs)| {
+            // If any impl symbol for this command is registered, skip it.
+            let has_registered_impl = locs
+                .iter()
+                .any(|(_, _, impl_name)| registered_impls.contains(impl_name));
+            if has_registered_impl {
+                return None;
+            }
+
+            let kept = strip_excluded_paths(locs, focus_set, exclude_set);
+            if kept.is_empty() {
+                return None;
+            }
+
+            let impl_name = locs
+                .iter()
+                .find(|(p, l, _)| p == &kept[0].0 && *l == kept[0].1)
+                .map(|(_, _, n)| n.clone());
+
+            Some(CommandGap {
+                name: name.clone(),
+                implementation_name: impl_name,
+                locations: kept,
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]

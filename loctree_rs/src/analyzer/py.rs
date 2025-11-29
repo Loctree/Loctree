@@ -125,19 +125,11 @@ fn read_all_from_resolved(resolved: &Option<String>, root: &Path) -> Option<Vec<
     let path_str = resolved.as_ref()?;
     let candidate = {
         let p = PathBuf::from(path_str);
-        if p.is_absolute() {
-            p
-        } else {
-            root.join(p)
-        }
+        if p.is_absolute() { p } else { root.join(p) }
     };
     let content = std::fs::read_to_string(&candidate).ok()?;
     let names = parse_all_list(&content);
-    if names.is_empty() {
-        None
-    } else {
-        Some(names)
-    }
+    if names.is_empty() { None } else { Some(names) }
 }
 
 fn resolve_python_import(
@@ -226,41 +218,41 @@ pub(crate) fn analyze_py_file(
                     analysis.imports.push(entry);
                 }
             }
-        } else if let Some(rest) = trimmed.strip_prefix("from ") {
-            if let Some((module, names_raw)) = rest.split_once(" import ") {
-                let module = module.trim().trim_end_matches('.');
-                let names_clean = names_raw.trim().trim_matches('(').trim_matches(')');
-                let names_clean = names_clean.split('#').next().unwrap_or("").trim();
-                if !module.is_empty() {
-                    let mut entry = ImportEntry::new(module.to_string(), ImportKind::Static);
-                    let (resolved, resolution) =
-                        resolve_python_import(module, path, root, py_roots, extensions, stdlib);
-                    entry.resolution = resolution;
-                    entry.resolved_path = resolved.clone();
-                    entry.is_type_checking = in_type_checking;
-                    analysis.imports.push(entry);
-                }
-                if names_clean == "*" {
-                    let (resolved, _) =
-                        resolve_python_import(module, path, root, py_roots, extensions, stdlib);
-                    let mut entry = ReexportEntry {
-                        source: module.to_string(),
-                        kind: ReexportKind::Star,
-                        resolved: resolved.clone(),
-                    };
-                    if let Some(names) = read_all_from_resolved(&resolved, root) {
-                        for name in &names {
-                            analysis.exports.push(ExportSymbol::new(
-                                name.clone(),
-                                "reexport",
-                                "named",
-                                None,
-                            ));
-                        }
-                        entry.kind = ReexportKind::Named(names);
+        } else if let Some(rest) = trimmed.strip_prefix("from ")
+            && let Some((module, names_raw)) = rest.split_once(" import ")
+        {
+            let module = module.trim().trim_end_matches('.');
+            let names_clean = names_raw.trim().trim_matches('(').trim_matches(')');
+            let names_clean = names_clean.split('#').next().unwrap_or("").trim();
+            if !module.is_empty() {
+                let mut entry = ImportEntry::new(module.to_string(), ImportKind::Static);
+                let (resolved, resolution) =
+                    resolve_python_import(module, path, root, py_roots, extensions, stdlib);
+                entry.resolution = resolution;
+                entry.resolved_path = resolved.clone();
+                entry.is_type_checking = in_type_checking;
+                analysis.imports.push(entry);
+            }
+            if names_clean == "*" {
+                let (resolved, _) =
+                    resolve_python_import(module, path, root, py_roots, extensions, stdlib);
+                let mut entry = ReexportEntry {
+                    source: module.to_string(),
+                    kind: ReexportKind::Star,
+                    resolved: resolved.clone(),
+                };
+                if let Some(names) = read_all_from_resolved(&resolved, root) {
+                    for name in &names {
+                        analysis.exports.push(ExportSymbol::new(
+                            name.clone(),
+                            "reexport",
+                            "named",
+                            None,
+                        ));
                     }
-                    analysis.reexports.push(entry);
+                    entry.kind = ReexportKind::Named(names);
                 }
+                analysis.reexports.push(entry);
             }
         }
     }
@@ -432,11 +424,13 @@ dyn = __import__("x.y")
             .find(|i| i.source == "json")
             .expect("json import");
         assert_eq!(json_imp.resolution, ImportResolutionKind::Local);
-        assert!(json_imp
-            .resolved_path
-            .as_deref()
-            .unwrap_or("")
-            .ends_with("json.py"));
+        assert!(
+            json_imp
+                .resolved_path
+                .as_deref()
+                .unwrap_or("")
+                .ends_with("json.py")
+        );
 
         assert_eq!(analysis.dynamic_imports.len(), 2);
         assert!(analysis.dynamic_imports.iter().any(|s| s.contains("pkg.")));

@@ -110,12 +110,11 @@ pub fn should_ignore(
     {
         return true;
     }
-    if options.use_gitignore {
-        if let Some(checker) = git_checker {
-            if checker.is_ignored(full_path) {
-                return true;
-            }
-        }
+    if options.use_gitignore
+        && let Some(checker) = git_checker
+        && checker.is_ignored(full_path)
+    {
+        return true;
     }
     false
 }

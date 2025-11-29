@@ -14,7 +14,7 @@ use super::regexes::{
     regex_invoke_audio, regex_invoke_snake, regex_lazy_import_then, regex_reexport_named,
     regex_reexport_star, regex_safe_invoke, regex_side_effect_import, regex_tauri_invoke,
 };
-use super::resolvers::{resolve_reexport_target, TsPathResolver};
+use super::resolvers::{TsPathResolver, resolve_reexport_target};
 use super::{brace_list_to_names, offset_to_line};
 
 fn parse_import_symbols(raw: &str) -> Vec<ImportSymbol> {
@@ -51,25 +51,25 @@ fn parse_import_symbols(raw: &str) -> Vec<ImportSymbol> {
         default_done = true;
     }
 
-    if let Some(start) = trimmed.find('{') {
-        if let Some(end) = trimmed[start..].find('}') {
-            let inner = &trimmed[start + 1..start + end];
-            for part in inner.split(',') {
-                let part = part.trim();
-                if part.is_empty() {
-                    continue;
-                }
-                if let Some((name, alias)) = part.split_once(" as ") {
-                    symbols.push(ImportSymbol {
-                        name: name.trim().to_string(),
-                        alias: Some(alias.trim().to_string()),
-                    });
-                } else {
-                    symbols.push(ImportSymbol {
-                        name: part.to_string(),
-                        alias: None,
-                    });
-                }
+    if let Some(start) = trimmed.find('{')
+        && let Some(end) = trimmed[start..].find('}')
+    {
+        let inner = &trimmed[start + 1..start + end];
+        for part in inner.split(',') {
+            let part = part.trim();
+            if part.is_empty() {
+                continue;
+            }
+            if let Some((name, alias)) = part.split_once(" as ") {
+                symbols.push(ImportSymbol {
+                    name: name.trim().to_string(),
+                    alias: Some(alias.trim().to_string()),
+                });
+            } else {
+                symbols.push(ImportSymbol {
+                    name: part.to_string(),
+                    alias: None,
+                });
             }
         }
     }
@@ -152,17 +152,17 @@ pub(crate) fn analyze_js_file(
             .map(|i| pos + i)
             .unwrap_or_else(|| content.len());
         let line = &content[line_start..line_end];
-        if let Some(idx) = line.find("//") {
-            if line_start + idx < pos {
-                return true;
-            }
+        if let Some(idx) = line.find("//")
+            && line_start + idx < pos
+        {
+            return true;
         }
         let last_block_open = prefix.rfind("/*");
         let last_block_close = prefix.rfind("*/");
-        if let Some(open_idx) = last_block_open {
-            if last_block_close.is_none_or(|c| c < open_idx) {
-                return true;
-            }
+        if let Some(open_idx) = last_block_open
+            && last_block_close.is_none_or(|c| c < open_idx)
+        {
+            return true;
         }
         false
     };
@@ -474,15 +474,16 @@ invokeAudioCamel<Baz>("cmd_audio_generic");
             "app.tsx".to_string(),
         );
 
-        assert!(analysis
-            .imports
-            .iter()
-            .any(|i| i.source == "./dep" && matches!(i.kind, crate::types::ImportKind::Static)));
-        assert!(analysis
-            .imports
-            .iter()
-            .any(|i| i.source == "./side.css"
-                && matches!(i.kind, crate::types::ImportKind::SideEffect)));
+        assert!(
+            analysis
+                .imports
+                .iter()
+                .any(|i| i.source == "./dep" && matches!(i.kind, crate::types::ImportKind::Static))
+        );
+        assert!(
+            analysis.imports.iter().any(|i| i.source == "./side.css"
+                && matches!(i.kind, crate::types::ImportKind::SideEffect))
+        );
         assert!(analysis.reexports.iter().any(|r| r.source == "./reexports"));
         assert!(analysis.reexports.iter().any(|r| r.source == "./star"));
         assert!(analysis.dynamic_imports.iter().any(|s| s == "./lazy"));

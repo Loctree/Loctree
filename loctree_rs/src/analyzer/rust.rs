@@ -7,7 +7,8 @@ use super::offset_to_line;
 use super::regexes::{
     regex_event_const_rust, regex_event_emit_rust, regex_event_listen_rust,
     regex_rust_async_main_attr, regex_rust_fn_main, regex_rust_pub_use, regex_rust_use,
-    regex_tauri_command_fn, rust_pub_const_regexes, rust_pub_decl_regexes,
+    regex_tauri_command_fn, regex_tauri_generate_handler, rust_pub_const_regexes,
+    rust_pub_decl_regexes,
 };
 
 fn split_words_lower(name: &str) -> Vec<String> {
@@ -321,6 +322,44 @@ pub(crate) fn analyze_rust_file(content: &str, relative: String) -> FileAnalysis
         }
     }
 
+    // Tauri generate_handler! registrations
+    for caps in regex_tauri_generate_handler().captures_iter(content) {
+        if let Some(list) = caps.get(1) {
+            let raw = list.as_str();
+            for part in raw.split(',') {
+                let ident = part.trim();
+                if ident.is_empty() {
+                    continue;
+                }
+                // Strip potential trailing generics or module qualifiers (foo::<T>, module::foo)
+                let base = ident
+                    .split(|c: char| c == ':' || c.is_whitespace() || c == '<')
+                    .next()
+                    .unwrap_or("")
+                    .trim();
+                if base.is_empty() {
+                    continue;
+                }
+                // Basic Rust identifier check: starts with letter or '_', rest alphanumeric or '_'
+                let mut chars = base.chars();
+                if let Some(first) = chars.next() {
+                    if !(first.is_ascii_alphabetic() || first == '_') {
+                        continue;
+                    }
+                    if chars.any(|ch| !(ch.is_ascii_alphanumeric() || ch == '_')) {
+                        continue;
+                    }
+                    if !analysis
+                        .tauri_registered_handlers
+                        .contains(&base.to_string())
+                    {
+                        analysis.tauri_registered_handlers.push(base.to_string());
+                    }
+                }
+            }
+        }
+    }
+
     analysis.event_emits = event_emits;
     analysis.event_listens = event_listens;
 
@@ -362,10 +401,12 @@ pub fn snake_case_func() {}
         let analysis = analyze_rust_file(content, "src/lib.rs".to_string());
 
         // check reexports and public items
-        assert!(analysis
-            .reexports
-            .iter()
-            .any(|r| r.source.contains("foo::{Bar as Baz")));
+        assert!(
+            analysis
+                .reexports
+                .iter()
+                .any(|r| r.source.contains("foo::{Bar as Baz"))
+        );
         let export_names: Vec<_> = analysis.exports.iter().map(|e| e.name.clone()).collect();
         assert!(export_names.contains(&"MyStruct".to_string()));
         assert!(export_names.contains(&"MyEnum".to_string()));

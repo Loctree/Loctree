@@ -6,17 +6,17 @@ use globset::GlobSet;
 use serde_json::json;
 
 use crate::args::ParsedArgs;
-use crate::fs_utils::{gather_files, normalise_ignore_patterns, GitIgnoreChecker};
+use crate::fs_utils::{GitIgnoreChecker, gather_files, normalise_ignore_patterns};
 use crate::types::{ExportIndex, FileAnalysis, ImportKind, Options, PayloadMap};
 
 use super::classify::is_dev_file;
 use super::resolvers::{
-    resolve_js_relative, resolve_python_absolute, resolve_python_relative, TsPathResolver,
+    TsPathResolver, resolve_js_relative, resolve_python_absolute, resolve_python_relative,
 };
 use super::scan::{
     analyze_file, matches_focus, resolve_event_constants_across_files, strip_excluded,
 };
-use super::{coverage::CommandUsage, RankedDup};
+use super::{RankedDup, coverage::CommandUsage};
 
 pub struct ScanConfig<'a> {
     pub roots: &'a [PathBuf],
@@ -296,14 +296,12 @@ pub fn scan_roots(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
                 let collect_edges = cfg.collect_edges
                     || (cfg.parsed.graph && options.report_path.is_some())
                     || options.impact.is_some();
-                if collect_edges {
-                    if let Some(target) = &re.resolved {
-                        graph_edges.push((
-                            analysis.path.clone(),
-                            target.clone(),
-                            "reexport".to_string(),
-                        ));
-                    }
+                if collect_edges && let Some(target) = &re.resolved {
+                    graph_edges.push((
+                        analysis.path.clone(),
+                        target.clone(),
+                        "reexport".to_string(),
+                    ));
                 }
             }
             if !analysis.dynamic_imports.is_empty() {
@@ -495,10 +493,10 @@ pub fn scan_roots(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
 
         let mut cascades = Vec::new();
         for (from, resolved) in &reexport_edges {
-            if let Some(target) = resolved {
-                if reexport_files.contains(target) {
-                    cascades.push((from.clone(), target.clone()));
-                }
+            if let Some(target) = resolved
+                && reexport_files.contains(target)
+            {
+                cascades.push((from.clone(), target.clone()));
             }
         }
 
@@ -598,12 +596,12 @@ pub fn scan_roots(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
         let mut calls_with_generics = Vec::new();
         for analysis in &analyses {
             for call in &analysis.command_calls {
-                if let Some(gen) = &call.generic_type {
+                if let Some(gt) = &call.generic_type {
                     calls_with_generics.push(json!({
                         "name": call.name,
                         "path": analysis.path,
                         "line": call.line,
-                        "genericType": gen,
+                        "genericType": gt,
                     }));
                 }
             }
@@ -612,15 +610,15 @@ pub fn scan_roots(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
         let mut renamed_handlers = Vec::new();
         for analysis in &analyses {
             for handler in &analysis.command_handlers {
-                if let Some(exposed) = &handler.exposed_name {
-                    if exposed != &handler.name {
-                        renamed_handlers.push(json!({
-                            "path": analysis.path,
-                            "line": handler.line,
-                            "name": handler.name,
-                            "exposedName": exposed,
-                        }));
-                    }
+                if let Some(exposed) = &handler.exposed_name
+                    && exposed != &handler.name
+                {
+                    renamed_handlers.push(json!({
+                        "path": analysis.path,
+                        "line": handler.line,
+                        "name": handler.name,
+                        "exposedName": exposed,
+                    }));
                 }
             }
         }

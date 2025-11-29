@@ -96,6 +96,16 @@ pub(crate) fn regex_tauri_command_fn() -> &'static Regex {
     })
 }
 
+/// Matches Tauri registrations like `tauri::generate_handler![foo, bar]` or `generate_handler![foo, bar]`.
+/// Captures the comma-separated list of function identifiers inside the brackets.
+pub(crate) fn regex_tauri_generate_handler() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        // Supports optional `tauri::` prefix and arbitrary whitespace/newlines around the list.
+        regex(r#"(?m)(?:tauri::)?generate_handler!\s*\[([^\]]+)\]"#)
+    })
+}
+
 pub(crate) fn regex_tauri_invoke() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {

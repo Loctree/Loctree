@@ -199,6 +199,9 @@ pub struct FileAnalysis {
     pub matches: Vec<SymbolMatch>,
     #[serde(default)]
     pub entry_points: Vec<String>,
+    /// Names of Rust functions registered via `tauri::generate_handler![...]` in this file
+    #[serde(default)]
+    pub tauri_registered_handlers: Vec<String>,
     /// File modification time (Unix timestamp) for incremental scanning
     #[serde(default)]
     pub mtime: u64,
@@ -251,6 +254,7 @@ impl FileAnalysis {
             event_consts: HashMap::new(),
             matches: Vec::new(),
             entry_points: Vec::new(),
+            tauri_registered_handlers: Vec::new(),
             mtime: 0,
         }
     }

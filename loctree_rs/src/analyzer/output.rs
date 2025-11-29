@@ -2,22 +2,22 @@ use std::collections::{HashMap, HashSet};
 use std::io;
 
 use serde_json::json;
-use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
 use crate::args::ParsedArgs;
 use crate::types::{FileAnalysis, ImportKind, ImportResolutionKind, OutputMode, ReexportKind};
 
-use super::classify::language_from_path;
-use super::graph::{build_graph_data, MAX_GRAPH_EDGES, MAX_GRAPH_NODES};
-use super::html::render_html_report;
-use super::insights::collect_ai_insights;
-use super::open_server::current_open_base;
-use super::root_scan::{normalize_module_id, RootContext};
-use super::scan::resolve_event_constants_across_files;
 use super::CommandGap;
 use super::RankedDup;
 use super::ReportSection;
+use super::classify::language_from_path;
+use super::graph::{MAX_GRAPH_EDGES, MAX_GRAPH_NODES, build_graph_data};
+use super::html::render_html_report;
+use super::insights::collect_ai_insights;
+use super::open_server::current_open_base;
+use super::root_scan::{RootContext, normalize_module_id};
+use super::scan::resolve_event_constants_across_files;
 
 pub struct RootArtifacts {
     pub json_items: Vec<serde_json::Value>,
@@ -32,6 +32,7 @@ pub fn process_root_context(
     fe_commands: &HashMap<String, Vec<(String, usize, String)>>,
     be_commands: &HashMap<String, Vec<(String, usize, String)>>,
     global_missing_handlers: &[CommandGap],
+    global_unregistered_handlers: &[CommandGap],
     global_unused_handlers: &[CommandGap],
     pipeline_summary: &serde_json::Value,
     schema_name: &str,
@@ -77,6 +78,7 @@ pub fn process_root_context(
         .collect();
 
     let missing_handlers = global_missing_handlers.to_vec();
+    let unregistered_handlers = global_unregistered_handlers.to_vec();
     let unused_handlers = global_unused_handlers.to_vec();
 
     let (graph_data, graph_warning) = if parsed.graph && options.report_path.is_some() {
@@ -221,6 +223,10 @@ pub fn process_root_context(
     all_command_names.dedup();
 
     let missing_set: HashSet<String> = missing_handlers.iter().map(|g| g.name.clone()).collect();
+    let unregistered_set: HashSet<String> = unregistered_handlers
+        .iter()
+        .map(|g| g.name.clone())
+        .collect();
     let unused_set: HashSet<String> = unused_handlers.iter().map(|g| g.name.clone()).collect();
 
     let mut commands2 = Vec::new();
@@ -254,6 +260,8 @@ pub fn process_root_context(
             "missing_handler"
         } else if unused_set.contains(name) {
             "unused_handler"
+        } else if unregistered_set.contains(name) {
+            "unregistered_handler"
         } else {
             "ok"
         };
@@ -820,6 +828,7 @@ Top duplicate exports (showing up to {}):",
             dynamic: sorted_dyn,
             analyze_limit: options.analyze_limit,
             missing_handlers: missing_sorted,
+            unregistered_handlers: Vec::new(),
             unused_handlers: unused_sorted,
             command_counts: (fe_commands.len(), be_commands.len()),
             open_base: if options.report_path.is_some() && options.serve {

@@ -68,6 +68,9 @@ pub struct ReportSection {
     pub dynamic: Vec<(String, Vec<String>)>,
     pub analyze_limit: usize,
     pub missing_handlers: Vec<CommandGap>,
+    /// Backend handlers that exist (`#[tauri::command]`) but are never
+    /// registered via `tauri::generate_handler![...]`.
+    pub unregistered_handlers: Vec<CommandGap>,
     pub unused_handlers: Vec<CommandGap>,
     pub command_counts: (usize, usize),
     pub open_base: Option<String>,

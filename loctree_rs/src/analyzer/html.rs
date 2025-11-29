@@ -2,9 +2,9 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
+use super::ReportSection;
 use super::assets::{CYTOSCAPE_COSE_BILKENT_JS, CYTOSCAPE_DAGRE_JS, CYTOSCAPE_JS, DAGRE_JS};
 use super::open_server::url_encode_component;
-use super::ReportSection;
 
 const GRAPH_BOOTSTRAP: &str = include_str!("graph_bootstrap.js");
 
@@ -107,8 +107,13 @@ fn render_command_coverage(out: &mut String, section: &ReportSection) {
         out.push_str("<p class=\"muted\">No Tauri commands detected in this root.</p>");
         return;
     }
-    if section.missing_handlers.is_empty() && section.unused_handlers.is_empty() {
-        out.push_str("<p class=\"muted\">All frontend calls have matching handlers.</p>");
+    if section.missing_handlers.is_empty()
+        && section.unused_handlers.is_empty()
+        && section.unregistered_handlers.is_empty()
+    {
+        out.push_str(
+            "<p class=\"muted\">All frontend calls have matching registered handlers.</p>",
+        );
         return;
     }
 
@@ -173,12 +178,12 @@ fn render_command_coverage(out: &mut String, section: &ReportSection) {
         }
     };
 
-    out.push_str(
-        "<table class=\"command-table\"><tr><th>Missing handlers (FE→BE)</th><th>Handlers unused by FE</th></tr><tr><td>",
-    );
+    out.push_str("<table class=\"command-table\"><tr><th>Missing handlers (FE→BE)</th><th>Handlers unused by FE</th><th>Handlers not registered in Tauri</th></tr><tr><td>");
     render_grouped(&section.missing_handlers, out);
     out.push_str("</td><td>");
     render_grouped(&section.unused_handlers, out);
+    out.push_str("</td><td>");
+    render_grouped(&section.unregistered_handlers, out);
     out.push_str("</td></tr></table>");
 }
 
@@ -463,6 +468,7 @@ mod tests {
             dynamic: vec![("dyn.ts".into(), vec!["./lazy".into()])],
             analyze_limit: 5,
             missing_handlers: Vec::new(),
+            unregistered_handlers: Vec::new(),
             unused_handlers: Vec::new(),
             command_counts: (0, 0),
             open_base: None,
@@ -495,6 +501,7 @@ mod tests {
             dynamic: Vec::new(),
             analyze_limit: 1,
             missing_handlers: Vec::new(),
+            unregistered_handlers: Vec::new(),
             unused_handlers: Vec::new(),
             command_counts: (0, 0),
             open_base: None,

@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-use crate::types::{ColorMode, Mode, OutputMode, DEFAULT_LOC_THRESHOLD};
+use crate::types::{ColorMode, DEFAULT_LOC_THRESHOLD, Mode, OutputMode};
 
 pub struct ParsedArgs {
     pub extensions: Option<HashSet<String>>,
@@ -153,11 +153,7 @@ pub fn parse_extensions(raw: &str) -> Option<HashSet<String>> {
             }
         })
         .collect();
-    if set.is_empty() {
-        None
-    } else {
-        Some(set)
-    }
+    if set.is_empty() { None } else { Some(set) }
 }
 
 fn parse_glob_list(raw: &str) -> Vec<String> {
@@ -232,11 +228,7 @@ pub fn parse_ignore_symbols(raw: &str) -> Option<HashSet<String>> {
             }
         })
         .collect();
-    if set.is_empty() {
-        None
-    } else {
-        Some(set)
-    }
+    if set.is_empty() { None } else { Some(set) }
 }
 
 pub fn preset_ignore_symbols(name: &str) -> Option<HashSet<String>> {
@@ -315,12 +307,12 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
                 i += 1;
             }
             "--color" | "-c" => {
-                if let Some(next) = args.get(i + 1) {
-                    if !next.starts_with('-') {
-                        parsed.color = parse_color_mode(next)?;
-                        i += 2;
-                        continue;
-                    }
+                if let Some(next) = args.get(i + 1)
+                    && !next.starts_with('-')
+                {
+                    parsed.color = parse_color_mode(next)?;
+                    i += 2;
+                    continue;
                 }
                 parsed.color = ColorMode::Always;
                 i += 1;
@@ -371,12 +363,12 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
             }
             "--json" => {
                 parsed.output = OutputMode::Json;
-                if let Some(next) = args.get(i + 1) {
-                    if !next.starts_with('-') {
-                        parsed.json_output_path = Some(PathBuf::from(next));
-                        i += 2;
-                        continue;
-                    }
+                if let Some(next) = args.get(i + 1)
+                    && !next.starts_with('-')
+                {
+                    parsed.json_output_path = Some(PathBuf::from(next));
+                    i += 2;
+                    continue;
                 }
                 i += 1;
             }
@@ -436,12 +428,12 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
             }
             "--summary" => {
                 parsed.summary = true;
-                if let Some(next) = args.get(i + 1) {
-                    if !next.starts_with('-') {
-                        parsed.summary_limit = parse_summary_limit(next)?;
-                        i += 2;
-                        continue;
-                    }
+                if let Some(next) = args.get(i + 1)
+                    && !next.starts_with('-')
+                {
+                    parsed.summary_limit = parse_summary_limit(next)?;
+                    i += 2;
+                    continue;
                 }
                 i += 1;
             }
@@ -555,12 +547,12 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
             }
             "slice" | "--slice" => {
                 parsed.mode = Mode::Slice;
-                if let Some(next) = args.get(i + 1) {
-                    if !next.starts_with('-') {
-                        parsed.slice_target = Some(next.clone());
-                        i += 2;
-                        continue;
-                    }
+                if let Some(next) = args.get(i + 1)
+                    && !next.starts_with('-')
+                {
+                    parsed.slice_target = Some(next.clone());
+                    i += 2;
+                    continue;
                 }
                 i += 1;
             }
