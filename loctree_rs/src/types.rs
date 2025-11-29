@@ -27,6 +27,10 @@ pub enum Mode {
     Init,
     /// VS2 Holographic Slice - extract context for a file
     Slice,
+    /// Trace a handler - show full investigation path and WHY it's unused/missing
+    Trace,
+    /// AI-optimized hierarchical output with quick wins and slice references
+    ForAi,
 }
 
 #[derive(Clone)]
@@ -105,6 +109,7 @@ pub struct ImportEntry {
 pub enum ImportKind {
     Static,
     SideEffect,
+    Dynamic,
 }
 
 #[allow(dead_code)]
@@ -198,6 +203,9 @@ pub struct FileAnalysis {
     pub matches: Vec<SymbolMatch>,
     #[serde(default)]
     pub entry_points: Vec<String>,
+    /// Names of Rust functions registered via `tauri::generate_handler![...]` in this file
+    #[serde(default)]
+    pub tauri_registered_handlers: Vec<String>,
     /// File modification time (Unix timestamp) for incremental scanning
     #[serde(default)]
     pub mtime: u64,
@@ -250,6 +258,7 @@ impl FileAnalysis {
             event_consts: HashMap::new(),
             matches: Vec::new(),
             entry_points: Vec::new(),
+            tauri_registered_handlers: Vec::new(),
             mtime: 0,
         }
     }

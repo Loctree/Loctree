@@ -1,13 +1,45 @@
 use serde::Serialize;
 
-#[derive(Clone)]
+/// Confidence level for unused handler detection.
+/// HIGH = no string literal matches found (likely truly unused)
+/// LOW = string literal matches found (may be used dynamically)
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub enum Confidence {
+    High,
+    Low,
+}
+
+impl std::fmt::Display for Confidence {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Confidence::High => write!(f, "HIGH"),
+            Confidence::Low => write!(f, "LOW"),
+        }
+    }
+}
+
+/// A string literal match in frontend code that might indicate dynamic usage.
+#[derive(Clone, Debug, Serialize)]
+pub struct StringLiteralMatch {
+    pub file: String,
+    pub line: usize,
+    pub context: String, // "allowlist", "const", "object_key", "array_item"
+}
+
+#[derive(Clone, Serialize)]
 pub struct CommandGap {
     pub name: String,
     pub implementation_name: Option<String>,
     pub locations: Vec<(String, usize)>,
+    /// Confidence level (None for missing handlers, Some for unused handlers)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<Confidence>,
+    /// String literal matches that may indicate dynamic usage
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub string_literal_matches: Vec<StringLiteralMatch>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize)]
 pub struct AiInsight {
     pub title: String,
     pub severity: String,
@@ -49,7 +81,7 @@ pub struct GraphData {
     pub main_component_id: usize,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize)]
 pub struct RankedDup {
     pub name: String,
     pub files: Vec<String>,
@@ -60,6 +92,7 @@ pub struct RankedDup {
     pub refactors: Vec<String>,
 }
 
+#[derive(Serialize)]
 pub struct ReportSection {
     pub root: String,
     pub files_analyzed: usize,
@@ -68,6 +101,9 @@ pub struct ReportSection {
     pub dynamic: Vec<(String, Vec<String>)>,
     pub analyze_limit: usize,
     pub missing_handlers: Vec<CommandGap>,
+    /// Backend handlers that exist (`#[tauri::command]`) but are never
+    /// registered via `tauri::generate_handler![...]`.
+    pub unregistered_handlers: Vec<CommandGap>,
     pub unused_handlers: Vec<CommandGap>,
     pub command_counts: (usize, usize),
     pub open_base: Option<String>,

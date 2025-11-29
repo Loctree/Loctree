@@ -1,0 +1,177 @@
+{
+  "metadata": {
+    "schema_version": "0.5.0-rc",
+    "generated_at": "2025-11-29T11:30:53.514738000Z",
+    "roots": [
+      "/Users/maciejgad/hosted/loctree/loctree_rs/tests/fixtures/simple_ts"
+    ],
+    "languages": [
+      "ts"
+    ],
+    "file_count": 3,
+    "total_loc": 26,
+    "scan_duration_ms": 56,
+    "resolver_config": null
+  },
+  "files": [
+    {
+      "path": "src/index.ts",
+      "loc": 10,
+      "language": "ts",
+      "kind": "code",
+      "is_test": false,
+      "is_generated": false,
+      "imports": [
+        {
+          "source": "./utils/greeting",
+          "source_raw": "./utils/greeting",
+          "kind": "Static",
+          "resolved_path": "src/utils/greeting.ts",
+          "is_bare": false,
+          "symbols": [
+            {
+              "name": "greet",
+              "alias": null
+            }
+          ],
+          "resolution": "Unknown",
+          "is_type_checking": false
+        },
+        {
+          "source": "./utils/date",
+          "source_raw": "./utils/date",
+          "kind": "Static",
+          "resolved_path": "src/utils/date.ts",
+          "is_bare": false,
+          "symbols": [
+            {
+              "name": "formatDate",
+              "alias": null
+            }
+          ],
+          "resolution": "Unknown",
+          "is_type_checking": false
+        }
+      ],
+      "reexports": [],
+      "dynamic_imports": [],
+      "exports": [
+        {
+          "name": "main",
+          "kind": "decl",
+          "export_type": "named",
+          "line": 5
+        }
+      ],
+      "command_calls": [],
+      "command_handlers": [],
+      "event_emits": [],
+      "event_listens": [],
+      "event_consts": {},
+      "matches": [],
+      "entry_points": [],
+      "tauri_registered_handlers": [],
+      "mtime": 1764415285
+    },
+    {
+      "path": "src/utils/date.ts",
+      "loc": 8,
+      "language": "ts",
+      "kind": "code",
+      "is_test": false,
+      "is_generated": false,
+      "imports": [],
+      "reexports": [],
+      "dynamic_imports": [],
+      "exports": [
+        {
+          "name": "formatDate",
+          "kind": "decl",
+          "export_type": "named",
+          "line": 2
+        },
+        {
+          "name": "parseDate",
+          "kind": "decl",
+          "export_type": "named",
+          "line": 6
+        }
+      ],
+      "command_calls": [],
+      "command_handlers": [],
+      "event_emits": [],
+      "event_listens": [],
+      "event_consts": {},
+      "matches": [],
+      "entry_points": [],
+      "tauri_registered_handlers": [],
+      "mtime": 1764415286
+    },
+    {
+      "path": "src/utils/greeting.ts",
+      "loc": 8,
+      "language": "ts",
+      "kind": "code",
+      "is_test": false,
+      "is_generated": false,
+      "imports": [],
+      "reexports": [],
+      "dynamic_imports": [],
+      "exports": [
+        {
+          "name": "greet",
+          "kind": "decl",
+          "export_type": "named",
+          "line": 2
+        },
+        {
+          "name": "farewell",
+          "kind": "decl",
+          "export_type": "named",
+          "line": 6
+        }
+      ],
+      "command_calls": [],
+      "command_handlers": [],
+      "event_emits": [],
+      "event_listens": [],
+      "event_consts": {},
+      "matches": [],
+      "entry_points": [],
+      "tauri_registered_handlers": [],
+      "mtime": 1764415285
+    }
+  ],
+  "edges": [
+    {
+      "from": "src/index.ts",
+      "to": "src/utils/greeting.ts",
+      "label": "import"
+    },
+    {
+      "from": "src/index.ts",
+      "to": "src/utils/date.ts",
+      "label": "import"
+    }
+  ],
+  "export_index": {
+    "farewell": [
+      "src/utils/greeting.ts"
+    ],
+    "parseDate": [
+      "src/utils/date.ts"
+    ],
+    "formatDate": [
+      "src/utils/date.ts"
+    ],
+    "greet": [
+      "src/utils/greeting.ts"
+    ],
+    "main": [
+      "src/index.ts"
+    ]
+  },
+  "command_bridges": [],
+  "event_bridges": [],
+  "barrels": []
+}

@@ -1,0 +1,38 @@
+[package]
+name = "report-leptos"
+version = "0.1.0"
+edition = "2021"
+authors = ["LibraxisAI <the1st@whoai.am>"]
+description = "Leptos SSR renderer for generating static HTML reports - beautiful, interactive, type-safe"
+license = "MIT"
+repository = "https://github.com/LibraxisAI/Loctree"
+homepage = "https://github.com/LibraxisAI/Loctree"
+documentation = "https://docs.rs/report-leptos"
+readme = "README.md"
+keywords = ["leptos", "ssr", "html", "report", "static-site"]
+categories = ["web-programming", "template-engine", "visualization"]
+rust-version = "1.75"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+leptos = { version = "0.8", default-features = false, features = ["ssr"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+pretty_assertions = "1"
+
+[features]
+default = []
+# Future: graph-bundle = [] # Bundle Cytoscape JS inline
+
+[[example]]
+name = "basic_report"
+path = "examples/basic_report.rs"
+
+[[example]]
+name = "with_graph"
+path = "examples/with_graph.rs"

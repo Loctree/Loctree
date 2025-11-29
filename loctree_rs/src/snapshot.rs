@@ -341,7 +341,7 @@ impl Snapshot {
 /// Run the init command: scan the project and save snapshot
 pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
     use crate::analyzer::coverage::compute_command_gaps;
-    use crate::analyzer::root_scan::{scan_roots, ScanConfig};
+    use crate::analyzer::root_scan::{ScanConfig, scan_roots};
     use crate::analyzer::runner::default_analyzer_exts;
     use crate::analyzer::scan::{opt_globset, python_stdlib};
 
@@ -394,6 +394,33 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
         "fresh (no existing snapshot)"
     };
     eprintln!("[loctree] Scan mode: {}", scan_mode);
+
+    // Try to load existing snapshot for incremental scanning
+    let cached_analyses: Option<HashMap<String, FileAnalysis>> =
+        if !parsed.full_scan && Snapshot::exists(&snapshot_root) {
+            match Snapshot::load(&snapshot_root) {
+                Ok(old_snapshot) => {
+                    if parsed.verbose {
+                        eprintln!(
+                            "[loctree][incremental] Loaded existing snapshot ({} files cached)",
+                            old_snapshot.files.len()
+                        );
+                    }
+                    Some(old_snapshot.cached_analyses())
+                }
+                Err(e) => {
+                    if parsed.verbose {
+                        eprintln!(
+                            "[loctree][warn] Could not load snapshot for incremental: {}",
+                            e
+                        );
+                    }
+                    None
+                }
+            }
+        } else {
+            None
+        };
 
     // Prepare scan configuration (reusing existing infrastructure)
     let py_stdlib = python_stdlib();

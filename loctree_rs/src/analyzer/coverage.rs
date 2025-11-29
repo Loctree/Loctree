@@ -2,8 +2,11 @@ use std::collections::{HashMap, HashSet};
 
 use globset::GlobSet;
 use heck::ToSnakeCase;
+use regex::Regex;
+use std::sync::OnceLock;
 
-use super::report::CommandGap;
+use super::report::{CommandGap, Confidence, StringLiteralMatch};
+use crate::types::FileAnalysis;
 
 pub type CommandUsage = HashMap<String, Vec<(String, usize, String)>>;
 
@@ -33,19 +36,129 @@ fn strip_excluded_paths(
         .iter()
         .filter_map(|(p, line, _)| {
             let pb = std::path::Path::new(p);
-            if let Some(ex) = exclude {
-                if ex.is_match(pb) {
-                    return None;
-                }
+            if let Some(ex) = exclude
+                && ex.is_match(pb)
+            {
+                return None;
             }
-            if let Some(focus_globs) = focus {
-                if !focus_globs.is_match(pb) {
-                    return None;
-                }
+            if let Some(focus_globs) = focus
+                && !focus_globs.is_match(pb)
+            {
+                return None;
             }
             Some((p.clone(), *line))
         })
         .collect()
+}
+
+/// Regex for finding string literals in frontend code.
+/// Reserved for future content-based scanning.
+#[allow(dead_code)]
+fn regex_string_literal() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r#"['"]([a-z][a-z0-9_]*)['"]"#).expect("valid regex"))
+}
+
+/// Scan frontend files for string literals matching a handler name.
+/// Returns matches that might indicate dynamic invoke usage.
+pub fn find_string_literal_matches(
+    handler_name: &str,
+    analyses: &[FileAnalysis],
+) -> Vec<StringLiteralMatch> {
+    let mut matches = Vec::new();
+    let normalized = normalize_cmd_name(handler_name);
+
+    // Generate search variations (snake_case, camelCase, with/without _command)
+    let variations: HashSet<String> = {
+        let mut v = HashSet::new();
+        v.insert(handler_name.to_string());
+        v.insert(normalized.clone());
+
+        // snake_case variant
+        let snake = handler_name.chars().fold(String::new(), |mut acc, c| {
+            if c.is_ascii_uppercase() && !acc.is_empty() {
+                acc.push('_');
+            }
+            acc.push(c.to_ascii_lowercase());
+            acc
+        });
+        v.insert(snake.clone());
+        v.insert(normalize_cmd_name(&snake));
+
+        // Without _command suffix
+        if let Some(stripped) = handler_name.strip_suffix("_command") {
+            v.insert(stripped.to_string());
+            v.insert(normalize_cmd_name(stripped));
+        }
+        v
+    };
+
+    for analysis in analyses {
+        // Skip Rust files - we want frontend string literals
+        if analysis.path.ends_with(".rs") {
+            continue;
+        }
+
+        // Check exports that might be allowlists or command constants
+        for export in &analysis.exports {
+            let export_lower = export.name.to_lowercase();
+            if variations.iter().any(|v| export_lower.contains(v)) {
+                matches.push(StringLiteralMatch {
+                    file: analysis.path.clone(),
+                    line: export.line.unwrap_or(0),
+                    context: "export/const".to_string(),
+                });
+            }
+        }
+
+        // Check event constants that might reference handler names
+        for (const_name, const_val) in &analysis.event_consts {
+            let val_normalized = normalize_cmd_name(const_val);
+            if variations.contains(&val_normalized)
+                || variations.iter().any(|v| const_val.contains(v))
+            {
+                matches.push(StringLiteralMatch {
+                    file: analysis.path.clone(),
+                    line: 0, // Line not available from event_consts
+                    context: format!("const {} = '{}'", const_name, const_val),
+                });
+            }
+        }
+    }
+
+    matches
+}
+
+/// Scan raw file content for string literal occurrences of handler name.
+/// This is a more thorough scan that finds any string literal matching.
+/// Reserved for future content-based scanning beyond analysis data.
+#[allow(dead_code)]
+pub fn scan_content_for_handler_literals(
+    handler_name: &str,
+    content: &str,
+    file_path: &str,
+) -> Vec<StringLiteralMatch> {
+    let mut matches = Vec::new();
+    let normalized = normalize_cmd_name(handler_name);
+
+    for caps in regex_string_literal().captures_iter(content) {
+        if let Some(lit) = caps.get(1) {
+            let lit_str = lit.as_str();
+            let lit_normalized = normalize_cmd_name(lit_str);
+
+            if lit_normalized == normalized {
+                // Calculate line number
+                let line = content[..lit.start()].matches('\n').count() + 1;
+                matches.push(StringLiteralMatch {
+                    file: file_path.to_string(),
+                    line,
+                    context: format!("string_literal '{}'", lit_str),
+                });
+            }
+        }
+    }
+
+    matches
 }
 
 pub fn compute_command_gaps(
@@ -53,6 +166,17 @@ pub fn compute_command_gaps(
     be_commands: &CommandUsage,
     focus_set: &Option<GlobSet>,
     exclude_set: &Option<GlobSet>,
+) -> (Vec<CommandGap>, Vec<CommandGap>) {
+    compute_command_gaps_with_confidence(fe_commands, be_commands, focus_set, exclude_set, &[])
+}
+
+/// Compute command gaps with confidence scoring based on string literal analysis.
+pub fn compute_command_gaps_with_confidence(
+    fe_commands: &CommandUsage,
+    be_commands: &CommandUsage,
+    focus_set: &Option<GlobSet>,
+    exclude_set: &Option<GlobSet>,
+    analyses: &[FileAnalysis],
 ) -> (Vec<CommandGap>, Vec<CommandGap>) {
     let fe_norms: HashMap<String, String> = fe_commands
         .keys()
@@ -87,6 +211,8 @@ pub fn compute_command_gaps(
                     name: name.clone(),
                     implementation_name: impl_name,
                     locations: kept,
+                    confidence: None, // Missing handlers don't have confidence
+                    string_literal_matches: Vec::new(),
                 })
             }
         })
@@ -110,16 +236,74 @@ pub fn compute_command_gaps(
                     .iter()
                     .find(|(p, l, _)| p == &kept[0].0 && *l == kept[0].1)
                     .map(|(_, _, n)| n.clone());
+
+                // Find string literal matches for confidence scoring
+                let string_literal_matches = find_string_literal_matches(name, analyses);
+                let confidence = if string_literal_matches.is_empty() {
+                    Confidence::High
+                } else {
+                    Confidence::Low
+                };
+
                 Some(CommandGap {
                     name: name.clone(),
                     implementation_name: impl_name,
                     locations: kept,
+                    confidence: Some(confidence),
+                    string_literal_matches,
                 })
             }
         })
         .collect();
 
     (missing_handlers, unused_handlers)
+}
+
+/// Compute gaps for backend handlers that are defined but never registered with Tauri.
+///
+/// `be_commands` is the full backend command usage map (including both registered and
+/// unregistered handlers). `registered_impls` is the set of Rust function names that
+/// are actually registered via `tauri::generate_handler![...]` across the project.
+///
+/// We treat a command name as "unregistered" if **none** of its implementation symbols
+/// appear in `registered_impls`. Paths are filtered through `focus_set` / `exclude_set`
+/// in the same way as in `compute_command_gaps`.
+pub fn compute_unregistered_handlers(
+    be_commands: &CommandUsage,
+    registered_impls: &std::collections::HashSet<String>,
+    focus_set: &Option<GlobSet>,
+    exclude_set: &Option<GlobSet>,
+) -> Vec<CommandGap> {
+    be_commands
+        .iter()
+        .filter_map(|(name, locs)| {
+            // If any impl symbol for this command is registered, skip it.
+            let has_registered_impl = locs
+                .iter()
+                .any(|(_, _, impl_name)| registered_impls.contains(impl_name));
+            if has_registered_impl {
+                return None;
+            }
+
+            let kept = strip_excluded_paths(locs, focus_set, exclude_set);
+            if kept.is_empty() {
+                return None;
+            }
+
+            let impl_name = locs
+                .iter()
+                .find(|(p, l, _)| p == &kept[0].0 && *l == kept[0].1)
+                .map(|(_, _, n)| n.clone());
+
+            Some(CommandGap {
+                name: name.clone(),
+                implementation_name: impl_name,
+                locations: kept,
+                confidence: None, // Unregistered handlers don't have confidence scoring
+                string_literal_matches: Vec::new(),
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -162,5 +346,108 @@ mod tests {
         let (missing, unused) = compute_command_gaps(&fe, &be, &None, &exclude_set);
         assert!(missing.is_empty());
         assert!(unused.is_empty());
+    }
+
+    /// Tests that commands with rename attribute match correctly.
+    /// Simulates: BE has `alpha_status_command` with `rename = "alpha_status"`,
+    /// FE invokes `alpha_status`. They should match.
+    #[test]
+    fn matches_renamed_commands() {
+        // When root_scan processes `#[tauri::command(rename = "alpha_status")]`,
+        // it uses exposed_name ("alpha_status") as the key, not the function name.
+        // So be_commands will have key "alpha_status", not "alpha_status_command".
+        let mut fe: CommandUsage = HashMap::new();
+        fe.insert(
+            "alpha_status".into(),
+            vec![("src/service.ts".into(), 42usize, "alpha_status".into())],
+        );
+        let mut be: CommandUsage = HashMap::new();
+        // Key is the exposed name, impl_name is the function name
+        be.insert(
+            "alpha_status".into(),
+            vec![(
+                "src-tauri/src/commands/alpha_gate.rs".into(),
+                15usize,
+                "alpha_status_command".into(),
+            )],
+        );
+        let (missing, unused) = compute_command_gaps(&fe, &be, &None, &None);
+        assert!(
+            missing.is_empty(),
+            "FE invoke('alpha_status') should match BE handler with rename='alpha_status'"
+        );
+        assert!(
+            unused.is_empty(),
+            "BE alpha_status handler should be detected as used"
+        );
+    }
+
+    /// Tests that suffix stripping doesn't break renamed commands.
+    /// If someone uses `rename = "some_thing_command"` (unusual but valid),
+    /// the _command suffix should still be stripped for matching.
+    #[test]
+    fn suffix_stripping_on_exposed_name() {
+        let mut fe: CommandUsage = HashMap::new();
+        fe.insert(
+            "some_thing".into(),
+            vec![("src/app.ts".into(), 10usize, "some_thing".into())],
+        );
+        let mut be: CommandUsage = HashMap::new();
+        // Edge case: exposed name has _command suffix (will be stripped)
+        be.insert(
+            "some_thing".into(), // After suffix stripping in root_scan
+            vec![("src-tauri/handler.rs".into(), 5usize, "impl_fn".into())],
+        );
+        let (missing, unused) = compute_command_gaps(&fe, &be, &None, &None);
+        assert!(missing.is_empty());
+        assert!(unused.is_empty());
+    }
+
+    /// Tests confidence scoring for unused handlers.
+    /// HIGH confidence = no string literal matches found.
+    /// LOW confidence = string literal matches found (may be dynamic usage).
+    #[test]
+    fn confidence_scoring_for_unused_handlers() {
+        use super::Confidence;
+        use crate::types::{ExportSymbol, FileAnalysis};
+
+        let fe: CommandUsage = HashMap::new();
+        // No FE usage - both BE handlers are unused
+        let mut be: CommandUsage = HashMap::new();
+        be.insert(
+            "truly_unused".into(),
+            vec![("src-tauri/cmd.rs".into(), 10usize, "truly_unused".into())],
+        );
+        be.insert(
+            "get_pin_status".into(),
+            vec![("src-tauri/cmd.rs".into(), 20usize, "get_pin_status".into())],
+        );
+
+        // Create analyses with exports that reference one handler name
+        let mut analysis = FileAnalysis::new("src/commands.ts".into());
+        analysis.exports.push(ExportSymbol::new(
+            "GET_PIN_STATUS_CMD".into(), // Contains handler name
+            "const",
+            "named",
+            Some(5),
+        ));
+
+        let (missing, unused) =
+            compute_command_gaps_with_confidence(&fe, &be, &None, &None, &[analysis]);
+
+        assert!(missing.is_empty());
+        assert_eq!(unused.len(), 2);
+
+        // Find handlers by name
+        let truly_unused = unused.iter().find(|g| g.name == "truly_unused").unwrap();
+        let pin_status = unused.iter().find(|g| g.name == "get_pin_status").unwrap();
+
+        // truly_unused should have HIGH confidence (no string literal matches)
+        assert_eq!(truly_unused.confidence, Some(Confidence::High));
+        assert!(truly_unused.string_literal_matches.is_empty());
+
+        // get_pin_status should have LOW confidence (string literal match found)
+        assert_eq!(pin_status.confidence, Some(Confidence::Low));
+        assert!(!pin_status.string_literal_matches.is_empty());
     }
 }

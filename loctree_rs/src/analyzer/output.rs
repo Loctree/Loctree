@@ -2,22 +2,22 @@ use std::collections::{HashMap, HashSet};
 use std::io;
 
 use serde_json::json;
-use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
 use crate::args::ParsedArgs;
 use crate::types::{FileAnalysis, ImportKind, ImportResolutionKind, OutputMode, ReexportKind};
 
-use super::classify::language_from_path;
-use super::graph::{build_graph_data, MAX_GRAPH_EDGES, MAX_GRAPH_NODES};
-use super::html::render_html_report;
-use super::insights::collect_ai_insights;
-use super::open_server::current_open_base;
-use super::root_scan::{normalize_module_id, RootContext};
-use super::scan::resolve_event_constants_across_files;
 use super::CommandGap;
 use super::RankedDup;
 use super::ReportSection;
+use super::classify::language_from_path;
+use super::graph::{MAX_GRAPH_EDGES, MAX_GRAPH_NODES, build_graph_data};
+use super::html::render_html_report;
+use super::insights::collect_ai_insights;
+use super::open_server::current_open_base;
+use super::root_scan::{RootContext, normalize_module_id};
+use super::scan::resolve_event_constants_across_files;
 
 pub struct RootArtifacts {
     pub json_items: Vec<serde_json::Value>,
@@ -32,6 +32,7 @@ pub fn process_root_context(
     fe_commands: &HashMap<String, Vec<(String, usize, String)>>,
     be_commands: &HashMap<String, Vec<(String, usize, String)>>,
     global_missing_handlers: &[CommandGap],
+    global_unregistered_handlers: &[CommandGap],
     global_unused_handlers: &[CommandGap],
     pipeline_summary: &serde_json::Value,
     schema_name: &str,
@@ -77,6 +78,7 @@ pub fn process_root_context(
         .collect();
 
     let missing_handlers = global_missing_handlers.to_vec();
+    let unregistered_handlers = global_unregistered_handlers.to_vec();
     let unused_handlers = global_unused_handlers.to_vec();
 
     let (graph_data, graph_warning) = if parsed.graph && options.report_path.is_some() {
@@ -150,7 +152,7 @@ pub fn process_root_context(
                 "imports": imports.iter().map(|i| json!({
                     "source": i.source,
                     "sourceRaw": i.source_raw,
-                    "kind": match i.kind { ImportKind::Static => "static", ImportKind::SideEffect => "side-effect" },
+                    "kind": match i.kind { ImportKind::Static => "static", ImportKind::SideEffect => "side-effect", ImportKind::Dynamic => "dynamic" },
                     "resolvedPath": i.resolved_path,
                     "isBareModule": i.is_bare,
                     "resolutionKind": match i.resolution {
@@ -221,6 +223,10 @@ pub fn process_root_context(
     all_command_names.dedup();
 
     let missing_set: HashSet<String> = missing_handlers.iter().map(|g| g.name.clone()).collect();
+    let unregistered_set: HashSet<String> = unregistered_handlers
+        .iter()
+        .map(|g| g.name.clone())
+        .collect();
     let unused_set: HashSet<String> = unused_handlers.iter().map(|g| g.name.clone()).collect();
 
     let mut commands2 = Vec::new();
@@ -254,6 +260,8 @@ pub fn process_root_context(
             "missing_handler"
         } else if unused_set.contains(name) {
             "unused_handler"
+        } else if unregistered_set.contains(name) {
+            "unregistered_handler"
         } else {
             "ok"
         };
@@ -601,10 +609,19 @@ pub fn process_root_context(
                         "name": g.name,
                         "locations": g.locations,
                     })).collect::<Vec<_>>(),
-                    "unusedHandlers": unused_handlers.iter().take(top_limit).map(|g| json!({
-                        "name": g.name,
-                        "locations": g.locations,
-                    })).collect::<Vec<_>>(),
+                    "unusedHandlers": unused_handlers.iter().take(top_limit).map(|g| {
+                        let mut obj = json!({
+                            "name": g.name,
+                            "locations": g.locations,
+                        });
+                        if let Some(conf) = &g.confidence {
+                            obj["confidence"] = json!(conf.to_string());
+                        }
+                        if !g.string_literal_matches.is_empty() {
+                            obj["stringLiteralMatches"] = json!(g.string_literal_matches.len());
+                        }
+                        obj
+                    }).collect::<Vec<_>>(),
                     "events": event_alerts,
                     "pipelineRisks": pipeline_risks.iter().take(top_limit).cloned().collect::<Vec<_>>(),
                     "deadSymbols": dead_symbols.iter().take(parsed.top_dead_symbols).cloned().collect::<Vec<_>>(),
@@ -664,7 +681,18 @@ pub fn process_root_context(
                     "frontend": fe_commands.iter().map(|(k,v)| json!({"name": k, "locations": v})).collect::<Vec<_>>(),
                     "backend": be_commands.iter().map(|(k,v)| json!({"name": k, "locations": v})).collect::<Vec<_>>(),
                     "missingHandlers": missing_handlers.iter().map(|g| json!({"name": g.name, "locations": g.locations})).collect::<Vec<_>>(),
-                    "unusedHandlers": unused_handlers.iter().map(|g| json!({"name": g.name, "locations": g.locations})).collect::<Vec<_>>(),
+                    "unusedHandlers": unused_handlers.iter().map(|g| {
+                        let mut obj = json!({"name": g.name, "locations": g.locations});
+                        if let Some(conf) = &g.confidence {
+                            obj["confidence"] = json!(conf.to_string());
+                        }
+                        if !g.string_literal_matches.is_empty() {
+                            obj["stringLiteralMatches"] = json!(g.string_literal_matches.iter().map(|m| {
+                                json!({"file": m.file, "line": m.line, "context": m.context})
+                            }).collect::<Vec<_>>());
+                        }
+                        obj
+                    }).collect::<Vec<_>>(),
                 },
                 "commands2": commands2,
                 "symbols": symbols_json,
@@ -781,14 +809,46 @@ Top duplicate exports (showing up to {}):",
                 );
             }
             if !unused_handlers.is_empty() {
-                println!(
-                    "  Unused handlers (backend not called by FE): {}",
-                    unused_handlers
-                        .iter()
-                        .map(|g| g.name.clone())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                );
+                use crate::analyzer::report::Confidence;
+                let high_conf: Vec<_> = unused_handlers
+                    .iter()
+                    .filter(|g| g.confidence == Some(Confidence::High))
+                    .map(|g| g.name.clone())
+                    .collect();
+                let low_conf: Vec<_> = unused_handlers
+                    .iter()
+                    .filter(|g| g.confidence == Some(Confidence::Low))
+                    .collect();
+
+                if !high_conf.is_empty() {
+                    println!(
+                        "  Unused handlers (HIGH confidence): {}",
+                        high_conf.join(", ")
+                    );
+                }
+                if !low_conf.is_empty() {
+                    println!("  Unused handlers (LOW confidence - possible dynamic usage):");
+                    for g in &low_conf {
+                        let matches_note = if !g.string_literal_matches.is_empty() {
+                            format!(
+                                " ({} string literal matches)",
+                                g.string_literal_matches.len()
+                            )
+                        } else {
+                            String::new()
+                        };
+                        println!("    - {}{}", g.name, matches_note);
+                    }
+                }
+                // Fallback for handlers without confidence (shouldn't happen but be safe)
+                let no_conf: Vec<_> = unused_handlers
+                    .iter()
+                    .filter(|g| g.confidence.is_none())
+                    .map(|g| g.name.clone())
+                    .collect();
+                if !no_conf.is_empty() {
+                    println!("  Unused handlers: {}", no_conf.join(", "));
+                }
             }
         }
 
@@ -820,6 +880,7 @@ Top duplicate exports (showing up to {}):",
             dynamic: sorted_dyn,
             analyze_limit: options.analyze_limit,
             missing_handlers: missing_sorted,
+            unregistered_handlers: Vec::new(),
             unused_handlers: unused_sorted,
             command_counts: (fe_commands.len(), be_commands.len()),
             open_base: if options.report_path.is_some() && options.serve {

@@ -3,19 +3,22 @@ use std::fs;
 use std::io;
 use std::path::PathBuf;
 
-use crate::args::{preset_ignore_symbols, ParsedArgs};
+use crate::args::{ParsedArgs, preset_ignore_symbols};
 use crate::types::OutputMode;
 
+use super::ReportSection;
+use super::coverage::{
+    CommandUsage, compute_command_gaps_with_confidence, compute_unregistered_handlers,
+};
 use super::dead_parrots::{
     analyze_impact, find_dead_exports, find_similar, print_dead_exports, print_impact_results,
     print_similarity_results, print_symbol_results, search_symbol,
 };
 use super::open_server::{open_in_browser, start_open_server};
-use super::output::{process_root_context, write_report, RootArtifacts};
-use super::root_scan::{scan_roots, ScanConfig, ScanResults};
+use super::output::{RootArtifacts, process_root_context, write_report};
+use super::pipelines::build_pipeline_summary;
+use super::root_scan::{ScanConfig, ScanResults, scan_roots};
 use super::scan::{opt_globset, python_stdlib};
-use super::ReportSection;
-use super::{coverage::compute_command_gaps, pipelines::build_pipeline_summary};
 
 const DEFAULT_EXCLUDE_REPORT_PATTERNS: &[&str] =
     &["**/__tests__/**", "scripts/semgrep-fixtures/**"];
@@ -186,10 +189,41 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         return Ok(());
     }
 
+    // Build a set of registered Tauri handler function names from all analyzed files.
+    let registered_impls: std::collections::HashSet<String> = global_analyses
+        .iter()
+        .flat_map(|a| a.tauri_registered_handlers.iter().cloned())
+        .collect();
+
+    // Filter backend commands down to those whose implementation symbol is actually
+    // registered via tauri::generate_handler![...]. This prevents unregistered
+    // handlers from counting as "available" when computing FE→BE gaps.
+    let mut global_be_registered_commands: CommandUsage = std::collections::HashMap::new();
+    for (name, locs) in &global_be_commands {
+        for (path, line, impl_name) in locs {
+            if registered_impls.is_empty() || registered_impls.contains(impl_name) {
+                global_be_registered_commands
+                    .entry(name.clone())
+                    .or_default()
+                    .push((path.clone(), *line, impl_name.clone()));
+            }
+        }
+    }
+
     // Cross-root command gaps (fixes multi-root FP for missing/unused handlers)
-    let (global_missing_handlers, global_unused_handlers) = compute_command_gaps(
+    // Pass analyses for confidence scoring on unused handlers
+    let (global_missing_handlers, global_unused_handlers) = compute_command_gaps_with_confidence(
         &global_fe_commands,
+        &global_be_registered_commands,
+        &focus_set,
+        &exclude_set,
+        &global_analyses,
+    );
+
+    // Handlers that have #[tauri::command] but are never registered via generate_handler!.
+    let global_unregistered_handlers = compute_unregistered_handlers(
         &global_be_commands,
+        &registered_impls,
         &focus_set,
         &exclude_set,
     );
@@ -237,6 +271,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             &global_fe_commands,
             &global_be_commands,
             &global_missing_handlers,
+            &global_unregistered_handlers,
             &global_unused_handlers,
             &pipeline_summary,
             SCHEMA_NAME,

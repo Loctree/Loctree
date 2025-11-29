@@ -1,0 +1,380 @@
+/* ============================================
+   Hero Section
+   Created by M&K (c)2025
+   ============================================ */
+
+/* Agent Hero */
+.agent-hero {
+    padding-top: 80px;
+    padding-bottom: 40px;
+    background: var(--bg-black);
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.agent-hero-inner {
+    max-width: 700px;
+    margin: 0 auto;
+    animation: fadeIn 0.5s ease;
+}
+
+.agent-hero-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    color: var(--text-dim);
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* Hero Tabs */
+.hero-tabs {
+    display: flex;
+    gap: 0;
+    margin-bottom: 20px;
+    border: 1px solid var(--border-visible);
+    background: var(--bg-dark);
+}
+
+.hero-tab {
+    flex: 1;
+    padding: 12px 24px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+}
+
+.hero-tab:first-child {
+    border-right: 1px solid var(--border-subtle);
+}
+
+.hero-tab:hover {
+    color: var(--text-bright);
+    background: rgba(168, 168, 168, 0.05);
+}
+
+.hero-tab.active {
+    color: var(--text-bright);
+    background: var(--bg-mid);
+    text-shadow: 0 0 4px rgba(168, 168, 168, 0.3);
+}
+
+.hero-tab.active::after {
+    content: "";
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--text-bright);
+}
+
+/* Install Hero Box (FOR HUMANS) */
+.install-hero-box {
+    text-align: center;
+}
+
+.code-block-with-copy {
+    display: flex;
+    align-items: center;
+    background: var(--bg-dark);
+    border: 1px solid var(--border-visible);
+    margin-bottom: 16px;
+}
+
+.code-block-content {
+    flex: 1;
+    padding: 16px 20px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--text-bright);
+    text-align: left;
+    overflow-x: auto;
+}
+
+.code-copy-btn {
+    padding: 16px 20px;
+    background: var(--bg-mid);
+    border: none;
+    border-left: 1px solid var(--border-subtle);
+    color: var(--text-dim);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.code-copy-btn:hover {
+    color: var(--text-bright);
+    background: rgba(168, 168, 168, 0.1);
+}
+
+.prompt-cta {
+    font-size: 13px;
+    color: var(--text-dim);
+    line-height: 1.6;
+}
+
+.prompt-cta-dim {
+    color: var(--text-muted);
+}
+
+.prompt-link {
+    background: none;
+    border: none;
+    color: var(--text-bright);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    text-decoration: underline;
+    cursor: pointer;
+    padding: 0;
+    transition: color 0.2s;
+}
+
+.prompt-link:hover {
+    color: #fff;
+}
+
+/* Prompt Box (FOR AI AGENTS) */
+.prompt-box {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.prompt-box-inner {
+    position: relative;
+    background: var(--bg-dark);
+    border: 1px solid var(--border-visible);
+}
+
+.prompt-content {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.7;
+    color: var(--text-bright);
+    padding: 20px;
+    padding-right: 70px;
+    white-space: pre-wrap;
+    margin: 0;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.prompt-copy-btn {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    padding: 6px 12px;
+    background: var(--bg-mid);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-dim);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.prompt-copy-btn:hover {
+    color: var(--text-bright);
+    border-color: var(--text-dim);
+}
+
+.prompt-expand-btn {
+    align-self: flex-start;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    cursor: pointer;
+    padding: 4px 0;
+    transition: color 0.2s;
+}
+
+.prompt-expand-btn:hover {
+    color: var(--text-dim);
+}
+
+.agent-hero-prompt {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.8;
+    color: var(--text-bright);
+    background: var(--bg-dark);
+    border: 1px solid var(--border-visible);
+    padding: 24px;
+    white-space: pre-wrap;
+    overflow-x: auto;
+    text-shadow: 0 0 2px rgba(168, 168, 168, 0.3);
+}
+
+/* Main Hero */
+.hero {
+    min-height: 80vh;
+    display: flex;
+    align-items: center;
+    padding: 60px 0;
+}
+
+.hero-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 60px;
+    align-items: center;
+}
+
+.hero-content {
+    max-width: 500px;
+    animation: fadeIn 0.6s ease;
+}
+
+.hero-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 12px;
+    border: 1px solid var(--border-visible);
+    font-size: 11px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 24px;
+}
+
+.hero-badge-dot {
+    width: 6px;
+    height: 6px;
+    background: var(--text-dim);
+    animation: pulse 2s infinite;
+}
+
+.hero-title {
+    font-size: clamp(32px, 5vw, 48px);
+    font-weight: 400;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+    margin-bottom: 24px;
+    color: var(--text-bright);
+    text-shadow: 0 0 4px rgba(168, 168, 168, 0.2);
+}
+
+.hero-title-accent {
+    color: #fff;
+    text-shadow: 0 0 8px rgba(255, 255, 255, 0.3);
+}
+
+.hero-description {
+    font-size: 14px;
+    color: var(--text-dim);
+    line-height: 1.8;
+    margin-bottom: 32px;
+}
+
+.hero-actions {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+/* Terminal */
+.hero-terminal {
+    background: var(--bg-dark);
+    border: 1px solid var(--border-visible);
+    animation: fadeIn 0.8s ease;
+}
+
+.terminal-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px;
+    background: var(--bg-mid);
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.terminal-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--text-muted);
+}
+
+.terminal-dot.red { background: #504040; }
+.terminal-dot.yellow { background: #505040; }
+.terminal-dot.green { background: #405040; }
+
+.terminal-title {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.terminal-body {
+    padding: 20px;
+    font-size: 12px;
+    line-height: 1.8;
+    min-height: 280px;
+}
+
+.terminal-line {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.terminal-prompt {
+    color: var(--text-dim);
+    user-select: none;
+}
+
+.terminal-command {
+    color: var(--text-bright);
+}
+
+.terminal-output {
+    color: var(--text-dim);
+    margin-left: 16px;
+}
+
+.terminal-output.highlight {
+    color: var(--text-bright);
+}
+
+.terminal-output.success {
+    color: #808080;
+}
+
+.terminal-output.muted {
+    color: var(--text-muted);
+}
+
+@media (max-width: 900px) {
+    .hero-grid {
+        grid-template-columns: 1fr;
+        gap: 40px;
+    }
+}
+
+@media (max-width: 600px) {
+    .hero-actions {
+        flex-direction: column;
+    }
+
+    .btn {
+        width: 100%;
+        justify-content: center;
+    }
+}

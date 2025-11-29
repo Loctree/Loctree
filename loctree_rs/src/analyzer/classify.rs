@@ -98,14 +98,14 @@ mod tests {
 
     #[test]
     fn classifies_file_kinds_and_flags() {
-        let (kind, test, gen) = file_kind("src/generated/foo.gen.ts");
+        let (kind, test, is_generated) = file_kind("src/generated/foo.gen.ts");
         assert_eq!(kind, "generated");
         assert!(!test);
-        assert!(gen);
+        assert!(is_generated);
 
-        let (kind, test, gen) = file_kind("src/components/Button.story.tsx");
+        let (kind, test, is_generated) = file_kind("src/components/Button.story.tsx");
         assert_eq!(kind, "story");
-        assert!(!gen);
+        assert!(!is_generated);
         assert!(!test);
 
         let (kind, test, _) = file_kind("src/__tests__/foo.test.ts");

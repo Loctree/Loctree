@@ -20,15 +20,15 @@ fn normalize_event(name: &str) -> String {
 
 fn is_in_scope(path: &str, focus: &Option<GlobSet>, exclude: &Option<GlobSet>) -> bool {
     let pb = std::path::Path::new(path);
-    if let Some(ex) = exclude {
-        if ex.is_match(pb) {
-            return false;
-        }
+    if let Some(ex) = exclude
+        && ex.is_match(pb)
+    {
+        return false;
     }
-    if let Some(focus_globs) = focus {
-        if !focus_globs.is_match(pb) {
-            return false;
-        }
+    if let Some(focus_globs) = focus
+        && !focus_globs.is_match(pb)
+    {
+        return false;
     }
     true
 }
@@ -276,16 +276,16 @@ pub fn build_pipeline_summary(
             .min_by_key(|e| e.line)
             .cloned();
 
-        if let (Some(call), Some(listen)) = (first_call.clone(), first_listen.clone()) {
-            if call.line < listen.line {
-                risks.push(json!({
-                    "type": "invoke_before_listen",
-                    "path": analysis.path,
-                    "line": call.line,
-                    "command": call.name,
-                    "details": "invoke is called before any listener is registered; event may be missed"
-                }));
-            }
+        if let (Some(call), Some(listen)) = (first_call.clone(), first_listen.clone())
+            && call.line < listen.line
+        {
+            risks.push(json!({
+                "type": "invoke_before_listen",
+                "path": analysis.path,
+                "line": call.line,
+                "command": call.name,
+                "details": "invoke is called before any listener is registered; event may be missed"
+            }));
         }
 
         if let Some(listen) = first_listen {
@@ -296,18 +296,17 @@ pub fn build_pipeline_summary(
                     "line": listen.line,
                     "details": "listener registration is not awaited; first events may race"
                 }));
-            } else if let Some(call) = first_call {
-                if let Some(aw) = first_awaited {
-                    if call.line < aw.line {
-                        risks.push(json!({
-                            "type": "invoke_before_awaited_listen",
-                            "path": analysis.path,
-                            "line": call.line,
-                            "details": "invoke is issued before awaited listener is registered",
-                            "command": call.name,
-                        }));
-                    }
-                }
+            } else if let Some(call) = first_call
+                && let Some(aw) = first_awaited
+                && call.line < aw.line
+            {
+                risks.push(json!({
+                    "type": "invoke_before_awaited_listen",
+                    "path": analysis.path,
+                    "line": call.line,
+                    "details": "invoke is issued before awaited listener is registered",
+                    "command": call.name,
+                }));
             }
         }
     }

@@ -60,6 +60,11 @@ jobs:
         run: cd loctree_rs && cargo test
       - name: Run rust integration tests
         run: node tools/tests/loctree-rs.test.mjs
+      - name: Loctree dogfooding
+        working-directory: loctree_rs
+        run: |
+          cargo build --release
+          ./target/release/loctree ./src -A --ext rs --circular --dead
 
       - name: Run node unit tests
         run: node tools/tests/test_loctree_node_unit.mjs
