@@ -6,13 +6,16 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
-## [0.5.1-rc] - 2025-11-28
+## [0.5.1] - 2025-11-28
 
 ### Added
 - **Entry point detection**: Proper regex-based detection for Python and Rust entry points:
   - Python: `__main__.py` files and `if __name__ == "__main__":` blocks
   - Rust: `fn main(` and async runtime attributes (`#[tokio::main]`, `#[async_std::main]`)
   - Uses regex with line-start anchors to avoid false positives in comments/strings
+- **Lazy import detection**: React.lazy() patterns now properly tracked as dynamic imports:
+  - Detects `import('./Foo').then(m => ({ default: m.Bar }))` syntax
+  - Prevents false positives for lazy-loaded components in dead export detection
 
 ### Changed
 - **Python stack detection**: Extended default ignores for Python projects:

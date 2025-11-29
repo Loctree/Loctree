@@ -397,8 +397,8 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
 
     // Try to load existing snapshot for incremental scanning
     let cached_analyses: Option<HashMap<String, FileAnalysis>> =
-        if !parsed.full_scan && Snapshot::exists(snapshot_root) {
-            match Snapshot::load(snapshot_root) {
+        if !parsed.full_scan && Snapshot::exists(&snapshot_root) {
+            match Snapshot::load(&snapshot_root) {
                 Ok(old_snapshot) => {
                     if parsed.verbose {
                         eprintln!(

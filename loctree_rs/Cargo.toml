@@ -1,7 +1,14 @@
 [package]
 name = "loctree"
-version = "0.5.1-rc"
+version = "0.5.1"
 edition = "2021"
+authors = ["LibraxisAI <the1st@whoai.am>"]
+description = "Fast, language-aware codebase analyzer for detecting dead exports, circular imports, and generating dependency graphs"
+license = "MIT"
+repository = "https://github.com/LibraxisAI/Loctree"
+readme = "../README.md"
+keywords = ["static-analysis", "dead-code", "imports", "exports", "codebase"]
+categories = ["development-tools", "command-line-utilities"]
 
 [[bin]]
 name = "loctree"
