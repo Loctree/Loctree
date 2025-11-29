@@ -24,6 +24,10 @@ pub fn CliReference() -> impl IntoView {
                             <code class="cli-cmd">"loctree -A"</code>
                             <span class="cli-desc">"Import/export analyzer mode"</span>
                         </div>
+                        <div class="cli-item">
+                            <code class="cli-cmd">"loctree trace <handler>"</code>
+                            <span class="cli-desc">"Investigate unused handler"</span>
+                        </div>
                     </div>
 
                     <div class="cli-group">
@@ -49,6 +53,10 @@ pub fn CliReference() -> impl IntoView {
                             <span class="cli-desc">"Find unused exports"</span>
                         </div>
                         <div class="cli-item">
+                            <code class="cli-cmd">"--confidence <level>"</code>
+                            <span class="cli-desc">"Filter: high, low, all"</span>
+                        </div>
+                        <div class="cli-item">
                             <code class="cli-cmd">"--entrypoints"</code>
                             <span class="cli-desc">"List entry points"</span>
                         </div>
@@ -63,6 +71,14 @@ pub fn CliReference() -> impl IntoView {
                         <div class="cli-item">
                             <code class="cli-cmd">"--symbol <name>"</code>
                             <span class="cli-desc">"Search for symbol"</span>
+                        </div>
+                        <div class="cli-item">
+                            <code class="cli-cmd">"--graph"</code>
+                            <span class="cli-desc">"Output DOT graph format"</span>
+                        </div>
+                        <div class="cli-item">
+                            <code class="cli-cmd">"--html-report"</code>
+                            <span class="cli-desc">"Generate HTML report"</span>
                         </div>
                         <div class="cli-item">
                             <code class="cli-cmd">"--sarif"</code>

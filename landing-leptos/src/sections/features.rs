@@ -78,12 +78,24 @@ pub fn Features() -> impl IntoView {
                     />
                     <FeatureCard
                         icon="[11]"
+                        title="Handler Tracing"
+                        description="Trace why a handler appears unused. Shows string literals, exports, and dynamic usage patterns."
+                        code=Some("loctree trace toggle_assistant ./src")
+                    />
+                    <FeatureCard
+                        icon="[12]"
+                        title="Confidence Scoring"
+                        description="HIGH/LOW confidence for unused handlers. LOW = potential dynamic usage detected. Filter with --confidence."
+                        code=Some("loctree -A --dead --confidence high")
+                    />
+                    <FeatureCard
+                        icon="[13]"
                         title="CI Pipeline Checks"
                         description="Fail builds on missing handlers, ghost events, or race conditions."
                         code=Some("--fail-on-missing-handlers")
                     />
                     <FeatureCard
-                        icon="[12]"
+                        icon="[14]"
                         title="SARIF Output"
                         description="SARIF 2.1.0 output for GitHub Actions, GitLab CI, and other CI/CD systems."
                         code=Some("loctree -A --sarif > results.sarif")
