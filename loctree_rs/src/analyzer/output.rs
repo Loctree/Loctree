@@ -150,7 +150,7 @@ pub fn process_root_context(
                 "imports": imports.iter().map(|i| json!({
                     "source": i.source,
                     "sourceRaw": i.source_raw,
-                    "kind": match i.kind { ImportKind::Static => "static", ImportKind::SideEffect => "side-effect" },
+                    "kind": match i.kind { ImportKind::Static => "static", ImportKind::SideEffect => "side-effect", ImportKind::Dynamic => "dynamic" },
                     "resolvedPath": i.resolved_path,
                     "isBareModule": i.is_bare,
                     "resolutionKind": match i.resolution {

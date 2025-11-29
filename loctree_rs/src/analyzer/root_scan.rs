@@ -361,6 +361,7 @@ pub fn scan_roots(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
                             tgt_id,
                             match imp.kind {
                                 ImportKind::Static | ImportKind::SideEffect => "import".to_string(),
+                                ImportKind::Dynamic => "dynamic_import".to_string(),
                             },
                         ));
                     }

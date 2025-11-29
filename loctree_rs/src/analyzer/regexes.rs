@@ -31,6 +31,18 @@ pub(crate) fn regex_dynamic_import() -> &'static Regex {
     RE.get_or_init(|| regex(r#"import\s*\(\s*["']([^"']+)["']\s*\)"#))
 }
 
+/// Captures lazy import patterns like:
+/// `import('./Foo').then((m) => ({ default: m.Bar }))`
+/// `import('./Foo').then(m => ({ default: m.Bar }))`
+/// source: module path, export: accessed symbol name
+pub(crate) fn regex_lazy_import_then() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    // Note: Rust regex doesn't support backreferences, so we match any word for callback param
+    RE.get_or_init(|| {
+        regex(r#"import\s*\(\s*["'](?P<source>[^"']+)["']\s*\)\s*\.\s*then\s*\(\s*\(?\s*\w+\s*\)?\s*=>\s*\(?\s*\{\s*default\s*:\s*\w+\.(?P<export>\w+)"#)
+    })
+}
+
 pub(crate) fn regex_export_named_decl() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {

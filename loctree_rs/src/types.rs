@@ -105,6 +105,7 @@ pub struct ImportEntry {
 pub enum ImportKind {
     Static,
     SideEffect,
+    Dynamic,
 }
 
 #[allow(dead_code)]

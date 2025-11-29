@@ -11,8 +11,8 @@ use regex::Regex;
 use super::regexes::{
     regex_dynamic_import, regex_event_const_js, regex_event_emit_js, regex_event_listen_js,
     regex_export_brace, regex_export_default, regex_export_named_decl, regex_import,
-    regex_invoke_audio, regex_invoke_snake, regex_reexport_named, regex_reexport_star,
-    regex_safe_invoke, regex_side_effect_import, regex_tauri_invoke,
+    regex_invoke_audio, regex_invoke_snake, regex_lazy_import_then, regex_reexport_named,
+    regex_reexport_star, regex_safe_invoke, regex_side_effect_import, regex_tauri_invoke,
 };
 use super::resolvers::{resolve_reexport_target, TsPathResolver};
 use super::{brace_list_to_names, offset_to_line};
@@ -292,6 +292,34 @@ pub(crate) fn analyze_js_file(
     for caps in regex_dynamic_import().captures_iter(content) {
         let source = caps.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
         analysis.dynamic_imports.push(source);
+    }
+
+    // Lazy imports with .then() pattern: import('./X').then(m => ({ default: m.Y }))
+    // These are common in React.lazy() and should be tracked as proper imports
+    for caps in regex_lazy_import_then().captures_iter(content) {
+        if let (Some(source), Some(export_name)) = (caps.name("source"), caps.name("export")) {
+            let source_str = source.as_str().to_string();
+            let export_str = export_name.as_str().to_string();
+
+            // Add to dynamic_imports if not already present
+            if !analysis.dynamic_imports.contains(&source_str) {
+                analysis.dynamic_imports.push(source_str.clone());
+            }
+
+            // Create a proper import entry with the symbol being accessed
+            let mut entry = ImportEntry::new(source_str.clone(), ImportKind::Dynamic);
+            entry.symbols.push(ImportSymbol {
+                name: export_str,
+                alias: None,
+            });
+            entry.resolved_path = resolve_reexport_target(path, root, &source_str, extensions)
+                .or_else(|| ts_resolver.and_then(|r| r.resolve(&source_str, extensions)))
+                .or_else(|| {
+                    super::resolvers::resolve_js_relative(path, root, &source_str, extensions)
+                });
+            entry.is_bare = !source_str.starts_with('.') && !source_str.starts_with('/');
+            analysis.imports.push(entry);
+        }
     }
 
     for caps in regex_event_emit_js().captures_iter(content) {
