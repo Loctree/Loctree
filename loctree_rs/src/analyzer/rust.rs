@@ -175,7 +175,7 @@ fn strip_cfg_attributes(s: &str) -> String {
                 chars.next(); // consume '['
                 let mut depth = 1;
                 // Skip until we find the matching ']'
-                while let Some(inner) = chars.next() {
+                for inner in chars.by_ref() {
                     match inner {
                         '[' => depth += 1,
                         ']' => {
@@ -399,7 +399,7 @@ pub(crate) fn analyze_rust_file(content: &str, relative: String) -> FileAnalysis
                 let base = ident
                     .split(|c: char| c == ':' || c.is_whitespace() || c == '<')
                     .filter(|s| !s.is_empty())
-                    .last()
+                    .next_back()
                     .unwrap_or("")
                     .trim();
                 if base.is_empty() {

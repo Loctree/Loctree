@@ -86,11 +86,9 @@ pub fn find_string_literal_matches(
         v.insert(normalize_cmd_name(&snake));
 
         // Without _command suffix
-        if handler_name.ends_with("_command") {
-            if let Some(stripped) = handler_name.strip_suffix("_command") {
-                v.insert(stripped.to_string());
-                v.insert(normalize_cmd_name(stripped));
-            }
+        if let Some(stripped) = handler_name.strip_suffix("_command") {
+            v.insert(stripped.to_string());
+            v.insert(normalize_cmd_name(stripped));
         }
         v
     };

@@ -402,7 +402,7 @@ pub(crate) fn render_html_report(path: &Path, sections: &[ReportSection]) -> io:
     // Use Leptos renderer when feature is enabled
     #[cfg(feature = "leptos-reports")]
     {
-        return render_with_leptos(path, sections);
+        render_with_leptos(path, sections)
     }
 
     #[cfg(not(feature = "leptos-reports"))]
