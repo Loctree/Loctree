@@ -189,6 +189,7 @@ fn find_frontend_invokes(
     search_variations: &[String],
 ) -> Vec<FrontendMention> {
     let mut invokes = Vec::new();
+    let mut seen: std::collections::HashSet<(String, usize)> = std::collections::HashSet::new();
     let normalized = normalize_name(handler_name);
 
     for (cmd_name, locations) in fe_commands {
@@ -201,13 +202,16 @@ fn find_frontend_invokes(
 
         if matches {
             for (path, line, _impl_name) in locations {
-                invokes.push(FrontendMention {
-                    file: path.clone(),
-                    line: *line,
-                    context: "invoke".to_string(),
-                    is_invoke: true,
-                    snippet: None,
-                });
+                // Deduplicate by (file, line)
+                if seen.insert((path.clone(), *line)) {
+                    invokes.push(FrontendMention {
+                        file: path.clone(),
+                        line: *line,
+                        context: "invoke".to_string(),
+                        is_invoke: true,
+                        snippet: None,
+                    });
+                }
             }
         }
     }

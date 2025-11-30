@@ -814,9 +814,9 @@ pub fn process_root_context(
             println!(
                 "
 Top duplicate exports (showing up to {}):",
-                options.analyze_limit
+                parsed.analyze_limit
             );
-            for dup in filtered_ranked.iter().take(options.analyze_limit) {
+            for dup in filtered_ranked.iter().take(parsed.analyze_limit) {
                 println!(
                     "  - {} (score {}, {} files: {} prod, {} dev) canonical: {} | refs: {}",
                     dup.name,
@@ -840,11 +840,11 @@ Top duplicate exports (showing up to {}):",
         if !dynamic_summary.is_empty() {
             println!(
                 "\nDynamic imports (showing up to {}):",
-                options.analyze_limit
+                parsed.analyze_limit
             );
             let mut sorted_dyn = dynamic_summary.clone();
             sorted_dyn.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
-            for (file, sources) in sorted_dyn.iter().take(options.analyze_limit) {
+            for (file, sources) in sorted_dyn.iter().take(parsed.analyze_limit) {
                 println!(
                     "  - {}: {}{}",
                     file,

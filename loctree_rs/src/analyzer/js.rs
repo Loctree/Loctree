@@ -267,8 +267,25 @@ pub(crate) fn analyze_js_file(
         }
     }
     // Detect wrapper functions like invokePinCommand('get_pin_status', ...)
+    // Known DOM APIs that contain "Command" but aren't Tauri invokes
+    const DOM_COMMAND_METHODS: &[&str] = &[
+        "execCommand",
+        "queryCommandState",
+        "queryCommandEnabled",
+        "queryCommandSupported",
+        "queryCommandValue",
+    ];
     for caps in regex_invoke_wrapper().captures_iter(content) {
         if let Some(cmd) = caps.name("cmd") {
+            // Get the full match to check the function name
+            let full_match = caps.get(0).map(|m| m.as_str()).unwrap_or("");
+            // Skip known DOM APIs
+            if DOM_COMMAND_METHODS
+                .iter()
+                .any(|dom_api| full_match.contains(dom_api))
+            {
+                continue;
+            }
             let line = offset_to_line(content, cmd.start());
             if is_commented(cmd.start()) {
                 continue;
