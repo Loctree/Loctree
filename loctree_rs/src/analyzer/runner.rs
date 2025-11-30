@@ -4,6 +4,7 @@ use std::io;
 use std::path::PathBuf;
 
 use crate::args::{ParsedArgs, preset_ignore_symbols};
+use crate::config::LoctreeConfig;
 use crate::types::OutputMode;
 
 use super::ReportSection;
@@ -157,6 +158,14 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
     }
 
     let focus_set = opt_globset(&parsed.focus_patterns);
+
+    // Load custom Tauri command macros from .loctree/config.toml
+    let loctree_config = root_list
+        .first()
+        .map(|root| LoctreeConfig::load(root))
+        .unwrap_or_default();
+    let custom_command_macros = loctree_config.tauri.command_macros;
+
     let mut exclude_patterns = parsed.exclude_report_patterns.clone();
     exclude_patterns.extend(
         DEFAULT_EXCLUDE_REPORT_PATTERNS
@@ -239,6 +248,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                             collect_edges: parsed.graph
                                 || parsed.impact.is_some()
                                 || parsed.circular,
+                            custom_command_macros: &custom_command_macros,
                         })?
                     }
                 }
@@ -255,6 +265,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                     py_stdlib: &py_stdlib,
                     cached_analyses: None,
                     collect_edges: parsed.graph || parsed.impact.is_some() || parsed.circular,
+                    custom_command_macros: &custom_command_macros,
                 })?
             }
         } else {
@@ -270,6 +281,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                 py_stdlib: &py_stdlib,
                 cached_analyses: None,
                 collect_edges: parsed.graph || parsed.impact.is_some() || parsed.circular,
+                custom_command_macros: &custom_command_macros,
             })?
         }
     } else {
@@ -285,6 +297,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             py_stdlib: &py_stdlib,
             cached_analyses: None,
             collect_edges: parsed.graph || parsed.impact.is_some() || parsed.circular,
+            custom_command_macros: &custom_command_macros,
         })?
     };
     let ScanResults {

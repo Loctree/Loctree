@@ -741,6 +741,22 @@ pub fn process_root_context(
                     }).collect::<Vec<_>>(),
                 },
                 "commands2": commands2,
+                "tauri_analysis": {
+                    "total_handlers": be_commands.len(),
+                    "total_calls": fe_commands.len(),
+                    "registered": be_commands.len().saturating_sub(unregistered_handlers.len()),
+                    "coverage": {
+                        "ok": all_command_names.len().saturating_sub(
+                            missing_handlers.len() + unused_handlers.len() + unregistered_handlers.len()
+                        ),
+                        "missing_handler": missing_handlers.len(),
+                        "unused_handler": unused_handlers.len(),
+                        "unregistered_handler": unregistered_handlers.len(),
+                    },
+                    "missing_handlers": missing_handlers.iter().map(|g| &g.name).collect::<Vec<_>>(),
+                    "unused_handlers": unused_handlers.iter().map(|g| &g.name).collect::<Vec<_>>(),
+                    "unregistered_handlers": unregistered_handlers.iter().map(|g| &g.name).collect::<Vec<_>>(),
+                },
                 "symbols": symbols_json,
                 "clusters": clusters_json,
                 "pipeline": pipeline_summary,

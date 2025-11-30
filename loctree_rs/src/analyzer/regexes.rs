@@ -117,6 +117,32 @@ pub(crate) fn regex_tauri_command_fn() -> &'static Regex {
     })
 }
 
+/// Build a regex to match custom attribute macros that generate Tauri commands.
+///
+/// For example, if `macro_names` contains `["api_cmd_tauri", "custom_command"]`,
+/// this will match `#[api_cmd_tauri(...)]` or `#[custom_command(...)]` on functions.
+///
+/// Returns `None` if `macro_names` is empty.
+pub fn regex_custom_command_fn(macro_names: &[String]) -> Option<Regex> {
+    if macro_names.is_empty() {
+        return None;
+    }
+
+    // Escape any special regex characters in macro names and join with |
+    let escaped: Vec<String> = macro_names.iter().map(|name| regex::escape(name)).collect();
+    let pattern = escaped.join("|");
+
+    // Build regex similar to regex_tauri_command_fn but with dynamic macro names
+    // Matches: #[macro_name(...)] fn name(...)
+    // Supports optional crate:: prefix and additional attributes
+    let full_pattern = format!(
+        r#"(?m)#\s*\[\s*(?:crate::)?(?:{})([^\]]*)\](?:\s*#\s*\[[^\]]*\])*\s*(?:pub\s*(?:\([^)]*\)\s*)?)?(?:async\s+)?fn\s+([A-Za-z0-9_]+)\s*\((?P<params>[^)]*)\)"#,
+        pattern
+    );
+
+    Regex::new(&full_pattern).ok()
+}
+
 /// Matches Tauri registrations like `tauri::generate_handler![foo, bar]` or `generate_handler![foo, bar]`.
 /// Captures the comma-separated list of function identifiers inside the brackets.
 pub(crate) fn regex_tauri_generate_handler() -> &'static Regex {

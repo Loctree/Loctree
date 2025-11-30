@@ -5,9 +5,9 @@ use crate::types::{
 
 use super::offset_to_line;
 use super::regexes::{
-    regex_event_const_rust, regex_event_emit_rust, regex_event_listen_rust,
-    regex_rust_async_main_attr, regex_rust_fn_main, regex_rust_pub_use, regex_rust_use,
-    regex_tauri_command_fn, regex_tauri_generate_handler, rust_pub_const_regexes,
+    regex_custom_command_fn, regex_event_const_rust, regex_event_emit_rust,
+    regex_event_listen_rust, regex_rust_async_main_attr, regex_rust_fn_main, regex_rust_pub_use,
+    regex_rust_use, regex_tauri_command_fn, regex_tauri_generate_handler, rust_pub_const_regexes,
     rust_pub_decl_regexes,
 };
 
@@ -195,7 +195,11 @@ fn strip_cfg_attributes(s: &str) -> String {
     result
 }
 
-pub(crate) fn analyze_rust_file(content: &str, relative: String) -> FileAnalysis {
+pub(crate) fn analyze_rust_file(
+    content: &str,
+    relative: String,
+    custom_command_macros: &[String],
+) -> FileAnalysis {
     let mut analysis = FileAnalysis::new(relative);
     let mut event_emits = Vec::new();
     let mut event_listens = Vec::new();
@@ -373,6 +377,35 @@ pub(crate) fn analyze_rust_file(content: &str, relative: String) -> FileAnalysis
         }
     }
 
+    // Custom command macros (from .loctree/config.toml)
+    if let Some(custom_regex) = regex_custom_command_fn(custom_command_macros) {
+        for caps in custom_regex.captures_iter(content) {
+            let attr_raw = caps.get(1).map(|m| m.as_str()).unwrap_or("").trim();
+            let name_match = caps.get(2);
+            let params = caps
+                .name("params")
+                .map(|p| p.as_str().trim().to_string())
+                .filter(|s| !s.is_empty());
+
+            if let Some(name) = name_match {
+                let fn_name = name.as_str().to_string();
+                // Avoid duplicates if both #[tauri::command] and custom macro are used
+                if analysis.command_handlers.iter().any(|c| c.name == fn_name) {
+                    continue;
+                }
+                let exposed_name = exposed_command_name(attr_raw, &fn_name);
+                let line = offset_to_line(content, name.start());
+                analysis.command_handlers.push(CommandRef {
+                    name: fn_name,
+                    exposed_name: Some(exposed_name),
+                    line,
+                    generic_type: None,
+                    payload: params,
+                });
+            }
+        }
+    }
+
     // Tauri generate_handler! registrations
     // The generate_handler! macro may span multiple lines and contain #[cfg(...)] attributes.
     // We need to handle nested brackets by finding balanced pairs.
@@ -455,7 +488,7 @@ tauri::generate_handler![
     simple_cmd,
 ]
 "#;
-        let analysis = analyze_rust_file(content, "lib.rs".to_string());
+        let analysis = analyze_rust_file(content, "lib.rs".to_string(), &[]);
         assert!(
             analysis
                 .tauri_registered_handlers
@@ -489,7 +522,7 @@ tauri::generate_handler![
     another_normal_command,
 ]
 "#;
-        let analysis = analyze_rust_file(content, "lib.rs".to_string());
+        let analysis = analyze_rust_file(content, "lib.rs".to_string(), &[]);
         let handlers = &analysis.tauri_registered_handlers;
         assert!(
             handlers.contains(&"normal_command".to_string()),
@@ -528,7 +561,7 @@ pub async fn internal_name() {}
 pub fn snake_case_func() {}
         "#;
 
-        let analysis = analyze_rust_file(content, "src/lib.rs".to_string());
+        let analysis = analyze_rust_file(content, "src/lib.rs".to_string(), &[]);
 
         // check reexports and public items
         assert!(
@@ -560,7 +593,7 @@ fn main() {
     vista_lib::run()
 }
 "#;
-        let analysis = analyze_rust_file(content, "main.rs".to_string());
+        let analysis = analyze_rust_file(content, "main.rs".to_string(), &[]);
         assert!(
             analysis.entry_points.contains(&"main".to_string()),
             "Should detect fn main() as entry point, got: {:?}",
@@ -576,7 +609,7 @@ async fn main() {
     app::run().await
 }
 "#;
-        let analysis = analyze_rust_file(content, "main.rs".to_string());
+        let analysis = analyze_rust_file(content, "main.rs".to_string(), &[]);
         assert!(
             analysis.entry_points.contains(&"main".to_string()),
             "Should detect async fn main()"
@@ -584,6 +617,63 @@ async fn main() {
         assert!(
             analysis.entry_points.contains(&"async_main".to_string()),
             "Should detect #[tokio::main]"
+        );
+    }
+
+    #[test]
+    fn detects_custom_command_macros() {
+        let content = r#"
+#[api_cmd_tauri]
+pub async fn custom_handler(state: State) -> Result<(), Error> {}
+
+#[gitbutler_command]
+pub fn another_custom() {}
+
+#[tauri::command]
+pub fn standard_command() {}
+"#;
+        let custom_macros = vec!["api_cmd_tauri".to_string(), "gitbutler_command".to_string()];
+        let analysis = analyze_rust_file(content, "commands.rs".to_string(), &custom_macros);
+
+        let handler_names: Vec<_> = analysis.command_handlers.iter().map(|c| &c.name).collect();
+        assert!(
+            handler_names.contains(&&"custom_handler".to_string()),
+            "Should detect #[api_cmd_tauri] command, got: {:?}",
+            handler_names
+        );
+        assert!(
+            handler_names.contains(&&"another_custom".to_string()),
+            "Should detect #[gitbutler_command] command"
+        );
+        assert!(
+            handler_names.contains(&&"standard_command".to_string()),
+            "Should still detect #[tauri::command]"
+        );
+        assert_eq!(
+            analysis.command_handlers.len(),
+            3,
+            "Should have exactly 3 handlers"
+        );
+    }
+
+    #[test]
+    fn custom_macros_avoid_duplicates() {
+        let content = r#"
+#[api_cmd_tauri]
+#[tauri::command]
+pub fn double_annotated() {}
+"#;
+        let custom_macros = vec!["api_cmd_tauri".to_string()];
+        let analysis = analyze_rust_file(content, "commands.rs".to_string(), &custom_macros);
+
+        assert_eq!(
+            analysis.command_handlers.len(),
+            1,
+            "Should not duplicate when both macros present"
+        );
+        assert_eq!(
+            analysis.command_handlers[0].name, "double_annotated",
+            "Handler name should match"
         );
     }
 }

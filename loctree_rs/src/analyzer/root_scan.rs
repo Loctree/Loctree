@@ -34,6 +34,8 @@ pub struct ScanConfig<'a> {
     pub cached_analyses: Option<&'a HashMap<String, crate::types::FileAnalysis>>,
     /// Force collection of graph edges (for Init mode snapshots)
     pub collect_edges: bool,
+    /// Custom Tauri command macros from .loctree/config.toml
+    pub custom_command_macros: &'a [String],
 }
 
 pub struct RootContext {
@@ -223,6 +225,7 @@ pub fn scan_roots(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
                             &py_roots,
                             cfg.py_stdlib,
                             options.symbol.as_deref(),
+                            cfg.custom_command_macros,
                         )?;
                         a.mtime = current_mtime;
                         a
@@ -238,6 +241,7 @@ pub fn scan_roots(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
                         &py_roots,
                         cfg.py_stdlib,
                         options.symbol.as_deref(),
+                        cfg.custom_command_macros,
                     )?;
                     a.mtime = current_mtime;
                     a
@@ -253,6 +257,7 @@ pub fn scan_roots(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
                     &py_roots,
                     cfg.py_stdlib,
                     options.symbol.as_deref(),
+                    cfg.custom_command_macros,
                 )?;
                 a.mtime = current_mtime;
                 a
