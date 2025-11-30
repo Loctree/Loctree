@@ -132,6 +132,7 @@ pub(crate) fn analyze_file(
     py_roots: &[PathBuf],
     py_stdlib: &HashSet<String>,
     symbol: Option<&str>,
+    custom_command_macros: &[String],
 ) -> io::Result<FileAnalysis> {
     let canonical = path.canonicalize()?;
     if !canonical.starts_with(root_canon) {
@@ -156,7 +157,7 @@ pub(crate) fn analyze_file(
         .unwrap_or_default();
 
     let mut analysis = match ext.as_str() {
-        "rs" => analyze_rust_file(&content, relative),
+        "rs" => analyze_rust_file(&content, relative, custom_command_macros),
         "css" => analyze_css_file(&content, relative),
         "py" => analyze_py_file(
             &content, &canonical, root_canon, extensions, relative, py_roots, py_stdlib,

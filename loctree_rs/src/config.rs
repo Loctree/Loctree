@@ -10,12 +10,6 @@ use std::path::Path;
 #[serde(default)]
 pub struct LoctreeConfig {
     pub tauri: TauriConfig,
-    /// Enable library mode to filter example/demo/fixture files
-    #[serde(default)]
-    pub library_mode: bool,
-    /// Additional glob patterns for library example files
-    #[serde(default)]
-    pub library_example_globs: Vec<String>,
 }
 
 /// Tauri-specific configuration
@@ -26,15 +20,6 @@ pub struct TauriConfig {
     /// Example: `["api_cmd_tauri", "gitbutler_command"]`
     #[serde(default)]
     pub command_macros: Vec<String>,
-    /// Extra DOM API names to exclude from Tauri command detection.
-    #[serde(default)]
-    pub dom_exclusions: Vec<String>,
-    /// Extra function names to exclude from Tauri invoke detection.
-    #[serde(default)]
-    pub non_invoke_exclusions: Vec<String>,
-    /// Extra invalid command names (CLI/test helpers) to ignore.
-    #[serde(default)]
-    pub invalid_command_names: Vec<String>,
 }
 
 impl LoctreeConfig {
@@ -82,9 +67,6 @@ mod tests {
     fn test_default_config() {
         let config = LoctreeConfig::default();
         assert!(config.tauri.command_macros.is_empty());
-        assert!(config.tauri.dom_exclusions.is_empty());
-        assert!(config.tauri.non_invoke_exclusions.is_empty());
-        assert!(config.tauri.invalid_command_names.is_empty());
         assert!(!config.has_custom_command_macros());
     }
 
@@ -108,9 +90,6 @@ mod tests {
             r#"
 [tauri]
 command_macros = ["api_cmd_tauri", "custom_command"]
-dom_exclusions = ["fetch"]
-non_invoke_exclusions = ["wrapCommand"]
-invalid_command_names = ["npm"]
 "#
         )
         .expect("write config");
@@ -128,19 +107,6 @@ invalid_command_names = ["npm"]
                 .tauri
                 .command_macros
                 .contains(&"custom_command".to_string())
-        );
-        assert!(config.tauri.dom_exclusions.contains(&"fetch".to_string()));
-        assert!(
-            config
-                .tauri
-                .non_invoke_exclusions
-                .contains(&"wrapCommand".to_string())
-        );
-        assert!(
-            config
-                .tauri
-                .invalid_command_names
-                .contains(&"npm".to_string())
         );
         assert!(config.has_custom_command_macros());
     }

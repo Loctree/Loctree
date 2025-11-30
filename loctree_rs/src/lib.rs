@@ -88,6 +88,11 @@ pub mod analyzer;
 /// Contains [`ParsedArgs`](args::ParsedArgs) struct and [`parse_args`](args::parse_args) function.
 pub mod args;
 
+/// Configuration file support.
+///
+/// Loads `.loctree/config.toml` for project-specific settings like custom Tauri command macros.
+pub mod config;
+
 /// Auto-detection of project stacks.
 ///
 /// Detects Rust, TypeScript, Python, Tauri, Vite, and more based on marker files.

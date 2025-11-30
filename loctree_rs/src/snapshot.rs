@@ -418,6 +418,7 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
     use crate::analyzer::root_scan::{ScanConfig, scan_roots};
     use crate::analyzer::runner::default_analyzer_exts;
     use crate::analyzer::scan::{opt_globset, python_stdlib};
+    use crate::config::LoctreeConfig;
 
     let start_time = Instant::now();
 
@@ -479,6 +480,13 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
         .clone()
         .or_else(|| Some(default_analyzer_exts()));
 
+    // Load custom Tauri command macros from .loctree/config.toml
+    let loctree_config = root_list
+        .first()
+        .map(|root| LoctreeConfig::load(root))
+        .unwrap_or_default();
+    let custom_command_macros = loctree_config.tauri.command_macros;
+
     let scan_config = ScanConfig {
         roots: root_list,
         parsed,
@@ -490,6 +498,7 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
         py_stdlib: &py_stdlib,
         cached_analyses: cached_analyses.as_ref(),
         collect_edges: true, // Always collect edges for snapshot (needed by slice)
+        custom_command_macros: &custom_command_macros,
     };
 
     // Perform the scan
