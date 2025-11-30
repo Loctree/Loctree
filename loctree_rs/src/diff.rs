@@ -265,11 +265,11 @@ impl SnapshotDiff {
         let mut affected_consumers = Vec::new();
         for file_info in &to_snapshot.files {
             for import in &file_info.imports {
-                if let Some(resolved) = &import.resolved_path {
-                    if changed_paths.contains(resolved) {
-                        affected_consumers.push(PathBuf::from(&file_info.path));
-                        break;
-                    }
+                if let Some(resolved) = &import.resolved_path
+                    && changed_paths.contains(resolved)
+                {
+                    affected_consumers.push(PathBuf::from(&file_info.path));
+                    break;
                 }
             }
         }

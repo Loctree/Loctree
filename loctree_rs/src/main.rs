@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::panic;
 use std::path::PathBuf;
 
@@ -9,11 +10,9 @@ fn install_broken_pipe_handler() {
     let default_hook = panic::take_hook();
     panic::set_hook(Box::new(move |info| {
         let payload = info.payload();
-        let is_broken = payload
-            .downcast_ref::<&str>()
+        let is_broken = <dyn Any>::downcast_ref::<&str>(payload)
             .is_some_and(|s| s.contains("Broken pipe"))
-            || payload
-                .downcast_ref::<String>()
+            || <dyn Any>::downcast_ref::<String>(payload)
                 .is_some_and(|s| s.contains("Broken pipe"));
 
         if is_broken {
@@ -505,7 +504,7 @@ fn run_git_compare(
     let to_ref = to.unwrap_or("HEAD");
     let changed_files = repo
         .changed_files(from, to_ref)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
 
     // Try to load existing snapshot from .loctree/snapshot.json
     let repo_path = repo.path().to_path_buf();
@@ -537,7 +536,7 @@ fn run_git_compare(
 
     // Output as JSON (agent-first design)
     let json = serde_json::to_string_pretty(&snapshot_diff)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
     println!("{}", json);
 
     Ok(())

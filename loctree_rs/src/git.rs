@@ -114,10 +114,10 @@ impl GitRepo {
     /// Resolve a reference (branch, tag, commit hash, HEAD~n) to a commit hash
     pub fn resolve_ref(&self, reference: &str) -> Result<String, GitError> {
         // Try to parse as OID first (commit hash)
-        if let Ok(oid) = Oid::from_str(reference) {
-            if self.repo.find_commit(oid).is_ok() {
-                return Ok(oid.to_string());
-            }
+        if let Ok(oid) = Oid::from_str(reference)
+            && self.repo.find_commit(oid).is_ok()
+        {
+            return Ok(oid.to_string());
         }
 
         // Try to resolve as a reference
@@ -182,10 +182,10 @@ impl GitRepo {
             let commit = self.repo.find_commit(oid)?;
 
             // If file_path is specified, check if the commit touches that file
-            if let Some(path) = file_path {
-                if !self.commit_touches_file(&commit, path)? {
-                    continue;
-                }
+            if let Some(path) = file_path
+                && !self.commit_touches_file(&commit, path)?
+            {
+                continue;
             }
 
             let author = commit.author();

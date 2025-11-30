@@ -4,6 +4,7 @@
 //! Created by M&K (c)2025 The LibraxisAI Team
 
 use assert_cmd::Command;
+use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -15,7 +16,7 @@ fn fixtures_path() -> PathBuf {
 
 /// Get a command pointing to the loctree binary
 fn loctree() -> Command {
-    Command::cargo_bin("loctree").unwrap()
+    cargo_bin_cmd!("loctree")
 }
 
 // ============================================
