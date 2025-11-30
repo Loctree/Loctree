@@ -42,8 +42,13 @@ exec "$installed_bin" "\$@"
 WRAP
 chmod +x "$wrapper"
 
+# Create short alias 'loct' -> 'loctree'
+loct_wrapper="$INSTALL_DIR/loct"
+ln -sf "$wrapper" "$loct_wrapper" 2>/dev/null || cp "$wrapper" "$loct_wrapper"
+
 info "Installed binary: $installed_bin"
 info "Wrapper: $wrapper"
+info "Short alias: $loct_wrapper (loct)"
 
 # Ensure PATH contains cargo/bin and INSTALL_DIR (wrapper), in that order.
 ensure_path_line() {
