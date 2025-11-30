@@ -31,3 +31,4 @@ loctree-*.js
 loctree-*.min.js
 /reports/loctree-*.js
 /reports/reports/
+/reports/wasm/target
