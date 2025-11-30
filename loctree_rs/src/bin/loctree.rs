@@ -3,6 +3,7 @@ use std::panic;
 use std::path::PathBuf;
 
 use loctree::args::{self, parse_args};
+use loctree::config::LoctreeConfig;
 use loctree::types::{GitSubcommand, Mode};
 use loctree::{OutputMode, analyzer, detect, diff, fs_utils, git, slicer, snapshot, tree};
 
@@ -286,6 +287,13 @@ fn run_trace(
 
     let py_stdlib = analyzer::scan::python_stdlib();
 
+    // Load custom Tauri command macros from .loctree/config.toml
+    let loctree_config = root_list
+        .first()
+        .map(|root| LoctreeConfig::load(root))
+        .unwrap_or_default();
+    let custom_command_macros = loctree_config.tauri.command_macros;
+
     let scan_results = scan_roots(ScanConfig {
         roots: root_list,
         parsed,
@@ -297,6 +305,7 @@ fn run_trace(
         py_stdlib: &py_stdlib,
         cached_analyses: None,
         collect_edges: false,
+        custom_command_macros: &custom_command_macros,
     })?;
 
     let ScanResults {
@@ -350,6 +359,13 @@ fn run_for_ai(root_list: &[PathBuf], parsed: &args::ParsedArgs) -> std::io::Resu
     let focus_set = opt_globset(&parsed.focus_patterns);
     let exclude_set = opt_globset(&parsed.exclude_report_patterns);
 
+    // Load custom Tauri command macros from .loctree/config.toml
+    let loctree_config = root_list
+        .first()
+        .map(|root| LoctreeConfig::load(root))
+        .unwrap_or_default();
+    let custom_command_macros = loctree_config.tauri.command_macros;
+
     let scan_results = scan_roots(ScanConfig {
         roots: root_list,
         parsed,
@@ -361,6 +377,7 @@ fn run_for_ai(root_list: &[PathBuf], parsed: &args::ParsedArgs) -> std::io::Resu
         py_stdlib: &py_stdlib,
         cached_analyses: None,
         collect_edges: true, // Need edges for hub files
+        custom_command_macros: &custom_command_macros,
     })?;
 
     let ScanResults {

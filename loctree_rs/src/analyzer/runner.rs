@@ -5,7 +5,6 @@ use std::path::PathBuf;
 
 use crate::args::{ParsedArgs, preset_ignore_symbols};
 use crate::config::LoctreeConfig;
-use crate::snapshot::{Snapshot, SnapshotMetadata};
 use crate::types::OutputMode;
 
 use super::ReportSection;
@@ -13,15 +12,15 @@ use super::coverage::{
     CommandUsage, compute_command_gaps_with_confidence, compute_unregistered_handlers,
 };
 use super::dead_parrots::{
-    DeadFilterConfig, analyze_impact, find_dead_exports, find_similar, print_dead_exports,
-    print_impact_results, print_similarity_results, print_symbol_results, search_symbol,
+    analyze_impact, find_dead_exports, find_similar, print_dead_exports, print_impact_results,
+    print_similarity_results, print_symbol_results, search_symbol,
 };
 use super::open_server::{open_in_browser, start_open_server};
 use super::output::{RootArtifacts, process_root_context, write_report};
 use super::pipelines::build_pipeline_summary;
 use super::root_scan::{ScanConfig, ScanResults, scan_results_from_snapshot, scan_roots};
 use super::scan::{opt_globset, python_stdlib};
-use crate::analyzer::ast_js::CommandDetectionConfig;
+use crate::snapshot::Snapshot;
 
 const DEFAULT_EXCLUDE_REPORT_PATTERNS: &[&str] =
     &["**/__tests__/**", "scripts/semgrep-fixtures/**"];
@@ -30,12 +29,10 @@ const SCHEMA_NAME: &str = "loctree-json";
 const SCHEMA_VERSION: &str = "1.2.0";
 
 pub fn default_analyzer_exts() -> HashSet<String> {
-    [
-        "ts", "tsx", "js", "jsx", "mjs", "cjs", "rs", "css", "py", "svelte", "vue", "dart", "go",
-    ]
-    .iter()
-    .map(|s| s.to_string())
-    .collect()
+    ["ts", "tsx", "js", "jsx", "mjs", "cjs", "rs", "css", "py"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
 }
 
 pub fn styles_preset_exts() -> HashSet<String> {
@@ -99,7 +96,7 @@ fn print_py_race_indicators(analyses: &[crate::types::FileAnalysis], json: bool)
         println!("===================================\n");
 
         if !warnings.is_empty() {
-            println!("[!] WARNINGS ({}):", warnings.len());
+            println!("⚠️  WARNINGS ({}):", warnings.len());
             for (path, ind) in &warnings {
                 println!("  {}:{}", path, ind.line);
                 println!("    [{}] {}", ind.pattern, ind.message);
@@ -108,7 +105,7 @@ fn print_py_race_indicators(analyses: &[crate::types::FileAnalysis], json: bool)
         }
 
         if !infos.is_empty() {
-            println!("[i] INFO ({}):", infos.len());
+            println!("ℹ️  INFO ({}):", infos.len());
             for (path, ind) in &infos {
                 println!("  {}:{}", path, ind.line);
                 println!("    [{}] {}", ind.pattern, ind.message);
@@ -126,10 +123,6 @@ fn print_py_race_indicators(analyses: &[crate::types::FileAnalysis], json: bool)
 }
 
 pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
-    use std::time::Instant;
-
-    let mut parsed = parsed.clone();
-    let scan_started = Instant::now();
     let mut json_results = Vec::new();
     let mut report_sections: Vec<ReportSection> = Vec::new();
     let mut server_handle = None;
@@ -171,17 +164,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         .first()
         .map(|root| LoctreeConfig::load(root))
         .unwrap_or_default();
-    parsed.library_mode = parsed.library_mode || loctree_config.library_mode;
-    if parsed.library_mode && parsed.library_example_globs.is_empty() {
-        parsed.library_example_globs = loctree_config.library_example_globs.clone();
-    }
-    let library_mode = parsed.library_mode;
     let custom_command_macros = loctree_config.tauri.command_macros;
-    let command_detection = CommandDetectionConfig::new(
-        &loctree_config.tauri.dom_exclusions,
-        &loctree_config.tauri.non_invoke_exclusions,
-        &loctree_config.tauri.invalid_command_names,
-    );
 
     let mut exclude_patterns = parsed.exclude_report_patterns.clone();
     exclude_patterns.extend(
@@ -196,25 +179,11 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         parsed.editor_cmd.clone(),
     );
 
-    // Only generate HTML when explicitly requested or serving; avoid auto-opening during tests/builds.
-    let auto_report_path = if parsed.serve || parsed.report_path.is_some() {
-        parsed.report_path.clone().or_else(|| {
-            root_list
-                .first()
-                .map(|root| Snapshot::artifacts_dir(root).join("report.html"))
-        })
-    } else {
-        None
-    };
-
     if parsed.serve {
-        eprintln!(
-            "[loctree][warn] `--serve` will move to `loct report --serve`; please prefer the report subcommand (backwards compatible for now)"
-        );
         if let Some((base, handle)) = start_open_server(
             root_list.to_vec(),
             editor_cfg.clone(),
-            auto_report_path.clone(),
+            parsed.report_path.clone(),
             parsed.serve_port,
         ) {
             server_handle = Some(handle);
@@ -268,7 +237,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                         }
                         scan_roots(ScanConfig {
                             roots: root_list,
-                            parsed: &parsed,
+                            parsed,
                             extensions: base_extensions.clone(),
                             focus_set: &focus_set,
                             exclude_set: &exclude_set,
@@ -280,7 +249,6 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                                 || parsed.impact.is_some()
                                 || parsed.circular,
                             custom_command_macros: &custom_command_macros,
-                            command_detection: command_detection.clone(),
                         })?
                     }
                 }
@@ -288,7 +256,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                 // No .loctree directory found, scan fresh
                 scan_roots(ScanConfig {
                     roots: root_list,
-                    parsed: &parsed,
+                    parsed,
                     extensions: base_extensions.clone(),
                     focus_set: &focus_set,
                     exclude_set: &exclude_set,
@@ -298,14 +266,13 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                     cached_analyses: None,
                     collect_edges: parsed.graph || parsed.impact.is_some() || parsed.circular,
                     custom_command_macros: &custom_command_macros,
-                    command_detection: command_detection.clone(),
                 })?
             }
         } else {
             // No roots provided
             scan_roots(ScanConfig {
                 roots: root_list,
-                parsed: &parsed,
+                parsed,
                 extensions: base_extensions.clone(),
                 focus_set: &focus_set,
                 exclude_set: &exclude_set,
@@ -315,14 +282,13 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                 cached_analyses: None,
                 collect_edges: parsed.graph || parsed.impact.is_some() || parsed.circular,
                 custom_command_macros: &custom_command_macros,
-                command_detection: command_detection.clone(),
             })?
         }
     } else {
         // --symbol requires reading files, skip snapshot
         scan_roots(ScanConfig {
             roots: root_list,
-            parsed: &parsed,
+            parsed,
             extensions: base_extensions,
             focus_set: &focus_set,
             exclude_set: &exclude_set,
@@ -332,34 +298,8 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             cached_analyses: None,
             collect_edges: parsed.graph || parsed.impact.is_some() || parsed.circular,
             custom_command_macros: &custom_command_macros,
-            command_detection,
         })?
     };
-    if parsed.auto_outputs {
-        let snapshot_root = if root_list.len() == 1 {
-            root_list
-                .first()
-                .cloned()
-                .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
-        } else {
-            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-        };
-
-        match crate::snapshot::write_auto_artifacts(&snapshot_root, &scan_results, &parsed) {
-            Ok(paths) => {
-                if !paths.is_empty() {
-                    println!("Artifacts saved under ./.loctree:");
-                    for p in paths {
-                        println!("  - {}", p);
-                    }
-                }
-            }
-            Err(err) => {
-                eprintln!("[loctree][warn] failed to write auto artifacts: {}", err);
-            }
-        }
-    }
-
     let ScanResults {
         contexts,
         global_fe_commands,
@@ -367,7 +307,6 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         global_fe_payloads,
         global_be_payloads,
         global_analyses,
-        ..
     } = scan_results;
 
     if let Some(sym) = &parsed.symbol {
@@ -401,44 +340,8 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
 
     if parsed.dead_exports {
         let high_confidence = parsed.dead_confidence.as_deref() == Some("high");
-        let dead_exports = find_dead_exports(
-            &global_analyses,
-            high_confidence,
-            None,
-            DeadFilterConfig {
-                include_tests: parsed.with_tests,
-                include_helpers: parsed.with_helpers,
-                library_mode,
-                example_globs: parsed.library_example_globs.clone(),
-                python_library_mode: parsed.python_library,
-                include_ambient: false,
-                include_dynamic: false,
-            },
-        );
-        // Apply --focus and --exclude-report filters to dead exports
-        let filtered_dead: Vec<_> = dead_exports
-            .into_iter()
-            .filter(|d| {
-                let path = std::path::PathBuf::from(&d.file);
-                // Check focus_set: if set, file must match
-                let passes_focus = focus_set
-                    .as_ref()
-                    .map(|set| set.is_match(&path))
-                    .unwrap_or(true);
-                // Check exclude_set: if set, file must NOT match
-                let passes_exclude = exclude_set
-                    .as_ref()
-                    .map(|set| !set.is_match(&path))
-                    .unwrap_or(true);
-                passes_focus && passes_exclude
-            })
-            .collect();
-        print_dead_exports(
-            &filtered_dead,
-            parsed.output,
-            high_confidence,
-            parsed.top_dead_symbols,
-        );
+        let dead_exports = find_dead_exports(&global_analyses, high_confidence);
+        print_dead_exports(&dead_exports, parsed.output, high_confidence);
         return Ok(());
     }
 
@@ -449,26 +352,8 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         .collect();
 
     if parsed.circular {
-        let (cycles, lazy_cycles) = super::cycles::find_cycles_with_lazy(&all_graph_edges);
+        let cycles = super::cycles::find_cycles(&all_graph_edges);
         super::cycles::print_cycles(&cycles, matches!(parsed.output, OutputMode::Json));
-        if !lazy_cycles.is_empty() && !matches!(parsed.output, OutputMode::Json) {
-            println!("\nLazy circular imports (info):");
-            println!(
-                "  These come from imports inside functions/methods; usually safe, but check init order if relevant."
-            );
-            super::cycles::print_cycles(&lazy_cycles, false);
-            let lazy_edges: Vec<_> = all_graph_edges
-                .iter()
-                .filter(|(_, _, kind)| kind.contains("lazy"))
-                .take(5)
-                .collect();
-            if !lazy_edges.is_empty() {
-                println!("  Lazy edges (sample):");
-                for (from, to, kind) in lazy_edges {
-                    println!("    {} -> {} [{}]", from, to, kind);
-                }
-            }
-        }
         return Ok(());
     }
 
@@ -530,7 +415,6 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         &global_fe_payloads,
         &global_be_payloads,
     );
-    let git_ctx = Snapshot::current_git_context();
 
     // Handle SARIF output
     if parsed.sarif {
@@ -542,53 +426,15 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
 
         // Get dead exports
         let high_confidence = parsed.dead_confidence.as_deref() == Some("high");
-        let dead_exports = find_dead_exports(
-            &global_analyses,
-            high_confidence,
-            None,
-            DeadFilterConfig {
-                include_tests: parsed.with_tests,
-                include_helpers: parsed.with_helpers,
-                library_mode,
-                example_globs: parsed.library_example_globs.clone(),
-                python_library_mode: parsed.python_library,
-                include_ambient: false,
-                include_dynamic: false,
-            },
-        );
-
-        // Get circular imports
-        let (circular_imports, _lazy) = super::cycles::find_cycles_with_lazy(&all_graph_edges);
-
-        // Build minimal snapshot for SARIF enrichment (blast radius, consumer count)
-        use crate::snapshot::GraphEdge;
-        let minimal_snapshot = Snapshot {
-            metadata: SnapshotMetadata::default(),
-            files: vec![],
-            edges: all_graph_edges
-                .iter()
-                .map(|(from, to, label)| GraphEdge {
-                    from: from.clone(),
-                    to: to.clone(),
-                    label: label.clone(),
-                })
-                .collect(),
-            export_index: Default::default(),
-            command_bridges: vec![],
-            event_bridges: vec![],
-            barrels: vec![],
-        };
+        let dead_exports = find_dead_exports(&global_analyses, high_confidence);
 
         super::sarif::print_sarif(super::sarif::SarifInputs {
             duplicate_exports: &all_ranked_dups,
             missing_handlers: &global_missing_handlers,
             unused_handlers: &global_unused_handlers,
             dead_exports: &dead_exports,
-            circular_imports: &circular_imports,
             pipeline_summary: &pipeline_summary,
-            snapshot: Some(&minimal_snapshot),
-        })
-        .map_err(|err| io::Error::other(format!("Failed to serialize SARIF: {err}")))?;
+        });
         return Ok(());
     }
 
@@ -599,17 +445,15 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         } = process_root_context(
             idx,
             ctx,
-            &parsed,
+            parsed,
             &global_fe_commands,
             &global_be_commands,
             &global_missing_handlers,
             &global_unregistered_handlers,
             &global_unused_handlers,
             &pipeline_summary,
-            Some(&git_ctx),
             SCHEMA_NAME,
             SCHEMA_VERSION,
-            &global_analyses,
         );
         json_results.extend(json_items);
         if let Some(section) = report_section {
@@ -657,9 +501,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         }
     }
 
-    if (parsed.serve || parsed.report_path.is_some())
-        && let Some(report_path) = auto_report_path.as_ref()
-    {
+    if let Some(report_path) = parsed.report_path.as_ref() {
         write_report(report_path, &report_sections, parsed.verbose)?;
         open_in_browser(report_path);
     }
@@ -734,68 +576,12 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         }
     }
 
-    // Threshold-based CI policy checks
-    if let Some(max_dead) = parsed.max_dead {
-        let high_confidence = parsed.dead_confidence.as_deref() == Some("high");
-        let dead_exports = super::dead_parrots::find_dead_exports(
-            &global_analyses,
-            high_confidence,
-            None,
-            DeadFilterConfig {
-                include_tests: parsed.with_tests,
-                include_helpers: parsed.with_helpers,
-                library_mode,
-                example_globs: parsed.library_example_globs.clone(),
-                python_library_mode: parsed.python_library,
-                include_ambient: false,
-                include_dynamic: false,
-            },
-        );
-        let dead_count = dead_exports.len();
-        if dead_count > max_dead {
-            fail_reasons.push(format!(
-                "{} dead export(s) exceed threshold of {} (--max-dead)",
-                dead_count, max_dead
-            ));
-        }
-    }
-
-    if let Some(max_cycles) = parsed.max_cycles {
-        let (cycles, _) = super::cycles::find_cycles_with_lazy(&all_graph_edges);
-        let cycle_count = cycles.len();
-        if cycle_count > max_cycles {
-            fail_reasons.push(format!(
-                "{} circular import(s) exceed threshold of {} (--max-cycles)",
-                cycle_count, max_cycles
-            ));
-        }
-    }
-
     if !fail_reasons.is_empty() {
         eprintln!("[loctree][fail] {}", fail_reasons.join("; "));
         return Err(io::Error::other(format!(
             "Pipeline check failed: {}",
             fail_reasons.join("; ")
         )));
-    }
-
-    // Human-friendly summary for the default scan (avoid empty output).
-    if matches!(parsed.output, OutputMode::Human) && !parsed.sarif {
-        let elapsed = scan_started.elapsed();
-        let mut langs: HashSet<String> = HashSet::new();
-        for fa in &global_analyses {
-            if !fa.language.is_empty() {
-                langs.insert(fa.language.clone());
-            }
-        }
-        eprintln!(
-            "[loctree] Summary: files {}, missing handlers {}, unused handlers {}, languages [{}], elapsed {:.2?}",
-            global_analyses.len(),
-            global_missing_handlers.len(),
-            global_unused_handlers.len(),
-            langs.iter().cloned().collect::<Vec<_>>().join(","),
-            elapsed
-        );
     }
 
     Ok(())
