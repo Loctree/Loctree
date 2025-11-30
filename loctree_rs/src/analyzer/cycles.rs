@@ -1,14 +1,7 @@
-//! Circular import detection using Tarjan's SCC algorithm.
-//!
-//! Finds strongly connected components (cycles) in the import graph.
-//! Normalizes module paths to collapse barrels and extensions before detection.
-
 use std::cmp::min;
 use std::collections::{HashMap, HashSet};
 
 use serde_json::json;
-
-use super::root_scan::normalize_module_id;
 
 struct TarjanData {
     index: usize,
@@ -20,107 +13,10 @@ struct TarjanData {
 }
 
 pub fn find_cycles(edges: &[(String, String, String)]) -> Vec<Vec<String>> {
-    // Normalize modules to collapse barrels (index files) and JS/TS extensions.
-    // Keep a canonical display path for each normalized module id so output remains readable.
-    let mut canonical: HashMap<String, String> = HashMap::new();
-    let mut normalized_edges: Vec<(String, String)> = Vec::new();
-
-    for (from, to, _) in edges {
-        let norm_from = normalize_module_id(from).as_key();
-        let norm_to = normalize_module_id(to).as_key();
-        canonical
-            .entry(norm_from.clone())
-            .or_insert_with(|| from.clone());
-        canonical
-            .entry(norm_to.clone())
-            .or_insert_with(|| to.clone());
-        normalized_edges.push((norm_from, norm_to));
-    }
-
-    // Run Tarjan on normalized module ids
-    let cycles_norm = find_cycles_normalized(&normalized_edges);
-
-    // Map back to canonical display paths
-    cycles_norm
-        .into_iter()
-        .map(|cycle| {
-            cycle
-                .into_iter()
-                .map(|id| canonical.get(&id).cloned().unwrap_or(id))
-                .collect()
-        })
-        .collect()
-}
-
-/// Return (strict_cycles, lazy_cycles), where:
-/// - strict_cycles exclude edges marked as "lazy_import" or "type_import"
-/// - lazy_cycles are cycles that disappear once lazy imports are removed and that include a lazy edge
-pub fn find_cycles_with_lazy(
-    edges: &[(String, String, String)],
-) -> (Vec<Vec<String>>, Vec<Vec<String>>) {
-    let strict_edges: Vec<_> = edges
-        .iter()
-        .filter(|(_, _, kind)| kind != "lazy_import" && kind != "type_import")
-        .cloned()
-        .collect();
-    let strict_cycles = find_cycles(&strict_edges);
-
-    let edges_no_type: Vec<_> = edges
-        .iter()
-        .filter(|(_, _, kind)| kind != "type_import")
-        .cloned()
-        .collect();
-    let all_cycles = find_cycles(&edges_no_type);
-
-    let lazy_edge_set: HashSet<(String, String)> = edges_no_type
-        .iter()
-        .filter(|(_, _, kind)| kind == "lazy_import")
-        .map(|(a, b, _)| (a.clone(), b.clone()))
-        .collect();
-
-    let normalize = |cycle: &[String]| {
-        let mut sorted = cycle.to_vec();
-        sorted.sort();
-        sorted.join("|")
-    };
-    let strict_keys: HashSet<String> = strict_cycles.iter().map(|c| normalize(c)).collect();
-    let mut seen = HashSet::new();
-    let mut lazy_cycles = Vec::new();
-
-    for cycle in all_cycles {
-        let key = normalize(&cycle);
-        if strict_keys.contains(&key) || seen.contains(&key) {
-            continue;
-        }
-        let mut has_lazy = false;
-        for pair in cycle.windows(2) {
-            if pair.len() == 2 && lazy_edge_set.contains(&(pair[0].clone(), pair[1].clone())) {
-                has_lazy = true;
-                break;
-            }
-        }
-        // wrap edge
-        if !has_lazy && cycle.len() > 1 {
-            let last = cycle.last().unwrap();
-            let first = cycle.first().unwrap();
-            if lazy_edge_set.contains(&(last.clone(), first.clone())) {
-                has_lazy = true;
-            }
-        }
-        if has_lazy {
-            seen.insert(key);
-            lazy_cycles.push(cycle);
-        }
-    }
-
-    (strict_cycles, lazy_cycles)
-}
-
-fn find_cycles_normalized(edges: &[(String, String)]) -> Vec<Vec<String>> {
     let mut adj: HashMap<String, Vec<String>> = HashMap::new();
     let mut all_nodes = HashSet::new();
 
-    for (from, to) in edges {
+    for (from, to, _) in edges {
         adj.entry(from.clone()).or_default().push(to.clone());
         all_nodes.insert(from.clone());
         all_nodes.insert(to.clone());
@@ -237,21 +133,7 @@ pub fn print_cycles(cycles: &[Vec<String>], json_output: bool) {
         for (i, cycle) in cycles.iter().enumerate() {
             let mut c = cycle.clone();
             c.reverse(); // Reverse to show cycle in discovery order for readability
-
-            let cycle_str = if c.len() > 12 {
-                let first_part = c[..5].join(" -> ");
-                let last_part = c[c.len() - 5..].join(" -> ");
-                format!(
-                    "{} -> ... ({} intermediate) ... -> {}",
-                    first_part,
-                    c.len() - 10,
-                    last_part
-                )
-            } else {
-                c.join(" -> ")
-            };
-
-            println!("  Cycle {}: {}", i + 1, cycle_str);
+            println!("  Cycle {}: {}", i + 1, c.join(" -> "));
         }
     }
 }
@@ -369,53 +251,5 @@ mod tests {
         ];
         // Should not panic
         print_cycles(&cycles, false);
-    }
-
-    #[test]
-    fn detects_cycle_with_index_collapse() {
-        // Barrel (index.ts) re-export + consumer importing the barrel should still form a cycle
-        // after normalizing /index and TS/JS extensions.
-        let edges = vec![
-            (
-                "src/features/ai-suite/index.ts".to_string(),
-                "src/features/ai-suite/hooks/useFoo.ts".to_string(),
-                "reexport".to_string(),
-            ),
-            (
-                "src/features/ai-suite/hooks/useFoo.tsx".to_string(),
-                "src/features/ai-suite/index.tsx".to_string(),
-                "import".to_string(),
-            ),
-        ];
-        let cycles = find_cycles(&edges);
-        assert_eq!(cycles.len(), 1);
-        let cycle = &cycles[0];
-        assert_eq!(cycle.len(), 2);
-        assert!(cycle.iter().any(|p| p.contains("ai-suite/index")));
-        assert!(cycle.iter().any(|p| p.contains("hooks/useFoo")));
-    }
-
-    #[test]
-    fn collapses_ts_js_family_into_cycles() {
-        // Cross-extension imports (ts/js) should normalize to the same module id
-        // so cycles are detectable even when files are split by extension.
-        let edges = vec![
-            (
-                "src/utils/a.ts".to_string(),
-                "src/utils/b.ts".to_string(),
-                "import".to_string(),
-            ),
-            (
-                "src/utils/b.js".to_string(),
-                "src/utils/a.js".to_string(),
-                "import".to_string(),
-            ),
-        ];
-        let cycles = find_cycles(&edges);
-        assert_eq!(cycles.len(), 1);
-        let cycle = &cycles[0];
-        assert_eq!(cycle.len(), 2);
-        assert!(cycle.iter().any(|p| p.contains("utils/a")));
-        assert!(cycle.iter().any(|p| p.contains("utils/b")));
     }
 }

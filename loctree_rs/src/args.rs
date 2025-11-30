@@ -3,7 +3,6 @@ use std::path::PathBuf;
 
 use crate::types::{ColorMode, DEFAULT_LOC_THRESHOLD, GitSubcommand, Mode, OutputMode};
 
-#[derive(Clone)]
 pub struct ParsedArgs {
     pub extensions: Option<HashSet<String>>,
     pub ignore_patterns: Vec<String>,
@@ -19,9 +18,6 @@ pub struct ParsedArgs {
     pub json_output_path: Option<PathBuf>,
     pub summary: bool,
     pub summary_limit: usize,
-    pub summary_only: bool,
-    pub suppress_duplicates: bool,
-    pub suppress_dynamic: bool,
     pub show_help: bool,
     pub show_help_full: bool,
     pub show_version: bool,
@@ -45,10 +41,6 @@ pub struct ParsedArgs {
     pub fail_on_missing_handlers: bool,
     pub fail_on_ghost_events: bool,
     pub fail_on_races: bool,
-    /// Maximum allowed dead exports before failing (CI policy)
-    pub max_dead: Option<usize>,
-    /// Maximum allowed circular imports before failing (CI policy)
-    pub max_cycles: Option<usize>,
     pub ai_mode: bool,
     pub top_dead_symbols: usize,
     pub skip_dead_symbols: bool,
@@ -68,44 +60,6 @@ pub struct ParsedArgs {
     pub slice_target: Option<String>,
     pub slice_consumers: bool,
     pub trace_handler: Option<String>,
-    /// Unified search query
-    pub search_query: Option<String>,
-    /// Filter search to symbol matches only
-    pub search_symbol_only: bool,
-    /// Filter search to dead code only
-    pub search_dead_only: bool,
-    /// Filter search to semantic matches only
-    pub search_semantic_only: bool,
-    /// Auto mode: eagerly emit HTML/JSON/cycle artifacts into .loctree
-    pub auto_outputs: bool,
-    /// Filter search to exported symbols only
-    pub search_exported_only: bool,
-    /// Language filter for search
-    pub search_lang: Option<String>,
-    /// Limit search results
-    pub search_limit: Option<usize>,
-    /// Command name regex filter (commands subcommand)
-    pub commands_name_filter: Option<String>,
-    /// Only commands missing backend handlers
-    pub commands_missing_only: bool,
-    /// Only commands unused on frontend
-    pub commands_unused_only: bool,
-    /// Include tests in dead-export analysis
-    pub with_tests: bool,
-    /// Include helper/docs/scripts in dead-export analysis
-    pub with_helpers: bool,
-    /// Agent feed / JSON output mode
-    pub for_agent_feed: bool,
-    /// Write agent.json to disk
-    pub agent_json: bool,
-    /// Enforce fresh scan (no snapshot reuse) for agent mode
-    pub force_full_scan: bool,
-    /// Library/framework mode (ignore examples/demos from dead-code noise)
-    pub library_mode: bool,
-    /// Additional example/demo globs to ignore in library mode
-    pub library_example_globs: Vec<String>,
-    /// Python library mode: treat __all__ exports as public API
-    pub python_library: bool,
 }
 
 impl Default for ParsedArgs {
@@ -118,16 +72,13 @@ impl Default for ParsedArgs {
             focus_patterns: Vec::new(),
             exclude_report_patterns: Vec::new(),
             graph: false,
-            use_gitignore: true,
+            use_gitignore: false,
             max_depth: None,
             color: ColorMode::Auto,
             output: OutputMode::Human,
             json_output_path: None,
             summary: false,
             summary_limit: 5,
-            summary_only: false,
-            suppress_duplicates: false,
-            suppress_dynamic: false,
             show_help: false,
             show_help_full: false,
             show_version: false,
@@ -151,8 +102,6 @@ impl Default for ParsedArgs {
             fail_on_missing_handlers: false,
             fail_on_ghost_events: false,
             fail_on_races: false,
-            max_dead: None,
-            max_cycles: None,
             ai_mode: false,
             top_dead_symbols: 20,
             skip_dead_symbols: false,
@@ -172,25 +121,6 @@ impl Default for ParsedArgs {
             slice_target: None,
             slice_consumers: false,
             trace_handler: None,
-            search_query: None,
-            search_symbol_only: false,
-            search_dead_only: false,
-            search_semantic_only: false,
-            auto_outputs: false,
-            search_exported_only: false,
-            search_lang: None,
-            search_limit: None,
-            commands_name_filter: None,
-            commands_missing_only: false,
-            commands_unused_only: false,
-            with_tests: false,
-            with_helpers: false,
-            for_agent_feed: false,
-            agent_json: false,
-            force_full_scan: false,
-            library_mode: false,
-            library_example_globs: Vec::new(),
-            python_library: false,
         }
     }
 }
@@ -400,16 +330,8 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
                 parsed.use_gitignore = true;
                 i += 1;
             }
-            "--no-gitignore" => {
-                parsed.use_gitignore = false;
-                i += 1;
-            }
             "--graph" => {
                 parsed.graph = true;
-                i += 1;
-            }
-            "--library-mode" => {
-                parsed.library_mode = true;
                 i += 1;
             }
             "--verbose" | "-v" => {
@@ -426,42 +348,6 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
             }
             "--fail-on-races" => {
                 parsed.fail_on_races = true;
-                i += 1;
-            }
-            "--max-dead" => {
-                let next = args
-                    .get(i + 1)
-                    .ok_or_else(|| "--max-dead requires a non-negative integer".to_string())?;
-                let value = next
-                    .parse::<usize>()
-                    .map_err(|_| "--max-dead requires a non-negative integer".to_string())?;
-                parsed.max_dead = Some(value);
-                i += 2;
-            }
-            _ if arg.starts_with("--max-dead=") => {
-                let value = arg
-                    .trim_start_matches("--max-dead=")
-                    .parse::<usize>()
-                    .map_err(|_| "--max-dead requires a non-negative integer".to_string())?;
-                parsed.max_dead = Some(value);
-                i += 1;
-            }
-            "--max-cycles" => {
-                let next = args
-                    .get(i + 1)
-                    .ok_or_else(|| "--max-cycles requires a non-negative integer".to_string())?;
-                let value = next
-                    .parse::<usize>()
-                    .map_err(|_| "--max-cycles requires a non-negative integer".to_string())?;
-                parsed.max_cycles = Some(value);
-                i += 2;
-            }
-            _ if arg.starts_with("--max-cycles=") => {
-                let value = arg
-                    .trim_start_matches("--max-cycles=")
-                    .parse::<usize>()
-                    .map_err(|_| "--max-cycles requires a non-negative integer".to_string())?;
-                parsed.max_cycles = Some(value);
                 i += 1;
             }
             "--show-hidden" | "-H" => {
@@ -690,29 +576,6 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
                 }
                 i += 1;
             }
-            "search" => {
-                parsed.mode = Mode::Search;
-                if let Some(next) = args.get(i + 1)
-                    && !next.starts_with('-')
-                {
-                    parsed.search_query = Some(next.clone());
-                    i += 2;
-                    continue;
-                }
-                i += 1;
-            }
-            "--symbol-only" => {
-                parsed.search_symbol_only = true;
-                i += 1;
-            }
-            "--dead-only" => {
-                parsed.search_dead_only = true;
-                i += 1;
-            }
-            "--semantic-only" | "--sem-only" => {
-                parsed.search_semantic_only = true;
-                i += 1;
-            }
             "git" => {
                 // Parse git subcommand: compare, blame, history, when-introduced
                 // NO passthrough commands - agents can call git directly
@@ -866,11 +729,6 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
             "--for-ai" | "for-ai" => {
                 parsed.mode = Mode::ForAi;
                 parsed.output = OutputMode::Json;
-                i += 1;
-            }
-            "--for-agent-feed" => {
-                parsed.mode = Mode::ForAi;
-                parsed.output = OutputMode::Jsonl;
                 i += 1;
             }
             "--confidence" => {
@@ -1103,9 +961,8 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
     validate_globs(&parsed.exclude_report_patterns, "--exclude-report")?;
     detect_glob_conflicts(&parsed.focus_patterns, &parsed.exclude_report_patterns)?;
 
-    if parsed.serve {
-        // --serve implies full analysis + HTML report generation
-        parsed.mode = Mode::AnalyzeImports;
+    if parsed.serve && parsed.report_path.is_none() {
+        return Err("--serve requires --html-report to be set".to_string());
     }
 
     for extra in &parsed.py_roots {
@@ -1359,7 +1216,7 @@ mod tests {
         assert!(args.extensions.is_none());
         assert!(args.ignore_patterns.is_empty());
         assert!(!args.graph);
-        assert!(args.use_gitignore); // Default: respect gitignore
+        assert!(!args.use_gitignore);
         assert!(args.max_depth.is_none());
         assert_eq!(args.color, ColorMode::Auto);
         assert_eq!(args.output, OutputMode::Human);
@@ -1374,8 +1231,6 @@ mod tests {
         assert!(!args.verbose);
         assert!(!args.tauri_preset);
         assert!(!args.fail_on_missing_handlers);
-        assert!(args.max_dead.is_none());
-        assert!(args.max_cycles.is_none());
         assert!(!args.ai_mode);
         assert_eq!(args.top_dead_symbols, 20);
         assert!(!args.dead_exports);

@@ -139,7 +139,6 @@ pub fn collect_ai_insights(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analyzer::report::DupSeverity;
 
     fn mock_file(path: &str, language: &str, loc: usize) -> FileAnalysis {
         FileAnalysis {
@@ -234,17 +233,11 @@ mod tests {
             .map(|i| RankedDup {
                 name: format!("dup{}", i),
                 files: vec![format!("file{}.ts", i)],
-                locations: vec![],
                 score: i,
                 prod_count: 1,
                 dev_count: 0,
                 canonical: format!("file{}.ts", i),
-                canonical_line: None,
                 refactors: vec![],
-                severity: DupSeverity::SamePackage,
-                is_cross_lang: false,
-                packages: vec![],
-                reason: String::new(),
             })
             .collect();
 
