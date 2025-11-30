@@ -17,11 +17,11 @@ path = "src/lib.rs"
 
 [[bin]]
 name = "loctree"
-path = "src/main.rs"
+path = "src/bin/loctree.rs"
 
 [[bin]]
 name = "loct"
-path = "src/main.rs"
+path = "src/bin/loct.rs"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
