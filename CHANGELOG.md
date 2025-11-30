@@ -6,6 +6,14 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Released]
 
+## [0.5.2] - 2025-11-28
+
+### Changed
+- Updated Semgrep policy configuration to the latest defaults.
+
+### Fixed
+- Synced version references (landing assets and metadata) with the v0.5.2 release to resolve develop/main divergence.
+
 ## [0.5.1] - 2025-11-28
 
 ### Added
