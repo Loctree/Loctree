@@ -49,10 +49,10 @@ pub fn find_cycles(edges: &[(String, String, String)]) -> Vec<Vec<String>> {
                 return true;
             }
             // Check self loop
-            if let Some(node) = scc.first()
-                && let Some(neighbors) = adj.get(node)
-            {
-                return neighbors.contains(node);
+            if let Some(node) = scc.first() {
+                if let Some(neighbors) = adj.get(node) {
+                    return neighbors.contains(node);
+                }
             }
             false
         })
