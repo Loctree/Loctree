@@ -167,13 +167,48 @@ pub mod tree;
 ///
 /// # Key Types
 ///
-/// - [`Mode`] - CLI mode (Tree, Slice, Trace, AnalyzeImports, ForAi)
+/// - [`Mode`] - CLI mode (Tree, Slice, Trace, AnalyzeImports, ForAi, Git)
 /// - [`Options`] - Analysis configuration
 /// - [`FileAnalysis`] - Per-file analysis result
 /// - `ImportEntry` - Import statement representation
 /// - `ExportSymbol` - Export declaration
 /// - `CommandRef` - Tauri command reference
 pub mod types;
+
+/// Git operations for temporal awareness.
+///
+/// Native git operations using libgit2 for analyzing repository history.
+///
+/// # Key Types
+///
+/// - [`GitRepo`](git::GitRepo) - Git repository wrapper
+/// - [`CommitInfo`](git::CommitInfo) - Commit metadata
+/// - [`ChangedFile`](git::ChangedFile) - File change between commits
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use loctree::git::GitRepo;
+/// use std::path::Path;
+///
+/// let repo = GitRepo::discover(Path::new(".")).unwrap();
+/// let head = repo.head_commit().unwrap();
+/// println!("HEAD: {}", head);
+/// ```
+pub mod git;
+
+/// Snapshot comparison engine for temporal analysis.
+///
+/// Compares loctree snapshots between commits to show semantic changes.
+///
+/// # Key Types
+///
+/// - [`SnapshotDiff`](diff::SnapshotDiff) - Result of comparing two snapshots
+/// - [`GraphDiff`](diff::GraphDiff) - Import graph changes
+/// - [`ExportsDiff`](diff::ExportsDiff) - Export changes
+/// - [`DeadCodeDiff`](diff::DeadCodeDiff) - Dead code changes
+/// - [`ImpactAnalysis`](diff::ImpactAnalysis) - Change impact assessment
+pub mod diff;
 
 // ============================================================================
 // Re-exports for convenience

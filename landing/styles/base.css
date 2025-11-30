@@ -221,3 +221,53 @@ body::after {
     animation: blink-cursor 1.2s step-end infinite;
     color: var(--text-bright);
 }
+
+/* ============================================
+   Easter Eggs
+   ============================================ */
+
+/* Konami code rainbow effect */
+@keyframes konami-rainbow {
+    0% { filter: hue-rotate(0deg); }
+    100% { filter: hue-rotate(360deg); }
+}
+
+@keyframes konami-glow {
+    0%, 100% { box-shadow: 0 0 20px rgba(255, 0, 255, 0.3); }
+    50% { box-shadow: 0 0 40px rgba(0, 255, 255, 0.5), 0 0 60px rgba(255, 0, 255, 0.3); }
+}
+
+body.konami-activated {
+    animation: konami-rainbow 2s linear, konami-glow 0.5s ease-in-out infinite;
+}
+
+body.konami-activated * {
+    transition: all 0.3s ease;
+}
+
+/* Theme toggle tooltip */
+.theme-toggle-wrapper {
+    position: relative;
+}
+
+.theme-toggle-tooltip {
+    position: absolute;
+    bottom: -40px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--bg-mid);
+    border: 1px solid var(--border-visible);
+    padding: 6px 12px;
+    font-size: 11px;
+    white-space: nowrap;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.2s, visibility 0.2s;
+    pointer-events: none;
+    z-index: 100;
+}
+
+.theme-toggle-wrapper:hover .theme-toggle-tooltip {
+    opacity: 1;
+    visibility: visible;
+}
