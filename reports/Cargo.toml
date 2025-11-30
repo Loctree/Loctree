@@ -1,6 +1,6 @@
 [package]
 name = "report-leptos"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["LibraxisAI <the1st@whoai.am>"]
 description = "Leptos SSR renderer for generating static HTML reports - beautiful, interactive, type-safe"
