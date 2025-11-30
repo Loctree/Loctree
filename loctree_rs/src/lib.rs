@@ -53,14 +53,14 @@
 //! loctree --for-ai           # AI-optimized JSON output
 //! ```
 //!
-//! See the [README](https://github.com/Loctree/Loctree) for full documentation.
+//! See the [README](https://github.com/LibraxisAI/Loctree) for full documentation.
 
-#![doc(html_root_url = "https://docs.rs/loctree/0.8.4")]
+#![doc(html_root_url = "https://docs.rs/loctree/0.5.4")]
 #![doc(
-    html_favicon_url = "https://raw.githubusercontent.com/Loctree/Loctree/main/assets/loctree-badge.svg"
+    html_favicon_url = "https://raw.githubusercontent.com/LibraxisAI/loctree/main/assets/loctree-logo.svg"
 )]
 #![doc(
-    html_logo_url = "https://raw.githubusercontent.com/Loctree/Loctree/main/assets/loctree-badge.svg"
+    html_logo_url = "https://raw.githubusercontent.com/LibraxisAI/loctree/main/assets/loctree-logo.svg"
 )]
 
 // ============================================================================
@@ -83,45 +83,10 @@
 /// - [`analyzer::sarif`] - SARIF 2.1.0 output for CI
 pub mod analyzer;
 
-/// New CLI module for the subcommand-based interface.
-///
-/// Provides the canonical `loct <command> [options]` interface with:
-/// - [`Command`](cli::Command) enum as the source of truth for all commands
-/// - [`GlobalOptions`](cli::GlobalOptions) for shared flags
-/// - Per-command option structs
-/// - Legacy adapter for backward compatibility (until v1.0)
-///
-/// # Key Commands (Human Interface)
-///
-/// - `loct` / `loct auto` - Full auto-scan with stack detection (default)
-/// - `loct scan` - Build/update snapshot
-/// - `loct dead` - Detect unused exports
-/// - `loct commands` - Show Tauri command bridges
-/// - `loct events` - Show event flow
-/// - `loct slice <path>` - Extract holographic context
-///
-/// # Agent Interface
-///
-/// Agents should use `--json` output with regex filters on metadata:
-/// - `loct find --symbol '.*patient.*' --lang ts --json`
-/// - `loct dead --confidence high --json`
-pub mod cli;
-
 /// Command-line argument parsing.
 ///
 /// Contains [`ParsedArgs`](args::ParsedArgs) struct and [`parse_args`](args::parse_args) function.
 pub mod args;
-
-/// Configuration file support.
-///
-/// Loads `.loctree/config.toml` for project-specific settings like custom Tauri command macros.
-pub mod config;
-
-/// Suppression system for false positives.
-///
-/// Allows marking findings as "reviewed and OK" so they don't appear in subsequent runs.
-/// Stored in `.loctree/suppressions.toml`.
-pub mod suppressions;
 
 /// Auto-detection of project stacks.
 ///
@@ -175,17 +140,6 @@ pub mod similarity;
 /// slicer::run_slice(root, "src/App.tsx", true, true, &parsed).unwrap();
 /// ```
 pub mod slicer;
-
-/// Directory-level holographic focus.
-///
-/// Like slicer but for directories instead of single files.
-pub mod focuser;
-
-/// CSS Layout Analysis.
-///
-/// Scans CSS/SCSS files for layout-related properties:
-/// z-index, position: sticky/fixed, display: grid/flex.
-pub mod layoutmap;
 
 /// Incremental snapshot persistence.
 ///
@@ -256,53 +210,6 @@ pub mod git;
 /// - [`ImpactAnalysis`](diff::ImpactAnalysis) - Change impact assessment
 pub mod diff;
 
-/// Query API for fast lookups against the cached snapshot.
-///
-/// Provides interactive queries without re-scanning:
-/// - `who-imports <file>` - Find all files that import a given file
-/// - `where-symbol <symbol>` - Find where a symbol is defined
-/// - `component-of <file>` - Show what component/module a file belongs to
-///
-/// # Example
-///
-/// ```rust,no_run
-/// use loctree::{query, snapshot};
-/// use std::path::Path;
-///
-/// let snapshot = snapshot::Snapshot::load(Path::new(".")).unwrap();
-/// let result = query::query_who_imports(&snapshot, "src/utils.ts");
-/// println!("Found {} importers", result.results.len());
-/// ```
-pub mod query;
-
-/// Memex module for AI agent context management.
-///
-/// Provides semantic codebase exploration and context extraction for AI agents.
-/// Requires the `memex` feature flag (heavy dependencies).
-#[cfg(feature = "memex")]
-pub mod memex;
-
-/// Progress UI utilities (spinners, status messages).
-///
-/// Provides Black-style visual feedback for CLI operations.
-pub mod progress;
-
-/// jaq query execution for filtering snapshot data.
-///
-/// Provides jq-compatible filtering using the jaq library.
-pub mod jaq_query;
-
-/// Impact analysis module for understanding file dependencies.
-///
-/// Analyzes "what breaks if you modify/remove this file" by traversing
-/// the reverse dependency graph to find all direct and transitive consumers.
-pub mod impact;
-
-/// Watch mode for live snapshot refresh during iterative development.
-///
-/// Provides file system watching with debouncing and incremental re-scanning.
-pub mod watch;
-
 // ============================================================================
 // Re-exports for convenience
 // ============================================================================
@@ -348,16 +255,3 @@ pub use analyzer::CommandGap;
 
 /// Ranked duplicate export.
 pub use analyzer::RankedDup;
-
-// ============================================================================
-// CLI types (new subcommand interface)
-// ============================================================================
-
-/// CLI command enum (source of truth for `loct <command>`).
-pub use cli::Command;
-
-/// Global CLI options (--json, --quiet, --verbose, --color).
-pub use cli::GlobalOptions;
-
-/// Parsed command result with deprecation warning support.
-pub use cli::ParsedCommand;
