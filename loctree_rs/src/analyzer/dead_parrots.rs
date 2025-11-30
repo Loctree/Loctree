@@ -375,7 +375,11 @@ pub fn print_dead_exports(dead_exports: &[DeadExport], output: OutputMode, high_
         };
         println!("Potential Dead Exports ({} found){}:", count, suffix);
         for item in dead_exports.iter().take(50) {
-            println!("  - {} in {}", item.symbol, item.file);
+            let location = match item.line {
+                Some(line) => format!("{}:{}", item.file, line),
+                None => item.file.clone(),
+            };
+            println!("  - {} in {}", item.symbol, location);
         }
         if count > 50 {
             println!("  ... and {} more", count - 50);

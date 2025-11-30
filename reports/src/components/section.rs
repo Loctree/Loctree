@@ -1,0 +1,152 @@
+//! Report section component - wrapper for each analyzed root
+//!
+//! Implements the "Section View" layout with a sticky header and scrollable content.
+
+use leptos::prelude::*;
+use crate::types::ReportSection;
+use super::{
+    TabContent, AiInsightsPanel, AnalysisSummary, DuplicateExportsTable,
+    CascadesList, DynamicImportsTable, TauriCommandCoverage, GraphContainer
+};
+
+/// Shorten a path for display: "vista/src" instead of "/Users/maciej/hosted/vista/src"
+fn shorten_path(path: &str) -> String {
+    let parts: Vec<&str> = path.split('/').collect();
+    // Take last 2-3 meaningful parts
+    if parts.len() <= 3 {
+        path.to_string()
+    } else {
+        parts.iter()
+            .rev()
+            .take(3)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("/")
+    }
+}
+
+/// A complete report section for one analyzed root
+#[component]
+pub fn ReportSectionView(
+    section: ReportSection,
+    active: bool,
+    view_id: String,
+) -> impl IntoView {
+    let root_id = section.root
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect::<String>();
+
+    let section_clone = section.clone();
+    let view_class = if active { "section-view active" } else { "section-view" };
+
+    // Stats for header - extract before view! macro to avoid borrow issues
+    let file_count = section.files_analyzed;
+    let total_loc = section.total_loc;
+    let duplicate_exports_count = section.ranked_dups.len();
+    let reexport_files_count = section.reexport_files_count;
+    let dynamic_imports_count = section.dynamic_imports_count;
+
+    let short_path = shorten_path(&section.root);
+
+    view! {
+        <div id=view_id class=view_class>
+            <header class="app-header">
+                <div class="header-title">
+                    <h1>{short_path}</h1>
+                    <p class="header-path" title=section.root.clone()>{section.root.clone()}</p>
+                </div>
+                <div class="header-stats">
+                    <span class="stat-badge">
+                        <span class="stat-badge-value">{file_count}</span>
+                        <span class="stat-badge-label">"files"</span>
+                    </span>
+                    <span class="stat-badge">
+                        <span class="stat-badge-value">{total_loc}</span>
+                        <span class="stat-badge-label">"LOC"</span>
+                    </span>
+                    <span class="stat-badge">
+                        <span class="stat-badge-value">{duplicate_exports_count}</span>
+                        <span class="stat-badge-label">"dups"</span>
+                    </span>
+                </div>
+            </header>
+
+            <div class="app-content">
+                <TabContent
+                    root_id=root_id.clone()
+                    tab_name="overview"
+                    active=true
+                >
+                    <div class="content-container">
+                        <AnalysisSummary
+                            files_analyzed=file_count
+                            total_loc=total_loc
+                            duplicate_exports=duplicate_exports_count
+                            reexport_files=reexport_files_count
+                            dynamic_imports=dynamic_imports_count
+                        />
+                        <AiInsightsPanel insights=section.insights.clone() />
+                    </div>
+                </TabContent>
+
+                <TabContent
+                    root_id=root_id.clone()
+                    tab_name="dups"
+                    active=false
+                >
+                    <div class="content-container">
+                        <DuplicateExportsTable
+                            dups=section.ranked_dups.clone()
+                        />
+                        <CascadesList cascades=section.cascades.clone() />
+                    </div>
+                </TabContent>
+
+                <TabContent
+                    root_id=root_id.clone()
+                    tab_name="dynamic"
+                    active=false
+                >
+                    <div class="content-container">
+                        <DynamicImportsTable
+                            imports=section.dynamic.clone()
+                        />
+                    </div>
+                </TabContent>
+
+                <TabContent 
+                    root_id=root_id.clone() 
+                    tab_name="commands" 
+                    active=false
+                >
+                    <div class="content-container">
+                        <TauriCommandCoverage
+                            missing=section.missing_handlers.clone()
+                            unused=section.unused_handlers.clone()
+                            unregistered=section.unregistered_handlers.clone()
+                            bridges=section.command_bridges.clone()
+                            counts=section.command_counts
+                            open_base=section.open_base.clone()
+                        />
+                    </div>
+                </TabContent>
+
+                <TabContent 
+                    root_id=root_id.clone() 
+                    tab_name="graph" 
+                    active=false
+                >
+                    // Graph takes full width/height, so no content-container
+                    <GraphContainer
+                        section=section_clone
+                        root_id=root_id
+                    />
+                </TabContent>
+            </div>
+        </div>
+    }
+}

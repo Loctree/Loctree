@@ -52,7 +52,8 @@ node tools/tests/loctree-rs.test.mjs
 echo ""
 echo "[7/7] Loctree dogfooding..."
 (cd loctree_rs && cargo build --release --quiet)
-"$REPO_ROOT/loctree_rs/target/release/loctree" "$REPO_ROOT/loctree_rs/src" -A --ext rs --circular --dead || {
+# Note: --dead skipped for lib crate (exports used by CLI binary outside src/)
+"$REPO_ROOT/loctree_rs/target/release/loctree" "$REPO_ROOT/loctree_rs/src" -A --ext rs --circular || {
   echo "❌ Loctree dogfooding failed!"
   exit 1
 }

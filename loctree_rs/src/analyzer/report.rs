@@ -92,10 +92,29 @@ pub struct RankedDup {
     pub refactors: Vec<String>,
 }
 
+/// Full command bridge for FE↔BE comparison table.
+/// Represents a single command with all its frontend calls and backend handler.
+#[derive(Clone, Serialize)]
+pub struct CommandBridge {
+    /// Command name (exposed_name from Tauri)
+    pub name: String,
+    /// Frontend call locations (file, line)
+    pub fe_locations: Vec<(String, usize)>,
+    /// Backend handler location (file, line, impl_symbol) - None if missing
+    pub be_location: Option<(String, usize, String)>,
+    /// Status: "ok", "missing_handler", "unused_handler", "unregistered_handler"
+    pub status: String,
+    /// Language (ts, rs, etc.)
+    pub language: String,
+}
+
 #[derive(Serialize)]
 pub struct ReportSection {
     pub root: String,
     pub files_analyzed: usize,
+    pub total_loc: usize,
+    pub reexport_files_count: usize,
+    pub dynamic_imports_count: usize,
     pub ranked_dups: Vec<RankedDup>,
     pub cascades: Vec<(String, String)>,
     pub dynamic: Vec<(String, Vec<String>)>,
@@ -106,6 +125,8 @@ pub struct ReportSection {
     pub unregistered_handlers: Vec<CommandGap>,
     pub unused_handlers: Vec<CommandGap>,
     pub command_counts: (usize, usize),
+    /// Full command bridges for FE↔BE comparison table
+    pub command_bridges: Vec<CommandBridge>,
     pub open_base: Option<String>,
     pub graph: Option<GraphData>,
     pub graph_warning: Option<String>,

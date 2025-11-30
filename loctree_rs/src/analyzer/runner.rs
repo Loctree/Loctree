@@ -17,8 +17,9 @@ use super::dead_parrots::{
 use super::open_server::{open_in_browser, start_open_server};
 use super::output::{RootArtifacts, process_root_context, write_report};
 use super::pipelines::build_pipeline_summary;
-use super::root_scan::{ScanConfig, ScanResults, scan_roots};
+use super::root_scan::{ScanConfig, ScanResults, scan_results_from_snapshot, scan_roots};
 use super::scan::{opt_globset, python_stdlib};
+use crate::snapshot::Snapshot;
 
 const DEFAULT_EXCLUDE_REPORT_PATTERNS: &[&str] =
     &["**/__tests__/**", "scripts/semgrep-fixtures/**"];
@@ -114,18 +115,100 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             Some(default_analyzer_exts())
         }
     });
-    let scan_results = scan_roots(ScanConfig {
-        roots: root_list,
-        parsed,
-        extensions: base_extensions,
-        focus_set: &focus_set,
-        exclude_set: &exclude_set,
-        ignore_exact,
-        ignore_prefixes,
-        py_stdlib: &py_stdlib,
-        cached_analyses: None, // Runner mode doesn't use incremental caching
-        collect_edges: parsed.graph || parsed.impact.is_some() || parsed.circular,
-    })?;
+
+    // Try to use snapshot if available (scan once, analyze many)
+    // Skip snapshot for modes that need fresh data or special handling:
+    // - --symbol: requires reading file contents for text search
+    // - --circular: needs complete edges for cycle detection
+    // - --graph: needs complete edges for visualization
+    // - --dead: needs imports/exports from scanned directory, not parent snapshot
+    // - --json/--jsonl/--sarif: output mode not preserved in snapshot Options
+    let needs_fresh_scan = parsed.symbol.is_some()
+        || parsed.circular
+        || parsed.graph
+        || parsed.dead_exports
+        || matches!(parsed.output, OutputMode::Json | OutputMode::Jsonl)
+        || parsed.sarif;
+    let use_snapshot = !needs_fresh_scan;
+    let scan_results = if use_snapshot {
+        if let Some(root) = root_list.first() {
+            if let Some(loctree_root) = Snapshot::find_loctree_root(root) {
+                match Snapshot::load(&loctree_root) {
+                    Ok(snapshot) => {
+                        if parsed.verbose {
+                            eprintln!(
+                                "[loctree] Using snapshot from {} ({} files)",
+                                loctree_root.display(),
+                                snapshot.files.len()
+                            );
+                        }
+                        scan_results_from_snapshot(&snapshot)
+                    }
+                    Err(e) => {
+                        if parsed.verbose {
+                            eprintln!("[loctree] Could not load snapshot: {}, scanning fresh", e);
+                        }
+                        scan_roots(ScanConfig {
+                            roots: root_list,
+                            parsed,
+                            extensions: base_extensions.clone(),
+                            focus_set: &focus_set,
+                            exclude_set: &exclude_set,
+                            ignore_exact: ignore_exact.clone(),
+                            ignore_prefixes: ignore_prefixes.clone(),
+                            py_stdlib: &py_stdlib,
+                            cached_analyses: None,
+                            collect_edges: parsed.graph
+                                || parsed.impact.is_some()
+                                || parsed.circular,
+                        })?
+                    }
+                }
+            } else {
+                // No .loctree directory found, scan fresh
+                scan_roots(ScanConfig {
+                    roots: root_list,
+                    parsed,
+                    extensions: base_extensions.clone(),
+                    focus_set: &focus_set,
+                    exclude_set: &exclude_set,
+                    ignore_exact: ignore_exact.clone(),
+                    ignore_prefixes: ignore_prefixes.clone(),
+                    py_stdlib: &py_stdlib,
+                    cached_analyses: None,
+                    collect_edges: parsed.graph || parsed.impact.is_some() || parsed.circular,
+                })?
+            }
+        } else {
+            // No roots provided
+            scan_roots(ScanConfig {
+                roots: root_list,
+                parsed,
+                extensions: base_extensions.clone(),
+                focus_set: &focus_set,
+                exclude_set: &exclude_set,
+                ignore_exact: ignore_exact.clone(),
+                ignore_prefixes: ignore_prefixes.clone(),
+                py_stdlib: &py_stdlib,
+                cached_analyses: None,
+                collect_edges: parsed.graph || parsed.impact.is_some() || parsed.circular,
+            })?
+        }
+    } else {
+        // --symbol requires reading files, skip snapshot
+        scan_roots(ScanConfig {
+            roots: root_list,
+            parsed,
+            extensions: base_extensions,
+            focus_set: &focus_set,
+            exclude_set: &exclude_set,
+            ignore_exact,
+            ignore_prefixes,
+            py_stdlib: &py_stdlib,
+            cached_analyses: None,
+            collect_edges: parsed.graph || parsed.impact.is_some() || parsed.circular,
+        })?
+    };
     let ScanResults {
         contexts,
         global_fe_commands,
@@ -209,7 +292,6 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             }
         }
     }
-
     // Cross-root command gaps (fixes multi-root FP for missing/unused handlers)
     // Pass analyses for confidence scoring on unused handlers
     let (global_missing_handlers, global_unused_handlers) = compute_command_gaps_with_confidence(

@@ -1,0 +1,290 @@
+name: Publish to crates.io
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'loctree-v[0-9]+.[0-9]+.[0-9]+'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write  # Required for Trusted Publishing
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Rust
+        uses: dtolnay/rust-action@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            loctree_rs
+            reports
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+          # Extract version number (strip 'v' or 'loctree-v' prefix)
+          if [[ "$TAG" == loctree-v* ]]; then
+            VERSION="${TAG#loctree-v}"
+          else
+            VERSION="${TAG#v}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+          # Get current versions from Cargo.toml
+          LOCTREE_VERSION=$(grep '^version' loctree_rs/Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          REPORTS_VERSION=$(grep '^version' reports/Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "loctree_current=$LOCTREE_VERSION" >> $GITHUB_OUTPUT
+          echo "reports_current=$REPORTS_VERSION" >> $GITHUB_OUTPUT
+
+          echo "Tag: $TAG"
+          echo "Target version: $VERSION"
+          echo "Current loctree version: $LOCTREE_VERSION"
+          echo "Current report-leptos version: $REPORTS_VERSION"
+
+      - name: Check if version bump needed
+        id: bump
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          LOCTREE_CURRENT="${{ steps.version.outputs.loctree_current }}"
+
+          if [[ "$VERSION" == "$LOCTREE_CURRENT" ]]; then
+            echo "needs_bump=false" >> $GITHUB_OUTPUT
+            echo "Version already matches tag, no bump needed"
+          else
+            echo "needs_bump=true" >> $GITHUB_OUTPUT
+            echo "Version mismatch: Cargo.toml=$LOCTREE_CURRENT, tag=$VERSION"
+          fi
+
+      - name: Sync all crate versions
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          V_VERSION="v$VERSION"
+
+          echo "=== Syncing all crates to version $VERSION ==="
+
+          # 1. loctree (main CLI)
+          echo "Updating loctree_rs/Cargo.toml..."
+          sed -i "s/^version = \"[0-9.]*\"/version = \"$VERSION\"/" loctree_rs/Cargo.toml
+
+          # 2. report-leptos (HTML renderer)
+          echo "Updating reports/Cargo.toml..."
+          sed -i "s/^version = \"[0-9.]*\"/version = \"$VERSION\"/" reports/Cargo.toml
+
+          # 3. landing (WASM landing page)
+          echo "Updating landing/Cargo.toml..."
+          sed -i "s/^version = \"[0-9.]*\"/version = \"$VERSION\"/" landing/Cargo.toml
+
+          # Also update landing source files with display version
+          echo "Updating landing source files..."
+          sed -i "s/pub const VERSION: &str = \"v[0-9.]*\";/pub const VERSION: \&str = \"$V_VERSION\";/" landing/src/sections/mod.rs
+          sed -i "s/v[0-9.]* | loctree.io/$V_VERSION | loctree.io/" landing/src/sections/easter_eggs.rs
+          sed -i "s/\"version\": \"[0-9.]*\"/\"version\": \"$VERSION\"/" landing/api/agent/index.json
+
+          # Update loctree's dependency on report-leptos to match
+          echo "Updating loctree dependency on report-leptos..."
+          sed -i "s/report-leptos = { version = \"[0-9.]*\"/report-leptos = { version = \"$VERSION\"/" loctree_rs/Cargo.toml
+
+          # Regenerate Cargo.lock
+          echo "Regenerating Cargo.lock..."
+          cd loctree_rs && cargo check --quiet 2>/dev/null || true && cd ..
+
+          echo "=== All crates synced to $VERSION ==="
+          echo "  - loctree: $VERSION"
+          echo "  - report-leptos: $VERSION"
+          echo "  - landing: $VERSION"
+
+      - name: Publish report-leptos
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          cd reports
+
+          # Check if this version is already published
+          if cargo search report-leptos 2>/dev/null | grep -q "report-leptos = \"$VERSION\""; then
+            echo "report-leptos $VERSION already published, skipping"
+          else
+            echo "Publishing report-leptos $VERSION..."
+            cargo publish --no-verify
+          fi
+
+      - name: Wait for crates.io index
+        run: |
+          echo "Waiting for crates.io index to update..."
+          sleep 30
+
+      - name: Publish loctree
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          cd loctree_rs
+
+          # Check if already published
+          if cargo search loctree 2>/dev/null | grep -q "loctree = \"$VERSION\""; then
+            echo "loctree $VERSION already published, skipping"
+          else
+            echo "Publishing loctree $VERSION..."
+            cargo publish
+          fi
+
+      - name: Commit version sync (if changed)
+        run: |
+          if git diff --quiet; then
+            echo "No changes to commit"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git commit -m "chore: Sync all crates to v${{ steps.version.outputs.version }}"
+            git push origin HEAD:main || echo "Could not push to main, changes committed locally"
+          fi
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+
+          # Get previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+
+          if [ -z "$PREV_TAG" ]; then
+            echo "No previous tag found, using all commits"
+            COMMITS=$(git log --oneline --no-merges | head -20)
+          else
+            echo "Generating changelog from $PREV_TAG to v$VERSION"
+            COMMITS=$(git log --oneline --no-merges "$PREV_TAG"..HEAD)
+          fi
+
+          # Categorize commits
+          FEATURES=$(echo "$COMMITS" | grep -iE "^[a-f0-9]+ (feat|add|new)" || true)
+          FIXES=$(echo "$COMMITS" | grep -iE "^[a-f0-9]+ (fix|bug|patch)" || true)
+          IMPROVEMENTS=$(echo "$COMMITS" | grep -iE "^[a-f0-9]+ (improve|enhance|update|refactor)" || true)
+          DOCS=$(echo "$COMMITS" | grep -iE "^[a-f0-9]+ (doc|readme)" || true)
+          CHORE=$(echo "$COMMITS" | grep -iE "^[a-f0-9]+ (chore|ci|build)" || true)
+
+          # Build changelog body
+          BODY="## What's Changed in v$VERSION\n\n"
+
+          if [ -n "$FEATURES" ]; then
+            BODY+="### ✨ New Features\n"
+            while IFS= read -r line; do
+              BODY+="- ${line#* }\n"
+            done <<< "$FEATURES"
+            BODY+="\n"
+          fi
+
+          if [ -n "$FIXES" ]; then
+            BODY+="### 🐛 Bug Fixes\n"
+            while IFS= read -r line; do
+              BODY+="- ${line#* }\n"
+            done <<< "$FIXES"
+            BODY+="\n"
+          fi
+
+          if [ -n "$IMPROVEMENTS" ]; then
+            BODY+="### 🔧 Improvements\n"
+            while IFS= read -r line; do
+              BODY+="- ${line#* }\n"
+            done <<< "$IMPROVEMENTS"
+            BODY+="\n"
+          fi
+
+          BODY+="### 📦 Installation\n"
+          BODY+="\`\`\`bash\ncargo install loctree\n\`\`\`\n\n"
+          BODY+="Or use the install script:\n"
+          BODY+="\`\`\`bash\ncurl -fsSL https://raw.githubusercontent.com/LibraxisAI/loctree/main/tools/install.sh | sh\n\`\`\`\n"
+
+          # Save to file for the release action
+          echo -e "$BODY" > /tmp/release_notes.md
+          cat /tmp/release_notes.md
+
+          # Set output
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          cat /tmp/release_notes.md >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: loctree ${{ steps.version.outputs.version }}
+          body: ${{ steps.changelog.outputs.body }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Build binaries for multiple platforms
+  build-binaries:
+    name: Build ${{ matrix.target }}
+    needs: publish
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            artifact: loctree-linux-x86_64
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            artifact: loctree-darwin-x86_64
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            artifact: loctree-darwin-aarch64
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            artifact: loctree-windows-x86_64.exe
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Setup Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build release binary
+        run: |
+          cd loctree_rs
+          cargo build --release --target ${{ matrix.target }}
+
+      - name: Prepare artifact (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cp loctree_rs/target/${{ matrix.target }}/release/loctree ${{ matrix.artifact }}
+          chmod +x ${{ matrix.artifact }}
+          tar -czvf ${{ matrix.artifact }}.tar.gz ${{ matrix.artifact }}
+
+      - name: Prepare artifact (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          copy loctree_rs\target\${{ matrix.target }}\release\loctree.exe ${{ matrix.artifact }}
+          Compress-Archive -Path ${{ matrix.artifact }} -DestinationPath ${{ matrix.artifact }}.zip
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: |
+            ${{ matrix.artifact }}.tar.gz
+            ${{ matrix.artifact }}.zip
+          fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

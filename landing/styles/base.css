@@ -1,0 +1,273 @@
+/* ============================================
+   loctree Landing Page — Base Styles
+   v0.5.2 | Created by M&K (c)2025
+   ============================================ */
+
+:root {
+    /* CRT Monochromatic Palette */
+    --bg-black: #000000;
+    --bg-dark: #0a0a0a;
+    --bg-mid: #141414;
+
+    --text-bright: #a8a8a8;
+    --text-dim: #707070;
+    --text-muted: #404040;
+
+    --border-subtle: rgba(168, 168, 168, 0.1);
+    --border-visible: rgba(168, 168, 168, 0.2);
+
+    /* Typography */
+    --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+    --font-sans: 'Inter', system-ui, sans-serif;
+
+    /* Spacing */
+    --container-max: 1000px;
+    --section-padding: clamp(40px, 8vw, 80px);
+}
+
+/* Reset */
+*, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html {
+    scroll-behavior: smooth;
+}
+
+body {
+    font-family: var(--font-mono);
+    background: var(--bg-black);
+    color: var(--text-bright);
+    line-height: 1.6;
+    min-height: 100vh;
+    overflow-x: hidden;
+}
+
+/* ============================================
+   CRT Scanlines + Flicker
+   ============================================ */
+body::before {
+    content: "";
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background:
+        linear-gradient(rgba(18,16,16,0) 50%, rgba(0,0,0,0.25) 50%),
+        linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01), rgba(255,255,255,0.02));
+    background-size: 100% 2px, 3px 100%;
+    z-index: 9999;
+    pointer-events: none;
+}
+
+body::after {
+    content: "";
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: rgba(18,16,16,0.1);
+    opacity: 0;
+    z-index: 9998;
+    pointer-events: none;
+    animation: flicker 0.15s infinite;
+}
+
+@keyframes flicker {
+    0%   { opacity: 0.15; }
+    50%  { opacity: 0.05; }
+    100% { opacity: 0.15; }
+}
+
+/* Container */
+.container {
+    max-width: var(--container-max);
+    margin: 0 auto;
+    padding: 0 24px;
+}
+
+/* Section Headers */
+.section-header {
+    text-align: center;
+    max-width: 600px;
+    margin: 0 auto 48px;
+}
+
+.section-eyebrow {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+}
+
+.section-title {
+    font-size: clamp(24px, 3vw, 32px);
+    font-weight: 400;
+    line-height: 1.3;
+    margin-bottom: 12px;
+    color: var(--text-bright);
+}
+
+.section-description {
+    font-size: 14px;
+    color: var(--text-dim);
+}
+
+/* Buttons */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 24px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    text-decoration: none;
+    transition: all 0.2s;
+    cursor: pointer;
+    border: none;
+}
+
+.btn-primary {
+    background: var(--text-bright);
+    color: var(--bg-black);
+}
+
+.btn-primary:hover {
+    background: #fff;
+}
+
+.btn-secondary {
+    background: transparent;
+    color: var(--text-dim);
+    border: 1px solid var(--border-visible);
+}
+
+.btn-secondary:hover {
+    border-color: var(--text-bright);
+    color: var(--text-bright);
+}
+
+.copy-btn {
+    margin-top: 16px;
+    padding: 10px 24px;
+    background: transparent;
+    border: 1px solid var(--text-dim);
+    color: var(--text-dim);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.copy-btn:hover {
+    border-color: var(--text-bright);
+    color: var(--text-bright);
+}
+
+/* Selection */
+::selection {
+    background: rgba(168, 168, 168, 0.3);
+    color: var(--text-bright);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--bg-dark);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--text-muted);
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--text-dim);
+}
+
+/* Focus states */
+.btn:focus-visible,
+.copy-btn:focus-visible,
+.nav-link:focus-visible {
+    outline: 1px solid var(--text-dim);
+    outline-offset: 2px;
+}
+
+/* Animations */
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}
+
+@keyframes blink-cursor {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0; }
+}
+
+.blink {
+    animation: blink-cursor 1.2s step-end infinite;
+    color: var(--text-bright);
+}
+
+/* ============================================
+   Easter Eggs
+   ============================================ */
+
+/* Konami code rainbow effect */
+@keyframes konami-rainbow {
+    0% { filter: hue-rotate(0deg); }
+    100% { filter: hue-rotate(360deg); }
+}
+
+@keyframes konami-glow {
+    0%, 100% { box-shadow: 0 0 20px rgba(255, 0, 255, 0.3); }
+    50% { box-shadow: 0 0 40px rgba(0, 255, 255, 0.5), 0 0 60px rgba(255, 0, 255, 0.3); }
+}
+
+body.konami-activated {
+    animation: konami-rainbow 2s linear, konami-glow 0.5s ease-in-out infinite;
+}
+
+body.konami-activated * {
+    transition: all 0.3s ease;
+}
+
+/* Theme toggle tooltip */
+.theme-toggle-wrapper {
+    position: relative;
+}
+
+.theme-toggle-tooltip {
+    position: absolute;
+    bottom: -40px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--bg-mid);
+    border: 1px solid var(--border-visible);
+    padding: 6px 12px;
+    font-size: 11px;
+    white-space: nowrap;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.2s, visibility 0.2s;
+    pointer-events: none;
+    z-index: 100;
+}
+
+.theme-toggle-wrapper:hover .theme-toggle-tooltip {
+    opacity: 1;
+    visibility: visible;
+}

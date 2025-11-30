@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-use crate::types::{ColorMode, DEFAULT_LOC_THRESHOLD, Mode, OutputMode};
+use crate::types::{ColorMode, DEFAULT_LOC_THRESHOLD, GitSubcommand, Mode, OutputMode};
 
 pub struct ParsedArgs {
     pub extensions: Option<HashSet<String>>,
@@ -568,6 +568,156 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
                     continue;
                 }
                 i += 1;
+            }
+            "git" => {
+                // Parse git subcommand: compare, blame, history, when-introduced
+                // NO passthrough commands - agents can call git directly
+                let subcommand = args.get(i + 1).ok_or_else(|| {
+                    "git requires a subcommand: compare, blame, history, or when-introduced"
+                        .to_string()
+                })?;
+                match subcommand.as_str() {
+                    "compare" => {
+                        // loctree git compare <from> [to]
+                        // loctree git compare HEAD~1..HEAD
+                        // loctree git compare HEAD~1 (compares to working tree)
+                        let from_arg = args.get(i + 2).ok_or_else(|| {
+                            "git compare requires at least one commit reference (e.g., HEAD~1 or abc123..def456)".to_string()
+                        })?;
+
+                        // Check if it's range notation (e.g., HEAD~1..HEAD)
+                        if from_arg.contains("..") {
+                            let parts: Vec<&str> = from_arg.split("..").collect();
+                            if parts.len() != 2 {
+                                return Err(
+                                    "Invalid range format. Use: commit1..commit2".to_string()
+                                );
+                            }
+                            parsed.mode = Mode::Git(GitSubcommand::Compare {
+                                from: parts[0].to_string(),
+                                to: Some(parts[1].to_string()),
+                            });
+                            i += 3;
+                        } else {
+                            // Check for optional second argument
+                            let to = args.get(i + 3).and_then(|t| {
+                                if t.starts_with('-') {
+                                    None
+                                } else {
+                                    Some(t.clone())
+                                }
+                            });
+                            parsed.mode = Mode::Git(GitSubcommand::Compare {
+                                from: from_arg.clone(),
+                                to: to.clone(),
+                            });
+                            i += if to.is_some() { 4 } else { 3 };
+                        }
+                    }
+                    "blame" => {
+                        // loctree git blame <file>
+                        let file = args
+                            .get(i + 2)
+                            .ok_or_else(|| "git blame requires a file path".to_string())?;
+                        parsed.mode = Mode::Git(GitSubcommand::Blame { file: file.clone() });
+                        i += 3;
+                    }
+                    "history" => {
+                        // loctree git history [--symbol <name>] [--file <path>] [--limit <n>]
+                        let mut symbol = None;
+                        let mut file = None;
+                        let mut limit = 10usize; // default
+                        let mut j = i + 2;
+
+                        while j < args.len() {
+                            match args[j].as_str() {
+                                "--symbol" => {
+                                    symbol = args.get(j + 1).cloned();
+                                    j += 2;
+                                }
+                                "--file" => {
+                                    file = args.get(j + 1).cloned();
+                                    j += 2;
+                                }
+                                "--limit" => {
+                                    if let Some(l) = args.get(j + 1) {
+                                        limit = l.parse().unwrap_or(10);
+                                    }
+                                    j += 2;
+                                }
+                                _ if !args[j].starts_with('-')
+                                    && symbol.is_none()
+                                    && file.is_none() =>
+                                {
+                                    // First positional arg is symbol
+                                    symbol = Some(args[j].clone());
+                                    j += 1;
+                                }
+                                _ => break,
+                            }
+                        }
+
+                        if symbol.is_none() && file.is_none() {
+                            return Err(
+                                "git history requires --symbol <name> or --file <path>".to_string()
+                            );
+                        }
+
+                        parsed.mode = Mode::Git(GitSubcommand::History {
+                            symbol,
+                            file,
+                            limit,
+                        });
+                        i = j;
+                    }
+                    "when-introduced" => {
+                        // loctree git when-introduced --circular "src/a.rs <-> src/b.rs"
+                        // loctree git when-introduced --dead "src/utils.rs::unused_fn"
+                        // loctree git when-introduced --import "lodash"
+                        let mut circular = None;
+                        let mut dead = None;
+                        let mut import = None;
+                        let mut j = i + 2;
+
+                        while j < args.len() {
+                            match args[j].as_str() {
+                                "--circular" => {
+                                    circular = args.get(j + 1).cloned();
+                                    j += 2;
+                                }
+                                "--dead" => {
+                                    dead = args.get(j + 1).cloned();
+                                    j += 2;
+                                }
+                                "--import" => {
+                                    import = args.get(j + 1).cloned();
+                                    j += 2;
+                                }
+                                _ => break,
+                            }
+                        }
+
+                        if circular.is_none() && dead.is_none() && import.is_none() {
+                            return Err(
+                                "git when-introduced requires --circular, --dead, or --import"
+                                    .to_string(),
+                            );
+                        }
+
+                        parsed.mode = Mode::Git(GitSubcommand::WhenIntroduced {
+                            circular,
+                            dead,
+                            import,
+                        });
+                        i = j;
+                    }
+                    _ => {
+                        return Err(format!(
+                            "Unknown git subcommand '{}'. Use: compare, blame, history, or when-introduced",
+                            subcommand
+                        ));
+                    }
+                }
             }
             "--for-ai" | "for-ai" => {
                 parsed.mode = Mode::ForAi;

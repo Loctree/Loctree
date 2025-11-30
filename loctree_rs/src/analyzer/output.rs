@@ -16,6 +16,7 @@ use super::graph::{MAX_GRAPH_EDGES, MAX_GRAPH_NODES, build_graph_data};
 use super::html::render_html_report;
 use super::insights::collect_ai_insights;
 use super::open_server::current_open_base;
+use super::report::CommandBridge;
 use super::root_scan::{RootContext, normalize_module_id};
 use super::scan::resolve_event_constants_across_files;
 
@@ -81,7 +82,7 @@ pub fn process_root_context(
     let unregistered_handlers = global_unregistered_handlers.to_vec();
     let unused_handlers = global_unused_handlers.to_vec();
 
-    let (graph_data, graph_warning) = if parsed.graph && options.report_path.is_some() {
+    let (graph_data, graph_warning) = if parsed.graph && parsed.report_path.is_some() {
         build_graph_data(
             &analyses,
             &graph_edges,
@@ -279,6 +280,51 @@ pub fn process_root_context(
             })).collect::<Vec<_>>(),
             "status": status,
         }));
+    }
+
+    // Build command_bridges for full FE↔BE comparison table
+    let mut command_bridges: Vec<CommandBridge> = Vec::new();
+    for name in &all_command_names {
+        let mut handlers = be_commands.get(name).cloned().unwrap_or_default();
+        handlers.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+        let be_location = handlers
+            .first()
+            .map(|(path, line, symbol)| (path.clone(), *line, symbol.clone()));
+
+        let mut call_sites = fe_commands.get(name).cloned().unwrap_or_default();
+        call_sites.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+        let fe_locations: Vec<(String, usize)> = call_sites
+            .iter()
+            .map(|(path, line, _)| (path.clone(), *line))
+            .collect();
+
+        let language = be_location
+            .as_ref()
+            .map(|(path, _, _)| language_from_path(path))
+            .or_else(|| {
+                call_sites
+                    .first()
+                    .map(|(path, _, _)| language_from_path(path))
+            })
+            .unwrap_or_default();
+
+        let status = if missing_set.contains(name) {
+            "missing_handler"
+        } else if unused_set.contains(name) {
+            "unused_handler"
+        } else if unregistered_set.contains(name) {
+            "unregistered_handler"
+        } else {
+            "ok"
+        };
+
+        command_bridges.push(CommandBridge {
+            name: name.clone(),
+            fe_locations,
+            be_location,
+            status: status.to_string(),
+            language,
+        });
     }
 
     let dup_score_map: HashMap<String, &RankedDup> = filtered_ranked
@@ -856,7 +902,7 @@ Top duplicate exports (showing up to {}):",
     }
 
     let mut report_section = None;
-    if options.report_path.is_some() {
+    if parsed.report_path.is_some() {
         let mut sorted_dyn = dynamic_summary.clone();
         sorted_dyn.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
         let insights = collect_ai_insights(
@@ -870,20 +916,29 @@ Top duplicate exports (showing up to {}):",
         missing_sorted.sort_by(|a, b| a.name.cmp(&b.name));
         let mut unused_sorted = unused_handlers.clone();
         unused_sorted.sort_by(|a, b| a.name.cmp(&b.name));
+        let mut unregistered_sorted = unregistered_handlers.clone();
+        unregistered_sorted.sort_by(|a, b| a.name.cmp(&b.name));
+
+        // Calculate total LOC
+        let total_loc: usize = analyses.iter().map(|a| a.loc).sum();
 
         report_section = Some(ReportSection {
             insights,
             root: root_path.display().to_string(),
             files_analyzed: analyses.len(),
+            total_loc,
+            reexport_files_count: reexport_files.len(),
+            dynamic_imports_count: dynamic_summary.len(),
             ranked_dups: filtered_ranked.clone(),
             cascades: cascades.clone(),
             dynamic: sorted_dyn,
             analyze_limit: options.analyze_limit,
             missing_handlers: missing_sorted,
-            unregistered_handlers: Vec::new(),
+            unregistered_handlers: unregistered_sorted,
             unused_handlers: unused_sorted,
             command_counts: (fe_commands.len(), be_commands.len()),
-            open_base: if options.report_path.is_some() && options.serve {
+            command_bridges: command_bridges.clone(),
+            open_base: if parsed.report_path.is_some() && parsed.serve {
                 current_open_base()
             } else {
                 None
