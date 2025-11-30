@@ -194,7 +194,7 @@
 
     // Layout configuration helper - supports multiple algorithms
     const getLayoutConfig = (name, nodeCount) => {
-      // Animate only small graphs to avoid performance issues on large datasets
+      // Animate only moderate-sized graphs (fewer than 150 nodes) to avoid performance issues
       const animate = nodeCount < 150;
       const configs = {
         cose: {

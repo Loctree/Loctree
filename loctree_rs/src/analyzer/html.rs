@@ -12,7 +12,7 @@ pub(crate) fn render_html_report(path: &Path, sections: &[ReportSection]) -> io:
     }
 
     // Convert loctree types to report-leptos types via JSON serialization
-    // This decoupling allows report-leptos to be a standalone crate
+    // JSON bridge enables clean type separation between the analyzer and renderer
     let json = serde_json::to_string(sections).map_err(|e| {
         io::Error::new(
             io::ErrorKind::InvalidData,
@@ -115,7 +115,7 @@ mod tests {
 
         // Verify key parts exist in the Leptos-rendered output
         assert!(html.contains("<!DOCTYPE html>"));
-        assert!(html.contains("loctree import/export analysis"));
+        assert!(html.contains("loctree report")); // Title in new Vista design
 
         // The output format might differ slightly from legacy, check for content
         assert!(html.contains("Hint"));
@@ -155,7 +155,7 @@ mod tests {
         );
 
         // Leptos escapes content automatically
-        // We check for safe representation
-        assert!(html.contains("&lt;script&gt;") || html.contains("&lt;/script&gt;"));
+        // We check that both opening and closing tags are safely escaped
+        assert!(html.contains("&lt;script&gt;") && html.contains("&lt;/script&gt;"));
     }
 }

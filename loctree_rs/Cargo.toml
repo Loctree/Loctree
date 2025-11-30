@@ -28,9 +28,6 @@ heck = "0.5"
 time = { version = "0.3", features = ["formatting"] }
 report-leptos = { version = "0.1", path = "../reports" }
 
-[features]
-default = []
-
 [dev-dependencies]
 tempfile = "3"
 assert_cmd = "2.0"

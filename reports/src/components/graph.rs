@@ -10,11 +10,6 @@ pub fn GraphContainer(
     root_id: String,
 ) -> impl IntoView {
     view! {
-        <div class="graph-anchor">
-            <strong>"Import graph"</strong>
-            <span class="muted">"Use the toolbar below to filter, relayout, and export the graph."</span>
-        </div>
-
         {section.graph_warning.map(|warn| {
             view! { <div class="graph-empty">{warn}</div> }
         })}
