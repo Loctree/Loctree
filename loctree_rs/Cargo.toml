@@ -2,6 +2,7 @@
 name = "loctree"
 version = "0.5.3"
 edition = "2024"
+default-run = "loctree"
 authors = ["LibraxisAI <the1st@whoai.am>"]
 description = "Fast, language-aware codebase analyzer for detecting dead exports, circular imports, and generating dependency graphs"
 license = "MIT"
@@ -16,6 +17,10 @@ path = "src/lib.rs"
 
 [[bin]]
 name = "loctree"
+path = "src/main.rs"
+
+[[bin]]
+name = "loct"
 path = "src/main.rs"
 
 [dependencies]
