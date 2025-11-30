@@ -78,9 +78,9 @@ impl FilesDiff {
     }
 }
 
-/// Edge in the import graph
+/// Edge in the import graph (for diff operations)
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct GraphEdge {
+pub struct DiffEdge {
     /// Source file (importer)
     pub from: PathBuf,
     /// Target file (imported)
@@ -93,9 +93,9 @@ pub struct GraphEdge {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct GraphDiff {
     /// New import edges added
-    pub edges_added: Vec<GraphEdge>,
+    pub edges_added: Vec<DiffEdge>,
     /// Import edges removed
-    pub edges_removed: Vec<GraphEdge>,
+    pub edges_removed: Vec<DiffEdge>,
 }
 
 /// An exported symbol
@@ -181,7 +181,7 @@ impl SnapshotDiff {
     }
 
     /// Extract edges from snapshot
-    fn extract_edges(snapshot: &Snapshot) -> HashSet<GraphEdge> {
+    fn extract_edges(snapshot: &Snapshot) -> HashSet<DiffEdge> {
         let mut edges = HashSet::new();
 
         // Use snapshot.edges which contains GraphEdge structs
@@ -193,7 +193,7 @@ impl SnapshotDiff {
                 edge.label.split(", ").map(|s| s.to_string()).collect()
             };
 
-            edges.insert(GraphEdge {
+            edges.insert(DiffEdge {
                 from: PathBuf::from(&edge.from),
                 to: PathBuf::from(&edge.to),
                 symbols,
