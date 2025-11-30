@@ -5,9 +5,28 @@
 use leptos::prelude::*;
 use crate::types::ReportSection;
 use super::{
-    TabBar, TabContent, AiInsightsPanel, DuplicateExportsTable, 
+    TabContent, AiInsightsPanel, AnalysisSummary, DuplicateExportsTable,
     CascadesList, DynamicImportsTable, TauriCommandCoverage, GraphContainer
 };
+
+/// Shorten a path for display: "vista/src" instead of "/Users/maciej/hosted/vista/src"
+fn shorten_path(path: &str) -> String {
+    let parts: Vec<&str> = path.split('/').collect();
+    // Take last 2-3 meaningful parts
+    if parts.len() <= 3 {
+        path.to_string()
+    } else {
+        parts.iter()
+            .rev()
+            .take(3)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("/")
+    }
+}
 
 /// A complete report section for one analyzed root
 #[component]
@@ -23,54 +42,78 @@ pub fn ReportSectionView(
 
     let section_clone = section.clone();
     let view_class = if active { "section-view active" } else { "section-view" };
-    
-    // Stats for header
+
+    // Stats for header - extract before view! macro to avoid borrow issues
     let file_count = section.files_analyzed;
+    let total_loc = section.total_loc;
+    let duplicate_exports_count = section.ranked_dups.len();
+    let reexport_files_count = section.reexport_files_count;
+    let dynamic_imports_count = section.dynamic_imports_count;
+
+    let short_path = shorten_path(&section.root);
 
     view! {
         <div id=view_id class=view_class>
             <header class="app-header">
                 <div class="header-title">
-                    <h1>{section.root.clone()}</h1>
-                    <p>"Analysis • " {file_count} " files"</p>
+                    <h1>{short_path}</h1>
+                    <p class="header-path" title=section.root.clone()>{section.root.clone()}</p>
                 </div>
-                <TabBar root_id=root_id.clone() />
+                <div class="header-stats">
+                    <span class="stat-badge">
+                        <span class="stat-badge-value">{file_count}</span>
+                        <span class="stat-badge-label">"files"</span>
+                    </span>
+                    <span class="stat-badge">
+                        <span class="stat-badge-value">{total_loc}</span>
+                        <span class="stat-badge-label">"LOC"</span>
+                    </span>
+                    <span class="stat-badge">
+                        <span class="stat-badge-value">{duplicate_exports_count}</span>
+                        <span class="stat-badge-label">"dups"</span>
+                    </span>
+                </div>
             </header>
 
             <div class="app-content">
-                <TabContent 
-                    root_id=root_id.clone() 
-                    tab_name="overview" 
+                <TabContent
+                    root_id=root_id.clone()
+                    tab_name="overview"
                     active=true
                 >
                     <div class="content-container">
+                        <AnalysisSummary
+                            files_analyzed=file_count
+                            total_loc=total_loc
+                            duplicate_exports=duplicate_exports_count
+                            reexport_files=reexport_files_count
+                            dynamic_imports=dynamic_imports_count
+                        />
                         <AiInsightsPanel insights=section.insights.clone() />
                     </div>
                 </TabContent>
 
-                <TabContent 
-                    root_id=root_id.clone() 
-                    tab_name="dups" 
+                <TabContent
+                    root_id=root_id.clone()
+                    tab_name="dups"
                     active=false
                 >
                     <div class="content-container">
                         <DuplicateExportsTable
                             dups=section.ranked_dups.clone()
-                            limit=section.analyze_limit
                         />
                         <CascadesList cascades=section.cascades.clone() />
                     </div>
                 </TabContent>
 
-                <TabContent 
-                    root_id=root_id.clone() 
-                    tab_name="dynamic" 
+                <TabContent
+                    root_id=root_id.clone()
+                    tab_name="dynamic"
                     active=false
                 >
                     <div class="content-container">
                         <DynamicImportsTable
                             imports=section.dynamic.clone()
-                            limit=section.analyze_limit
                         />
                     </div>
                 </TabContent>
@@ -85,6 +128,7 @@ pub fn ReportSectionView(
                             missing=section.missing_handlers.clone()
                             unused=section.unused_handlers.clone()
                             unregistered=section.unregistered_handlers.clone()
+                            bridges=section.command_bridges.clone()
                             counts=section.command_counts
                             open_base=section.open_base.clone()
                         />

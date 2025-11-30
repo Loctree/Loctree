@@ -50,6 +50,15 @@ pub struct SnapshotMetadata {
     /// Resolver configuration (tsconfig paths, etc.)
     #[serde(default)]
     pub resolver_config: Option<ResolverConfig>,
+    /// Git repository name (extracted from remote origin)
+    #[serde(default)]
+    pub git_repo: Option<String>,
+    /// Git branch name
+    #[serde(default)]
+    pub git_branch: Option<String>,
+    /// Git commit hash (short)
+    #[serde(default)]
+    pub git_commit: Option<String>,
 }
 
 /// Configuration for path resolution (aliases, etc.)
@@ -158,6 +167,9 @@ impl Snapshot {
             .format(&time::format_description::well_known::Iso8601::DEFAULT)
             .unwrap_or_else(|_| "unknown".to_string());
 
+        // Get git info from current directory
+        let git_info = Self::get_git_info();
+
         Self {
             metadata: SnapshotMetadata {
                 schema_version: SNAPSHOT_SCHEMA_VERSION.to_string(),
@@ -168,6 +180,9 @@ impl Snapshot {
                 total_loc: 0,
                 scan_duration_ms: 0,
                 resolver_config: None,
+                git_repo: git_info.0,
+                git_branch: git_info.1,
+                git_commit: git_info.2,
             },
             files: Vec::new(),
             edges: Vec::new(),
@@ -176,6 +191,65 @@ impl Snapshot {
             event_bridges: Vec::new(),
             barrels: Vec::new(),
         }
+    }
+
+    /// Get git repository info (repo name, branch, commit)
+    fn get_git_info() -> (Option<String>, Option<String>, Option<String>) {
+        use std::process::Command;
+
+        // Get repo name from remote origin URL
+        let repo = Command::new("git")
+            .args(["remote", "get-url", "origin"])
+            .output()
+            .ok()
+            .and_then(|output| {
+                if output.status.success() {
+                    String::from_utf8(output.stdout).ok()
+                } else {
+                    None
+                }
+            })
+            .and_then(|url| {
+                // Extract repo name from URL like git@github.com:user/repo.git
+                // or https://github.com/user/repo.git
+                let url = url.trim();
+                url.rsplit('/')
+                    .next()
+                    .or_else(|| url.rsplit(':').next())
+                    .map(|s| s.trim_end_matches(".git").to_string())
+            });
+
+        // Get current branch
+        let branch = Command::new("git")
+            .args(["rev-parse", "--abbrev-ref", "HEAD"])
+            .output()
+            .ok()
+            .and_then(|output| {
+                if output.status.success() {
+                    String::from_utf8(output.stdout)
+                        .ok()
+                        .map(|s| s.trim().to_string())
+                } else {
+                    None
+                }
+            });
+
+        // Get short commit hash
+        let commit = Command::new("git")
+            .args(["rev-parse", "--short", "HEAD"])
+            .output()
+            .ok()
+            .and_then(|output| {
+                if output.status.success() {
+                    String::from_utf8(output.stdout)
+                        .ok()
+                        .map(|s| s.trim().to_string())
+                } else {
+                    None
+                }
+            });
+
+        (repo, branch, commit)
     }
 
     /// Get the snapshot file path for a given root

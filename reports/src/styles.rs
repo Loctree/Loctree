@@ -24,7 +24,8 @@
 //! - Cytoscape graph container styling
 
 /// Content Security Policy for the report
-pub const CSP: &str = "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' data:; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src data: https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self';";
+/// Note: Permissive policy to allow local file:// viewing of reports
+pub const CSP: &str = "default-src 'self' file: data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' file: data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: file:; connect-src 'self';";
 
 /// Complete CSS for the report.
 pub const REPORT_CSS: &str = r#"
@@ -230,16 +231,20 @@ html.dark .theme-icon-dark { display: block; }
     gap: 4px;
 }
 
+/* Nav items styled like tab buttons - unified design */
 .nav-item {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 10px 14px;
-    border-radius: var(--radius-md);
+    padding: 10px 16px;
+    border-radius: var(--radius-lg);
     color: var(--theme-text-secondary);
     transition: all 0.2s ease;
     font-size: 13px;
-    border: 1px solid transparent;
+    font-weight: 500;
+    border: none;
+    background: transparent;
+    cursor: pointer;
     text-decoration: none;
     /* Prevent label overflow */
     overflow: hidden;
@@ -249,15 +254,14 @@ html.dark .theme-icon-dark { display: block; }
 }
 
 .nav-item:hover {
-    background: var(--theme-hover);
+    background: var(--theme-hover-strong);
     color: var(--theme-text-primary);
 }
 
 .nav-item.active {
-    background: rgba(163, 184, 199, 0.1);
+    background: var(--theme-bg-surface);
     color: var(--theme-accent);
-    border-color: rgba(163, 184, 199, 0.2);
-    font-weight: 500;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.12);
 }
 
 .nav-section-title {
@@ -295,14 +299,52 @@ html.dark .theme-icon-dark { display: block; }
 .header-title h1 {
     margin: 0;
     font-size: 16px;
-    font-weight: 500;
+    font-weight: 600;
     color: var(--theme-text-primary);
 }
 
-.header-title p {
+.header-title p,
+.header-path {
     margin: 2px 0 0;
-    font-size: 12px;
+    font-size: 11px;
     color: var(--theme-text-tertiary);
+    font-family: var(--font-mono);
+    max-width: 300px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Header Stats Badges */
+.header-stats {
+    display: flex;
+    gap: 8px;
+}
+
+.stat-badge {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 8px 14px;
+    background: var(--theme-bg-surface);
+    border: 1px solid var(--theme-border);
+    border-radius: var(--radius-md);
+    min-width: 60px;
+}
+
+.stat-badge-value {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--theme-accent);
+    font-family: var(--font-mono);
+}
+
+.stat-badge-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--theme-text-tertiary);
+    margin-top: 2px;
 }
 
 /* Tabs */
@@ -412,6 +454,66 @@ code {
     font-size: 0.9em;
 }
 
+/* Analysis Summary */
+.analysis-summary {
+    margin-bottom: 24px;
+}
+
+.analysis-summary h3 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 16px;
+}
+
+.summary-stat {
+    background: var(--theme-bg-surface);
+    border: 1px solid var(--theme-border);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    text-align: center;
+}
+
+.stat-value {
+    display: block;
+    font-size: 28px;
+    font-weight: 600;
+    color: var(--theme-accent);
+    margin-bottom: 4px;
+}
+
+.stat-label {
+    display: block;
+    font-size: 12px;
+    color: var(--theme-text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Command Coverage Summary */
+.coverage-summary {
+    padding: 12px 16px;
+    background: var(--theme-bg-surface-elevated);
+    border: 1px solid var(--theme-border);
+    border-radius: var(--radius-md);
+    margin-bottom: 16px;
+    font-size: 13px;
+}
+
+.text-warning {
+    color: #e67e22;
+}
+
+.text-muted {
+    color: var(--theme-text-tertiary);
+}
+
 /* AI Insights */
 .insight-list {
     list-style: none;
@@ -497,7 +599,135 @@ code {
    Graph Container & Toolbars
    ============================================ */
 
-/* Graph container */
+/* ============================================
+   Graph Split Layout (Side-by-Side)
+   ============================================ */
+
+.graph-split-container {
+    display: flex;
+    height: calc(100vh - var(--header-height) - 32px);
+    gap: 0;
+    position: relative;
+}
+
+.graph-left-panel {
+    width: 380px;
+    min-width: 280px;
+    max-width: 600px;
+    display: flex;
+    flex-direction: column;
+    background: var(--theme-bg-surface);
+    border-right: 1px solid var(--theme-border);
+    overflow: hidden;
+}
+
+.graph-left-panel .component-panel {
+    flex: 1;
+    overflow-y: auto;
+    margin: 0;
+    border: none;
+    border-radius: 0;
+}
+
+.graph-left-panel .component-panel-header {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    padding: 8px 10px;
+    font-size: 11px;
+}
+
+/* Compact table for left panel */
+.graph-left-panel .component-panel table {
+    font-size: 11px;
+}
+
+.graph-left-panel .component-panel th {
+    padding: 6px 8px;
+    font-size: 10px;
+}
+
+.graph-left-panel .component-panel td {
+    padding: 4px 8px;
+}
+
+.graph-left-panel .component-panel code {
+    font-size: 10px;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: inline-block;
+}
+
+.graph-left-panel .component-toolbar {
+    padding: 6px 10px;
+    font-size: 11px;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.graph-left-panel .component-toolbar label {
+    font-size: 10px;
+}
+
+.graph-left-panel .component-toolbar button {
+    padding: 3px 6px;
+    font-size: 10px;
+}
+
+.graph-left-panel .panel-actions {
+    gap: 6px;
+}
+
+.graph-left-panel .panel-actions label {
+    font-size: 10px;
+}
+
+.graph-left-panel .panel-actions input {
+    padding: 2px 4px;
+    width: 50px !important;
+}
+
+.graph-right-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 400px;
+    overflow: hidden;
+}
+
+.graph-right-panel .graph-toolbar {
+    flex-shrink: 0;
+    margin: 0;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+}
+
+.graph-right-panel .graph {
+    flex: 1;
+    min-height: 0;
+    border-radius: 0;
+    border: none;
+    border-top: 1px solid var(--theme-border);
+}
+
+/* Resize handle */
+.graph-resize-handle {
+    width: 6px;
+    cursor: col-resize;
+    background: var(--theme-border);
+    transition: background 0.15s;
+    flex-shrink: 0;
+}
+
+.graph-resize-handle:hover,
+.graph-resize-handle.active {
+    background: var(--theme-accent);
+}
+
+/* Graph container - fallback for non-split */
 .graph {
     width: 100%;
     height: calc(100vh - var(--header-height) - 200px);
@@ -768,6 +998,109 @@ code {
     margin-bottom: 12px;
     padding-bottom: 8px;
     border-bottom: 1px solid var(--theme-border);
+}
+
+/* FE↔BE Bridge Comparison Table */
+.bridge-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    margin-top: 16px;
+    background: var(--theme-bg-surface);
+    border: 1px solid var(--theme-border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+}
+
+.bridge-table thead th {
+    text-align: left;
+    padding: 10px 14px;
+    color: var(--theme-text-tertiary);
+    font-weight: 500;
+    background: var(--theme-bg-surface-elevated);
+    border-bottom: 1px solid var(--theme-border);
+}
+
+.bridge-table tbody td {
+    padding: 8px 14px;
+    border-bottom: 1px solid rgba(114, 124, 139, 0.08);
+    color: var(--theme-text-secondary);
+    vertical-align: top;
+}
+
+.bridge-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.bridge-table tbody tr:hover td {
+    background: var(--theme-hover);
+}
+
+.bridge-table .status-cell {
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.bridge-table .loc-cell {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    max-width: 300px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.bridge-table .loc-cell a {
+    color: var(--theme-accent);
+}
+
+.bridge-table .loc-cell a:hover {
+    text-decoration: underline;
+}
+
+/* Bridge row status colors */
+.bridge-table tr.status-ok .status-cell {
+    color: #27ae60;
+}
+
+.bridge-table tr.status-missing .status-cell {
+    color: #e67e22;
+}
+
+.bridge-table tr.status-unused .status-cell {
+    color: var(--theme-text-tertiary);
+}
+
+.bridge-table tr.status-unregistered .status-cell {
+    color: #c0392b;
+}
+
+.bridge-table tr.status-missing {
+    background: rgba(230, 126, 34, 0.05);
+}
+
+.bridge-table tr.status-unregistered {
+    background: rgba(192, 57, 43, 0.05);
+}
+
+/* Gap details toggle */
+.gap-details {
+    margin-top: 24px;
+}
+
+.gap-details summary {
+    cursor: pointer;
+    color: var(--theme-text-tertiary);
+    font-size: 12px;
+    padding: 8px 0;
+}
+
+.gap-details summary:hover {
+    color: var(--theme-text-secondary);
+}
+
+/* Text success color */
+.text-success {
+    color: #27ae60;
 }
 
 /* ============================================

@@ -523,6 +523,9 @@ mod tests {
                 total_loc: 400,
                 scan_duration_ms: 100,
                 resolver_config: None,
+                git_repo: None,
+                git_branch: None,
+                git_commit: None,
             },
             files: vec![
                 FileAnalysis {

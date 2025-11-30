@@ -146,6 +146,10 @@ pub struct JsAssets {
     pub dagre_path: String,
     /// Path to cytoscape-dagre.js plugin
     pub cytoscape_dagre_path: String,
+    /// Path to layout-base.js (required by cose-base)
+    pub layout_base_path: String,
+    /// Path to cose-base.js (required by cytoscape-cose-bilkent)
+    pub cose_base_path: String,
     /// Path to cytoscape-cose-bilkent.js plugin (for force-directed layouts)
     pub cytoscape_cose_bilkent_path: String,
 }

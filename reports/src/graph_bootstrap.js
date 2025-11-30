@@ -62,10 +62,19 @@
     const openBase = g.openBase || null;
 
     const originalParent = container.parentNode;
-    container.style.height = "520px";
-
-    // Component controls stay in the main Graph tab
     const targetParent = originalParent || container.parentNode;
+
+    // ========================================
+    // Side-by-side split layout
+    // ========================================
+    const splitContainer = document.createElement("div");
+    splitContainer.className = "graph-split-container";
+
+    // LEFT PANEL: Component list with inner scroll
+    const leftPanel = document.createElement("div");
+    leftPanel.className = "graph-left-panel";
+
+    // Component filter toolbar
     const componentBar = document.createElement("div");
     componentBar.className = "graph-toolbar component-toolbar";
     componentBar.innerHTML = `
@@ -89,9 +98,35 @@
         <button data-role="component-show-isolates">Show isolates</button>
       </span>
     `;
-    if (targetParent) targetParent.insertBefore(componentBar, container);
 
-    // Graph controls
+    const componentPanel = document.createElement("div");
+    componentPanel.className = "component-panel";
+    componentPanel.innerHTML = `
+      <div class="component-panel-header">
+        <div><strong>Disconnected components</strong> <span class="muted" data-role="component-summary"></span></div>
+        <div class="panel-actions">
+          <label>show size ≤ <input type="number" min="1" value="8" data-role="component-size-limit" style="width:70px" /></label>
+          <button data-role="component-reset">Reset view</button>
+        </div>
+      </div>
+      <table>
+        <thead><tr><th>id</th><th>size</th><th>sample</th><th>isolated</th><th>edges</th><th>LOC</th><th>actions</th></tr></thead>
+        <tbody data-role="component-table"></tbody>
+      </table>
+    `;
+
+    leftPanel.appendChild(componentBar);
+    leftPanel.appendChild(componentPanel);
+
+    // RESIZE HANDLE
+    const resizeHandle = document.createElement("div");
+    resizeHandle.className = "graph-resize-handle";
+
+    // RIGHT PANEL: Graph pinned to viewport
+    const rightPanel = document.createElement("div");
+    rightPanel.className = "graph-right-panel";
+
+    // Graph controls toolbar
     const toolbar = document.createElement("div");
     toolbar.className = "graph-toolbar";
     toolbar.innerHTML = `
@@ -128,30 +163,54 @@
         <span><span class="legend-dot" style="background:#d1830f"></span> detached</span>
       </div>
     `;
-    if (targetParent) targetParent.insertBefore(toolbar, componentBar.nextSibling);
 
-    const componentPanel = document.createElement("div");
-    componentPanel.className = "component-panel";
-    componentPanel.innerHTML = `
-      <div class="component-panel-header">
-        <div><strong>Disconnected components</strong> <span class="muted" data-role="component-summary"></span></div>
-        <div class="panel-actions">
-          <label>show size ≤ <input type="number" min="1" value="8" data-role="component-size-limit" style="width:70px" /></label>
-          <button data-role="component-reset">Reset view</button>
-        </div>
-      </div>
-      <table>
-        <thead><tr><th>id</th><th>size</th><th>sample</th><th>isolated</th><th>edges</th><th>LOC</th><th>actions</th></tr></thead>
-        <tbody data-role="component-table"></tbody>
-      </table>
-    `;
-    if (targetParent) targetParent.insertBefore(componentPanel, toolbar.nextSibling);
+    // Move graph container into right panel
+    container.style.height = "";  // Remove fixed height, let flex handle it
+    container.style.flex = "1";
+    container.style.minHeight = "0";
 
-    const hint = document.createElement("div");
-    hint.className = "graph-hint";
-    hint.textContent =
-      "Component filter selects an island (or small islands) and highlights nodes; slider sets threshold for small components. Text filter still matches node paths.";
-    if (targetParent) targetParent.insertBefore(hint, componentPanel.nextSibling);
+    rightPanel.appendChild(toolbar);
+    rightPanel.appendChild(container);
+
+    // Assemble split layout
+    splitContainer.appendChild(leftPanel);
+    splitContainer.appendChild(resizeHandle);
+    splitContainer.appendChild(rightPanel);
+
+    if (targetParent) targetParent.appendChild(splitContainer);
+
+    // ========================================
+    // Resize handle drag functionality
+    // ========================================
+    let isResizing = false;
+    let startX = 0;
+    let startWidth = 0;
+
+    resizeHandle.addEventListener("mousedown", (e) => {
+      isResizing = true;
+      startX = e.clientX;
+      startWidth = leftPanel.offsetWidth;
+      resizeHandle.classList.add("active");
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+      e.preventDefault();
+    });
+
+    document.addEventListener("mousemove", (e) => {
+      if (!isResizing) return;
+      const delta = e.clientX - startX;
+      const newWidth = Math.min(600, Math.max(280, startWidth + delta));
+      leftPanel.style.width = newWidth + "px";
+    });
+
+    document.addEventListener("mouseup", () => {
+      if (isResizing) {
+        isResizing = false;
+        resizeHandle.classList.remove("active");
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+      }
+    });
 
     const componentSelect = componentBar.querySelector('[data-role="component-filter"]');
     const sizeSlider = componentBar.querySelector('[data-role="component-threshold"]');
@@ -539,10 +598,16 @@
         if (!nodeHover && !tooltipHover) {
           hideTip();
         }
-      }, 220);
+      }, 350);
     };
 
     const showTip = (evt, node) => {
+      // Cancel any pending hide
+      if (hideTimeout) {
+        clearTimeout(hideTimeout);
+        hideTimeout = null;
+      }
+
       const data = node.data();
       const path = data.full || data.id;
       const comp = componentMap.get(data.component);
@@ -568,10 +633,6 @@
       tooltip.style.top = top + "px";
       tooltip.style.display = "block";
       nodeHover = true;
-      if (hideTimeout) {
-        clearTimeout(hideTimeout);
-        hideTimeout = null;
-      }
     };
 
     tooltip.addEventListener("mouseenter", () => {
@@ -590,8 +651,11 @@
     cy.off("mouseout");
     cy.off("tap");
     cy.off("tapdrag");
+    cy.off("pan");
+    cy.off("zoom");
     cy.on("mouseover", "node", (evt) => {
       nodeHover = true;
+      if (hideTimeout) { clearTimeout(hideTimeout); hideTimeout = null; }
       showTip(evt, evt.target);
     });
     cy.on("mouseout", "node", () => {
@@ -605,6 +669,12 @@
     cy.on("tapdrag", "node", () => {
       nodeHover = false;
       hideTip();
+    });
+    // Hide tooltip on pan/zoom to avoid stale position
+    cy.on("pan zoom", () => {
+      if (tooltip.style.display !== "none") {
+        hideTip();
+      }
     });
 
     const updateComponentFilter = () => {
@@ -734,5 +804,9 @@
 
     renderComponentTable();
     applyFilters();
+    // Initial fit after layout completes (layout is async)
+    cy.one("layoutstop", () => {
+      cy.fit();
+    });
   });
 })();
