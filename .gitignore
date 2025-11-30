@@ -23,3 +23,5 @@ __pycache__/
 *.pyc
 /reports/target
 *.zip
+/loctree_rs/tests/fixtures/simple_ts/.loctree
+/loctree_rs/tests/fixtures/tauri_app/.loctree
