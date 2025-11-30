@@ -347,3 +347,280 @@ pub fn print_for_ai_json(report: &ForAiReport) {
     let json = serde_json::to_string_pretty(report).expect("serialize for-ai report");
     println!("{}", json);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::analyzer::report::CommandGap;
+    use crate::types::{CommandRef, ImportEntry, ImportKind};
+
+    fn mock_file(path: &str, loc: usize) -> FileAnalysis {
+        FileAnalysis {
+            path: path.to_string(),
+            loc,
+            ..Default::default()
+        }
+    }
+
+    fn mock_section(root: &str, files: usize) -> ReportSection {
+        ReportSection {
+            root: root.to_string(),
+            files_analyzed: files,
+            total_loc: 0,
+            reexport_files_count: 0,
+            dynamic_imports_count: 0,
+            ranked_dups: vec![],
+            cascades: vec![],
+            dynamic: vec![],
+            analyze_limit: 50,
+            missing_handlers: vec![],
+            unregistered_handlers: vec![],
+            unused_handlers: vec![],
+            command_counts: (0, 0),
+            command_bridges: vec![],
+            open_base: None,
+            insights: vec![],
+            graph: None,
+            graph_warning: None,
+        }
+    }
+
+    #[test]
+    fn test_compute_summary_empty() {
+        let sections: Vec<ReportSection> = vec![];
+        let analyses: Vec<FileAnalysis> = vec![];
+
+        let summary = compute_summary(&sections, &analyses);
+
+        assert_eq!(summary.files_analyzed, 0);
+        assert_eq!(summary.total_loc, 0);
+        assert_eq!(summary.health_score, 100);
+        assert!(summary.priority.contains("HEALTHY"));
+    }
+
+    #[test]
+    fn test_compute_summary_with_missing_handlers() {
+        let mut section = mock_section("src", 10);
+        section.missing_handlers = vec![
+            CommandGap {
+                name: "cmd1".to_string(),
+                implementation_name: None,
+                locations: vec![("src/a.ts".to_string(), 1)],
+                confidence: None,
+                string_literal_matches: vec![],
+            },
+            CommandGap {
+                name: "cmd2".to_string(),
+                implementation_name: None,
+                locations: vec![("src/b.ts".to_string(), 2)],
+                confidence: None,
+                string_literal_matches: vec![],
+            },
+        ];
+
+        let sections = vec![section];
+        let analyses: Vec<FileAnalysis> = vec![];
+
+        let summary = compute_summary(&sections, &analyses);
+
+        assert_eq!(summary.missing_handlers, 2);
+        assert!(summary.priority.contains("CRITICAL"));
+        // Missing handlers penalty: 2 * 20 = 40
+        assert!(summary.health_score < 100);
+    }
+
+    #[test]
+    fn test_compute_summary_with_unregistered_handlers() {
+        let mut section = mock_section("src", 10);
+        section.unregistered_handlers = vec![CommandGap {
+            name: "unreg_cmd".to_string(),
+            implementation_name: Some("unregisteredHandler".to_string()),
+            locations: vec![("src-tauri/src/main.rs".to_string(), 50)],
+            confidence: None,
+            string_literal_matches: vec![],
+        }];
+
+        let sections = vec![section];
+        let analyses: Vec<FileAnalysis> = vec![];
+
+        let summary = compute_summary(&sections, &analyses);
+
+        assert_eq!(summary.unregistered_handlers, 1);
+        assert!(summary.priority.contains("WARNING"));
+    }
+
+    #[test]
+    fn test_compute_summary_with_unused_high_confidence() {
+        let mut section = mock_section("src", 10);
+        section.unused_handlers = vec![CommandGap {
+            name: "unused_cmd".to_string(),
+            implementation_name: Some("unusedHandler".to_string()),
+            locations: vec![("src-tauri/src/main.rs".to_string(), 100)],
+            confidence: Some(Confidence::High),
+            string_literal_matches: vec![],
+        }];
+
+        let sections = vec![section];
+        let analyses: Vec<FileAnalysis> = vec![];
+
+        let summary = compute_summary(&sections, &analyses);
+
+        assert_eq!(summary.unused_high_confidence, 1);
+        assert!(summary.priority.contains("CLEANUP"));
+    }
+
+    #[test]
+    fn test_build_section_refs() {
+        let sections = vec![mock_section("src", 10), mock_section("lib", 5)];
+
+        let refs = build_section_refs(&sections);
+
+        assert_eq!(refs.len(), 2);
+        assert_eq!(refs[0].root, "src");
+        assert_eq!(refs[0].files, 10);
+        assert!(refs[0].slice_cmd.contains("loctree slice"));
+        assert_eq!(refs[1].root, "lib");
+    }
+
+    #[test]
+    fn test_extract_quick_wins_missing_handlers() {
+        let mut section = mock_section("src", 10);
+        section.missing_handlers = vec![CommandGap {
+            name: "missing_cmd".to_string(),
+            implementation_name: None,
+            locations: vec![("src/app.ts".to_string(), 42)],
+            confidence: None,
+            string_literal_matches: vec![],
+        }];
+
+        let sections = vec![section];
+        let wins = extract_quick_wins(&sections);
+
+        assert!(!wins.is_empty());
+        assert_eq!(wins[0].priority, 1);
+        assert!(wins[0].action.contains("missing backend handler"));
+        assert_eq!(wins[0].target, "missing_cmd");
+        assert!(wins[0].location.contains("src/app.ts:42"));
+    }
+
+    #[test]
+    fn test_extract_quick_wins_priority_order() {
+        let mut section = mock_section("src", 10);
+        section.missing_handlers = vec![CommandGap {
+            name: "missing".to_string(),
+            implementation_name: None,
+            locations: vec![("a.ts".to_string(), 1)],
+            confidence: None,
+            string_literal_matches: vec![],
+        }];
+        section.unregistered_handlers = vec![CommandGap {
+            name: "unreg".to_string(),
+            implementation_name: Some("unregHandler".to_string()),
+            locations: vec![("b.rs".to_string(), 2)],
+            confidence: None,
+            string_literal_matches: vec![],
+        }];
+        section.unused_handlers = vec![CommandGap {
+            name: "unused".to_string(),
+            implementation_name: Some("unusedHandler".to_string()),
+            locations: vec![("c.rs".to_string(), 3)],
+            confidence: Some(Confidence::High),
+            string_literal_matches: vec![],
+        }];
+
+        let sections = vec![section];
+        let wins = extract_quick_wins(&sections);
+
+        // Should have all 3 with priority order: missing < unregistered < unused
+        assert!(wins.len() >= 3);
+        let missing_win = wins.iter().find(|w| w.target == "missing").unwrap();
+        let unreg_win = wins.iter().find(|w| w.target == "unreg").unwrap();
+        let unused_win = wins.iter().find(|w| w.target == "unused").unwrap();
+
+        assert!(missing_win.priority < unreg_win.priority);
+        assert!(unreg_win.priority < unused_win.priority);
+    }
+
+    #[test]
+    fn test_find_hub_files_empty() {
+        let analyses: Vec<FileAnalysis> = vec![];
+        let hubs = find_hub_files(&analyses);
+        assert!(hubs.is_empty());
+    }
+
+    #[test]
+    fn test_find_hub_files_scores_by_connectivity() {
+        let mut high_connectivity = mock_file("hub.ts", 200);
+        high_connectivity.imports = vec![
+            ImportEntry::new("./a".to_string(), ImportKind::Static),
+            ImportEntry::new("./b".to_string(), ImportKind::Static),
+            ImportEntry::new("./c".to_string(), ImportKind::Static),
+        ];
+        high_connectivity.command_handlers = vec![
+            CommandRef {
+                name: "cmd1".to_string(),
+                exposed_name: None,
+                line: 10,
+                generic_type: None,
+                payload: None,
+            },
+            CommandRef {
+                name: "cmd2".to_string(),
+                exposed_name: None,
+                line: 20,
+                generic_type: None,
+                payload: None,
+            },
+        ];
+
+        let low_connectivity = mock_file("leaf.ts", 50);
+
+        let analyses = vec![high_connectivity, low_connectivity];
+        let hubs = find_hub_files(&analyses);
+
+        // High connectivity file should appear first (if any)
+        if !hubs.is_empty() {
+            assert_eq!(hubs[0].path, "hub.ts");
+        }
+    }
+
+    #[test]
+    fn test_generate_for_ai_report() {
+        let sections = vec![mock_section("src", 5)];
+        let analyses = vec![mock_file("src/a.ts", 100), mock_file("src/b.ts", 50)];
+
+        let report = generate_for_ai_report("/project", &sections, &analyses);
+
+        assert_eq!(report.project, "/project");
+        assert!(!report.generated_at.is_empty());
+        assert_eq!(report.summary.files_analyzed, 5);
+        assert_eq!(report.summary.total_loc, 150);
+        assert_eq!(report.sections.len(), 1);
+    }
+
+    #[test]
+    fn test_health_score_bounds() {
+        // Health score should be 0-100
+        let mut section = mock_section("src", 10);
+        // Add lots of issues to test lower bound
+        section.missing_handlers = (0..10)
+            .map(|i| CommandGap {
+                name: format!("cmd{}", i),
+                implementation_name: None,
+                locations: vec![("a.ts".to_string(), i)],
+                confidence: None,
+                string_literal_matches: vec![],
+            })
+            .collect();
+
+        let sections = vec![section];
+        let analyses: Vec<FileAnalysis> = vec![];
+
+        let summary = compute_summary(&sections, &analyses);
+
+        // Should not go below 0
+        assert!(summary.health_score <= 100);
+        // With 10 missing handlers (20 points each = 200), should be 0
+        assert_eq!(summary.health_score, 0);
+    }
+}

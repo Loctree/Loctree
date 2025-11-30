@@ -237,7 +237,7 @@ impl SnapshotDiff {
                 exports.insert(ExportedSymbol {
                     file: file_path.clone(),
                     name: export.name.clone(),
-                    kind: format!("{:?}", export.kind),
+                    kind: export.kind.clone(),
                 });
             }
         }
@@ -353,6 +353,8 @@ impl SnapshotDiff {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::snapshot::GraphEdge;
+    use crate::types::{ExportSymbol, FileAnalysis};
 
     #[test]
     fn test_files_diff_from_changed_files() {
@@ -383,6 +385,39 @@ mod tests {
     }
 
     #[test]
+    fn test_files_diff_renamed() {
+        let changes = vec![ChangedFile {
+            old_path: Some(PathBuf::from("old.ts")),
+            new_path: Some(PathBuf::from("new.ts")),
+            status: ChangeStatus::Renamed,
+        }];
+
+        let diff = FilesDiff::from_changed_files(&changes);
+        assert_eq!(diff.renamed.len(), 1);
+        assert_eq!(diff.renamed[0].0, PathBuf::from("old.ts"));
+        assert_eq!(diff.renamed[0].1, PathBuf::from("new.ts"));
+    }
+
+    #[test]
+    fn test_files_diff_copied() {
+        let changes = vec![ChangedFile {
+            old_path: Some(PathBuf::from("src.ts")),
+            new_path: Some(PathBuf::from("copy.ts")),
+            status: ChangeStatus::Copied,
+        }];
+
+        let diff = FilesDiff::from_changed_files(&changes);
+        assert_eq!(diff.renamed.len(), 1); // Copied uses same handling as renamed
+    }
+
+    #[test]
+    fn test_files_diff_empty() {
+        let changes: Vec<ChangedFile> = vec![];
+        let diff = FilesDiff::from_changed_files(&changes);
+        assert_eq!(diff.total_changes(), 0);
+    }
+
+    #[test]
     fn test_risk_score_clamped() {
         let files = FilesDiff {
             removed: (0..100)
@@ -395,5 +430,351 @@ mod tests {
 
         let score = SnapshotDiff::calculate_risk_score(&files, &graph, &exports);
         assert!(score <= 1.0);
+    }
+
+    #[test]
+    fn test_risk_score_components() {
+        // Test modified files contribution
+        let files = FilesDiff {
+            modified: vec![PathBuf::from("a.ts")],
+            ..Default::default()
+        };
+        let score1 = SnapshotDiff::calculate_risk_score(
+            &files,
+            &GraphDiff::default(),
+            &ExportsDiff::default(),
+        );
+        assert!(score1 > 0.0);
+
+        // Test removed exports contribution
+        let exports = ExportsDiff {
+            removed: vec![ExportedSymbol {
+                file: PathBuf::from("a.ts"),
+                name: "foo".to_string(),
+                kind: "function".to_string(),
+            }],
+            ..Default::default()
+        };
+        let score2 = SnapshotDiff::calculate_risk_score(
+            &FilesDiff::default(),
+            &GraphDiff::default(),
+            &exports,
+        );
+        assert!(score2 > 0.0);
+    }
+
+    #[test]
+    fn test_generate_summary_empty() {
+        let summary = SnapshotDiff::generate_summary(
+            &FilesDiff::default(),
+            &GraphDiff::default(),
+            &ExportsDiff::default(),
+            &[],
+        );
+        assert_eq!(summary, "No significant changes");
+    }
+
+    #[test]
+    fn test_generate_summary_with_changes() {
+        let files = FilesDiff {
+            added: vec![PathBuf::from("new.ts")],
+            removed: vec![PathBuf::from("old.ts")],
+            modified: vec![PathBuf::from("mod.ts")],
+            ..Default::default()
+        };
+        let summary = SnapshotDiff::generate_summary(
+            &files,
+            &GraphDiff::default(),
+            &ExportsDiff::default(),
+            &[],
+        );
+        assert!(summary.contains("1 files added"));
+        assert!(summary.contains("1 files removed"));
+        assert!(summary.contains("1 files modified"));
+    }
+
+    #[test]
+    fn test_generate_summary_with_graph_changes() {
+        let graph = GraphDiff {
+            edges_added: vec![DiffEdge {
+                from: PathBuf::from("a.ts"),
+                to: PathBuf::from("b.ts"),
+                symbols: vec![],
+            }],
+            edges_removed: vec![DiffEdge {
+                from: PathBuf::from("c.ts"),
+                to: PathBuf::from("d.ts"),
+                symbols: vec![],
+            }],
+        };
+        let summary = SnapshotDiff::generate_summary(
+            &FilesDiff::default(),
+            &graph,
+            &ExportsDiff::default(),
+            &[],
+        );
+        assert!(summary.contains("1 imports added"));
+        assert!(summary.contains("1 imports removed"));
+    }
+
+    #[test]
+    fn test_generate_summary_with_consumers() {
+        let summary = SnapshotDiff::generate_summary(
+            &FilesDiff::default(),
+            &GraphDiff::default(),
+            &ExportsDiff::default(),
+            &[PathBuf::from("consumer.ts")],
+        );
+        assert!(summary.contains("1 consumers affected"));
+    }
+
+    fn mock_metadata() -> crate::snapshot::SnapshotMetadata {
+        crate::snapshot::SnapshotMetadata {
+            schema_version: "1".to_string(),
+            generated_at: "2025-01-01T00:00:00Z".to_string(),
+            roots: vec![".".to_string()],
+            languages: std::collections::HashSet::new(),
+            file_count: 0,
+            total_loc: 0,
+            scan_duration_ms: 0,
+            resolver_config: None,
+            git_repo: None,
+            git_branch: None,
+            git_commit: None,
+        }
+    }
+
+    fn mock_snapshot_with_edges(edges: Vec<GraphEdge>) -> Snapshot {
+        Snapshot {
+            metadata: mock_metadata(),
+            files: vec![],
+            edges,
+            export_index: std::collections::HashMap::new(),
+            command_bridges: vec![],
+            event_bridges: vec![],
+            barrels: vec![],
+        }
+    }
+
+    fn mock_snapshot_with_files(files: Vec<FileAnalysis>) -> Snapshot {
+        Snapshot {
+            metadata: mock_metadata(),
+            files,
+            edges: vec![],
+            export_index: std::collections::HashMap::new(),
+            command_bridges: vec![],
+            event_bridges: vec![],
+            barrels: vec![],
+        }
+    }
+
+    #[test]
+    fn test_extract_edges_empty() {
+        let snapshot = mock_snapshot_with_edges(vec![]);
+        let edges = SnapshotDiff::extract_edges(&snapshot);
+        assert!(edges.is_empty());
+    }
+
+    #[test]
+    fn test_extract_edges() {
+        let snapshot = mock_snapshot_with_edges(vec![GraphEdge {
+            from: "a.ts".to_string(),
+            to: "b.ts".to_string(),
+            label: "foo, bar".to_string(),
+        }]);
+        let edges = SnapshotDiff::extract_edges(&snapshot);
+        assert_eq!(edges.len(), 1);
+        let edge = edges.iter().next().unwrap();
+        assert_eq!(edge.from, PathBuf::from("a.ts"));
+        assert_eq!(edge.to, PathBuf::from("b.ts"));
+        assert_eq!(edge.symbols, vec!["foo", "bar"]);
+    }
+
+    #[test]
+    fn test_extract_exports() {
+        let mut file = FileAnalysis::default();
+        file.path = "utils.ts".to_string();
+        file.exports = vec![ExportSymbol::new(
+            "helper".to_string(),
+            "function",
+            "named",
+            Some(10),
+        )];
+
+        let snapshot = mock_snapshot_with_files(vec![file]);
+        let exports = SnapshotDiff::extract_exports(&snapshot);
+        assert_eq!(exports.len(), 1);
+    }
+
+    #[test]
+    fn test_diff_edge_equality() {
+        let edge1 = DiffEdge {
+            from: PathBuf::from("a.ts"),
+            to: PathBuf::from("b.ts"),
+            symbols: vec!["foo".to_string()],
+        };
+        let edge2 = DiffEdge {
+            from: PathBuf::from("a.ts"),
+            to: PathBuf::from("b.ts"),
+            symbols: vec!["foo".to_string()],
+        };
+        assert_eq!(edge1, edge2);
+
+        let mut set = HashSet::new();
+        set.insert(edge1.clone());
+        assert!(set.contains(&edge2));
+    }
+
+    #[test]
+    fn test_snapshot_diff_to_json() {
+        let diff = SnapshotDiff {
+            from_commit: None,
+            to_commit: None,
+            files: FilesDiff::default(),
+            graph: GraphDiff::default(),
+            exports: ExportsDiff::default(),
+            impact: ImpactAnalysis {
+                affected_files: 0,
+                affected_consumers: vec![],
+                risk_score: 0.0,
+                summary: "No changes".to_string(),
+            },
+        };
+        let json = diff.to_json();
+        assert!(!json.is_null());
+    }
+
+    #[test]
+    fn test_compare_graphs_added_edge() {
+        let from = mock_snapshot_with_edges(vec![]);
+        let to = mock_snapshot_with_edges(vec![GraphEdge {
+            from: "a.ts".to_string(),
+            to: "b.ts".to_string(),
+            label: "".to_string(),
+        }]);
+        let diff = SnapshotDiff::compare_graphs(&from, &to);
+        assert_eq!(diff.edges_added.len(), 1);
+        assert!(diff.edges_removed.is_empty());
+    }
+
+    #[test]
+    fn test_compare_graphs_removed_edge() {
+        let from = mock_snapshot_with_edges(vec![GraphEdge {
+            from: "a.ts".to_string(),
+            to: "b.ts".to_string(),
+            label: "".to_string(),
+        }]);
+        let to = mock_snapshot_with_edges(vec![]);
+        let diff = SnapshotDiff::compare_graphs(&from, &to);
+        assert!(diff.edges_added.is_empty());
+        assert_eq!(diff.edges_removed.len(), 1);
+    }
+
+    #[test]
+    fn test_compare_exports_added() {
+        let from = mock_snapshot_with_files(vec![]);
+
+        let mut file = FileAnalysis::default();
+        file.path = "utils.ts".to_string();
+        file.exports = vec![ExportSymbol::new(
+            "helper".to_string(),
+            "function",
+            "named",
+            Some(10),
+        )];
+        let to = mock_snapshot_with_files(vec![file]);
+
+        let diff = SnapshotDiff::compare_exports(&from, &to);
+        assert_eq!(diff.added.len(), 1);
+        assert!(diff.removed.is_empty());
+    }
+
+    #[test]
+    fn test_compare_exports_removed() {
+        let mut file = FileAnalysis::default();
+        file.path = "utils.ts".to_string();
+        file.exports = vec![ExportSymbol::new(
+            "helper".to_string(),
+            "function",
+            "named",
+            Some(10),
+        )];
+        let from = mock_snapshot_with_files(vec![file]);
+
+        let to = mock_snapshot_with_files(vec![]);
+        let diff = SnapshotDiff::compare_exports(&from, &to);
+        assert!(diff.added.is_empty());
+        assert_eq!(diff.removed.len(), 1);
+    }
+
+    #[test]
+    fn test_generate_summary_with_exports_removed() {
+        let exports = ExportsDiff {
+            removed: vec![ExportedSymbol {
+                file: PathBuf::from("a.ts"),
+                name: "foo".to_string(),
+                kind: "function".to_string(),
+            }],
+            ..Default::default()
+        };
+        let summary = SnapshotDiff::generate_summary(
+            &FilesDiff::default(),
+            &GraphDiff::default(),
+            &exports,
+            &[],
+        );
+        assert!(summary.contains("1 exports removed"));
+    }
+
+    #[test]
+    fn test_full_compare() {
+        let from = mock_snapshot_with_edges(vec![]);
+        let to = mock_snapshot_with_edges(vec![GraphEdge {
+            from: "a.ts".to_string(),
+            to: "b.ts".to_string(),
+            label: "foo".to_string(),
+        }]);
+        let changed_files = vec![ChangedFile {
+            old_path: None,
+            new_path: Some(PathBuf::from("a.ts")),
+            status: ChangeStatus::Added,
+        }];
+
+        let diff = SnapshotDiff::compare(&from, &to, None, None, &changed_files);
+
+        assert_eq!(diff.files.added.len(), 1);
+        assert_eq!(diff.graph.edges_added.len(), 1);
+        assert!(!diff.impact.summary.is_empty());
+    }
+
+    #[test]
+    fn test_extract_edges_empty_label() {
+        let snapshot = mock_snapshot_with_edges(vec![GraphEdge {
+            from: "a.ts".to_string(),
+            to: "b.ts".to_string(),
+            label: "".to_string(),
+        }]);
+        let edges = SnapshotDiff::extract_edges(&snapshot);
+        let edge = edges.iter().next().unwrap();
+        assert!(edge.symbols.is_empty());
+    }
+
+    #[test]
+    fn test_exported_symbol_equality() {
+        let sym1 = ExportedSymbol {
+            file: PathBuf::from("a.ts"),
+            name: "foo".to_string(),
+            kind: "function".to_string(),
+        };
+        let sym2 = ExportedSymbol {
+            file: PathBuf::from("a.ts"),
+            name: "foo".to_string(),
+            kind: "function".to_string(),
+        };
+        assert_eq!(sym1, sym2);
+
+        let mut set = HashSet::new();
+        set.insert(sym1.clone());
+        assert!(set.contains(&sym2));
     }
 }

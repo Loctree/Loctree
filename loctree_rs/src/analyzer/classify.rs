@@ -127,4 +127,128 @@ mod tests {
         assert_eq!(language_from_path("foo/bar.css"), "css");
         assert_eq!(language_from_path("foo/bar.unknown"), "unknown");
     }
+
+    #[test]
+    fn detect_language_all_extensions() {
+        assert_eq!(detect_language("ts"), "ts");
+        assert_eq!(detect_language("tsx"), "ts");
+        assert_eq!(detect_language("js"), "js");
+        assert_eq!(detect_language("jsx"), "js");
+        assert_eq!(detect_language("mjs"), "js");
+        assert_eq!(detect_language("cjs"), "js");
+        assert_eq!(detect_language("rs"), "rs");
+        assert_eq!(detect_language("py"), "py");
+        assert_eq!(detect_language("css"), "css");
+        assert_eq!(detect_language("html"), "html");
+    }
+
+    #[test]
+    fn is_dev_file_variations() {
+        // __tests__ variations
+        assert!(is_dev_file("src/__tests__/Button.test.ts"));
+        assert!(is_dev_file("__tests__/unit/helper.ts"));
+
+        // stories variations
+        assert!(is_dev_file("components/stories/Button.tsx"));
+        assert!(is_dev_file("Button.stories.tsx"));
+        assert!(is_dev_file("Button.story.tsx"));
+
+        // fixtures
+        assert!(is_dev_file("test/fixtures/data.json"));
+        assert!(is_dev_file("fixture/mock.ts"));
+
+        // regular files should not match
+        assert!(!is_dev_file("src/components/Button.tsx"));
+        assert!(!is_dev_file("lib/utils.ts"));
+        assert!(!is_dev_file("src/store/index.ts"));
+    }
+
+    #[test]
+    fn is_test_path_variations() {
+        assert!(is_test_path("src/__tests__/foo.ts"));
+        assert!(is_test_path("src/Button.test.tsx"));
+        assert!(is_test_path("utils.spec.ts"));
+        assert!(is_test_path("lib_test.rs"));
+        assert!(is_test_path("module_tests.rs"));
+        assert!(is_test_path("SRC/__TESTS__/FOO.TS")); // case insensitive
+
+        assert!(!is_test_path("src/Button.tsx"));
+        assert!(!is_test_path("testing.ts")); // 'testing' not a test marker
+    }
+
+    #[test]
+    fn is_story_path_variations() {
+        assert!(is_story_path("Button.stories.tsx"));
+        assert!(is_story_path("Button.story.tsx"));
+        assert!(is_story_path("components/stories/Button.tsx"));
+        assert!(is_story_path("BUTTON.STORIES.TSX")); // case insensitive
+
+        assert!(!is_story_path("src/Button.tsx"));
+        assert!(!is_story_path("history.ts")); // 'history' doesn't match
+    }
+
+    #[test]
+    fn is_generated_path_variations() {
+        assert!(is_generated_path("src/generated/types.ts"));
+        assert!(is_generated_path("lib/codegen/schema.ts"));
+        assert!(is_generated_path("out/gen/api.ts"));
+        assert!(is_generated_path("types.gen.ts"));
+        assert!(is_generated_path("api.gen.tsx"));
+        assert!(is_generated_path("schema.gen.rs"));
+        assert!(is_generated_path("proto.g.rs"));
+        assert!(is_generated_path("SRC/GENERATED/FOO.TS")); // case insensitive
+
+        assert!(!is_generated_path("src/utils.ts"));
+        assert!(!is_generated_path("generic.ts")); // 'generic' != 'generated'
+    }
+
+    #[test]
+    fn file_kind_config_variations() {
+        // Directory-based config (must have /config/ in middle)
+        let (kind, _, _) = file_kind("src/config/app.ts");
+        assert_eq!(kind, "config");
+
+        // File-suffix based config (must end with "config.ts" or ".config.ts" etc)
+        let (kind, _, _) = file_kind("vite.config.ts");
+        assert_eq!(kind, "config");
+
+        let (kind, _, _) = file_kind("tailwind.config.js");
+        assert_eq!(kind, "config");
+
+        // Note: tsconfig.json doesn't match pattern - would need config.json or .config.json
+        let (kind, _, _) = file_kind("app.config.json");
+        assert_eq!(kind, "config");
+    }
+
+    #[test]
+    fn file_kind_priority_generated_over_test() {
+        // Generated takes priority over test for kind, but test flag is set independently
+        let (kind, test, generated) = file_kind("__tests__/generated/mock.gen.ts");
+        assert_eq!(kind, "generated");
+        assert!(test); // test flag is true because path contains __tests__
+        assert!(generated);
+    }
+
+    #[test]
+    fn file_kind_priority_test_over_story() {
+        // Test takes priority over story
+        let (kind, test, _) = file_kind("Button.stories.test.ts");
+        assert_eq!(kind, "test");
+        assert!(test);
+    }
+
+    #[test]
+    fn language_from_path_edge_cases() {
+        // No extension - returns empty string
+        assert_eq!(language_from_path("Makefile"), "");
+        assert_eq!(language_from_path("src/noext"), "");
+
+        // Hidden files without extension - returns empty (extension() returns None)
+        assert_eq!(language_from_path(".gitignore"), "");
+        assert_eq!(language_from_path(".env"), "");
+
+        // Double extensions (only last matters) - note tsx -> ts mapping
+        assert_eq!(language_from_path("file.test.ts"), "ts");
+        assert_eq!(language_from_path("app.module.tsx"), "ts"); // tsx mapped to ts
+    }
 }

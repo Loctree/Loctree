@@ -282,4 +282,132 @@ mod tests {
         assert!(detected.extensions.contains("rs"));
         assert!(detected.extensions.contains("py"));
     }
+
+    #[test]
+    fn test_detect_vite_project() {
+        let tmp = TempDir::new().expect("create temp dir");
+        std::fs::write(tmp.path().join("vite.config.ts"), "export default {}").expect("write");
+        std::fs::write(tmp.path().join("package.json"), "{}").expect("write");
+
+        let detected = detect_stack(tmp.path());
+
+        assert!(detected.ignores.contains(&"build".to_string()));
+        assert!(detected.description.contains("Vite"));
+    }
+
+    #[test]
+    fn test_detect_javascript_only() {
+        let tmp = TempDir::new().expect("create temp dir");
+        std::fs::write(tmp.path().join("package.json"), "{}").expect("write package.json");
+
+        let detected = detect_stack(tmp.path());
+
+        assert!(detected.extensions.contains("js"));
+        assert!(detected.description.contains("JavaScript"));
+    }
+
+    #[test]
+    fn test_detect_with_src_adds_css() {
+        let tmp = TempDir::new().expect("create temp dir");
+        std::fs::write(tmp.path().join("package.json"), "{}").expect("write package.json");
+        std::fs::create_dir(tmp.path().join("src")).expect("create src");
+
+        let detected = detect_stack(tmp.path());
+
+        assert!(detected.extensions.contains("css"));
+    }
+
+    #[test]
+    fn test_apply_detected_stack_skips_if_extensions_set() {
+        let tmp = TempDir::new().expect("create temp dir");
+        std::fs::write(tmp.path().join("Cargo.toml"), "").expect("write");
+
+        let mut extensions = Some(HashSet::from(["py".to_string()]));
+        let mut ignores = Vec::new();
+        let mut tauri = false;
+
+        apply_detected_stack(tmp.path(), &mut extensions, &mut ignores, &mut tauri, false);
+
+        // Should not have changed - user specified extensions
+        assert!(extensions.as_ref().unwrap().contains("py"));
+        assert!(!extensions.as_ref().unwrap().contains("rs"));
+    }
+
+    #[test]
+    fn test_apply_detected_stack_skips_if_tauri_preset() {
+        let tmp = TempDir::new().expect("create temp dir");
+        std::fs::write(tmp.path().join("Cargo.toml"), "").expect("write");
+
+        let mut extensions: Option<HashSet<String>> = None;
+        let mut ignores = Vec::new();
+        let mut tauri = true; // Already set
+
+        apply_detected_stack(tmp.path(), &mut extensions, &mut ignores, &mut tauri, false);
+
+        // Should not have changed - tauri already set
+        assert!(extensions.is_none());
+    }
+
+    #[test]
+    fn test_apply_detected_stack_applies_tauri() {
+        let tmp = TempDir::new().expect("create temp dir");
+        std::fs::create_dir(tmp.path().join("src-tauri")).expect("mkdir");
+        std::fs::write(tmp.path().join("package.json"), "{}").expect("write");
+
+        let mut extensions: Option<HashSet<String>> = None;
+        let mut ignores = Vec::new();
+        let mut tauri = false;
+
+        apply_detected_stack(tmp.path(), &mut extensions, &mut ignores, &mut tauri, false);
+
+        assert!(tauri);
+        assert!(extensions.is_some());
+        assert!(extensions.as_ref().unwrap().contains("ts"));
+    }
+
+    #[test]
+    fn test_apply_detected_stack_preserves_user_ignores() {
+        let tmp = TempDir::new().expect("create temp dir");
+        std::fs::write(tmp.path().join("Cargo.toml"), "").expect("write");
+
+        let mut extensions: Option<HashSet<String>> = None;
+        let mut ignores = vec!["custom_ignore".to_string()];
+        let mut tauri = false;
+
+        apply_detected_stack(tmp.path(), &mut extensions, &mut ignores, &mut tauri, false);
+
+        // Should NOT have applied detected ignores since user specified their own
+        assert_eq!(ignores, vec!["custom_ignore".to_string()]);
+    }
+
+    #[test]
+    fn test_apply_detected_stack_verbose() {
+        let tmp = TempDir::new().expect("create temp dir");
+        std::fs::write(tmp.path().join("Cargo.toml"), "").expect("write");
+
+        let mut extensions: Option<HashSet<String>> = None;
+        let mut ignores = Vec::new();
+        let mut tauri = false;
+
+        // Should not panic with verbose=true
+        apply_detected_stack(tmp.path(), &mut extensions, &mut ignores, &mut tauri, true);
+    }
+
+    #[test]
+    fn test_detected_stack_is_empty() {
+        let empty = DetectedStack::default();
+        assert!(empty.is_empty());
+
+        let with_ext = DetectedStack {
+            extensions: HashSet::from(["rs".to_string()]),
+            ..Default::default()
+        };
+        assert!(!with_ext.is_empty());
+
+        let with_preset = DetectedStack {
+            preset_name: Some("tauri".to_string()),
+            ..Default::default()
+        };
+        assert!(!with_preset.is_empty());
+    }
 }

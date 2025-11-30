@@ -140,7 +140,7 @@ pub fn print_cycles(cycles: &[Vec<String>], json_output: bool) {
 
 #[cfg(test)]
 mod tests {
-    use super::find_cycles;
+    use super::{find_cycles, print_cycles};
 
     #[test]
     fn detects_simple_cycle() {
@@ -187,5 +187,69 @@ mod tests {
         let cycles = find_cycles(&edges);
         assert_eq!(cycles.len(), 1);
         assert_eq!(cycles[0].len(), 3);
+    }
+
+    #[test]
+    fn multiple_cycles() {
+        // Two separate cycles: a<->b and c<->d
+        let edges = vec![
+            ("a".to_string(), "b".to_string(), "import".to_string()),
+            ("b".to_string(), "a".to_string(), "import".to_string()),
+            ("c".to_string(), "d".to_string(), "import".to_string()),
+            ("d".to_string(), "c".to_string(), "import".to_string()),
+        ];
+        let cycles = find_cycles(&edges);
+        assert_eq!(cycles.len(), 2);
+    }
+
+    #[test]
+    fn nested_cycles() {
+        // a->b->c->d->a forms a single cycle
+        let edges = vec![
+            ("a".to_string(), "b".to_string(), "import".to_string()),
+            ("b".to_string(), "c".to_string(), "import".to_string()),
+            ("c".to_string(), "d".to_string(), "import".to_string()),
+            ("d".to_string(), "a".to_string(), "import".to_string()),
+        ];
+        let cycles = find_cycles(&edges);
+        assert_eq!(cycles.len(), 1);
+        assert_eq!(cycles[0].len(), 4);
+    }
+
+    #[test]
+    fn empty_graph() {
+        let edges: Vec<(String, String, String)> = vec![];
+        let cycles = find_cycles(&edges);
+        assert!(cycles.is_empty());
+    }
+
+    #[test]
+    fn single_node_no_self_loop() {
+        let edges = vec![("a".to_string(), "b".to_string(), "import".to_string())];
+        let cycles = find_cycles(&edges);
+        assert!(cycles.is_empty());
+    }
+
+    #[test]
+    fn print_cycles_empty() {
+        // Should not panic
+        print_cycles(&[], false);
+    }
+
+    #[test]
+    fn print_cycles_json() {
+        let cycles = vec![vec!["a".to_string(), "b".to_string()]];
+        // Should not panic
+        print_cycles(&cycles, true);
+    }
+
+    #[test]
+    fn print_cycles_text() {
+        let cycles = vec![
+            vec!["a".to_string(), "b".to_string()],
+            vec!["c".to_string(), "d".to_string(), "e".to_string()],
+        ];
+        // Should not panic
+        print_cycles(&cycles, false);
     }
 }

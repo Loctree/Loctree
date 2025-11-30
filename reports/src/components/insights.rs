@@ -57,6 +57,7 @@ fn format_loc(loc: usize) -> String {
 
 /// Panel displaying AI-generated insights
 #[component]
+#[allow(clippy::unit_arg, clippy::unused_unit)]
 pub fn AiInsightsPanel(insights: Vec<AiInsight>) -> impl IntoView {
     if insights.is_empty() {
         return view! {}.into_any();

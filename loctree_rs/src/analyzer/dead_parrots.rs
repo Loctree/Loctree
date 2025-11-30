@@ -386,3 +386,245 @@ pub fn print_dead_exports(dead_exports: &[DeadExport], output: OutputMode, high_
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{ExportSymbol, ImportEntry, ImportKind, ImportSymbol, SymbolMatch};
+
+    fn mock_file(path: &str) -> FileAnalysis {
+        FileAnalysis {
+            path: path.to_string(),
+            ..Default::default()
+        }
+    }
+
+    fn mock_file_with_exports(path: &str, exports: Vec<&str>) -> FileAnalysis {
+        FileAnalysis {
+            path: path.to_string(),
+            exports: exports
+                .into_iter()
+                .enumerate()
+                .map(|(i, name)| ExportSymbol {
+                    name: name.to_string(),
+                    kind: "function".to_string(),
+                    export_type: "named".to_string(),
+                    line: Some(i + 1),
+                })
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    fn mock_file_with_matches(path: &str, matches: Vec<(usize, &str)>) -> FileAnalysis {
+        FileAnalysis {
+            path: path.to_string(),
+            matches: matches
+                .into_iter()
+                .map(|(line, ctx)| SymbolMatch {
+                    line,
+                    context: ctx.to_string(),
+                })
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_search_symbol_empty() {
+        let analyses: Vec<FileAnalysis> = vec![];
+        let result = search_symbol("foo", &analyses);
+        assert!(!result.found);
+        assert!(result.matches.is_empty());
+    }
+
+    #[test]
+    fn test_search_symbol_no_matches() {
+        let analyses = vec![mock_file("src/utils.ts"), mock_file("src/helpers.ts")];
+        let result = search_symbol("foo", &analyses);
+        assert!(!result.found);
+    }
+
+    #[test]
+    fn test_search_symbol_with_matches() {
+        let analyses = vec![
+            mock_file_with_matches(
+                "src/utils.ts",
+                vec![(10, "const foo = 1"), (20, "return foo")],
+            ),
+            mock_file("src/helpers.ts"),
+        ];
+        let result = search_symbol("foo", &analyses);
+        assert!(result.found);
+        assert_eq!(result.matches.len(), 1);
+    }
+
+    #[test]
+    fn test_print_symbol_results_no_matches() {
+        let result = SymbolSearchResult {
+            found: false,
+            matches: vec![],
+        };
+        // Should not panic
+        print_symbol_results("foo", &result, false);
+        print_symbol_results("foo", &result, true);
+    }
+
+    #[test]
+    fn test_print_symbol_results_with_matches() {
+        let result = SymbolSearchResult {
+            found: true,
+            matches: vec![json!({
+                "path": "src/utils.ts",
+                "matches": [{"line": 10, "context": "const foo = 1"}]
+            })],
+        };
+        // Should not panic
+        print_symbol_results("foo", &result, false);
+        print_symbol_results("foo", &result, true);
+    }
+
+    #[test]
+    fn test_find_similar_empty() {
+        let analyses: Vec<FileAnalysis> = vec![];
+        let result = find_similar("Button", &analyses);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_find_similar_by_path() {
+        let analyses = vec![mock_file("Button.tsx"), mock_file("src/utils/helpers.ts")];
+        let result = find_similar("Button", &analyses);
+        // Path similarity is computed against full path - shorter path gives higher score
+        assert!(!result.is_empty());
+        assert!(result.iter().any(|c| c.name.contains("Button")));
+    }
+
+    #[test]
+    fn test_find_similar_by_export() {
+        let analyses = vec![mock_file_with_exports(
+            "src/utils.ts",
+            vec!["useButton", "formatDate"],
+        )];
+        let result = find_similar("Button", &analyses);
+        assert!(result.iter().any(|c| c.name == "useButton"));
+    }
+
+    #[test]
+    fn test_print_similarity_results_empty() {
+        let candidates: Vec<SimilarityCandidate> = vec![];
+        // Should not panic
+        print_similarity_results("foo", &candidates, false);
+        print_similarity_results("foo", &candidates, true);
+    }
+
+    #[test]
+    fn test_print_similarity_results_with_matches() {
+        let candidates = vec![SimilarityCandidate {
+            name: "fooBar".to_string(),
+            location: "export in src/utils.ts".to_string(),
+            score: 0.8,
+        }];
+        // Should not panic
+        print_similarity_results("foo", &candidates, false);
+        print_similarity_results("foo", &candidates, true);
+    }
+
+    #[test]
+    fn test_find_dead_exports_empty() {
+        let analyses: Vec<FileAnalysis> = vec![];
+        let result = find_dead_exports(&analyses, false);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_find_dead_exports_all_used() {
+        let mut importer = mock_file("src/app.ts");
+        importer.imports = vec![{
+            let mut imp = ImportEntry::new("./utils".to_string(), ImportKind::Static);
+            imp.resolved_path = Some("src/utils.ts".to_string());
+            imp.symbols = vec![ImportSymbol {
+                name: "helper".to_string(),
+                alias: None,
+            }];
+            imp
+        }];
+
+        let exporter = mock_file_with_exports("src/utils.ts", vec!["helper"]);
+
+        let analyses = vec![importer, exporter];
+        let result = find_dead_exports(&analyses, false);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_find_dead_exports_unused() {
+        let analyses = vec![
+            mock_file("src/app.ts"),
+            mock_file_with_exports("src/utils.ts", vec!["unusedHelper"]),
+        ];
+        let result = find_dead_exports(&analyses, false);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].symbol, "unusedHelper");
+    }
+
+    #[test]
+    fn test_find_dead_exports_skips_tests() {
+        let mut test_file =
+            mock_file_with_exports("src/__tests__/utils.test.ts", vec!["testHelper"]);
+        test_file.is_test = true;
+
+        let analyses = vec![mock_file("src/app.ts"), test_file];
+        let result = find_dead_exports(&analyses, false);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_find_dead_exports_high_confidence_skips_default() {
+        let analyses = vec![
+            mock_file("src/app.ts"),
+            mock_file_with_exports("src/utils.ts", vec!["default", "helper"]),
+        ];
+        let result = find_dead_exports(&analyses, true);
+        assert!(!result.iter().any(|d| d.symbol == "default"));
+    }
+
+    #[test]
+    fn test_print_dead_exports_json() {
+        let dead = vec![DeadExport {
+            file: "src/utils.ts".to_string(),
+            symbol: "unused".to_string(),
+            line: Some(10),
+            confidence: "high".to_string(),
+        }];
+        // Should not panic
+        print_dead_exports(&dead, OutputMode::Json, false);
+    }
+
+    #[test]
+    fn test_print_dead_exports_human() {
+        let dead = vec![DeadExport {
+            file: "src/utils.ts".to_string(),
+            symbol: "unused".to_string(),
+            line: None,
+            confidence: "high".to_string(),
+        }];
+        // Should not panic
+        print_dead_exports(&dead, OutputMode::Human, false);
+        print_dead_exports(&dead, OutputMode::Human, true);
+    }
+
+    #[test]
+    fn test_print_dead_exports_many() {
+        let dead: Vec<DeadExport> = (0..60)
+            .map(|i| DeadExport {
+                file: format!("src/file{}.ts", i),
+                symbol: format!("unused{}", i),
+                line: Some(i),
+                confidence: "high".to_string(),
+            })
+            .collect();
+        // Should truncate to 50 and show "... and N more"
+        print_dead_exports(&dead, OutputMode::Human, false);
+    }
+}

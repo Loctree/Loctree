@@ -54,6 +54,7 @@ pub struct ParsedArgs {
     pub find_artifacts: bool,
     pub circular: bool,
     pub entrypoints: bool,
+    pub py_races: bool,
     pub sarif: bool,
     pub full_scan: bool,
     pub slice_target: Option<String>,
@@ -114,6 +115,7 @@ impl Default for ParsedArgs {
             find_artifacts: false,
             circular: false,
             entrypoints: false,
+            py_races: false,
             sarif: false,
             full_scan: false,
             slice_target: None,
@@ -530,6 +532,11 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
             }
             "--entrypoints" => {
                 parsed.entrypoints = true;
+                parsed.mode = Mode::AnalyzeImports;
+                i += 1;
+            }
+            "--py-races" => {
+                parsed.py_races = true;
                 parsed.mode = Mode::AnalyzeImports;
                 i += 1;
             }
@@ -994,6 +1001,31 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_extensions_with_dots() {
+        // Extensions with leading dots should be trimmed
+        let res = parse_extensions(".rs, .ts, .js").expect("parse extensions");
+        assert!(res.contains("rs"));
+        assert!(res.contains("ts"));
+        assert!(res.contains("js"));
+        assert_eq!(res.len(), 3);
+    }
+
+    #[test]
+    fn test_parse_extensions_uppercase() {
+        // Extensions should be lowercased
+        let res = parse_extensions("RS,TS").expect("parse extensions");
+        assert!(res.contains("rs"));
+        assert!(res.contains("ts"));
+    }
+
+    #[test]
+    fn test_parse_extensions_empty_segments() {
+        // Empty segments should be ignored
+        let res = parse_extensions("rs,,ts, ,js").expect("parse extensions");
+        assert_eq!(res.len(), 3);
+    }
+
+    #[test]
     fn test_parse_color_mode() {
         assert_eq!(
             parse_color_mode("always").expect("color always"),
@@ -1007,10 +1039,153 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_color_mode_auto() {
+        assert_eq!(
+            parse_color_mode("auto").expect("color auto"),
+            ColorMode::Auto
+        );
+    }
+
+    #[test]
     fn test_parse_summary_limit() {
         assert_eq!(parse_summary_limit("5").expect("summary"), 5);
         assert!(parse_summary_limit("0").is_err());
         assert!(parse_summary_limit("abc").is_err());
+    }
+
+    #[test]
+    fn test_parse_summary_limit_large() {
+        assert_eq!(parse_summary_limit("100").expect("summary"), 100);
+    }
+
+    #[test]
+    fn test_parse_glob_list() {
+        let list = parse_glob_list("src/**,tests/**,lib/*");
+        assert_eq!(list.len(), 3);
+        assert!(list.contains(&"src/**".to_string()));
+        assert!(list.contains(&"tests/**".to_string()));
+        assert!(list.contains(&"lib/*".to_string()));
+    }
+
+    #[test]
+    fn test_parse_glob_list_with_spaces() {
+        let list = parse_glob_list(" src/** , tests/** ");
+        assert_eq!(list.len(), 2);
+        assert!(list.contains(&"src/**".to_string()));
+        assert!(list.contains(&"tests/**".to_string()));
+    }
+
+    #[test]
+    fn test_parse_glob_list_empty() {
+        let list = parse_glob_list("");
+        assert!(list.is_empty());
+
+        let list = parse_glob_list("  ,  ,  ");
+        assert!(list.is_empty());
+    }
+
+    #[test]
+    fn test_parse_positive_usize() {
+        assert_eq!(parse_positive_usize("10", "--limit").expect("parse"), 10);
+        assert_eq!(parse_positive_usize("1", "--limit").expect("parse"), 1);
+    }
+
+    #[test]
+    fn test_parse_positive_usize_zero_error() {
+        let result = parse_positive_usize("0", "--limit");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("requires a positive integer"));
+    }
+
+    #[test]
+    fn test_parse_positive_usize_non_numeric() {
+        let result = parse_positive_usize("abc", "--limit");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_port() {
+        assert_eq!(parse_port("8080", "--port").expect("port"), 8080);
+        assert_eq!(parse_port("0", "--port").expect("port"), 0);
+        assert_eq!(parse_port("65535", "--port").expect("port"), 65535);
+    }
+
+    #[test]
+    fn test_parse_port_invalid() {
+        let result = parse_port("abc", "--port");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("port number"));
+    }
+
+    #[test]
+    fn test_validate_globs_valid() {
+        let patterns = vec!["src/**".to_string(), "*.rs".to_string()];
+        assert!(validate_globs(&patterns, "--focus").is_ok());
+    }
+
+    #[test]
+    fn test_validate_globs_invalid() {
+        let patterns = vec!["[invalid".to_string()]; // Unclosed bracket
+        assert!(validate_globs(&patterns, "--focus").is_err());
+    }
+
+    #[test]
+    fn test_validate_globs_empty() {
+        let patterns: Vec<String> = vec![];
+        assert!(validate_globs(&patterns, "--focus").is_ok());
+
+        let patterns = vec!["".to_string(), "  ".to_string()];
+        assert!(validate_globs(&patterns, "--focus").is_ok()); // Empty patterns are skipped
+    }
+
+    #[test]
+    fn test_parse_ignore_symbols() {
+        let result = parse_ignore_symbols("main,setup,test").expect("parse");
+        assert!(result.contains("main"));
+        assert!(result.contains("setup"));
+        assert!(result.contains("test"));
+        assert_eq!(result.len(), 3);
+    }
+
+    #[test]
+    fn test_parse_ignore_symbols_empty() {
+        assert!(parse_ignore_symbols("").is_none());
+        assert!(parse_ignore_symbols("  ,  ,  ").is_none());
+    }
+
+    #[test]
+    fn test_parse_ignore_symbols_case_insensitive() {
+        let result = parse_ignore_symbols("Main,SETUP").expect("parse");
+        assert!(result.contains("main"));
+        assert!(result.contains("setup"));
+    }
+
+    #[test]
+    fn test_preset_ignore_symbols_common() {
+        let symbols = preset_ignore_symbols("common").expect("preset common");
+        assert!(symbols.contains("main"));
+        assert!(symbols.contains("run"));
+        assert!(symbols.contains("setup"));
+    }
+
+    #[test]
+    fn test_preset_ignore_symbols_tauri() {
+        let symbols = preset_ignore_symbols("tauri").expect("preset tauri");
+        assert!(symbols.contains("main"));
+        assert!(symbols.contains("default"));
+        assert!(symbols.contains("new"));
+        assert!(symbols.contains("from"));
+    }
+
+    #[test]
+    fn test_preset_ignore_symbols_unknown() {
+        assert!(preset_ignore_symbols("unknown").is_none());
+    }
+
+    #[test]
+    fn test_preset_ignore_symbols_case_insensitive() {
+        assert!(preset_ignore_symbols("COMMON").is_some());
+        assert!(preset_ignore_symbols("Tauri").is_some());
     }
 
     #[test]
@@ -1025,5 +1200,42 @@ mod tests {
         let focus = vec!["src/**".to_string()];
         let exclude = vec!["tests/**".to_string()];
         assert!(detect_glob_conflicts(&focus, &exclude).is_ok());
+    }
+
+    #[test]
+    fn detect_glob_conflicts_empty_lists() {
+        // Empty lists should not conflict
+        assert!(detect_glob_conflicts(&[], &[]).is_ok());
+        assert!(detect_glob_conflicts(&["src/**".to_string()], &[]).is_ok());
+        assert!(detect_glob_conflicts(&[], &["tests/**".to_string()]).is_ok());
+    }
+
+    #[test]
+    fn test_parsed_args_default() {
+        let args = ParsedArgs::default();
+        assert!(args.extensions.is_none());
+        assert!(args.ignore_patterns.is_empty());
+        assert!(!args.graph);
+        assert!(!args.use_gitignore);
+        assert!(args.max_depth.is_none());
+        assert_eq!(args.color, ColorMode::Auto);
+        assert_eq!(args.output, OutputMode::Human);
+        assert!(!args.summary);
+        assert_eq!(args.summary_limit, 5);
+        assert!(!args.show_help);
+        assert!(!args.show_version);
+        assert!(args.root_list.is_empty());
+        assert_eq!(args.loc_threshold, DEFAULT_LOC_THRESHOLD);
+        assert!(matches!(args.mode, Mode::Tree));
+        assert_eq!(args.analyze_limit, 8);
+        assert!(!args.verbose);
+        assert!(!args.tauri_preset);
+        assert!(!args.fail_on_missing_handlers);
+        assert!(!args.ai_mode);
+        assert_eq!(args.top_dead_symbols, 20);
+        assert!(!args.dead_exports);
+        assert!(!args.circular);
+        assert!(!args.entrypoints);
+        assert!(!args.sarif);
     }
 }

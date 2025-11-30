@@ -55,9 +55,21 @@ fn main() {
 
     // Create edges
     let edges = vec![
-        ("src/main.ts".into(), "src/utils/index.ts".into(), "import".into()),
-        ("src/main.ts".into(), "src/components/App.tsx".into(), "import".into()),
-        ("src/components/App.tsx".into(), "src/utils/index.ts".into(), "import".into()),
+        (
+            "src/main.ts".into(),
+            "src/utils/index.ts".into(),
+            "import".into(),
+        ),
+        (
+            "src/main.ts".into(),
+            "src/components/App.tsx".into(),
+            "import".into(),
+        ),
+        (
+            "src/components/App.tsx".into(),
+            "src/utils/index.ts".into(),
+            "import".into(),
+        ),
     ];
 
     // Create components
@@ -138,13 +150,18 @@ fn main() {
         ..Default::default()
     };
 
-    // Configure JS assets from CDN
+    // Configure JS assets from CDN (with Cytoscape fallback)
     let js_assets = JsAssets {
         cytoscape_path: "https://unpkg.com/cytoscape@3/dist/cytoscape.min.js".into(),
         dagre_path: "https://unpkg.com/dagre@0.8/dist/dagre.min.js".into(),
         cytoscape_dagre_path: "https://unpkg.com/cytoscape-dagre@2/cytoscape-dagre.js".into(),
+        layout_base_path: "https://unpkg.com/layout-base@2/layout-base.js".into(),
+        cose_base_path: "https://unpkg.com/cose-base@2/cose-base.js".into(),
         cytoscape_cose_bilkent_path:
             "https://unpkg.com/cytoscape-cose-bilkent@4/cytoscape-cose-bilkent.js".into(),
+        // WASM assets (None = use Cytoscape fallback)
+        wasm_base64: None,
+        wasm_js_glue: None,
     };
 
     // Render
@@ -156,5 +173,8 @@ fn main() {
 
     println!("Report with graph written to: {}", output_path);
     println!("HTML size: {} bytes", html.len());
-    println!("\nOpen {} in a browser to see the interactive graph!", output_path);
+    println!(
+        "\nOpen {} in a browser to see the interactive graph!",
+        output_path
+    );
 }

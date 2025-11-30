@@ -249,3 +249,294 @@ pub fn collect_files(
 pub fn python_stdlib() -> HashSet<String> {
     python_stdlib_set().clone()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_globset_empty() {
+        let patterns: Vec<String> = vec![];
+        let result = build_globset(&patterns);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_build_globset_whitespace_only() {
+        let patterns = vec!["  ".to_string(), "\t".to_string()];
+        let result = build_globset(&patterns);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_build_globset_valid_patterns() {
+        let patterns = vec!["*.ts".to_string(), "src/**/*.js".to_string()];
+        let result = build_globset(&patterns);
+        assert!(result.is_some());
+        let gs = result.unwrap();
+        assert!(gs.is_match("foo.ts"));
+        assert!(gs.is_match("src/components/Button.js"));
+        assert!(!gs.is_match("foo.rs"));
+    }
+
+    #[test]
+    fn test_build_globset_invalid_pattern_skipped() {
+        let patterns = vec!["*.ts".to_string(), "[invalid".to_string()];
+        let result = build_globset(&patterns);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_opt_globset_empty() {
+        let globs: Vec<String> = vec![];
+        let result = opt_globset(&globs);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_opt_globset_valid() {
+        let globs = vec!["*.rs".to_string()];
+        let result = opt_globset(&globs);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_strip_excluded_none() {
+        let files = vec!["a.ts".to_string(), "b.ts".to_string()];
+        let result = strip_excluded(&files, &None);
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_strip_excluded_some() {
+        let files = vec![
+            "a.ts".to_string(),
+            "b.test.ts".to_string(),
+            "c.ts".to_string(),
+        ];
+        let exclude = opt_globset(&["*.test.ts".to_string()]);
+        let result = strip_excluded(&files, &exclude);
+        assert_eq!(result.len(), 2);
+        assert!(!result.contains(&"b.test.ts".to_string()));
+    }
+
+    #[test]
+    fn test_matches_focus_none() {
+        let files = vec!["a.ts".to_string()];
+        assert!(matches_focus(&files, &None));
+    }
+
+    #[test]
+    fn test_matches_focus_some_match() {
+        let files = vec!["src/components/Button.tsx".to_string()];
+        let focus = opt_globset(&["src/components/**".to_string()]);
+        assert!(matches_focus(&files, &focus));
+    }
+
+    #[test]
+    fn test_matches_focus_some_no_match() {
+        let files = vec!["src/utils/helpers.ts".to_string()];
+        let focus = opt_globset(&["src/components/**".to_string()]);
+        assert!(!matches_focus(&files, &focus));
+    }
+
+    #[test]
+    fn test_is_ident_like_valid() {
+        assert!(is_ident_like("foo"));
+        assert!(is_ident_like("FOO_BAR"));
+        assert!(is_ident_like("_private"));
+        assert!(is_ident_like("$jquery"));
+        assert!(is_ident_like("foo123"));
+    }
+
+    #[test]
+    fn test_is_ident_like_invalid() {
+        assert!(!is_ident_like("foo-bar"));
+        assert!(!is_ident_like("foo.bar"));
+        assert!(!is_ident_like("foo bar"));
+        assert!(!is_ident_like("foo:bar"));
+    }
+
+    #[test]
+    fn test_python_stdlib_not_empty() {
+        let stdlib = python_stdlib();
+        assert!(!stdlib.is_empty());
+        assert!(stdlib.contains("os"));
+        assert!(stdlib.contains("sys"));
+        assert!(stdlib.contains("json"));
+    }
+
+    #[test]
+    fn test_resolve_event_constants_empty() {
+        let mut analyses: Vec<FileAnalysis> = vec![];
+        resolve_event_constants_across_files(&mut analyses);
+        assert!(analyses.is_empty());
+    }
+
+    #[test]
+    fn test_resolve_event_constants_no_events() {
+        let mut analyses = vec![FileAnalysis {
+            path: "src/app.ts".to_string(),
+            ..Default::default()
+        }];
+        resolve_event_constants_across_files(&mut analyses);
+        assert!(analyses[0].event_emits.is_empty());
+    }
+
+    #[test]
+    fn test_resolve_event_constants_from_local_consts() {
+        use std::collections::HashMap;
+        let mut consts = HashMap::new();
+        consts.insert("USER_EVENT".to_string(), "user:updated".to_string());
+
+        let mut analyses = vec![FileAnalysis {
+            path: "src/app.ts".to_string(),
+            event_emits: vec![crate::types::EventRef {
+                raw_name: Some("USER_EVENT".to_string()),
+                name: "USER_EVENT".to_string(),
+                line: 10,
+                kind: "emit_ident".to_string(),
+                awaited: false,
+                payload: None,
+            }],
+            event_consts: consts,
+            ..Default::default()
+        }];
+        resolve_event_constants_across_files(&mut analyses);
+        assert_eq!(analyses[0].event_emits[0].name, "user:updated");
+        assert_eq!(analyses[0].event_emits[0].kind, "emit_const");
+    }
+
+    #[test]
+    fn test_resolve_event_constants_from_imports() {
+        use std::collections::HashMap;
+        let mut consts_file = HashMap::new();
+        consts_file.insert("EVENT_NAME".to_string(), "imported:event".to_string());
+
+        let mut analyses = vec![
+            FileAnalysis {
+                path: "src/constants.ts".to_string(),
+                event_consts: consts_file,
+                ..Default::default()
+            },
+            FileAnalysis {
+                path: "src/app.ts".to_string(),
+                imports: vec![crate::types::ImportEntry {
+                    source: "./constants".to_string(),
+                    source_raw: "./constants".to_string(),
+                    kind: crate::types::ImportKind::Static,
+                    resolved_path: Some("src/constants.ts".to_string()),
+                    is_bare: false,
+                    symbols: vec![crate::types::ImportSymbol {
+                        name: "EVENT_NAME".to_string(),
+                        alias: None,
+                    }],
+                    resolution: crate::types::ImportResolutionKind::Local,
+                    is_type_checking: false,
+                }],
+                event_listens: vec![crate::types::EventRef {
+                    raw_name: Some("EVENT_NAME".to_string()),
+                    name: "EVENT_NAME".to_string(),
+                    line: 20,
+                    kind: "listen_ident".to_string(),
+                    awaited: false,
+                    payload: None,
+                }],
+                ..Default::default()
+            },
+        ];
+        resolve_event_constants_across_files(&mut analyses);
+        assert_eq!(analyses[1].event_listens[0].name, "imported:event");
+        assert_eq!(analyses[1].event_listens[0].kind, "listen_const");
+    }
+
+    #[test]
+    fn test_resolve_event_constants_from_unique_global() {
+        use std::collections::HashMap;
+        let mut consts_file = HashMap::new();
+        consts_file.insert("UNIQUE_CONST".to_string(), "unique:value".to_string());
+
+        let mut analyses = vec![
+            FileAnalysis {
+                path: "src/constants.ts".to_string(),
+                event_consts: consts_file,
+                ..Default::default()
+            },
+            FileAnalysis {
+                path: "src/app.ts".to_string(),
+                event_emits: vec![crate::types::EventRef {
+                    raw_name: Some("UNIQUE_CONST".to_string()),
+                    name: "UNIQUE_CONST".to_string(),
+                    line: 15,
+                    kind: "emit_ident".to_string(),
+                    awaited: false,
+                    payload: None,
+                }],
+                ..Default::default()
+            },
+        ];
+        resolve_event_constants_across_files(&mut analyses);
+        assert_eq!(analyses[1].event_emits[0].name, "unique:value");
+    }
+
+    #[test]
+    fn test_resolve_event_constants_non_ident_skipped() {
+        let mut analyses = vec![FileAnalysis {
+            path: "src/app.ts".to_string(),
+            event_emits: vec![crate::types::EventRef {
+                raw_name: Some("not-an-ident!".to_string()),
+                name: "not-an-ident!".to_string(),
+                line: 10,
+                kind: "emit_ident".to_string(),
+                awaited: false,
+                payload: None,
+            }],
+            ..Default::default()
+        }];
+        resolve_event_constants_across_files(&mut analyses);
+        // Should not change since raw_name is not ident-like
+        assert_eq!(analyses[0].event_emits[0].name, "not-an-ident!");
+    }
+
+    #[test]
+    fn test_resolve_event_constants_with_alias() {
+        use std::collections::HashMap;
+        let mut consts_file = HashMap::new();
+        consts_file.insert("ORIGINAL".to_string(), "aliased:event".to_string());
+
+        let mut analyses = vec![
+            FileAnalysis {
+                path: "src/constants.ts".to_string(),
+                event_consts: consts_file,
+                ..Default::default()
+            },
+            FileAnalysis {
+                path: "src/app.ts".to_string(),
+                imports: vec![crate::types::ImportEntry {
+                    source: "./constants".to_string(),
+                    source_raw: "./constants".to_string(),
+                    kind: crate::types::ImportKind::Static,
+                    resolved_path: Some("src/constants.ts".to_string()),
+                    is_bare: false,
+                    symbols: vec![crate::types::ImportSymbol {
+                        name: "ORIGINAL".to_string(),
+                        alias: Some("ALIASED".to_string()),
+                    }],
+                    resolution: crate::types::ImportResolutionKind::Local,
+                    is_type_checking: false,
+                }],
+                event_emits: vec![crate::types::EventRef {
+                    raw_name: Some("ALIASED".to_string()),
+                    name: "ALIASED".to_string(),
+                    line: 30,
+                    kind: "emit_ident".to_string(),
+                    awaited: false,
+                    payload: None,
+                }],
+                ..Default::default()
+            },
+        ];
+        resolve_event_constants_across_files(&mut analyses);
+        assert_eq!(analyses[1].event_emits[0].name, "aliased:event");
+    }
+}

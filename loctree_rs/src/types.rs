@@ -205,7 +205,22 @@ pub struct EventRef {
     pub payload: Option<String>,
 }
 
+/// Python concurrency race indicator
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PyRaceIndicator {
+    /// Line number where the pattern was found
+    pub line: usize,
+    /// Type of concurrency pattern: "threading", "asyncio", "multiprocessing"
+    pub concurrency_type: String,
+    /// Specific pattern: "Thread", "Lock", "gather", "create_task", "Pool", etc.
+    pub pattern: String,
+    /// Risk level: "info", "warning", "high"
+    pub risk: String,
+    /// Description of the potential issue
+    pub message: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct FileAnalysis {
     #[serde(default)]
     pub path: String,
@@ -247,6 +262,9 @@ pub struct FileAnalysis {
     /// File modification time (Unix timestamp) for incremental scanning
     #[serde(default)]
     pub mtime: u64,
+    /// Python concurrency race indicators (threading/asyncio/multiprocessing patterns)
+    #[serde(default)]
+    pub py_race_indicators: Vec<PyRaceIndicator>,
 }
 
 impl ImportEntry {
@@ -297,6 +315,7 @@ impl FileAnalysis {
             matches: Vec::new(),
             entry_points: Vec::new(),
             tauri_registered_handlers: Vec::new(),
+            py_race_indicators: Vec::new(),
             mtime: 0,
         }
     }

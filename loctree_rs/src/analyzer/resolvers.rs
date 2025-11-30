@@ -449,3 +449,306 @@ pub(crate) fn find_rust_crate_root(file_path: &Path) -> Option<PathBuf> {
         current = current.parent()?;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn create_test_project() -> TempDir {
+        let dir = TempDir::new().unwrap();
+
+        // Create tsconfig.json
+        let tsconfig = r#"{
+            "compilerOptions": {
+                "baseUrl": ".",
+                "paths": {
+                    "@/*": ["src/*"],
+                    "@components/*": ["src/components/*"],
+                    "utils": ["src/utils/index.ts"]
+                }
+            }
+        }"#;
+        fs::write(dir.path().join("tsconfig.json"), tsconfig).unwrap();
+
+        // Create source files
+        fs::create_dir_all(dir.path().join("src/components")).unwrap();
+        fs::create_dir_all(dir.path().join("src/utils")).unwrap();
+        fs::write(dir.path().join("src/index.ts"), "export {}").unwrap();
+        fs::write(dir.path().join("src/components/Button.tsx"), "export {}").unwrap();
+        fs::write(dir.path().join("src/utils/index.ts"), "export {}").unwrap();
+
+        dir
+    }
+
+    fn create_python_project() -> TempDir {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join("src/mypackage")).unwrap();
+        fs::write(dir.path().join("src/mypackage/__init__.py"), "").unwrap();
+        fs::write(dir.path().join("src/mypackage/utils.py"), "").unwrap();
+        fs::write(dir.path().join("src/mypackage/helpers.py"), "").unwrap();
+        dir
+    }
+
+    fn create_rust_project() -> TempDir {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        fs::write(dir.path().join("Cargo.toml"), "[package]\nname = \"test\"").unwrap();
+        fs::write(dir.path().join("src/main.rs"), "fn main() {}").unwrap();
+        fs::write(dir.path().join("src/lib.rs"), "mod utils;").unwrap();
+        fs::write(dir.path().join("src/utils.rs"), "pub fn helper() {}").unwrap();
+        dir
+    }
+
+    #[test]
+    fn test_parse_tsconfig_value_valid_json() {
+        let content = r#"{"compilerOptions": {"strict": true}}"#;
+        let result = parse_tsconfig_value(content);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_parse_tsconfig_value_json5() {
+        let content = r#"{
+            // comment
+            "compilerOptions": {
+                "strict": true,
+            }
+        }"#;
+        let result = parse_tsconfig_value(content);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_parse_tsconfig_value_invalid() {
+        let content = "not valid json at all";
+        let result = parse_tsconfig_value(content);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_find_tsconfig() {
+        let dir = create_test_project();
+        let result = find_tsconfig(dir.path());
+        assert!(result.is_some());
+        assert!(result.unwrap().ends_with("tsconfig.json"));
+    }
+
+    #[test]
+    fn test_find_tsconfig_not_found() {
+        let dir = TempDir::new().unwrap();
+        let result = find_tsconfig(dir.path());
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_ts_path_resolver_from_tsconfig() {
+        let dir = create_test_project();
+        let resolver = TsPathResolver::from_tsconfig(dir.path());
+        assert!(resolver.is_some());
+    }
+
+    #[test]
+    fn test_ts_path_resolver_no_tsconfig() {
+        let dir = TempDir::new().unwrap();
+        let resolver = TsPathResolver::from_tsconfig(dir.path());
+        assert!(resolver.is_none());
+    }
+
+    #[test]
+    fn test_ts_path_resolver_resolve_relative_skipped() {
+        let dir = create_test_project();
+        let resolver = TsPathResolver::from_tsconfig(dir.path()).unwrap();
+        // Relative paths should return None
+        let result = resolver.resolve("./utils", None);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_resolve_reexport_target_relative() {
+        let dir = create_test_project();
+        let file = dir.path().join("src/index.ts");
+        let exts: HashSet<String> = ["ts", "tsx"].iter().map(|s| s.to_string()).collect();
+
+        let result = resolve_reexport_target(&file, dir.path(), "./utils/index", Some(&exts));
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_resolve_reexport_target_non_relative() {
+        let dir = create_test_project();
+        let file = dir.path().join("src/index.ts");
+
+        let result = resolve_reexport_target(&file, dir.path(), "@/utils", None);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_resolve_js_relative() {
+        let dir = create_test_project();
+        let file = dir.path().join("src/index.ts");
+        let exts: HashSet<String> = ["ts", "tsx"].iter().map(|s| s.to_string()).collect();
+
+        let result = resolve_js_relative(&file, dir.path(), "./components/Button", Some(&exts));
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_resolve_js_relative_non_relative() {
+        let dir = create_test_project();
+        let file = dir.path().join("src/index.ts");
+
+        let result = resolve_js_relative(&file, dir.path(), "lodash", None);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_resolve_python_relative() {
+        let dir = create_python_project();
+        let file = dir.path().join("src/mypackage/utils.py");
+        let exts: HashSet<String> = ["py"].iter().map(|s| s.to_string()).collect();
+
+        let result = resolve_python_relative(".helpers", &file, dir.path(), Some(&exts));
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_resolve_python_relative_double_dot() {
+        let dir = create_python_project();
+        fs::create_dir_all(dir.path().join("src/other")).unwrap();
+        fs::write(dir.path().join("src/other/module.py"), "").unwrap();
+
+        let file = dir.path().join("src/mypackage/utils.py");
+        let exts: HashSet<String> = ["py"].iter().map(|s| s.to_string()).collect();
+
+        let result = resolve_python_relative("..other.module", &file, dir.path(), Some(&exts));
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_resolve_python_relative_non_relative() {
+        let dir = create_python_project();
+        let file = dir.path().join("src/mypackage/utils.py");
+
+        let result = resolve_python_relative("os", &file, dir.path(), None);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_resolve_python_candidate_directory_with_init() {
+        let dir = create_python_project();
+        let candidate = dir.path().join("src/mypackage");
+
+        let result = resolve_python_candidate(candidate, dir.path(), None);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_resolve_python_candidate_file() {
+        let dir = create_python_project();
+        let candidate = dir.path().join("src/mypackage/utils.py");
+
+        let result = resolve_python_candidate(candidate, dir.path(), None);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_resolve_python_absolute() {
+        let dir = create_python_project();
+        let roots = vec![dir.path().join("src")];
+        let exts: HashSet<String> = ["py"].iter().map(|s| s.to_string()).collect();
+
+        let result = resolve_python_absolute("mypackage.utils", &roots, dir.path(), Some(&exts));
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_resolve_python_absolute_not_found() {
+        let dir = create_python_project();
+        let roots = vec![dir.path().join("src")];
+
+        let result = resolve_python_absolute("nonexistent.module", &roots, dir.path(), None);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_resolve_with_extensions_adds_extension() {
+        let dir = create_test_project();
+        let candidate = dir.path().join("src/index");
+        let exts: HashSet<String> = ["ts"].iter().map(|s| s.to_string()).collect();
+
+        let result = resolve_with_extensions(candidate, dir.path(), Some(&exts));
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_resolve_with_extensions_index_file() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join("src/utils")).unwrap();
+        fs::write(dir.path().join("src/utils/index.ts"), "").unwrap();
+
+        let candidate = dir.path().join("src/utils");
+        let result = resolve_with_extensions(candidate, dir.path(), None);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_resolve_with_extensions_not_found() {
+        let dir = TempDir::new().unwrap();
+        let candidate = dir.path().join("nonexistent");
+
+        let result = resolve_with_extensions(candidate, dir.path(), None);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_find_rust_crate_root() {
+        let dir = create_rust_project();
+        let file = dir.path().join("src/main.rs");
+
+        let result = find_rust_crate_root(&file);
+        assert!(result.is_some());
+        assert!(result.unwrap().ends_with("src"));
+    }
+
+    #[test]
+    fn test_find_rust_crate_root_not_found() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("some/random/file.rs");
+
+        let result = find_rust_crate_root(&file);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_resolve_rust_import_crate() {
+        let dir = create_rust_project();
+        let file = dir.path().join("src/main.rs");
+        let crate_root = dir.path().join("src");
+
+        let result = resolve_rust_import("crate::utils", &file, &crate_root, dir.path());
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_resolve_rust_import_stdlib_skipped() {
+        let dir = create_rust_project();
+        let file = dir.path().join("src/main.rs");
+        let crate_root = dir.path().join("src");
+
+        let result =
+            resolve_rust_import("std::collections::HashMap", &file, &crate_root, dir.path());
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_resolve_rust_import_no_separator() {
+        let dir = create_rust_project();
+        let file = dir.path().join("src/main.rs");
+        let crate_root = dir.path().join("src");
+
+        let result = resolve_rust_import("serde", &file, &crate_root, dir.path());
+        assert!(result.is_none());
+    }
+}

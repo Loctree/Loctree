@@ -665,4 +665,223 @@ mod tests {
         let result = Snapshot::load(tmp.path());
         assert!(result.is_err());
     }
+
+    #[test]
+    fn test_snapshot_new_creates_valid_metadata() {
+        let snapshot = Snapshot::new(vec!["src".to_string()]);
+        assert_eq!(snapshot.metadata.schema_version, SNAPSHOT_SCHEMA_VERSION);
+        assert_eq!(snapshot.metadata.roots, vec!["src".to_string()]);
+        assert!(snapshot.metadata.languages.is_empty());
+        assert_eq!(snapshot.metadata.file_count, 0);
+        assert!(!snapshot.metadata.generated_at.is_empty());
+    }
+
+    #[test]
+    fn test_snapshot_path() {
+        let path = Snapshot::snapshot_path(Path::new("/some/project"));
+        assert_eq!(path, PathBuf::from("/some/project/.loctree/snapshot.json"));
+    }
+
+    #[test]
+    fn test_snapshot_exists_false() {
+        let tmp = TempDir::new().expect("create temp dir");
+        assert!(!Snapshot::exists(tmp.path()));
+    }
+
+    #[test]
+    fn test_snapshot_exists_true() {
+        let tmp = TempDir::new().expect("create temp dir");
+        let snapshot = Snapshot::new(vec!["src".to_string()]);
+        snapshot.save(tmp.path()).expect("save");
+        assert!(Snapshot::exists(tmp.path()));
+    }
+
+    #[test]
+    fn test_find_loctree_root_none() {
+        let tmp = TempDir::new().expect("create temp dir");
+        // Create a subdirectory without .loctree
+        let subdir = tmp.path().join("sub");
+        std::fs::create_dir(&subdir).expect("create subdir");
+        assert!(Snapshot::find_loctree_root(&subdir).is_none());
+    }
+
+    #[test]
+    fn test_find_loctree_root_found() {
+        let tmp = TempDir::new().expect("create temp dir");
+        // Create .loctree directory at root
+        std::fs::create_dir(tmp.path().join(SNAPSHOT_DIR)).expect("create .loctree");
+        // Create a nested subdirectory
+        let subdir = tmp.path().join("a/b/c");
+        std::fs::create_dir_all(&subdir).expect("create nested subdir");
+        let found = Snapshot::find_loctree_root(&subdir);
+        assert!(found.is_some());
+        let found = found.unwrap();
+        assert!(found.join(SNAPSHOT_DIR).exists());
+    }
+
+    #[test]
+    fn test_snapshot_with_files() {
+        let tmp = TempDir::new().expect("create temp dir");
+        let mut snapshot = Snapshot::new(vec!["src".to_string()]);
+
+        // Add file analysis
+        let file = FileAnalysis::new("src/main.ts".into());
+        snapshot.files.push(file);
+        snapshot.metadata.file_count = 1;
+
+        snapshot.save(tmp.path()).expect("save");
+        let loaded = Snapshot::load(tmp.path()).expect("load");
+
+        assert_eq!(loaded.files.len(), 1);
+        assert_eq!(loaded.files[0].path, "src/main.ts");
+        assert_eq!(loaded.metadata.file_count, 1);
+    }
+
+    #[test]
+    fn test_snapshot_with_edges() {
+        let tmp = TempDir::new().expect("create temp dir");
+        let mut snapshot = Snapshot::new(vec!["src".to_string()]);
+
+        snapshot.edges.push(GraphEdge {
+            from: "a.ts".to_string(),
+            to: "b.ts".to_string(),
+            label: "foo".to_string(),
+        });
+
+        snapshot.save(tmp.path()).expect("save");
+        let loaded = Snapshot::load(tmp.path()).expect("load");
+
+        assert_eq!(loaded.edges.len(), 1);
+        assert_eq!(loaded.edges[0].from, "a.ts");
+        assert_eq!(loaded.edges[0].to, "b.ts");
+    }
+
+    #[test]
+    fn test_snapshot_with_command_bridges() {
+        let tmp = TempDir::new().expect("create temp dir");
+        let mut snapshot = Snapshot::new(vec!["src".to_string()]);
+
+        snapshot.command_bridges.push(CommandBridge {
+            name: "get_user".to_string(),
+            frontend_calls: vec![("app.ts".to_string(), 10)],
+            backend_handler: Some(("handlers.rs".to_string(), 20)),
+            has_handler: true,
+            is_called: true,
+        });
+
+        snapshot.save(tmp.path()).expect("save");
+        let loaded = Snapshot::load(tmp.path()).expect("load");
+
+        assert_eq!(loaded.command_bridges.len(), 1);
+        assert_eq!(loaded.command_bridges[0].name, "get_user");
+        assert!(loaded.command_bridges[0].has_handler);
+    }
+
+    #[test]
+    fn test_snapshot_with_event_bridges() {
+        let tmp = TempDir::new().expect("create temp dir");
+        let mut snapshot = Snapshot::new(vec!["src".to_string()]);
+
+        snapshot.event_bridges.push(EventBridge {
+            name: "user_updated".to_string(),
+            emits: vec![("events.ts".to_string(), 10, "emit".to_string())],
+            listens: vec![("listener.ts".to_string(), 20)],
+        });
+
+        snapshot.save(tmp.path()).expect("save");
+        let loaded = Snapshot::load(tmp.path()).expect("load");
+
+        assert_eq!(loaded.event_bridges.len(), 1);
+        assert_eq!(loaded.event_bridges[0].name, "user_updated");
+    }
+
+    #[test]
+    fn test_snapshot_with_barrels() {
+        let tmp = TempDir::new().expect("create temp dir");
+        let mut snapshot = Snapshot::new(vec!["src".to_string()]);
+
+        snapshot.barrels.push(BarrelFile {
+            path: "src/index.ts".to_string(),
+            module_id: "src".to_string(),
+            reexport_count: 5,
+            targets: vec!["src/utils.ts".to_string()],
+        });
+
+        snapshot.save(tmp.path()).expect("save");
+        let loaded = Snapshot::load(tmp.path()).expect("load");
+
+        assert_eq!(loaded.barrels.len(), 1);
+        assert_eq!(loaded.barrels[0].reexport_count, 5);
+    }
+
+    #[test]
+    fn test_snapshot_metadata_serde() {
+        let metadata = SnapshotMetadata {
+            schema_version: "1.0".to_string(),
+            generated_at: "2025-01-01T00:00:00Z".to_string(),
+            roots: vec!["src".to_string()],
+            languages: HashSet::from(["ts".to_string()]),
+            file_count: 10,
+            total_loc: 1000,
+            scan_duration_ms: 500,
+            resolver_config: Some(ResolverConfig {
+                ts_paths: HashMap::from([("@/*".to_string(), vec!["src/*".to_string()])]),
+                ts_base_url: Some("./src".to_string()),
+                py_roots: vec![],
+                rust_crate_roots: vec![],
+            }),
+            git_repo: None,
+            git_branch: None,
+            git_commit: None,
+        };
+
+        let json = serde_json::to_string(&metadata).expect("serialize");
+        let deser: SnapshotMetadata = serde_json::from_str(&json).expect("deserialize");
+
+        assert_eq!(deser.file_count, 10);
+        assert!(deser.resolver_config.is_some());
+    }
+
+    #[test]
+    fn test_graph_edge_serde() {
+        let edge = GraphEdge {
+            from: "a.ts".to_string(),
+            to: "b.ts".to_string(),
+            label: "import".to_string(),
+        };
+
+        let json = serde_json::to_string(&edge).expect("serialize");
+        let deser: GraphEdge = serde_json::from_str(&json).expect("deserialize");
+
+        assert_eq!(deser.from, "a.ts");
+        assert_eq!(deser.label, "import");
+    }
+
+    #[test]
+    fn test_resolver_config_default() {
+        let config = ResolverConfig::default();
+        assert!(config.ts_paths.is_empty());
+        assert!(config.ts_base_url.is_none());
+        assert!(config.py_roots.is_empty());
+        assert!(config.rust_crate_roots.is_empty());
+    }
+
+    #[test]
+    fn test_snapshot_export_index() {
+        let tmp = TempDir::new().expect("create temp dir");
+        let mut snapshot = Snapshot::new(vec!["src".to_string()]);
+
+        snapshot
+            .export_index
+            .insert("Button".to_string(), vec!["src/Button.tsx".to_string()]);
+
+        snapshot.save(tmp.path()).expect("save");
+        let loaded = Snapshot::load(tmp.path()).expect("load");
+
+        assert!(loaded.export_index.contains_key("Button"));
+        assert_eq!(
+            loaded.export_index.get("Button").unwrap(),
+            &vec!["src/Button.tsx".to_string()]
+        );
+    }
 }

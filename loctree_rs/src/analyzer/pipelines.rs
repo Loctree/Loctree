@@ -539,4 +539,180 @@ mod tests {
         assert!(risks.iter().any(|r| r["type"] == "invoke_before_listen"));
         assert!(risks.iter().any(|r| r["type"] == "listen_not_awaited"));
     }
+
+    #[test]
+    fn detects_name_mismatch_risk() {
+        // Test event with multiple aliases should trigger name_mismatch risk
+        // Both normalize to "user_created" but have different raw names
+        let mut fe = FileAnalysis::new("src/app.ts".into());
+        fe.event_emits
+            .push(mk_event("user-created", 10, "emit_literal", false));
+        fe.event_emits
+            .push(mk_event("user_created", 20, "emit_literal", false));
+        fe.event_listens
+            .push(mk_event("user-created", 5, "listen_literal", false));
+
+        let analyses = vec![fe];
+        let fe_commands: HashMap<String, Vec<(String, usize, String)>> = HashMap::new();
+        let be_commands: HashMap<String, Vec<(String, usize, String)>> = HashMap::new();
+        let fe_payloads: HashMap<String, Vec<(String, usize, Option<String>)>> = HashMap::new();
+        let be_payloads: HashMap<String, Vec<(String, usize, Option<String>)>> = HashMap::new();
+
+        let summary = build_pipeline_summary(
+            &analyses,
+            &None,
+            &None,
+            &fe_commands,
+            &be_commands,
+            &fe_payloads,
+            &be_payloads,
+        );
+
+        let risks = summary["risks"].as_array().expect("risks array");
+        assert!(risks.iter().any(|r| r["type"] == "name_mismatch"));
+    }
+
+    #[test]
+    fn ghost_emit_tauri_url_low_confidence() {
+        // Ghost emit with tauri:// should have low confidence
+        let mut be = FileAnalysis::new("src/backend.rs".into());
+        be.event_emits
+            .push(mk_event("tauri://focus", 10, "emit_literal", false));
+
+        let analyses = vec![be];
+        let fe_commands: HashMap<String, Vec<(String, usize, String)>> = HashMap::new();
+        let be_commands: HashMap<String, Vec<(String, usize, String)>> = HashMap::new();
+        let fe_payloads: HashMap<String, Vec<(String, usize, Option<String>)>> = HashMap::new();
+        let be_payloads: HashMap<String, Vec<(String, usize, Option<String>)>> = HashMap::new();
+
+        let summary = build_pipeline_summary(
+            &analyses,
+            &None,
+            &None,
+            &fe_commands,
+            &be_commands,
+            &fe_payloads,
+            &be_payloads,
+        );
+
+        let events = summary["events"].as_object().expect("events section");
+        let ghost = events["ghostEmits"].as_array().expect("ghostEmits array");
+        let tauri_ghost = ghost.iter().find(|g| g["name"] == "tauri://focus");
+        assert!(tauri_ghost.is_some());
+        assert_eq!(tauri_ghost.unwrap()["confidence"], "low");
+        assert_eq!(tauri_ghost.unwrap()["recommendation"], "check_system_docs");
+    }
+
+    #[test]
+    fn ghost_emit_template_low_confidence() {
+        // Ghost emit with template string should have low confidence
+        let mut be = FileAnalysis::new("src/backend.rs".into());
+        be.event_emits.push(EventRef {
+            raw_name: Some("`user:${id}`".to_string()),
+            name: "`user:${id}`".to_string(),
+            line: 15,
+            kind: "emit_template".to_string(),
+            awaited: false,
+            payload: None,
+        });
+
+        let analyses = vec![be];
+        let fe_commands: HashMap<String, Vec<(String, usize, String)>> = HashMap::new();
+        let be_commands: HashMap<String, Vec<(String, usize, String)>> = HashMap::new();
+        let fe_payloads: HashMap<String, Vec<(String, usize, Option<String>)>> = HashMap::new();
+        let be_payloads: HashMap<String, Vec<(String, usize, Option<String>)>> = HashMap::new();
+
+        let summary = build_pipeline_summary(
+            &analyses,
+            &None,
+            &None,
+            &fe_commands,
+            &be_commands,
+            &fe_payloads,
+            &be_payloads,
+        );
+
+        let events = summary["events"].as_object().expect("events section");
+        let ghost = events["ghostEmits"].as_array().expect("ghostEmits array");
+        assert!(!ghost.is_empty());
+        let template_ghost = &ghost[0];
+        assert_eq!(template_ghost["confidence"], "low");
+        assert_eq!(template_ghost["recommendation"], "verify_dynamic_value");
+    }
+
+    #[test]
+    fn ghost_emit_identifier_low_confidence() {
+        // Ghost emit with identifier (not literal) should have low confidence
+        let mut be = FileAnalysis::new("src/backend.rs".into());
+        be.event_emits.push(EventRef {
+            raw_name: Some("EVENT_NAME".to_string()),
+            name: "EVENT_NAME".to_string(),
+            line: 20,
+            kind: "emit_ident".to_string(),
+            awaited: false,
+            payload: None,
+        });
+
+        let analyses = vec![be];
+        let fe_commands: HashMap<String, Vec<(String, usize, String)>> = HashMap::new();
+        let be_commands: HashMap<String, Vec<(String, usize, String)>> = HashMap::new();
+        let fe_payloads: HashMap<String, Vec<(String, usize, Option<String>)>> = HashMap::new();
+        let be_payloads: HashMap<String, Vec<(String, usize, Option<String>)>> = HashMap::new();
+
+        let summary = build_pipeline_summary(
+            &analyses,
+            &None,
+            &None,
+            &fe_commands,
+            &be_commands,
+            &fe_payloads,
+            &be_payloads,
+        );
+
+        let events = summary["events"].as_object().expect("events section");
+        let ghost = events["ghostEmits"].as_array().expect("ghostEmits array");
+        assert!(!ghost.is_empty());
+        let ident_ghost = &ghost[0];
+        assert_eq!(ident_ghost["confidence"], "low");
+        assert_eq!(ident_ghost["recommendation"], "verify_variable_value");
+    }
+
+    #[test]
+    fn orphan_listener_tauri_url_skipped() {
+        // Orphan listeners with tauri:// should be skipped
+        let mut fe = FileAnalysis::new("src/app.ts".into());
+        fe.event_listens.push(mk_event(
+            "tauri://window-created",
+            10,
+            "listen_literal",
+            false,
+        ));
+
+        let analyses = vec![fe];
+        let fe_commands: HashMap<String, Vec<(String, usize, String)>> = HashMap::new();
+        let be_commands: HashMap<String, Vec<(String, usize, String)>> = HashMap::new();
+        let fe_payloads: HashMap<String, Vec<(String, usize, Option<String>)>> = HashMap::new();
+        let be_payloads: HashMap<String, Vec<(String, usize, Option<String>)>> = HashMap::new();
+
+        let summary = build_pipeline_summary(
+            &analyses,
+            &None,
+            &None,
+            &fe_commands,
+            &be_commands,
+            &fe_payloads,
+            &be_payloads,
+        );
+
+        let events = summary["events"].as_object().expect("events section");
+        let orphans = events["orphanListeners"]
+            .as_array()
+            .expect("orphanListeners array");
+        // tauri:// should not be in orphans
+        assert!(
+            !orphans
+                .iter()
+                .any(|o| o["name"] == "tauri://window-created")
+        );
+    }
 }

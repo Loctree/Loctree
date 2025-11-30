@@ -43,6 +43,84 @@ pub fn styles_preset_exts() -> HashSet<String> {
     .collect()
 }
 
+/// Print Python race condition indicators
+fn print_py_race_indicators(analyses: &[crate::types::FileAnalysis], json: bool) {
+    let mut all_indicators: Vec<(&str, &crate::types::PyRaceIndicator)> = Vec::new();
+
+    for analysis in analyses {
+        for indicator in &analysis.py_race_indicators {
+            all_indicators.push((&analysis.path, indicator));
+        }
+    }
+
+    if all_indicators.is_empty() {
+        if json {
+            println!("[]");
+        } else {
+            println!("No Python concurrency race indicators found.");
+        }
+        return;
+    }
+
+    if json {
+        let items: Vec<_> = all_indicators
+            .iter()
+            .map(|(path, ind)| {
+                serde_json::json!({
+                    "path": path,
+                    "line": ind.line,
+                    "type": ind.concurrency_type,
+                    "pattern": ind.pattern,
+                    "risk": ind.risk,
+                    "message": ind.message
+                })
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&items).unwrap_or_default()
+        );
+    } else {
+        // Group by risk level
+        let warnings: Vec<_> = all_indicators
+            .iter()
+            .filter(|(_, i)| i.risk == "warning")
+            .collect();
+        let infos: Vec<_> = all_indicators
+            .iter()
+            .filter(|(_, i)| i.risk == "info")
+            .collect();
+
+        println!("Python Concurrency Race Indicators");
+        println!("===================================\n");
+
+        if !warnings.is_empty() {
+            println!("⚠️  WARNINGS ({}):", warnings.len());
+            for (path, ind) in &warnings {
+                println!("  {}:{}", path, ind.line);
+                println!("    [{}] {}", ind.pattern, ind.message);
+                println!();
+            }
+        }
+
+        if !infos.is_empty() {
+            println!("ℹ️  INFO ({}):", infos.len());
+            for (path, ind) in &infos {
+                println!("  {}:{}", path, ind.line);
+                println!("    [{}] {}", ind.pattern, ind.message);
+                println!();
+            }
+        }
+
+        println!(
+            "Total: {} indicators ({} warnings, {} info)",
+            all_indicators.len(),
+            warnings.len(),
+            infos.len()
+        );
+    }
+}
+
 pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
     let mut json_results = Vec::new();
     let mut report_sections: Vec<ReportSection> = Vec::new();
@@ -269,6 +347,11 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
     if parsed.entrypoints {
         let eps = super::entrypoints::find_entrypoints(&global_analyses);
         super::entrypoints::print_entrypoints(&eps, matches!(parsed.output, OutputMode::Json));
+        return Ok(());
+    }
+
+    if parsed.py_races {
+        print_py_race_indicators(&global_analyses, matches!(parsed.output, OutputMode::Json));
         return Ok(());
     }
 

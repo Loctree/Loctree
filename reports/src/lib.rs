@@ -127,12 +127,15 @@ pub fn render_report(sections: &[ReportSection], js_assets: &JsAssets) -> String
 /// ```rust
 /// use report_leptos::JsAssets;
 ///
-/// // CDN paths
+/// // CDN paths (with Cytoscape fallback, no WASM)
 /// let assets = JsAssets {
 ///     cytoscape_path: "https://unpkg.com/cytoscape@3/dist/cytoscape.min.js".into(),
 ///     dagre_path: "https://unpkg.com/dagre@0.8/dist/dagre.min.js".into(),
 ///     cytoscape_dagre_path: "https://unpkg.com/cytoscape-dagre@2/cytoscape-dagre.js".into(),
+///     layout_base_path: "https://unpkg.com/layout-base@2/layout-base.js".into(),
+///     cose_base_path: "https://unpkg.com/cose-base@2/cose-base.js".into(),
 ///     cytoscape_cose_bilkent_path: "https://unpkg.com/cytoscape-cose-bilkent@4/cytoscape-cose-bilkent.js".into(),
+///     ..Default::default() // wasm_base64, wasm_js_glue = None
 /// };
 ///
 /// // Or use defaults (empty paths - graph shows placeholder)
@@ -152,6 +155,10 @@ pub struct JsAssets {
     pub cose_base_path: String,
     /// Path to cytoscape-cose-bilkent.js plugin (for force-directed layouts)
     pub cytoscape_cose_bilkent_path: String,
+    /// Inline WASM module (base64 encoded) for native graph rendering
+    pub wasm_base64: Option<String>,
+    /// Inline JS glue code for WASM module
+    pub wasm_js_glue: Option<String>,
 }
 
 #[cfg(test)]
@@ -181,5 +188,75 @@ mod tests {
 
         assert!(html.contains("test-root"));
         assert!(html.contains("42"));
+    }
+
+    #[test]
+    fn graph_data_to_dot_format() {
+        use types::{GraphData, GraphNode};
+
+        let graph = GraphData {
+            nodes: vec![
+                GraphNode {
+                    id: "src/main.ts".into(),
+                    label: "main.ts".into(),
+                    loc: 150,
+                    x: 0.5,
+                    y: 0.5,
+                    component: 0,
+                    degree: 2,
+                    detached: false,
+                },
+                GraphNode {
+                    id: "src/utils.ts".into(),
+                    label: "utils.ts".into(),
+                    loc: 50,
+                    x: 0.3,
+                    y: 0.7,
+                    component: 0,
+                    degree: 1,
+                    detached: false,
+                },
+            ],
+            edges: vec![("src/main.ts".into(), "src/utils.ts".into(), "import".into())],
+            components: vec![],
+            main_component_id: 0,
+        };
+
+        let dot = graph.to_dot();
+
+        // Verify DOT structure
+        assert!(dot.starts_with("digraph loctree"));
+        assert!(dot.contains("src/main.ts"));
+        assert!(dot.contains("src/utils.ts"));
+        assert!(dot.contains("->"));
+        assert!(dot.contains("fillcolor"));
+    }
+
+    #[test]
+    fn graph_data_to_dot_escapes_special_chars() {
+        use types::{GraphData, GraphNode};
+
+        let graph = GraphData {
+            nodes: vec![GraphNode {
+                id: "src/file\"with\"quotes.ts".into(),
+                label: "file\"quotes".into(),
+                loc: 10,
+                x: 0.0,
+                y: 0.0,
+                component: 0,
+                degree: 0,
+                detached: false,
+            }],
+            edges: vec![],
+            components: vec![],
+            main_component_id: 0,
+        };
+
+        let dot = graph.to_dot();
+
+        // Quotes should be escaped
+        assert!(dot.contains("\\\""));
+        // Raw unescaped quote should not appear in node definitions
+        assert!(!dot.contains("file\"with\"quotes"));
     }
 }

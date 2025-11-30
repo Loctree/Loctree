@@ -483,4 +483,240 @@ mod tests {
         assert_eq!(changes[0].status, ChangeStatus::Added);
         assert_eq!(changes[0].new_path, Some(PathBuf::from("utils.ts")));
     }
+
+    #[test]
+    fn test_git_error_display_not_a_repository() {
+        let err = GitError::NotARepository("/some/path".to_string());
+        assert_eq!(format!("{}", err), "not a git repository: /some/path");
+    }
+
+    #[test]
+    fn test_git_error_display_ref_not_found() {
+        let err = GitError::RefNotFound("main".to_string());
+        assert_eq!(format!("{}", err), "reference not found: main");
+    }
+
+    #[test]
+    fn test_git_error_display_operation_failed() {
+        let err = GitError::OperationFailed("something went wrong".to_string());
+        assert_eq!(
+            format!("{}", err),
+            "git operation failed: something went wrong"
+        );
+    }
+
+    #[test]
+    fn test_git_error_display_io_error() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
+        let err = GitError::IoError(io_err);
+        assert!(format!("{}", err).contains("IO error"));
+    }
+
+    #[test]
+    fn test_git_error_from_io_error() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
+        let git_err: GitError = io_err.into();
+        assert!(matches!(git_err, GitError::IoError(_)));
+    }
+
+    #[test]
+    fn test_changed_file_path_new_path() {
+        let file = ChangedFile {
+            old_path: Some(PathBuf::from("old.ts")),
+            new_path: Some(PathBuf::from("new.ts")),
+            status: ChangeStatus::Renamed,
+        };
+        assert_eq!(file.path(), Some(Path::new("new.ts")));
+    }
+
+    #[test]
+    fn test_changed_file_path_old_path_only() {
+        let file = ChangedFile {
+            old_path: Some(PathBuf::from("deleted.ts")),
+            new_path: None,
+            status: ChangeStatus::Deleted,
+        };
+        assert_eq!(file.path(), Some(Path::new("deleted.ts")));
+    }
+
+    #[test]
+    fn test_changed_file_path_none() {
+        let file = ChangedFile {
+            old_path: None,
+            new_path: None,
+            status: ChangeStatus::Modified,
+        };
+        assert!(file.path().is_none());
+    }
+
+    #[test]
+    fn test_resolve_ref_nonexistent() {
+        let (_temp_dir, repo) = create_test_repo();
+        let result = repo.resolve_ref("nonexistent-branch");
+        assert!(matches!(result, Err(GitError::RefNotFound(_))));
+    }
+
+    #[test]
+    fn test_resolve_ref_with_commit_hash() {
+        let (_temp_dir, repo) = create_test_repo();
+        let head = repo.head_commit().unwrap();
+        let resolved = repo.resolve_ref(&head).unwrap();
+        assert_eq!(resolved, head);
+    }
+
+    #[test]
+    fn test_log_with_file_filter() {
+        let (temp_dir, repo) = create_test_repo();
+        let path = temp_dir.path();
+
+        // Create another file and commit
+        std::fs::write(path.join("utils.ts"), "export const x = 1;").unwrap();
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(path)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "Add utils"])
+            .current_dir(path)
+            .output()
+            .unwrap();
+
+        // Log for main.ts should only show initial commit
+        let commits = repo.log(Some(Path::new("main.ts")), 10).unwrap();
+        assert_eq!(commits.len(), 1);
+        assert_eq!(commits[0].message, "Initial commit");
+
+        // Log for utils.ts should only show second commit
+        let commits = repo.log(Some(Path::new("utils.ts")), 10).unwrap();
+        assert_eq!(commits.len(), 1);
+        assert_eq!(commits[0].message, "Add utils");
+    }
+
+    #[test]
+    fn test_log_limit() {
+        let (temp_dir, repo) = create_test_repo();
+        let path = temp_dir.path();
+
+        // Create multiple commits
+        for i in 1..5 {
+            std::fs::write(path.join("main.ts"), format!("version {}", i)).unwrap();
+            Command::new("git")
+                .args(["add", "."])
+                .current_dir(path)
+                .output()
+                .unwrap();
+            Command::new("git")
+                .args(["commit", "-m", &format!("Commit {}", i)])
+                .current_dir(path)
+                .output()
+                .unwrap();
+        }
+
+        // Limit should work
+        let commits = repo.log(None, 2).unwrap();
+        assert_eq!(commits.len(), 2);
+    }
+
+    #[test]
+    fn test_file_content_at_nonexistent() {
+        let (_temp_dir, repo) = create_test_repo();
+        let result = repo.file_content_at("HEAD", Path::new("nonexistent.ts"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_changed_files_modified() {
+        let (temp_dir, repo) = create_test_repo();
+        let path = temp_dir.path();
+
+        // Modify existing file
+        std::fs::write(path.join("main.ts"), "export function main() { return 1; }").unwrap();
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(path)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "Modify main"])
+            .current_dir(path)
+            .output()
+            .unwrap();
+
+        let changes = repo.changed_files("HEAD~1", "HEAD").unwrap();
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].status, ChangeStatus::Modified);
+    }
+
+    #[test]
+    fn test_changed_files_deleted() {
+        let (temp_dir, repo) = create_test_repo();
+        let path = temp_dir.path();
+
+        // Delete file
+        std::fs::remove_file(path.join("main.ts")).unwrap();
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(path)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "Delete main"])
+            .current_dir(path)
+            .output()
+            .unwrap();
+
+        let changes = repo.changed_files("HEAD~1", "HEAD").unwrap();
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].status, ChangeStatus::Deleted);
+    }
+
+    #[test]
+    fn test_commit_info_fields() {
+        let (_temp_dir, repo) = create_test_repo();
+        let info = repo.get_commit_info("HEAD").unwrap();
+
+        // Verify all fields are populated
+        assert!(!info.hash.is_empty());
+        assert_eq!(info.short_hash.len(), 7);
+        assert_eq!(info.author, "Test User");
+        assert_eq!(info.author_email, "test@test.com");
+        assert!(!info.date.is_empty());
+        assert!(info.timestamp > 0);
+        assert!(!info.message.is_empty());
+        assert!(!info.message_full.is_empty());
+    }
+
+    #[test]
+    fn test_list_files_at_multiple() {
+        let (temp_dir, repo) = create_test_repo();
+        let path = temp_dir.path();
+
+        // Create additional files and commit
+        std::fs::create_dir(path.join("src")).unwrap();
+        std::fs::write(path.join("src/utils.ts"), "export const x = 1;").unwrap();
+        std::fs::write(path.join("config.json"), "{}").unwrap();
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(path)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "Add files"])
+            .current_dir(path)
+            .output()
+            .unwrap();
+
+        let files = repo.list_files_at("HEAD").unwrap();
+        assert_eq!(files.len(), 3);
+    }
+
+    #[test]
+    fn test_change_status_equality() {
+        assert_eq!(ChangeStatus::Added, ChangeStatus::Added);
+        assert_ne!(ChangeStatus::Added, ChangeStatus::Deleted);
+        assert_eq!(ChangeStatus::Modified, ChangeStatus::Modified);
+        assert_eq!(ChangeStatus::Renamed, ChangeStatus::Renamed);
+        assert_eq!(ChangeStatus::Copied, ChangeStatus::Copied);
+    }
 }

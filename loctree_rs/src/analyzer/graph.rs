@@ -221,3 +221,257 @@ pub fn build_graph_data(
         None,
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::FileAnalysis;
+
+    fn mock_file(path: &str, loc: usize) -> FileAnalysis {
+        FileAnalysis {
+            path: path.to_string(),
+            loc,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_layout_positions_empty() {
+        let comps: Vec<Vec<String>> = vec![];
+        let positions = layout_positions(&comps);
+        assert!(positions.is_empty());
+    }
+
+    #[test]
+    fn test_layout_positions_single_component() {
+        let comps = vec![vec!["a.ts".to_string(), "b.ts".to_string()]];
+        let positions = layout_positions(&comps);
+
+        assert_eq!(positions.len(), 2);
+        assert!(positions.contains_key("a.ts"));
+        assert!(positions.contains_key("b.ts"));
+    }
+
+    #[test]
+    fn test_layout_positions_multiple_components() {
+        let comps = vec![
+            vec!["a.ts".to_string()],
+            vec!["b.ts".to_string()],
+            vec!["c.ts".to_string()],
+        ];
+        let positions = layout_positions(&comps);
+
+        assert_eq!(positions.len(), 3);
+        // Components should have different positions
+        let (ax, ay) = positions["a.ts"];
+        let (bx, by) = positions["b.ts"];
+        let (cx, cy) = positions["c.ts"];
+
+        // They shouldn't all be at exactly the same spot
+        assert!(ax != bx || ay != by || bx != cx || by != cy);
+    }
+
+    #[test]
+    fn test_compute_components_empty() {
+        let nodes: Vec<String> = vec![];
+        let edges: Vec<(String, String, String)> = vec![];
+
+        let (comps, node_map, degrees) = compute_components(&nodes, &edges);
+        assert!(comps.is_empty());
+        assert!(node_map.is_empty());
+        assert!(degrees.is_empty());
+    }
+
+    #[test]
+    fn test_compute_components_single_node() {
+        let nodes = vec!["a.ts".to_string()];
+        let edges: Vec<(String, String, String)> = vec![];
+
+        let (comps, node_map, degrees) = compute_components(&nodes, &edges);
+
+        assert_eq!(comps.len(), 1);
+        assert_eq!(comps[0], vec!["a.ts"]);
+        assert_eq!(*node_map.get("a.ts").unwrap(), 1);
+        assert_eq!(*degrees.get("a.ts").unwrap(), 0);
+    }
+
+    #[test]
+    fn test_compute_components_connected_pair() {
+        let nodes = vec!["a.ts".to_string(), "b.ts".to_string()];
+        let edges = vec![("a.ts".to_string(), "b.ts".to_string(), "import".to_string())];
+
+        let (comps, node_map, degrees) = compute_components(&nodes, &edges);
+
+        assert_eq!(comps.len(), 1);
+        assert_eq!(comps[0].len(), 2);
+        // Both nodes in same component
+        assert_eq!(node_map.get("a.ts"), node_map.get("b.ts"));
+        assert_eq!(*degrees.get("a.ts").unwrap(), 1);
+        assert_eq!(*degrees.get("b.ts").unwrap(), 1);
+    }
+
+    #[test]
+    fn test_compute_components_disconnected() {
+        let nodes = vec!["a.ts".to_string(), "b.ts".to_string()];
+        let edges: Vec<(String, String, String)> = vec![];
+
+        let (comps, node_map, _) = compute_components(&nodes, &edges);
+
+        assert_eq!(comps.len(), 2);
+        // Different components
+        assert_ne!(node_map.get("a.ts"), node_map.get("b.ts"));
+    }
+
+    #[test]
+    fn test_compute_components_ignores_empty_edges() {
+        let nodes = vec!["a.ts".to_string()];
+        let edges = vec![
+            ("".to_string(), "a.ts".to_string(), "import".to_string()),
+            ("a.ts".to_string(), "".to_string(), "import".to_string()),
+        ];
+
+        let (comps, _, degrees) = compute_components(&nodes, &edges);
+        assert_eq!(comps.len(), 1);
+        // Empty node connections should be ignored
+        assert_eq!(*degrees.get("a.ts").unwrap(), 0);
+    }
+
+    #[test]
+    fn test_build_graph_data_empty() {
+        let analyses: Vec<FileAnalysis> = vec![];
+        let edges: Vec<(String, String, String)> = vec![];
+        let loc_map: HashMap<String, usize> = HashMap::new();
+        let fe_commands: CommandUsage = HashMap::new();
+        let be_commands: CommandUsage = HashMap::new();
+
+        let (graph, warning) = build_graph_data(
+            &analyses,
+            &edges,
+            &loc_map,
+            &fe_commands,
+            &be_commands,
+            MAX_GRAPH_NODES,
+            MAX_GRAPH_EDGES,
+        );
+
+        assert!(graph.is_none());
+        assert!(warning.is_none());
+    }
+
+    #[test]
+    fn test_build_graph_data_simple() {
+        let analyses = vec![mock_file("a.ts", 100), mock_file("b.ts", 50)];
+        let edges = vec![("a.ts".to_string(), "b.ts".to_string(), "import".to_string())];
+        let mut loc_map = HashMap::new();
+        loc_map.insert("a.ts".to_string(), 100);
+        loc_map.insert("b.ts".to_string(), 50);
+        let fe_commands: CommandUsage = HashMap::new();
+        let be_commands: CommandUsage = HashMap::new();
+
+        let (graph, warning) = build_graph_data(
+            &analyses,
+            &edges,
+            &loc_map,
+            &fe_commands,
+            &be_commands,
+            MAX_GRAPH_NODES,
+            MAX_GRAPH_EDGES,
+        );
+
+        assert!(graph.is_some());
+        assert!(warning.is_none());
+
+        let g = graph.unwrap();
+        assert_eq!(g.nodes.len(), 2);
+        assert_eq!(g.edges.len(), 1);
+        assert_eq!(g.components.len(), 1);
+        assert_eq!(g.main_component_id, 1);
+    }
+
+    #[test]
+    fn test_build_graph_data_exceeds_limits() {
+        let analyses: Vec<FileAnalysis> = (0..100)
+            .map(|i| mock_file(&format!("file{}.ts", i), 10))
+            .collect();
+        let edges: Vec<(String, String, String)> = vec![];
+        let loc_map: HashMap<String, usize> = HashMap::new();
+        let fe_commands: CommandUsage = HashMap::new();
+        let be_commands: CommandUsage = HashMap::new();
+
+        // Set very low limits
+        let (graph, warning) = build_graph_data(
+            &analyses,
+            &edges,
+            &loc_map,
+            &fe_commands,
+            &be_commands,
+            10, // max 10 nodes
+            100,
+        );
+
+        assert!(graph.is_none());
+        assert!(warning.is_some());
+        assert!(warning.unwrap().contains("exceed limits"));
+    }
+
+    #[test]
+    fn test_build_graph_data_with_detached_components() {
+        let analyses = vec![
+            mock_file("a.ts", 100),
+            mock_file("b.ts", 50),
+            mock_file("c.ts", 30),
+            mock_file("d.ts", 20),
+        ];
+        // a-b connected, c-d connected, but separate
+        let edges = vec![
+            ("a.ts".to_string(), "b.ts".to_string(), "import".to_string()),
+            ("c.ts".to_string(), "d.ts".to_string(), "import".to_string()),
+        ];
+        let loc_map: HashMap<String, usize> = HashMap::new();
+        let fe_commands: CommandUsage = HashMap::new();
+        let be_commands: CommandUsage = HashMap::new();
+
+        let (graph, _) = build_graph_data(
+            &analyses,
+            &edges,
+            &loc_map,
+            &fe_commands,
+            &be_commands,
+            MAX_GRAPH_NODES,
+            MAX_GRAPH_EDGES,
+        );
+
+        let g = graph.unwrap();
+        assert_eq!(g.components.len(), 2);
+
+        // One component should be detached (not main)
+        let detached_count = g.components.iter().filter(|c| c.detached).count();
+        assert_eq!(detached_count, 1);
+    }
+
+    #[test]
+    fn test_graph_node_labels() {
+        let analyses = vec![mock_file("src/components/Button.tsx", 100)];
+        let edges: Vec<(String, String, String)> = vec![];
+        let mut loc_map = HashMap::new();
+        loc_map.insert("src/components/Button.tsx".to_string(), 100);
+        let fe_commands: CommandUsage = HashMap::new();
+        let be_commands: CommandUsage = HashMap::new();
+
+        let (graph, _) = build_graph_data(
+            &analyses,
+            &edges,
+            &loc_map,
+            &fe_commands,
+            &be_commands,
+            MAX_GRAPH_NODES,
+            MAX_GRAPH_EDGES,
+        );
+
+        let g = graph.unwrap();
+        let node = &g.nodes[0];
+        // Label should be just filename, not full path
+        assert_eq!(node.label, "Button.tsx");
+        assert_eq!(node.id, "src/components/Button.tsx");
+    }
+}

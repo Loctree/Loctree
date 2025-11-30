@@ -687,4 +687,118 @@ mod tests {
         assert_eq!(slice.stats.total_files, 4);
         assert_eq!(slice.stats.total_loc, 400);
     }
+
+    #[test]
+    fn test_slice_config_default() {
+        let config = SliceConfig::default();
+        assert!(!config.include_consumers);
+        assert_eq!(config.max_depth, 2);
+    }
+
+    #[test]
+    fn test_slice_file_fields() {
+        let file = SliceFile {
+            path: "src/main.rs".to_string(),
+            layer: "core".to_string(),
+            loc: 100,
+            language: "rust".to_string(),
+            depth: 0,
+        };
+        assert_eq!(file.path, "src/main.rs");
+        assert_eq!(file.layer, "core");
+        assert_eq!(file.loc, 100);
+        assert_eq!(file.language, "rust");
+        assert_eq!(file.depth, 0);
+    }
+
+    #[test]
+    fn test_slice_stats_default() {
+        let stats = SliceStats {
+            core_files: 0,
+            core_loc: 0,
+            deps_files: 0,
+            deps_loc: 0,
+            consumers_files: 0,
+            consumers_loc: 0,
+            total_files: 0,
+            total_loc: 0,
+        };
+        assert_eq!(stats.total_files, 0);
+        assert_eq!(stats.total_loc, 0);
+    }
+
+    #[test]
+    fn test_slice_depth_limit() {
+        let snapshot = create_test_snapshot();
+        let config = SliceConfig {
+            include_consumers: false,
+            max_depth: 1, // Only direct deps
+        };
+
+        let slice = HolographicSlice::from_path(&snapshot, "src/main.rs", &config)
+            .expect("slice src/main.rs with depth 1");
+
+        // main.rs -> lib.rs (depth 1), but utils.rs (depth 2) should be excluded
+        assert_eq!(slice.deps.len(), 1);
+        assert_eq!(slice.deps[0].path, "src/lib.rs");
+    }
+
+    #[test]
+    fn test_slice_no_deps() {
+        let snapshot = create_test_snapshot();
+        let config = SliceConfig::default();
+
+        // utils.rs has no outgoing edges, so no deps
+        let slice = HolographicSlice::from_path(&snapshot, "src/utils.rs", &config)
+            .expect("slice src/utils.rs");
+
+        assert!(slice.deps.is_empty());
+    }
+
+    #[test]
+    fn test_slice_command_bridges_empty() {
+        let snapshot = create_test_snapshot();
+        let config = SliceConfig::default();
+
+        let slice = HolographicSlice::from_path(&snapshot, "src/utils.rs", &config)
+            .expect("slice src/utils.rs");
+
+        // No command bridges in this test snapshot
+        assert!(slice.command_bridges.is_empty());
+    }
+
+    #[test]
+    fn test_slice_serde_roundtrip() {
+        let slice = HolographicSlice {
+            target: "src/main.rs".to_string(),
+            core: vec![SliceFile {
+                path: "src/main.rs".to_string(),
+                layer: "core".to_string(),
+                loc: 100,
+                language: "rust".to_string(),
+                depth: 0,
+            }],
+            deps: vec![],
+            consumers: vec![],
+            command_bridges: vec![],
+            event_bridges: vec![],
+            stats: SliceStats {
+                core_files: 1,
+                core_loc: 100,
+                deps_files: 0,
+                deps_loc: 0,
+                consumers_files: 0,
+                consumers_loc: 0,
+                total_files: 1,
+                total_loc: 100,
+            },
+        };
+
+        let json = serde_json::to_string(&slice).expect("serialize");
+        let deser: HolographicSlice = serde_json::from_str(&json).expect("deserialize");
+
+        assert_eq!(deser.target, "src/main.rs");
+        assert_eq!(deser.core.len(), 1);
+        assert_eq!(deser.stats.core_loc, 100);
+    }
 }

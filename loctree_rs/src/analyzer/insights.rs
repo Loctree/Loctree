@@ -135,3 +135,194 @@ pub fn collect_ai_insights(
 
     insights
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mock_file(path: &str, language: &str, loc: usize) -> FileAnalysis {
+        FileAnalysis {
+            path: path.to_string(),
+            language: language.to_string(),
+            loc,
+            ..Default::default()
+        }
+    }
+
+    fn mock_file_test(path: &str, language: &str, loc: usize) -> FileAnalysis {
+        FileAnalysis {
+            path: path.to_string(),
+            language: language.to_string(),
+            loc,
+            is_test: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_cross_lang_stem_matches_finds_pairs() {
+        let files = vec![
+            mock_file("src/audio.rs", "rs", 100),
+            mock_file("src/audio.ts", "ts", 50),
+            mock_file("lib/player.py", "py", 80),
+            mock_file("lib/player.ts", "ts", 60),
+        ];
+
+        let matches = find_cross_lang_stem_matches(&files);
+        assert_eq!(matches.len(), 2);
+
+        let stems: Vec<&str> = matches.iter().map(|(s, _)| s.as_str()).collect();
+        assert!(stems.contains(&"audio"));
+        assert!(stems.contains(&"player"));
+    }
+
+    #[test]
+    fn test_cross_lang_stem_matches_ignores_generic_names() {
+        let files = vec![
+            mock_file("src/index.rs", "rs", 100),
+            mock_file("src/index.ts", "ts", 50),
+            mock_file("lib/utils.py", "py", 80),
+            mock_file("lib/utils.ts", "ts", 60),
+            mock_file("mod.rs", "rs", 10),
+            mock_file("mod.py", "py", 10),
+        ];
+
+        let matches = find_cross_lang_stem_matches(&files);
+        assert!(matches.is_empty(), "Should ignore generic names");
+    }
+
+    #[test]
+    fn test_cross_lang_stem_matches_ignores_test_files() {
+        let files = vec![
+            mock_file_test("src/audio.rs", "rs", 100),
+            mock_file("src/audio.ts", "ts", 50),
+        ];
+
+        let matches = find_cross_lang_stem_matches(&files);
+        assert!(matches.is_empty(), "Should ignore test files");
+    }
+
+    #[test]
+    fn test_cross_lang_stem_matches_ignores_same_lang() {
+        let files = vec![
+            mock_file("src/audio.ts", "ts", 100),
+            mock_file("lib/audio.ts", "ts", 50),
+        ];
+
+        let matches = find_cross_lang_stem_matches(&files);
+        assert!(matches.is_empty(), "Should not match same language");
+    }
+
+    #[test]
+    fn test_collect_ai_insights_huge_files() {
+        let files = vec![
+            mock_file("src/huge.ts", "ts", 3000),
+            mock_file("src/small.ts", "ts", 100),
+        ];
+
+        let insights = collect_ai_insights(&files, &[], &[], &[], &[]);
+
+        assert!(insights.iter().any(|i| i.title.contains("Huge files")));
+    }
+
+    #[test]
+    fn test_collect_ai_insights_many_dups() {
+        let files = vec![mock_file("src/a.ts", "ts", 100)];
+
+        let dups: Vec<RankedDup> = (0..15)
+            .map(|i| RankedDup {
+                name: format!("dup{}", i),
+                files: vec![format!("file{}.ts", i)],
+                score: i,
+                prod_count: 1,
+                dev_count: 0,
+                canonical: format!("file{}.ts", i),
+                refactors: vec![],
+            })
+            .collect();
+
+        let insights = collect_ai_insights(&files, &dups, &[], &[], &[]);
+
+        assert!(
+            insights
+                .iter()
+                .any(|i| i.title.contains("duplicate exports"))
+        );
+    }
+
+    #[test]
+    fn test_collect_ai_insights_many_cascades() {
+        let files = vec![mock_file("src/a.ts", "ts", 100)];
+
+        let cascades: Vec<(String, String)> = (0..25)
+            .map(|i| (format!("from{}.ts", i), format!("to{}.ts", i)))
+            .collect();
+
+        let insights = collect_ai_insights(&files, &[], &cascades, &[], &[]);
+
+        assert!(
+            insights
+                .iter()
+                .any(|i| i.title.contains("re-export chains"))
+        );
+    }
+
+    #[test]
+    fn test_collect_ai_insights_missing_handlers() {
+        let files = vec![mock_file("src/a.ts", "ts", 100)];
+
+        let missing = vec![CommandGap {
+            name: "missing_cmd".to_string(),
+            implementation_name: None,
+            locations: vec![("src/a.ts".to_string(), 10)],
+            confidence: None,
+            string_literal_matches: vec![],
+        }];
+
+        let insights = collect_ai_insights(&files, &[], &[], &missing, &[]);
+
+        assert!(
+            insights
+                .iter()
+                .any(|i| i.title.contains("Missing Tauri Handlers"))
+        );
+        assert!(insights.iter().any(|i| i.severity == "high"));
+    }
+
+    #[test]
+    fn test_collect_ai_insights_empty_inputs() {
+        let insights = collect_ai_insights(&[], &[], &[], &[], &[]);
+        assert!(insights.is_empty());
+    }
+
+    #[test]
+    fn test_cross_lang_with_generated_files() {
+        let mut generated = mock_file("src/audio.rs", "rs", 100);
+        generated.is_generated = true;
+
+        let files = vec![generated, mock_file("src/audio.ts", "ts", 50)];
+
+        let matches = find_cross_lang_stem_matches(&files);
+        assert!(matches.is_empty(), "Should ignore generated files");
+    }
+
+    #[test]
+    fn test_collect_ai_insights_cross_lang_binding() {
+        // Create files with matching stems across languages
+        let files = vec![
+            mock_file("src/audio_processor.rs", "rs", 200),
+            mock_file("src/audio_processor.ts", "ts", 150),
+            mock_file("lib/video_encoder.py", "py", 100),
+            mock_file("lib/video_encoder.rs", "rs", 120),
+        ];
+
+        let insights = collect_ai_insights(&files, &[], &[], &[], &[]);
+
+        assert!(
+            insights
+                .iter()
+                .any(|i| i.title.contains("cross-language binding"))
+        );
+        assert!(insights.iter().any(|i| i.severity == "info"));
+    }
+}

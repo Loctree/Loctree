@@ -474,3 +474,151 @@ fn handle_request(
         !is_head,
     );
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_url_encode_simple() {
+        assert_eq!(url_encode_component("hello"), "hello");
+        assert_eq!(url_encode_component("Hello123"), "Hello123");
+    }
+
+    #[test]
+    fn test_url_encode_special_chars() {
+        assert_eq!(url_encode_component("hello world"), "hello%20world");
+        assert_eq!(url_encode_component("path/to/file"), "path%2Fto%2Ffile");
+        assert_eq!(url_encode_component("a=b&c=d"), "a%3Db%26c%3Dd");
+    }
+
+    #[test]
+    fn test_url_encode_unicode() {
+        let encoded = url_encode_component("żółć");
+        assert!(encoded.contains('%'));
+    }
+
+    #[test]
+    fn test_url_encode_allowed_chars() {
+        // These should NOT be encoded
+        assert_eq!(url_encode_component("a-b_c.d~e"), "a-b_c.d~e");
+    }
+
+    #[test]
+    fn test_url_decode_simple() {
+        assert_eq!(url_decode_component("hello"), Some("hello".to_string()));
+    }
+
+    #[test]
+    fn test_url_decode_encoded() {
+        assert_eq!(
+            url_decode_component("hello%20world"),
+            Some("hello world".to_string())
+        );
+        assert_eq!(
+            url_decode_component("path%2Fto%2Ffile"),
+            Some("path/to/file".to_string())
+        );
+    }
+
+    #[test]
+    fn test_url_decode_invalid() {
+        // Incomplete percent encoding
+        assert_eq!(url_decode_component("hello%2"), None);
+        assert_eq!(url_decode_component("hello%"), None);
+        // Invalid hex
+        assert_eq!(url_decode_component("hello%GG"), None);
+    }
+
+    #[test]
+    fn test_url_roundtrip() {
+        let original = "path/to/file with spaces.ts";
+        let encoded = url_encode_component(original);
+        let decoded = url_decode_component(&encoded);
+        assert_eq!(decoded, Some(original.to_string()));
+    }
+
+    #[test]
+    fn test_editor_config_from_args_defaults() {
+        let cfg = EditorConfig::from_args(None, None);
+        assert_eq!(cfg.kind, EditorKind::Auto);
+        assert!(cfg.command_template.is_none());
+    }
+
+    #[test]
+    fn test_editor_config_from_args_code() {
+        let cfg = EditorConfig::from_args(Some("code".to_string()), None);
+        assert_eq!(cfg.kind, EditorKind::Code);
+
+        let cfg2 = EditorConfig::from_args(Some("vscode".to_string()), None);
+        assert_eq!(cfg2.kind, EditorKind::Code);
+
+        let cfg3 = EditorConfig::from_args(Some("vs".to_string()), None);
+        assert_eq!(cfg3.kind, EditorKind::Code);
+    }
+
+    #[test]
+    fn test_editor_config_from_args_cursor() {
+        let cfg = EditorConfig::from_args(Some("cursor".to_string()), None);
+        assert_eq!(cfg.kind, EditorKind::Cursor);
+    }
+
+    #[test]
+    fn test_editor_config_from_args_windsurf() {
+        let cfg = EditorConfig::from_args(Some("windsurf".to_string()), None);
+        assert_eq!(cfg.kind, EditorKind::Windsurf);
+    }
+
+    #[test]
+    fn test_editor_config_from_args_jetbrains() {
+        let cfg = EditorConfig::from_args(Some("jetbrains".to_string()), None);
+        assert_eq!(cfg.kind, EditorKind::Jetbrains);
+
+        let cfg2 = EditorConfig::from_args(Some("jb".to_string()), None);
+        assert_eq!(cfg2.kind, EditorKind::Jetbrains);
+    }
+
+    #[test]
+    fn test_editor_config_from_args_none() {
+        let cfg = EditorConfig::from_args(Some("none".to_string()), None);
+        assert_eq!(cfg.kind, EditorKind::None);
+    }
+
+    #[test]
+    fn test_editor_config_from_args_case_insensitive() {
+        let cfg = EditorConfig::from_args(Some("CODE".to_string()), None);
+        assert_eq!(cfg.kind, EditorKind::Code);
+
+        let cfg2 = EditorConfig::from_args(Some("JetBrains".to_string()), None);
+        assert_eq!(cfg2.kind, EditorKind::Jetbrains);
+    }
+
+    #[test]
+    fn test_editor_config_from_args_unknown() {
+        let cfg = EditorConfig::from_args(Some("unknown_editor".to_string()), None);
+        assert_eq!(cfg.kind, EditorKind::Auto);
+    }
+
+    #[test]
+    fn test_editor_config_with_template() {
+        let template = Some("myeditor {file}:{line}".to_string());
+        let cfg = EditorConfig::from_args(None, template.clone());
+        assert_eq!(cfg.command_template, template);
+    }
+
+    #[test]
+    fn test_editor_kind_equality() {
+        assert_eq!(EditorKind::Code, EditorKind::Code);
+        assert_ne!(EditorKind::Code, EditorKind::Cursor);
+    }
+
+    #[test]
+    fn test_url_decode_empty() {
+        assert_eq!(url_decode_component(""), Some("".to_string()));
+    }
+
+    #[test]
+    fn test_url_encode_empty() {
+        assert_eq!(url_encode_component(""), "");
+    }
+}

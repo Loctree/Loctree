@@ -2,6 +2,8 @@
 //!
 //! Because we're all curious creatures.
 
+#![allow(clippy::collapsible_if)]
+
 use leptos::prelude::*;
 use wasm_bindgen::prelude::*;
 
@@ -19,6 +21,7 @@ const ASCII_LOGO: &str = r#"
 
 /// Initialize all easter eggs
 #[component]
+#[allow(clippy::unused_unit)]
 pub fn EasterEggs() -> impl IntoView {
     // Print console art on mount
     Effect::new(move || {
