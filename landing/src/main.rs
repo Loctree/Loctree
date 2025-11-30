@@ -14,6 +14,7 @@ fn main() {
 #[component]
 fn App() -> impl IntoView {
     view! {
+        <EasterEggs />
         <Nav />
         <main>
             <Hero />

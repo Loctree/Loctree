@@ -2,7 +2,7 @@
 // Created by M&K (c)2025 The LibraxisAI Team
 
 /// Version string used across the landing page (single source of truth)
-pub const VERSION: &str = "v0.5.1";
+pub const VERSION: &str = "v0.5.2";
 
 mod nav;
 mod hero;
@@ -14,6 +14,7 @@ mod for_agents;
 mod cli_reference;
 mod install;
 mod footer;
+mod easter_eggs;
 
 pub use nav::Nav;
 pub use hero::Hero;
@@ -25,3 +26,4 @@ pub use for_agents::ForAgents;
 pub use cli_reference::CliReference;
 pub use install::InstallSection;
 pub use footer::Footer;
+pub use easter_eggs::EasterEggs;

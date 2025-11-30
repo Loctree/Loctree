@@ -19,7 +19,7 @@ pub enum OutputMode {
     Jsonl,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Mode {
     Tree,
     AnalyzeImports,
@@ -31,6 +31,44 @@ pub enum Mode {
     Trace,
     /// AI-optimized hierarchical output with quick wins and slice references
     ForAi,
+    /// Git awareness - temporal knowledge from repository history
+    Git(GitSubcommand),
+}
+
+/// Git subcommands for temporal awareness - semantic analysis only (no passthrough)
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum GitSubcommand {
+    /// Semantic diff between two commits (snapshot comparison)
+    /// Shows: files changed, graph delta, exports delta, dead code delta, impact analysis
+    Compare {
+        /// Starting commit (e.g., "HEAD~1", "abc123")
+        from: String,
+        /// Ending commit, defaults to current working tree if None
+        to: Option<String>,
+    },
+    /// Symbol-level blame: which commit introduced each symbol/import
+    Blame {
+        /// File to analyze
+        file: String,
+    },
+    /// Track evolution of a symbol or file's structure over time
+    History {
+        /// Symbol name to track (e.g., "processUser")
+        symbol: Option<String>,
+        /// File path to track
+        file: Option<String>,
+        /// Maximum number of commits to show
+        limit: usize,
+    },
+    /// Find when a pattern was introduced (circular import, dead code, etc.)
+    WhenIntroduced {
+        /// Circular import pattern (e.g., "src/a.rs <-> src/b.rs")
+        circular: Option<String>,
+        /// Dead code symbol (e.g., "src/utils.rs::unused_fn")
+        dead: Option<String>,
+        /// Import source (e.g., "lodash")
+        import: Option<String>,
+    },
 }
 
 #[derive(Clone)]

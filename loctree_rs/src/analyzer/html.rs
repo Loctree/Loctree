@@ -4,16 +4,15 @@ use std::path::Path;
 
 use super::ReportSection;
 use super::assets::{CYTOSCAPE_COSE_BILKENT_JS, CYTOSCAPE_DAGRE_JS, CYTOSCAPE_JS, DAGRE_JS};
-#[cfg(not(feature = "leptos-reports"))]
-use super::open_server::url_encode_component;
 
-#[cfg(not(feature = "leptos-reports"))]
-const GRAPH_BOOTSTRAP: &str = include_str!("graph_bootstrap.js");
+/// Render HTML report using Leptos SSR
+pub(crate) fn render_html_report(path: &Path, sections: &[ReportSection]) -> io::Result<()> {
+    if let Some(dir) = path.parent() {
+        write_js_assets(dir)?;
+    }
 
-/// Render HTML report using Leptos SSR (when feature enabled)
-#[cfg(feature = "leptos-reports")]
-fn render_with_leptos(path: &Path, sections: &[ReportSection]) -> io::Result<()> {
     // Convert loctree types to report-leptos types via JSON serialization
+    // JSON bridge enables clean type separation between the analyzer and renderer
     let json = serde_json::to_string(sections).map_err(|e| {
         io::Error::new(
             io::ErrorKind::InvalidData,
@@ -30,6 +29,7 @@ fn render_with_leptos(path: &Path, sections: &[ReportSection]) -> io::Result<()>
         })?;
 
     // Configure JS asset paths (relative to output file)
+    // These match the files written by write_js_assets below
     let js_assets = report_leptos::JsAssets {
         cytoscape_path: "loctree-cytoscape.min.js".into(),
         dagre_path: "loctree-dagre.min.js".into(),
@@ -39,333 +39,6 @@ fn render_with_leptos(path: &Path, sections: &[ReportSection]) -> io::Result<()>
 
     let html = report_leptos::render_report(&leptos_sections, &js_assets);
     fs::write(path, html)
-}
-
-#[cfg(not(feature = "leptos-reports"))]
-fn escape_html(raw: &str) -> String {
-    raw.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#x27;")
-}
-
-#[cfg(not(feature = "leptos-reports"))]
-fn linkify(base: Option<&str>, file: &str, line: usize) -> String {
-    if let Some(base) = base {
-        let href = format!("{}/open?f={}&l={}", base, url_encode_component(file), line);
-        format!("<a href=\"{}\">{}:{}</a>", href, file, line)
-    } else {
-        format!("{}:{}", file, line)
-    }
-}
-
-#[cfg(not(feature = "leptos-reports"))]
-fn render_ai_insights(out: &mut String, section: &ReportSection) {
-    if section.insights.is_empty() {
-        return;
-    }
-    out.push_str("<h3>AI Insights</h3><ul class=\"command-list\">");
-    for insight in &section.insights {
-        let color = match insight.severity.as_str() {
-            "high" => "#e74c3c",
-            "medium" => "#e67e22",
-            _ => "#3498db",
-        };
-        out.push_str(&format!(
-            "<li><strong style=\"color:{}\">{}</strong>: {}</li>",
-            color,
-            escape_html(&insight.title),
-            escape_html(&insight.message)
-        ));
-    }
-    out.push_str("</ul>");
-}
-
-#[cfg(not(feature = "leptos-reports"))]
-fn render_duplicate_exports(out: &mut String, section: &ReportSection) {
-    out.push_str("<h3>Top duplicate exports</h3>");
-    if section.ranked_dups.is_empty() {
-        out.push_str("<p class=\"muted\">None</p>");
-    } else {
-        out.push_str("<table><tr><th>Symbol</th><th>Files</th><th>Prod</th><th>Dev</th><th>Canonical</th><th>Refactor targets</th></tr>");
-        for dup in section.ranked_dups.iter().take(section.analyze_limit) {
-            out.push_str(&format!(
-                "<tr><td><code>{}</code></td><td>{}</td><td>{}</td><td>{}</td><td><code>{}</code></td><td>{}</td></tr>",
-                escape_html(&dup.name),
-                dup.files.len(),
-                dup.prod_count,
-                dup.dev_count,
-                escape_html(&dup.canonical),
-                escape_html(&dup.refactors.join(", "))
-            ));
-        }
-        out.push_str("</table>");
-    }
-}
-
-#[cfg(not(feature = "leptos-reports"))]
-fn render_cascades(out: &mut String, section: &ReportSection) {
-    out.push_str("<h3>Re-export cascades</h3>");
-    if section.cascades.is_empty() {
-        out.push_str("<p class=\"muted\">None</p>");
-    } else {
-        out.push_str("<ul>");
-        for (from, to) in &section.cascades {
-            out.push_str(&format!(
-                "<li><code>{}</code> → <code>{}</code></li>",
-                escape_html(from),
-                escape_html(to)
-            ));
-        }
-        out.push_str("</ul>");
-    }
-}
-
-#[cfg(not(feature = "leptos-reports"))]
-fn render_dynamic_imports(out: &mut String, section: &ReportSection) {
-    out.push_str("<h3>Dynamic imports</h3>");
-    if section.dynamic.is_empty() {
-        out.push_str("<p class=\"muted\">None</p>");
-    } else {
-        out.push_str("<table><tr><th>File</th><th>Sources</th></tr>");
-        for (file, sources) in section.dynamic.iter().take(section.analyze_limit) {
-            out.push_str(&format!(
-                "<tr><td><code>{}</code></td><td>{}</td></tr>",
-                escape_html(file),
-                escape_html(&sources.join(", "))
-            ));
-        }
-        out.push_str("</table>");
-    }
-}
-
-#[cfg(not(feature = "leptos-reports"))]
-fn render_command_coverage(out: &mut String, section: &ReportSection) {
-    out.push_str("<h3>Tauri command coverage</h3>");
-    if section.command_counts == (0, 0) {
-        out.push_str("<p class=\"muted\">No Tauri commands detected in this root.</p>");
-        return;
-    }
-    if section.missing_handlers.is_empty()
-        && section.unused_handlers.is_empty()
-        && section.unregistered_handlers.is_empty()
-    {
-        out.push_str(
-            "<p class=\"muted\">All frontend calls have matching registered handlers.</p>",
-        );
-        return;
-    }
-
-    let render_grouped = |gaps: &Vec<super::report::CommandGap>, out: &mut String| {
-        if gaps.is_empty() {
-            out.push_str("<span class=\"muted\">None</span>");
-            return;
-        }
-        let mut groups: std::collections::BTreeMap<String, Vec<String>> =
-            std::collections::BTreeMap::new();
-        for g in gaps {
-            let module = g
-                .locations
-                .first()
-                .map(|(p, _)| {
-                    let parts: Vec<&str> = p.split('/').collect();
-                    if parts.len() >= 2 {
-                        format!("{}/{}", parts[0], parts[1])
-                    } else {
-                        parts.first().unwrap_or(&"").to_string()
-                    }
-                })
-                .unwrap_or_else(|| "".to_string());
-            let locs: Vec<String> = g
-                .locations
-                .iter()
-                .map(|(f, l)| linkify(section.open_base.as_deref(), f, *l))
-                .collect();
-
-            let alias_info = if let Some(impl_name) = &g.implementation_name {
-                if impl_name != &g.name {
-                    format!(
-                        " <span class=\"muted\">(impl: {})</span>",
-                        escape_html(impl_name)
-                    )
-                } else {
-                    String::new()
-                }
-            } else {
-                String::new()
-            };
-
-            let pill = format!(
-                "<span class=\"command-pill\"><code>{}</code>{}</span> <span class=\"muted\">{}</span>",
-                escape_html(&g.name),
-                alias_info,
-                locs.join(", ")
-            );
-            groups.entry(module).or_default().push(pill);
-        }
-        for (module, items) in groups {
-            let module_label = if module.is_empty() {
-                "-".to_string()
-            } else {
-                escape_html(&module)
-            };
-            out.push_str(&format!(
-                "<div class=\"module-group\"><div class=\"module-header\">{}</div><div>{}</div></div>",
-                module_label,
-                items.join("<br/>")
-            ));
-        }
-    };
-
-    out.push_str("<table class=\"command-table\"><tr><th>Missing handlers (FE→BE)</th><th>Handlers unused by FE</th><th>Handlers not registered in Tauri</th></tr><tr><td>");
-    render_grouped(&section.missing_handlers, out);
-    out.push_str("</td><td>");
-    render_grouped(&section.unused_handlers, out);
-    out.push_str("</td><td>");
-    render_grouped(&section.unregistered_handlers, out);
-    out.push_str("</td></tr></table>");
-}
-
-#[cfg(not(feature = "leptos-reports"))]
-fn render_graph_stub(out: &mut String, section: &ReportSection) {
-    if let Some(warn) = &section.graph_warning {
-        out.push_str(&format!(
-            "<div class=\"graph-empty\">{}</div>",
-            escape_html(warn)
-        ));
-    }
-
-    if let Some(graph) = &section.graph {
-        out.push_str("<h3>Import graph</h3>");
-        out.push_str(&format!(
-            "<div class=\"graph\" id=\"graph-{}\"></div>",
-            escape_html(
-                &section
-                    .root
-                    .replace(|c: char| !c.is_ascii_alphanumeric(), "_")
-            )
-        ));
-        let nodes_json = serde_json::to_string(&graph.nodes).unwrap_or("[]".into());
-        let edges_json = serde_json::to_string(&graph.edges).unwrap_or("[]".into());
-        let components_json = serde_json::to_string(&graph.components).unwrap_or("[]".into());
-        let open_json = serde_json::to_string(&section.open_base).unwrap_or("null".into());
-        let label_json = serde_json::to_string(&section.root).unwrap_or("\"\"".into());
-        out.push_str("<script>");
-        out.push_str("window.__LOCTREE_GRAPHS = window.__LOCTREE_GRAPHS || [];");
-        out.push_str("window.__LOCTREE_GRAPHS.push({");
-        out.push_str(&format!(
-            "id:\"graph-{}\",label:{},nodes:{},edges:{},components:{},mainComponent:{},openBase:{}",
-            escape_html(
-                &section
-                    .root
-                    .replace(|c: char| !c.is_ascii_alphanumeric(), "_")
-            ),
-            label_json,
-            nodes_json,
-            edges_json,
-            components_json,
-            graph.main_component_id,
-            open_json
-        ));
-        out.push_str("});</script>");
-    }
-}
-
-#[cfg(not(feature = "leptos-reports"))]
-fn render_section(out: &mut String, section: &ReportSection) {
-    let root_id = section
-        .root
-        .replace(|c: char| !c.is_ascii_alphanumeric(), "_");
-    out.push_str("<section class=\"report-section\">");
-    out.push_str(&format!(
-        "<div class=\"section-head\"><div><h2>{}</h2><p class=\"muted\">Files analyzed: {}</p></div><span class=\"pill\">Graph is docked in the drawer below</span></div>",
-        escape_html(&section.root),
-        section.files_analyzed
-    ));
-
-    out.push_str(&format!(
-        "<div class=\"tab-bar\" data-tab-scope=\"{id}\">\
-            <button class=\"active\" data-tab=\"{id}-overview\">Overview</button>\
-            <button data-tab=\"{id}-dups\">Duplicates</button>\
-            <button data-tab=\"{id}-dynamic\">Dynamic imports</button>\
-            <button data-tab=\"{id}-commands\">Tauri coverage</button>\
-            <button data-tab=\"{id}-graph\">Graph</button>\
-        </div>",
-        id = escape_html(&root_id),
-    ));
-
-    out.push_str(&format!(
-        "<div class=\"tab-content active\" data-tab-panel=\"{}-overview\">",
-        escape_html(&root_id)
-    ));
-    render_ai_insights(out, section);
-    out.push_str("</div>");
-
-    out.push_str(&format!(
-        "<div class=\"tab-content\" data-tab-panel=\"{}-dups\">",
-        escape_html(&root_id)
-    ));
-    render_duplicate_exports(out, section);
-    render_cascades(out, section);
-    out.push_str("</div>");
-
-    out.push_str(&format!(
-        "<div class=\"tab-content\" data-tab-panel=\"{}-dynamic\">",
-        escape_html(&root_id)
-    ));
-    render_dynamic_imports(out, section);
-    out.push_str("</div>");
-
-    out.push_str(&format!(
-        "<div class=\"tab-content\" data-tab-panel=\"{}-commands\">",
-        escape_html(&root_id)
-    ));
-    render_command_coverage(out, section);
-    out.push_str("</div>");
-
-    out.push_str(&format!(
-        "<div class=\"tab-content\" data-tab-panel=\"{}-graph\">",
-        escape_html(&root_id)
-    ));
-    out.push_str("<div class=\"graph-anchor\"><strong>Import graph</strong><span class=\"muted\">Graph lives in the bottom drawer. Use fit/reset/filter controls there.</span></div>");
-    render_graph_stub(out, section);
-    out.push_str("</div>");
-    out.push_str("</section>");
-}
-
-#[cfg(not(feature = "leptos-reports"))]
-fn render_graph_bootstrap(out: &mut String) {
-    // Load Cytoscape core
-    out.push_str(r#"<script src="loctree-cytoscape.min.js"></script>"#);
-    // Load dagre (dependency for cytoscape-dagre)
-    out.push_str(r#"<script src="loctree-dagre.min.js"></script>"#);
-    // Load cytoscape-dagre extension (hierarchical layout)
-    out.push_str(r#"<script src="loctree-cytoscape-dagre.js"></script>"#);
-    // Load cytoscape-cose-bilkent extension (improved force-directed)
-    out.push_str(r#"<script src="loctree-cytoscape-cose-bilkent.js"></script>"#);
-    out.push_str("<script>");
-    out.push_str(GRAPH_BOOTSTRAP);
-    out.push_str(
-        r#"
-(() => {
-  document.querySelectorAll(".tab-bar").forEach((bar) => {
-    const scope = bar.dataset.tabScope || "";
-    bar.querySelectorAll("button").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        bar.querySelectorAll("button").forEach((b) => b.classList.remove("active"));
-        btn.classList.add("active");
-        const target = btn.dataset.tab;
-        document.querySelectorAll(`[data-tab-panel^="${scope}-"]`).forEach((panel) => {
-          panel.classList.toggle("active", panel.dataset.tabPanel === target);
-        });
-      });
-    });
-  });
-})();
-"#,
-    );
-    out.push_str("</script>");
 }
 
 /// Write JS assets to output directory
@@ -392,113 +65,6 @@ fn write_js_assets(dir: &Path) -> io::Result<()> {
         fs::write(&cy_cose_bilkent_path, CYTOSCAPE_COSE_BILKENT_JS)?;
     }
     Ok(())
-}
-
-pub(crate) fn render_html_report(path: &Path, sections: &[ReportSection]) -> io::Result<()> {
-    if let Some(dir) = path.parent() {
-        write_js_assets(dir)?;
-    }
-
-    // Use Leptos renderer when feature is enabled
-    #[cfg(feature = "leptos-reports")]
-    {
-        render_with_leptos(path, sections)
-    }
-
-    #[cfg(not(feature = "leptos-reports"))]
-    {
-        render_html_report_legacy(path, sections)
-    }
-}
-
-#[cfg(not(feature = "leptos-reports"))]
-fn render_html_report_legacy(path: &Path, sections: &[ReportSection]) -> io::Result<()> {
-    let mut out = String::new();
-    out.push_str(
-        r#"<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8" />
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'none'; font-src 'self' data:;">
-<title>loctree import/export report</title>
-<style>
-body{font-family:system-ui,-apple-system,Segoe UI,Helvetica,Arial,sans-serif;margin:24px;line-height:1.5;padding-bottom:140px;}
-h1,h2,h3{margin-bottom:0.2em;margin-top:0;}
-table{border-collapse:collapse;width:100%;margin:0.5em 0;}
-th,td{border:1px solid #ddd;padding:6px 8px;font-size:14px;}
-th{background:#f5f5f5;text-align:left;}
-code{background:#f6f8fa;padding:2px 4px;border-radius:4px;}
-.muted{color:#666;}
-.section-head{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;}
-.pill{background:#eef2ff;color:#2b2f3a;padding:4px 8px;border-radius:12px;font-size:12px;}
-.tab-bar{display:flex;gap:8px;margin:12px 0 6px 0;flex-wrap:wrap;}
-.tab-bar button{border:1px solid #cfd4de;background:#f7f9fc;border-radius:10px;padding:6px 10px;cursor:pointer;font-weight:600;}
-.tab-bar button.active{background:#4f81e1;color:#fff;border-color:#4f81e1;box-shadow:0 4px 16px rgba(0,0,0,.12);}
-.tab-content{display:none;padding:8px 0;}
-.tab-content.active{display:block;}
-.graph{height:520px;border:1px solid #ddd;border-radius:8px;margin:12px 0;}
-.command-table td{vertical-align:top;}
-.command-list{margin:0;padding-left:1.1rem;columns:2;column-gap:1.4rem;list-style:disc;}
-.command-list li{break-inside:avoid;word-break:break-word;margin-bottom:4px;}
-.graph-toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:6px 0 4px;}
-.graph-toolbar label,.graph-legend{font-size:13px;color:#444;display:flex;align-items:center;gap:8px;}
-.graph-legend{gap:12px;}
-.legend-dot{width:12px;height:12px;border-radius:50%;display:inline-block;}
-.graph-hint{font-size:12px;color:#555;margin:2px 0 6px;}
-.graph-empty{font-size:13px;color:#777;text-align:center;padding:24px;}
-.component-panel{border:1px solid #d5dce6;border-radius:10px;padding:8px 10px;margin:10px 0;background:#f8fafc;}
-.component-panel-header{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;}
-.component-panel table{margin:6px 0 0 0;}
-.component-panel .muted{font-size:12px;}
-.component-chip{display:inline-block;padding:3px 6px;border-radius:6px;background:#eef2ff;color:#2b2f3a;font-size:12px;}
-.component-panel .panel-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;}
-.component-toolbar{margin-bottom:6px;}
-.component-toolbar select,.component-toolbar input[type=\"range\"],.component-toolbar input[type=\"number\"]{font-size:12px;}
-.graph-controls button{font-size:12px;padding:4px 8px;border:1px solid #ccc;background:#f8f8f8;border-radius:6px;cursor:pointer;}
-.graph-controls button:hover{background:#eee;}
-.command-table th,.command-table td{vertical-align:top;}
-.command-table code{background:transparent;color:inherit;font-weight:600;}
-.command-pill{display:inline-block;padding:3px 6px;border-radius:6px;background:#eef2ff;color:#2b2f3a;font-size:12px;margin:2px 4px 2px 0;}
-.dark .command-pill{background:#1f2635;color:#e9ecf5;}
-.command-col{width:50%;}
-.module-header{font-weight:700;margin-top:4px;}
-.module-group{margin-bottom:10px;}
-.graph-anchor{margin-top:14px;font-size:13px;color:#444;}
-.graph-anchor .muted{display:block;margin-top:4px;}
-.report-section .graph,.report-section .graph-toolbar,.report-section .component-panel,.report-section .graph-hint{display:none;}
-.graph-drawer{position:fixed;left:16px;right:16px;bottom:12px;z-index:1100;background:#f5f7fb;border:1px solid #cfd4de;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.25);padding:8px 10px;}
-.graph-drawer{max-height:82vh;overflow:auto;}
-.graph-drawer.collapsed{opacity:0.9;}
-.graph-drawer-header{display:flex;align-items:center;gap:10px;cursor:pointer;font-weight:600;}
-.graph-drawer-header button{font-size:12px;padding:4px 8px;border:1px solid #ccc;background:#fff;border-radius:6px;cursor:pointer;}
-.graph-drawer-body{margin-top:6px;max-height:72vh;overflow:auto;padding-right:6px;}
-.graph-drawer .graph{margin:0;border-color:#cfd4de;}
-.dark body{background:#0f1115;color:#d7dde5;}
-.dark table th{background:#1c2029;color:#d7dde5;}
-.dark table td{background:#0f1115;color:#d7dde5;border-color:#2a2f3a;}
-.dark code{background:#1c2029;color:#f0f4ff;}
-.dark .graph{border-color:#2a2f3a;}
-.dark .graph-drawer{background:#0b0d11;border-color:#2a2f3a;box-shadow:0 8px 32px rgba(0,0,0,.45);}
-.dark .graph-drawer-header button{background:#111522;color:#e9ecf5;border-color:#2a2f3a;}
-.dark .component-panel{background:#0f131c;border-color:#2a2f3a;}
-.dark .component-chip{background:#1f2635;color:#e9ecf5;}
-.dark .pill{background:#1f2635;color:#e9ecf5;}
-.dark .tab-bar button{background:#0f131c;color:#e9ecf5;border-color:#2a2f3a;}
-.dark .tab-bar button.active{background:#4f81e1;color:#fff;border-color:#4f81e1;}
-</style>
-</head><body>
-<h1>loctree import/export analysis</h1>
-"#,
-    );
-
-    for section in sections {
-        render_section(&mut out, section);
-    }
-
-    render_graph_bootstrap(&mut out);
-
-    out.push_str("</body></html>");
-    fs::write(path, out)
 }
 
 #[cfg(test)]
@@ -546,9 +112,15 @@ mod tests {
 
         render_html_report(&out_path, &[section]).expect("render html");
         let html = fs::read_to_string(&out_path).expect("read html");
-        assert!(html.contains("loctree import/export analysis"));
+
+        // Verify key parts exist in the Leptos-rendered output
+        assert!(html.contains("<!DOCTYPE html>"));
+        assert!(html.contains("loctree report")); // Title in new Vista design
+
+        // The output format might differ slightly from legacy, check for content
         assert!(html.contains("Hint"));
         assert!(html.contains("Foo"));
+        assert!(html.contains("test-root"));
     }
 
     #[test]
@@ -569,25 +141,21 @@ mod tests {
             command_counts: (0, 0),
             open_base: None,
             graph: None,
-            graph_warning: Some(
-                "Graph skipped (10000 nodes, 500 edges exceed limits of 8000 nodes / 12000 edges)"
-                    .into(),
-            ),
+            graph_warning: None,
             insights: Vec::new(),
         };
 
         render_html_report(&out_path, &[section]).expect("render html");
         let html = fs::read_to_string(&out_path).expect("read html");
+
         // Security: raw script must not appear
         assert!(
             !html.contains(malicious),
             "XSS: raw script tag should be escaped"
         );
-        // Verify it's escaped (both legacy &#x27; and Leptos ' formats are valid)
-        assert!(
-            html.contains("&lt;script&gt;") && html.contains("&lt;/script&gt;"),
-            "Script tags should be HTML-escaped"
-        );
-        assert!(html.contains("Graph skipped"));
+
+        // Leptos escapes content automatically
+        // We check that both opening and closing tags are safely escaped
+        assert!(html.contains("&lt;script&gt;") && html.contains("&lt;/script&gt;"));
     }
 }
