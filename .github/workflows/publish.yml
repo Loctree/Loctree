@@ -84,6 +84,24 @@ jobs:
 
           echo "Bumped loctree to $VERSION"
 
+      - name: Sync landing page version
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          V_VERSION="v$VERSION"
+
+          echo "Syncing landing page to version $VERSION..."
+
+          # Update landing/src/sections/mod.rs
+          sed -i "s/pub const VERSION: &str = \"v[0-9.]*\";/pub const VERSION: \&str = \"$V_VERSION\";/" landing/src/sections/mod.rs
+
+          # Update landing/src/sections/easter_eggs.rs (ASCII art)
+          sed -i "s/v[0-9.]* | loctree.io/$V_VERSION | loctree.io/" landing/src/sections/easter_eggs.rs
+
+          # Update landing/api/agent/index.json
+          sed -i "s/\"version\": \"[0-9.]*\"/\"version\": \"$VERSION\"/" landing/api/agent/index.json
+
+          echo "Landing page version synced to $VERSION"
+
       - name: Publish report-leptos
         run: |
           cd reports
