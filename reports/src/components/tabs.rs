@@ -1,32 +1,41 @@
 //! Tab navigation components
+//!
+//! Provides the navigation tabs for the report sections.
+//! Uses the new "App-like" styling.
 
 use leptos::prelude::*;
+use crate::components::{Icon, ICON_SQUARES_FOUR, ICON_COPY, ICON_LIGHTNING, ICON_TERMINAL, ICON_GRAPH};
 
-/// Tab bar with navigation buttons
+/// Tab bar with navigation buttons (rendered in the Sticky Header)
 #[component]
 pub fn TabBar(root_id: String) -> impl IntoView {
     view! {
-        <div class="tab-bar" data-tab-scope=root_id.clone()>
-            <button class="active" data-tab=format!("{}-overview", root_id)>
+        <nav class="header-tabs tab-bar" data-tab-scope=root_id.clone()>
+            <button class="tab-btn active" data-tab="overview">
+                <Icon path=ICON_SQUARES_FOUR />
                 "Overview"
             </button>
-            <button data-tab=format!("{}-dups", root_id)>
+            <button class="tab-btn" data-tab="dups">
+                <Icon path=ICON_COPY />
                 "Duplicates"
             </button>
-            <button data-tab=format!("{}-dynamic", root_id)>
+            <button class="tab-btn" data-tab="dynamic">
+                <Icon path=ICON_LIGHTNING />
                 "Dynamic imports"
             </button>
-            <button data-tab=format!("{}-commands", root_id)>
+            <button class="tab-btn" data-tab="commands">
+                <Icon path=ICON_TERMINAL />
                 "Tauri coverage"
             </button>
-            <button data-tab=format!("{}-graph", root_id)>
+            <button class="tab-btn" data-tab="graph">
+                <Icon path=ICON_GRAPH />
                 "Graph"
             </button>
-        </div>
+        </nav>
     }
 }
 
-/// Tab content panel
+/// Tab content panel (rendered in the Scrollable Area)
 #[component]
 pub fn TabContent(
     root_id: String,
@@ -34,11 +43,14 @@ pub fn TabContent(
     active: bool,
     children: Children,
 ) -> impl IntoView {
-    let class = if active { "tab-content active" } else { "tab-content" };
-    let panel_id = format!("{}-{}", root_id, tab_name);
-
+    let class = if active { "tab-panel active" } else { "tab-panel" };
+    
     view! {
-        <div class=class data-tab-panel=panel_id>
+        <div 
+            class=class 
+            data-tab-scope=root_id 
+            data-tab-name=tab_name
+        >
             {children()}
         </div>
     }

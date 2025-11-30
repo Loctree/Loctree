@@ -124,7 +124,7 @@ pub fn resolve_event_constants_across_files(analyses: &mut [FileAnalysis]) {
     }
 }
 
-pub fn analyze_file(
+pub(crate) fn analyze_file(
     path: &Path,
     root_canon: &Path,
     extensions: Option<&HashSet<String>>,
