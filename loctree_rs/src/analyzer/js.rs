@@ -1,13 +1,91 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use crate::types::FileAnalysis;
+use crate::types::{
+    CommandRef, EventRef, ExportSymbol, FileAnalysis, ImportEntry, ImportKind, ImportSymbol,
+    ReexportEntry, ReexportKind,
+};
 
-use super::ast_js;
-use super::resolvers::TsPathResolver;
+use regex::Regex;
 
-/// Analyze JS/TS file using AST parser.
-/// Delegated to `ast_js` module which uses OXC parser.
+use super::regexes::{
+    regex_dynamic_import, regex_event_const_js, regex_event_emit_js, regex_event_listen_js,
+    regex_export_brace, regex_export_default, regex_export_named_decl, regex_import,
+    regex_invoke_audio, regex_invoke_snake, regex_invoke_wrapper, regex_lazy_import_then,
+    regex_reexport_named, regex_reexport_star, regex_safe_invoke, regex_side_effect_import,
+    regex_tauri_invoke,
+};
+use super::resolvers::{TsPathResolver, resolve_reexport_target};
+use super::{brace_list_to_names, offset_to_line};
+
+fn parse_import_symbols(raw: &str) -> Vec<ImportSymbol> {
+    let mut symbols = Vec::new();
+    let trimmed = raw.trim().trim_start_matches("type ").trim();
+
+    // namespace import: * as Foo
+    if trimmed.starts_with('*') {
+        if let Some((_, alias)) = trimmed.split_once(" as ") {
+            symbols.push(ImportSymbol {
+                name: "*".to_string(),
+                alias: Some(alias.trim().to_string()),
+            });
+        }
+        return symbols;
+    }
+
+    // default import before comma or brace
+    let mut default_done = false;
+    if let Some((head, _)) = trimmed.split_once(['{', ',']) {
+        let default_name = head.trim();
+        if !default_name.is_empty() {
+            symbols.push(ImportSymbol {
+                name: default_name.to_string(),
+                alias: None,
+            });
+            default_done = true;
+        }
+    } else if !trimmed.contains('{') && !trimmed.is_empty() {
+        symbols.push(ImportSymbol {
+            name: trimmed.to_string(),
+            alias: None,
+        });
+        default_done = true;
+    }
+
+    if let Some(start) = trimmed.find('{')
+        && let Some(end) = trimmed[start..].find('}')
+    {
+        let inner = &trimmed[start + 1..start + end];
+        for part in inner.split(',') {
+            let part = part.trim();
+            if part.is_empty() {
+                continue;
+            }
+            if let Some((name, alias)) = part.split_once(" as ") {
+                symbols.push(ImportSymbol {
+                    name: name.trim().to_string(),
+                    alias: Some(alias.trim().to_string()),
+                });
+            } else {
+                symbols.push(ImportSymbol {
+                    name: part.to_string(),
+                    alias: None,
+                });
+            }
+        }
+    }
+
+    // If there was no brace/import list and no default parsed, try to treat the whole trimmed token as default
+    if symbols.is_empty() && !default_done && !trimmed.is_empty() {
+        symbols.push(ImportSymbol {
+            name: trimmed.to_string(),
+            alias: None,
+        });
+    }
+
+    symbols
+}
+
 pub(crate) fn analyze_js_file(
     content: &str,
     path: &Path,
@@ -15,22 +93,390 @@ pub(crate) fn analyze_js_file(
     extensions: Option<&HashSet<String>>,
     ts_resolver: Option<&TsPathResolver>,
     relative: String,
-    command_cfg: &super::ast_js::CommandDetectionConfig,
 ) -> FileAnalysis {
-    ast_js::analyze_js_file_ast(
-        content,
-        path,
-        root,
-        extensions,
-        ts_resolver,
-        relative,
-        command_cfg,
-    )
+    let mut analysis = FileAnalysis::new(relative);
+    for caps in regex_event_const_js().captures_iter(content) {
+        if let (Some(name), Some(val)) = (caps.get(1), caps.get(2)) {
+            analysis
+                .event_consts
+                .insert(name.as_str().to_string(), val.as_str().to_string());
+        }
+    }
+
+    let resolve_event = |token: &str| -> (String, Option<String>, String) {
+        let trimmed = token.trim();
+        if (trimmed.starts_with('"') && trimmed.ends_with('"'))
+            || (trimmed.starts_with('\'') && trimmed.ends_with('\''))
+        {
+            let name = trimmed
+                .trim_start_matches(['"', '\''])
+                .trim_end_matches(['"', '\''])
+                .to_string();
+            return (name, Some(trimmed.to_string()), "literal".to_string());
+        }
+        if let Some(val) = analysis.event_consts.get(trimmed) {
+            return (val.clone(), Some(trimmed.to_string()), "const".to_string());
+        }
+        (
+            trimmed.to_string(),
+            Some(trimmed.to_string()),
+            "ident".to_string(),
+        )
+    };
+
+    // Best-effort await detection: checks the current line immediately preceding the call.
+    // Note: does not scan multi-line awaits (e.g., await on prior line). This is intentionally
+    // lightweight to avoid full AST parsing; callers should treat awaited = false as a heuristic.
+    let is_awaited = |start: usize| -> bool {
+        let prefix = &content[..start];
+        if let Some(line) = prefix.rsplit('\n').next() {
+            let mut iter = line.chars().rev().skip_while(|c| c.is_whitespace());
+            let mut word = String::new();
+            for ch in iter.by_ref() {
+                if ch.is_alphanumeric() || ch == '_' {
+                    word.push(ch);
+                } else {
+                    break;
+                }
+            }
+            let word: String = word.chars().rev().collect();
+            return word == "await";
+        }
+        false
+    };
+
+    let is_commented = |pos: usize| -> bool {
+        let prefix = &content[..pos];
+        let line_start = prefix.rfind('\n').map(|i| i + 1).unwrap_or(0);
+        let line_end = content[pos..]
+            .find('\n')
+            .map(|i| pos + i)
+            .unwrap_or_else(|| content.len());
+        let line = &content[line_start..line_end];
+        if let Some(idx) = line.find("//")
+            && line_start + idx < pos
+        {
+            return true;
+        }
+        let last_block_open = prefix.rfind("/*");
+        let last_block_close = prefix.rfind("*/");
+        if let Some(open_idx) = last_block_open
+            && last_block_close.is_none_or(|c| c < open_idx)
+        {
+            return true;
+        }
+        false
+    };
+
+    let mut command_calls = Vec::new();
+    let mut event_emits = Vec::new();
+    let mut event_listens = Vec::new();
+    let mut add_call =
+        |name: &str, line: usize, generic: Option<String>, payload: Option<String>| {
+            command_calls.push(CommandRef {
+                name: name.to_string(),
+                exposed_name: None,
+                line,
+                generic_type: generic,
+                payload,
+            });
+        };
+    for caps in regex_import().captures_iter(content) {
+        let clause = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+        let source = caps.get(2).map(|m| m.as_str()).unwrap_or("").to_string();
+        let mut entry = ImportEntry::new(source.clone(), ImportKind::Static);
+        entry.symbols = parse_import_symbols(clause);
+        entry.resolved_path = resolve_reexport_target(path, root, &source, extensions)
+            .or_else(|| ts_resolver.and_then(|r| r.resolve(&source, extensions)))
+            .or_else(|| super::resolvers::resolve_js_relative(path, root, &source, extensions));
+        entry.is_bare = !source.starts_with('.') && !source.starts_with('/');
+        analysis.imports.push(entry);
+    }
+    for caps in regex_side_effect_import().captures_iter(content) {
+        let source = caps.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
+        let mut entry = ImportEntry::new(source.clone(), ImportKind::SideEffect);
+        entry.resolved_path = resolve_reexport_target(path, root, &source, extensions)
+            .or_else(|| ts_resolver.and_then(|r| r.resolve(&source, extensions)))
+            .or_else(|| super::resolvers::resolve_js_relative(path, root, &source, extensions));
+        entry.is_bare = !source.starts_with('.') && !source.starts_with('/');
+        analysis.imports.push(entry);
+    }
+
+    for caps in regex_safe_invoke().captures_iter(content) {
+        if let Some(cmd) = caps.name("cmd") {
+            let line = offset_to_line(content, cmd.start());
+            if is_commented(cmd.start()) {
+                continue;
+            }
+            let generic = caps
+                .name("generic")
+                .map(|g| g.as_str().trim().to_string())
+                .filter(|s| !s.is_empty());
+            let payload = caps
+                .name("payload")
+                .map(|p| p.as_str().trim().trim_end_matches(')').trim().to_string())
+                .filter(|s| !s.is_empty());
+            add_call(cmd.as_str(), line, generic, payload);
+        }
+    }
+    for caps in regex_tauri_invoke().captures_iter(content) {
+        if let Some(cmd) = caps.get(1) {
+            let line = offset_to_line(content, cmd.start());
+            if is_commented(cmd.start()) {
+                continue;
+            }
+            let payload = caps
+                .name("payload")
+                .map(|p| p.as_str().trim().trim_end_matches(')').trim().to_string())
+                .filter(|s| !s.is_empty());
+            add_call(cmd.as_str(), line, None, payload);
+        }
+    }
+    for caps in regex_invoke_audio().captures_iter(content) {
+        if let Some(cmd) = caps.name("cmd") {
+            let line = offset_to_line(content, cmd.start());
+            if is_commented(cmd.start()) {
+                continue;
+            }
+            let generic = caps
+                .name("generic")
+                .map(|g| g.as_str().trim().to_string())
+                .filter(|s| !s.is_empty());
+            let payload = caps
+                .name("payload")
+                .map(|p| p.as_str().trim().trim_end_matches(')').trim().to_string())
+                .filter(|s| !s.is_empty());
+            add_call(cmd.as_str(), line, generic, payload);
+        }
+    }
+    for caps in regex_invoke_snake().captures_iter(content) {
+        if let Some(cmd) = caps.name("cmd") {
+            let line = offset_to_line(content, cmd.start());
+            if is_commented(cmd.start()) {
+                continue;
+            }
+            let generic = caps
+                .name("generic")
+                .map(|g| g.as_str().trim().to_string())
+                .filter(|s| !s.is_empty());
+            let payload = caps
+                .name("payload")
+                .map(|p| p.as_str().trim().trim_end_matches(')').trim().to_string())
+                .filter(|s| !s.is_empty());
+            add_call(cmd.as_str(), line, generic, payload);
+        }
+    }
+    // Detect wrapper functions like invokePinCommand('get_pin_status', ...)
+    // Known DOM APIs that contain "Command" but aren't Tauri invokes
+    const DOM_COMMAND_METHODS: &[&str] = &[
+        "execCommand",
+        "queryCommandState",
+        "queryCommandEnabled",
+        "queryCommandSupported",
+        "queryCommandValue",
+    ];
+    for caps in regex_invoke_wrapper().captures_iter(content) {
+        if let Some(cmd) = caps.name("cmd") {
+            // Get the full match to check the function name
+            let full_match = caps.get(0).map(|m| m.as_str()).unwrap_or("");
+            // Skip known DOM APIs
+            if DOM_COMMAND_METHODS
+                .iter()
+                .any(|dom_api| full_match.contains(dom_api))
+            {
+                continue;
+            }
+            let line = offset_to_line(content, cmd.start());
+            if is_commented(cmd.start()) {
+                continue;
+            }
+            let generic = caps
+                .name("generic")
+                .map(|g| g.as_str().trim().to_string())
+                .filter(|s| !s.is_empty());
+            let payload = caps
+                .name("payload")
+                .map(|p| p.as_str().trim().trim_end_matches(')').trim().to_string())
+                .filter(|s| !s.is_empty());
+            add_call(cmd.as_str(), line, generic, payload);
+        }
+    }
+
+    for caps in regex_reexport_star().captures_iter(content) {
+        let source = caps.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
+        let resolved = resolve_reexport_target(path, root, &source, extensions)
+            .or_else(|| ts_resolver.and_then(|r| r.resolve(&source, extensions)));
+        analysis.reexports.push(ReexportEntry {
+            source,
+            kind: ReexportKind::Star,
+            resolved,
+        });
+    }
+    for caps in regex_reexport_named().captures_iter(content) {
+        let raw_names = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+        let source = caps.get(2).map(|m| m.as_str()).unwrap_or("").to_string();
+        let names = brace_list_to_names(raw_names);
+        let resolved = resolve_reexport_target(path, root, &source, extensions)
+            .or_else(|| ts_resolver.and_then(|r| r.resolve(&source, extensions)));
+        analysis.reexports.push(ReexportEntry {
+            source,
+            kind: ReexportKind::Named(names.clone()),
+            resolved,
+        });
+    }
+
+    for caps in regex_dynamic_import().captures_iter(content) {
+        let source = caps.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
+        analysis.dynamic_imports.push(source);
+    }
+
+    // Lazy imports with .then() pattern: import('./X').then(m => ({ default: m.Y }))
+    // These are common in React.lazy() and should be tracked as proper imports
+    for caps in regex_lazy_import_then().captures_iter(content) {
+        if let (Some(source), Some(export_name)) = (caps.name("source"), caps.name("export")) {
+            let source_str = source.as_str().to_string();
+            let export_str = export_name.as_str().to_string();
+
+            // Add to dynamic_imports if not already present
+            if !analysis.dynamic_imports.contains(&source_str) {
+                analysis.dynamic_imports.push(source_str.clone());
+            }
+
+            // Create a proper import entry with the symbol being accessed
+            let mut entry = ImportEntry::new(source_str.clone(), ImportKind::Dynamic);
+            entry.symbols.push(ImportSymbol {
+                name: export_str,
+                alias: None,
+            });
+            entry.resolved_path = resolve_reexport_target(path, root, &source_str, extensions)
+                .or_else(|| ts_resolver.and_then(|r| r.resolve(&source_str, extensions)))
+                .or_else(|| {
+                    super::resolvers::resolve_js_relative(path, root, &source_str, extensions)
+                });
+            entry.is_bare = !source_str.starts_with('.') && !source_str.starts_with('/');
+            analysis.imports.push(entry);
+        }
+    }
+
+    for caps in regex_event_emit_js().captures_iter(content) {
+        if let Some(target) = caps.name("target") {
+            if is_commented(caps.get(0).map(|m| m.start()).unwrap_or(0)) {
+                continue;
+            }
+            let (name, raw_name, source_kind) = resolve_event(target.as_str());
+            let payload = caps
+                .name("payload")
+                .map(|p| p.as_str().trim().trim_end_matches(')').trim().to_string())
+                .filter(|s| !s.is_empty());
+            let line = offset_to_line(content, caps.get(0).map(|m| m.start()).unwrap_or(0));
+            event_emits.push(EventRef {
+                raw_name,
+                name,
+                line,
+                kind: format!("emit_{}", source_kind),
+                awaited: false,
+                payload,
+            });
+        }
+    }
+    for caps in regex_event_listen_js().captures_iter(content) {
+        if let Some(target) = caps.name("target") {
+            if is_commented(caps.get(0).map(|m| m.start()).unwrap_or(0)) {
+                continue;
+            }
+            let (name, raw_name, source_kind) = resolve_event(target.as_str());
+            let start = caps.get(0).map(|m| m.start()).unwrap_or(0);
+            let line = offset_to_line(content, start);
+            event_listens.push(EventRef {
+                raw_name,
+                name,
+                line,
+                kind: format!("listen_{}", source_kind),
+                awaited: is_awaited(start),
+                payload: None,
+            });
+        }
+    }
+
+    // Heuristic: custom listen wrappers (listenTo..., ...listen...) with literal event name
+    if let Ok(wrapper_re) =
+        Regex::new(r#"(?m)([A-Za-z0-9_]*listen[A-Za-z0-9_]*)\s*\(\s*['"]([^'"]+)['"]"#)
+    {
+        for caps in wrapper_re.captures_iter(content) {
+            let start = caps.get(0).map(|m| m.start()).unwrap_or(0);
+            if is_commented(start) {
+                continue;
+            }
+            let target = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+            if target.is_empty() {
+                continue;
+            }
+            let (name, raw_name, source_kind) = resolve_event(target);
+            let line = offset_to_line(content, start);
+            event_listens.push(EventRef {
+                raw_name,
+                name,
+                line,
+                kind: format!("listen_{}", source_kind),
+                awaited: is_awaited(start),
+                payload: None,
+            });
+        }
+    }
+
+    for caps in regex_export_named_decl().captures_iter(content) {
+        let name = caps.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
+        if !name.is_empty() {
+            let line = caps.get(1).map(|m| offset_to_line(content, m.start()));
+            analysis
+                .exports
+                .push(ExportSymbol::new(name, "decl", "named", line));
+        }
+    }
+    for caps in regex_export_default().captures_iter(content) {
+        let name = caps
+            .get(1)
+            .map(|m| m.as_str().to_string())
+            .unwrap_or_else(|| "default".to_string());
+        let line = caps.get(0).map(|m| offset_to_line(content, m.start()));
+        analysis
+            .exports
+            .push(ExportSymbol::new(name, "default", "default", line));
+    }
+    for caps in regex_export_brace().captures_iter(content) {
+        let end = caps.get(0).map(|m| m.end()).unwrap_or(0);
+        let suffix = &content[end..];
+        if suffix.trim_start().starts_with("from") {
+            continue;
+        }
+
+        let raw = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+        for name in brace_list_to_names(raw) {
+            let line = caps.get(1).map(|m| offset_to_line(content, m.start()));
+            analysis
+                .exports
+                .push(ExportSymbol::new(name, "named", "named", line));
+        }
+    }
+    for re in &analysis.reexports {
+        if let ReexportKind::Named(names) = &re.kind {
+            for name in names {
+                analysis
+                    .exports
+                    .push(ExportSymbol::new(name.clone(), "reexport", "named", None));
+            }
+        }
+    }
+
+    analysis.command_calls = command_calls;
+    analysis.event_emits = event_emits;
+    analysis.event_listens = event_listens;
+    analysis
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{analyze_js_file, ast_js::CommandDetectionConfig};
+    use super::analyze_js_file;
     use std::collections::HashSet;
     use std::path::Path;
 
@@ -66,7 +512,6 @@ customCommandWrapper("another_cmd", options);
             Some(&HashSet::from(["ts".to_string(), "tsx".to_string()])),
             None,
             "app.tsx".to_string(),
-            &CommandDetectionConfig::default(),
         );
 
         assert!(
@@ -116,168 +561,10 @@ customCommandWrapper("another_cmd", options);
             .collect();
         assert!(generics.iter().any(|g| g.contains("Foo.Bar")));
 
-        // exports should include defaults (named "default") and named exports
+        // exports should include defaults and named
         let export_names: Vec<_> = analysis.exports.iter().map(|e| e.name.clone()).collect();
         assert!(export_names.contains(&"localValue".to_string()));
-        // Default exports are now named "default", original name in export_type
-        assert!(export_names.contains(&"default".to_string()));
-        assert!(
-            analysis
-                .exports
-                .iter()
-                .any(|e| e.name == "default" && e.export_type == "MyComp")
-        );
+        assert!(export_names.contains(&"MyComp".to_string()));
         assert!(export_names.contains(&"namedA".to_string()));
-    }
-
-    #[test]
-    fn default_import_tracking() {
-        let content = r#"
-import DefaultFoo from "./foo";
-import DefaultBar, { named1, named2 } from "./bar";
-import { named3 } from "./baz";
-import * as Everything from "./everything";
-        "#;
-
-        let analysis = analyze_js_file(
-            content,
-            Path::new("src/app.tsx"),
-            Path::new("src"),
-            Some(&HashSet::from(["ts".to_string(), "tsx".to_string()])),
-            None,
-            "app.tsx".to_string(),
-            &CommandDetectionConfig::default(),
-        );
-
-        // Check default import from "./foo"
-        let foo_import = analysis
-            .imports
-            .iter()
-            .find(|i| i.source == "./foo")
-            .expect("Should find ./foo import");
-        assert_eq!(foo_import.symbols.len(), 1);
-        assert_eq!(foo_import.symbols[0].name, "DefaultFoo");
-        assert!(
-            foo_import.symbols[0].is_default,
-            "DefaultFoo should be marked as default import"
-        );
-
-        // Check mixed default + named imports from "./bar"
-        let bar_import = analysis
-            .imports
-            .iter()
-            .find(|i| i.source == "./bar")
-            .expect("Should find ./bar import");
-        assert_eq!(bar_import.symbols.len(), 3);
-
-        let default_sym = bar_import
-            .symbols
-            .iter()
-            .find(|s| s.name == "DefaultBar")
-            .expect("Should find DefaultBar symbol");
-        assert!(
-            default_sym.is_default,
-            "DefaultBar should be marked as default import"
-        );
-
-        let named1_sym = bar_import
-            .symbols
-            .iter()
-            .find(|s| s.name == "named1")
-            .expect("Should find named1 symbol");
-        assert!(
-            !named1_sym.is_default,
-            "named1 should NOT be marked as default import"
-        );
-
-        // Check named-only import from "./baz"
-        let baz_import = analysis
-            .imports
-            .iter()
-            .find(|i| i.source == "./baz")
-            .expect("Should find ./baz import");
-        assert_eq!(baz_import.symbols.len(), 1);
-        assert_eq!(baz_import.symbols[0].name, "named3");
-        assert!(
-            !baz_import.symbols[0].is_default,
-            "named3 should NOT be marked as default import"
-        );
-
-        // Check namespace import
-        let ns_import = analysis
-            .imports
-            .iter()
-            .find(|i| i.source == "./everything")
-            .expect("Should find ./everything import");
-        assert_eq!(ns_import.symbols.len(), 1);
-        assert_eq!(ns_import.symbols[0].name, "*");
-        assert!(
-            !ns_import.symbols[0].is_default,
-            "Namespace import should NOT be marked as default import"
-        );
-    }
-
-    #[test]
-    fn default_export_matching_scenario() {
-        // This test demonstrates the problem this fix solves:
-        // Default exports should be matchable with default imports,
-        // regardless of the aliased import name.
-
-        let exporter_content = r#"
-export default function MyComponent() {
-    return <div>Hello</div>;
-}
-        "#;
-
-        let importer_content = r#"
-import Foo from "./component";
-import Bar from "./component";
-import Baz from "./component";
-        "#;
-
-        let exporter = analyze_js_file(
-            exporter_content,
-            Path::new("src/component.tsx"),
-            Path::new("src"),
-            None,
-            None,
-            "component.tsx".to_string(),
-            &CommandDetectionConfig::default(),
-        );
-
-        let importer = analyze_js_file(
-            importer_content,
-            Path::new("src/app.tsx"),
-            Path::new("src"),
-            None,
-            None,
-            "app.tsx".to_string(),
-            &CommandDetectionConfig::default(),
-        );
-
-        // The export should be stored with name "default" for matching with `import X from`
-        // The original function name is preserved in export_type
-        assert_eq!(exporter.exports.len(), 1);
-        let export = &exporter.exports[0];
-        assert_eq!(export.name, "default");
-        assert_eq!(export.kind, "default");
-        assert_eq!(export.export_type, "MyComponent");
-
-        // All three imports should be marked as default imports
-        // even though they have different names (Foo, Bar, Baz)
-        assert_eq!(importer.imports.len(), 3);
-        for imp in &importer.imports {
-            assert_eq!(imp.symbols.len(), 1);
-            let sym = &imp.symbols[0];
-            assert!(
-                sym.is_default,
-                "{} should be marked as default import",
-                sym.name
-            );
-        }
-
-        // With is_default flag, all three imports (Foo, Bar, Baz) should match
-        // the single default export "MyComponent" because they all have is_default=true
-        // This prevents false positives where MyComponent appears "unused"
     }
 }

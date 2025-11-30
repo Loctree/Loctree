@@ -348,10 +348,16 @@ pub fn find_dead_exports(analyses: &[FileAnalysis], high_confidence: bool) -> Ve
 }
 
 /// Print dead exports results to stdout
-pub fn print_dead_exports(dead_exports: &[DeadExport], output: OutputMode, high_confidence: bool) {
+pub fn print_dead_exports(
+    dead_exports: &[DeadExport],
+    output: OutputMode,
+    high_confidence: bool,
+    limit: usize,
+) {
     if matches!(output, OutputMode::Json) {
         let json_items: Vec<_> = dead_exports
             .iter()
+            .take(limit)
             .map(|d| {
                 json!({
                     "file": d.file,
@@ -366,6 +372,19 @@ pub fn print_dead_exports(dead_exports: &[DeadExport], output: OutputMode, high_
             serde_json::to_string_pretty(&json_items)
                 .expect("Failed to serialize dead exports to JSON")
         );
+    } else if matches!(output, OutputMode::Jsonl) {
+        for item in dead_exports.iter().take(limit) {
+            let json_line = json!({
+                "file": item.file,
+                "symbol": item.symbol,
+                "line": item.line,
+                "confidence": item.confidence
+            });
+            println!(
+                "{}",
+                serde_json::to_string(&json_line).expect("Failed to serialize dead export to JSON")
+            );
+        }
     } else {
         let count = dead_exports.len();
         let suffix = if high_confidence {
@@ -374,15 +393,15 @@ pub fn print_dead_exports(dead_exports: &[DeadExport], output: OutputMode, high_
             ""
         };
         println!("Potential Dead Exports ({} found){}:", count, suffix);
-        for item in dead_exports.iter().take(50) {
+        for item in dead_exports.iter().take(limit) {
             let location = match item.line {
                 Some(line) => format!("{}:{}", item.file, line),
                 None => item.file.clone(),
             };
             println!("  - {} in {}", item.symbol, location);
         }
-        if count > 50 {
-            println!("  ... and {} more", count - 50);
+        if count > limit {
+            println!("  ... and {} more", count - limit);
         }
     }
 }
@@ -598,7 +617,7 @@ mod tests {
             confidence: "high".to_string(),
         }];
         // Should not panic
-        print_dead_exports(&dead, OutputMode::Json, false);
+        print_dead_exports(&dead, OutputMode::Json, false, 20);
     }
 
     #[test]
@@ -610,8 +629,8 @@ mod tests {
             confidence: "high".to_string(),
         }];
         // Should not panic
-        print_dead_exports(&dead, OutputMode::Human, false);
-        print_dead_exports(&dead, OutputMode::Human, true);
+        print_dead_exports(&dead, OutputMode::Human, false, 20);
+        print_dead_exports(&dead, OutputMode::Human, true, 20);
     }
 
     #[test]
@@ -624,7 +643,7 @@ mod tests {
                 confidence: "high".to_string(),
             })
             .collect();
-        // Should truncate to 50 and show "... and N more"
-        print_dead_exports(&dead, OutputMode::Human, false);
+        // Should truncate to limit and show "... and N more"
+        print_dead_exports(&dead, OutputMode::Human, false, 50);
     }
 }
