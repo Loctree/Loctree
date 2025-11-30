@@ -7,7 +7,10 @@ use serde_json::json;
 
 use crate::args::ParsedArgs;
 use crate::fs_utils::{GitIgnoreChecker, gather_files, normalise_ignore_patterns};
-use crate::types::{ExportIndex, FileAnalysis, ImportKind, Options, PayloadMap};
+use crate::snapshot::Snapshot;
+use crate::types::{
+    ColorMode, ExportIndex, FileAnalysis, ImportKind, Options, OutputMode, PayloadMap,
+};
 
 use super::classify::is_dev_file;
 use super::resolvers::{
@@ -676,4 +679,271 @@ pub(crate) fn normalize_module_id(path: &str) -> String {
         return stripped.to_string();
     }
     p
+}
+
+/// Build ScanResults from a loaded Snapshot (scan once, analyze many)
+pub fn scan_results_from_snapshot(snapshot: &Snapshot) -> ScanResults {
+    let mut global_fe_commands: CommandUsage = HashMap::new();
+    let mut global_be_commands: CommandUsage = HashMap::new();
+    let mut global_fe_payloads: PayloadMap = HashMap::new();
+    let mut global_be_payloads: PayloadMap = HashMap::new();
+
+    // Build command maps from FileAnalysis
+    for analysis in &snapshot.files {
+        // Frontend commands (invoke calls)
+        for call in &analysis.command_calls {
+            let mut key = call.name.clone();
+            if let Some(stripped) = key.strip_suffix("_command") {
+                key = stripped.to_string();
+            }
+            global_fe_commands.entry(key.clone()).or_default().push((
+                analysis.path.clone(),
+                call.line,
+                call.name.clone(),
+            ));
+
+            // Track payload types if present
+            if let Some(payload) = &call.payload {
+                global_fe_payloads.entry(key).or_default().push((
+                    analysis.path.clone(),
+                    call.line,
+                    Some(payload.clone()),
+                ));
+            }
+        }
+
+        // Backend handlers (#[tauri::command])
+        for handler in &analysis.command_handlers {
+            let mut key = handler
+                .exposed_name
+                .as_ref()
+                .unwrap_or(&handler.name)
+                .clone();
+            if let Some(stripped) = key.strip_suffix("_command") {
+                key = stripped.to_string();
+            }
+            global_be_commands.entry(key.clone()).or_default().push((
+                analysis.path.clone(),
+                handler.line,
+                handler.name.clone(),
+            ));
+
+            // Track return types if present
+            if let Some(ret) = &handler.payload {
+                global_be_payloads.entry(key).or_default().push((
+                    analysis.path.clone(),
+                    handler.line,
+                    Some(ret.clone()),
+                ));
+            }
+        }
+    }
+
+    // Build minimal RootContext for each root in snapshot
+    let mut contexts = Vec::new();
+
+    // If only one root, all files belong to it (paths are relative in snapshot)
+    let single_root = snapshot.metadata.roots.len() == 1;
+
+    for root_str in &snapshot.metadata.roots {
+        let root_path = PathBuf::from(root_str);
+
+        // Filter analyses for this root
+        // Note: snapshot paths are relative, so for single root we take all files
+        let root_analyses: Vec<FileAnalysis> = if single_root {
+            snapshot.files.clone()
+        } else {
+            snapshot
+                .files
+                .iter()
+                .filter(|a| a.path.starts_with(root_str) || root_str == ".")
+                .cloned()
+                .collect()
+        };
+
+        // Build export index
+        let mut export_index: ExportIndex = HashMap::new();
+        for analysis in &root_analyses {
+            for export in &analysis.exports {
+                export_index
+                    .entry(export.name.clone())
+                    .or_default()
+                    .push(analysis.path.clone());
+            }
+        }
+
+        // Build LOC map
+        let loc_map: HashMap<String, usize> = root_analyses
+            .iter()
+            .map(|a| (a.path.clone(), a.loc))
+            .collect();
+
+        // Build dynamic summary
+        let dynamic_summary: Vec<(String, Vec<String>)> = root_analyses
+            .iter()
+            .filter(|a| !a.dynamic_imports.is_empty())
+            .map(|a| (a.path.clone(), a.dynamic_imports.clone()))
+            .collect();
+
+        // Build graph edges from snapshot
+        // Note: For single root, all edges belong to it (paths in snapshot are relative)
+        let graph_edges: Vec<(String, String, String)> = if single_root {
+            snapshot
+                .edges
+                .iter()
+                .map(|e| (e.from.clone(), e.to.clone(), e.label.clone()))
+                .collect()
+        } else {
+            snapshot
+                .edges
+                .iter()
+                .filter(|e| e.from.starts_with(root_str) || root_str == ".")
+                .map(|e| (e.from.clone(), e.to.clone(), e.label.clone()))
+                .collect()
+        };
+
+        // Detect languages
+        let languages: HashSet<String> = root_analyses.iter().map(|a| a.language.clone()).collect();
+
+        // Calculate ranked duplicates
+        let filtered_ranked = rank_duplicates(&export_index, &root_analyses, &HashSet::new(), &[]);
+
+        // Build cascades (re-export chains)
+        let cascades = build_cascades(&root_analyses);
+
+        // Build barrel info
+        let barrels: Vec<BarrelInfo> = snapshot
+            .barrels
+            .iter()
+            .filter(|b| b.path.starts_with(root_str) || root_str == ".")
+            .map(|b| BarrelInfo {
+                path: b.path.clone(),
+                module_id: b.module_id.clone(),
+                reexport_count: b.reexport_count,
+                target_count: b.targets.len(),
+                mixed: false, // Can't determine from snapshot
+                targets: b.targets.clone(),
+            })
+            .collect();
+
+        contexts.push(RootContext {
+            root_path,
+            options: Options {
+                extensions: None,
+                ignore_paths: vec![],
+                use_gitignore: false,
+                max_depth: None,
+                color: ColorMode::Auto,
+                output: OutputMode::Human,
+                summary: false,
+                summary_limit: 5,
+                show_hidden: false,
+                show_ignored: false,
+                loc_threshold: 1000,
+                analyze_limit: 0,
+                report_path: None,
+                serve: false,
+                editor_cmd: None,
+                max_graph_nodes: None,
+                max_graph_edges: None,
+                verbose: false,
+                scan_all: false,
+                symbol: None,
+                impact: None,
+                find_artifacts: false,
+            },
+            analyses: root_analyses,
+            export_index,
+            dynamic_summary,
+            cascades,
+            filtered_ranked,
+            graph_edges,
+            loc_map,
+            languages,
+            tsconfig_summary: json!({}),
+            calls_with_generics: vec![],
+            renamed_handlers: vec![],
+            barrels,
+        });
+    }
+
+    ScanResults {
+        contexts,
+        global_fe_commands,
+        global_be_commands,
+        global_fe_payloads,
+        global_be_payloads,
+        global_analyses: snapshot.files.clone(),
+    }
+}
+
+/// Rank duplicates by severity (helper for snapshot conversion)
+fn rank_duplicates(
+    export_index: &ExportIndex,
+    _analyses: &[FileAnalysis],
+    ignore_exact: &HashSet<String>,
+    ignore_prefixes: &[String],
+) -> Vec<RankedDup> {
+    use super::classify::is_dev_file;
+
+    let mut ranked = Vec::new();
+    for (name, files) in export_index {
+        if files.len() <= 1 {
+            continue;
+        }
+        let lc = name.to_lowercase();
+        if ignore_exact.contains(&lc) {
+            continue;
+        }
+        if ignore_prefixes.iter().any(|p| lc.starts_with(p)) {
+            continue;
+        }
+
+        let mut prod_count = 0;
+        let mut dev_count = 0;
+        for f in files {
+            if is_dev_file(f) {
+                dev_count += 1;
+            } else {
+                prod_count += 1;
+            }
+        }
+
+        // Skip if all are dev files
+        if prod_count == 0 {
+            continue;
+        }
+
+        let score = files.len() + prod_count;
+        let canonical = files.first().cloned().unwrap_or_default();
+
+        // Refactor targets = all files except canonical
+        let refactors: Vec<String> = files.iter().filter(|f| *f != &canonical).cloned().collect();
+
+        ranked.push(RankedDup {
+            name: name.clone(),
+            score,
+            files: files.clone(),
+            prod_count,
+            dev_count,
+            canonical,
+            refactors,
+        });
+    }
+
+    ranked.sort_by(|a, b| b.score.cmp(&a.score));
+    ranked
+}
+
+/// Build cascades (re-export chains) from analyses
+fn build_cascades(analyses: &[FileAnalysis]) -> Vec<(String, String)> {
+    let mut cascades = Vec::new();
+    for analysis in analyses {
+        for reexport in &analysis.reexports {
+            if !reexport.source.is_empty() {
+                cascades.push((analysis.path.clone(), reexport.source.clone()));
+            }
+        }
+    }
+    cascades
 }

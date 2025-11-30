@@ -6,7 +6,7 @@ use leptos::prelude::*;
 use crate::styles::{REPORT_CSS, CSP};
 use crate::types::ReportSection;
 use crate::JsAssets;
-use super::{ReportSectionView, Icon, ICON_FOLDER};
+use super::{ReportSectionView, Icon, ICON_SQUARES_FOUR, ICON_COPY, ICON_LIGHTNING, ICON_TERMINAL, ICON_GRAPH};
 
 /// The complete HTML document for the report
 #[component]
@@ -41,21 +41,26 @@ pub fn ReportDocument(
                         </div>
                         
                         <nav class="sidebar-nav">
-                            <div class="nav-section-title">"Project Roots"</div>
-                            {sections.iter().enumerate().map(|(idx, section)| {
-                                // Use index for robust ID generation
-                                let view_id = format!("section-view-{}", idx);
-                                let label = section.root.clone();
-                                let active = idx == 0;
-                                let class = if active { "nav-item active" } else { "nav-item" };
-                                
-                                view! {
-                                    <a href="#" class=class data-view=view_id>
-                                        <Icon path=ICON_FOLDER class="icon-sm" />
-                                        {label}
-                                    </a>
-                                }
-                            }).collect::<Vec<_>>()}
+                            <button class="nav-item active" data-tab="overview">
+                                <Icon path=ICON_SQUARES_FOUR class="icon-sm" />
+                                "Overview"
+                            </button>
+                            <button class="nav-item" data-tab="dups">
+                                <Icon path=ICON_COPY class="icon-sm" />
+                                "Duplicates"
+                            </button>
+                            <button class="nav-item" data-tab="dynamic">
+                                <Icon path=ICON_LIGHTNING class="icon-sm" />
+                                "Dynamic imports"
+                            </button>
+                            <button class="nav-item" data-tab="commands">
+                                <Icon path=ICON_TERMINAL class="icon-sm" />
+                                "Tauri coverage"
+                            </button>
+                            <button class="nav-item" data-tab="graph">
+                                <Icon path=ICON_GRAPH class="icon-sm" />
+                                "Graph"
+                            </button>
                         </nav>
 
                         <div class="app-footer">
@@ -92,16 +97,19 @@ fn GraphScripts(js_assets: JsAssets) -> impl IntoView {
     let has_graph_assets = !js_assets.cytoscape_path.is_empty();
 
     view! {
+        // App navigation script FIRST (must run even if graph fails)
+        <script>{APP_SCRIPT}</script>
         // Graph-specific scripts (only when assets are provided)
+        // Load order matters: layout-base -> cose-base -> cytoscape-cose-bilkent
         {has_graph_assets.then(|| view! {
             <script src=js_assets.cytoscape_path.clone()></script>
             <script src=js_assets.dagre_path.clone()></script>
             <script src=js_assets.cytoscape_dagre_path.clone()></script>
+            <script src=js_assets.layout_base_path.clone()></script>
+            <script src=js_assets.cose_base_path.clone()></script>
             <script src=js_assets.cytoscape_cose_bilkent_path.clone()></script>
             <script>{include_str!("../graph_bootstrap.js")}</script>
         })}
-        // App navigation script (always runs for section/tab switching)
-        <script>{APP_SCRIPT}</script>
     }
 }
 
@@ -118,19 +126,17 @@ const APP_SCRIPT: &str = r#"
           document.documentElement.classList.add('light');
           document.documentElement.classList.remove('dark');
       } else {
-          // Follow system preference (CSS handles this via media query)
-          // But we need to set class for JS-based checks
           if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
               document.documentElement.classList.add('dark');
           }
       }
   };
-  
+
   const toggleTheme = () => {
       const isDark = document.documentElement.classList.contains('dark') ||
-          (!document.documentElement.classList.contains('light') && 
+          (!document.documentElement.classList.contains('light') &&
            window.matchMedia('(prefers-color-scheme: dark)').matches);
-      
+
       if (isDark) {
           document.documentElement.classList.remove('dark');
           document.documentElement.classList.add('light');
@@ -140,69 +146,56 @@ const APP_SCRIPT: &str = r#"
           document.documentElement.classList.remove('light');
           localStorage.setItem('loctree-theme', 'dark');
       }
-      
-      // Sync with graph's dark mode checkboxes if present
+
       document.querySelectorAll('[data-role="dark"]').forEach(chk => {
           chk.checked = document.documentElement.classList.contains('dark');
       });
   };
-  
+
   initTheme();
-  
+
   const themeToggle = document.querySelector('[data-role="theme-toggle"]');
   if (themeToggle) {
       themeToggle.addEventListener('click', toggleTheme);
   }
 
-  // 1. Section Switching (Sidebar)
-  document.querySelectorAll('.nav-item[data-view]').forEach(btn => {
+  // 1. Sidebar Navigation (Tab Switching)
+  document.querySelectorAll('.sidebar-nav .nav-item[data-tab]').forEach(btn => {
       btn.addEventListener('click', () => {
-          const targetId = btn.dataset.view;
-          
-          // Update Sidebar
-          document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
+          const tabName = btn.dataset.tab;
+
+          // Update Sidebar buttons
+          document.querySelectorAll('.sidebar-nav .nav-item').forEach(b => b.classList.remove('active'));
           btn.classList.add('active');
-          
-          // Update Main View
-          document.querySelectorAll('.section-view').forEach(v => v.classList.remove('active'));
-          const view = document.getElementById(targetId);
-          if(view) {
-              view.classList.add('active');
-              // Trigger resize if current tab is graph
-              const activeTab = view.querySelector('.tab-panel.active');
-              if(activeTab && activeTab.dataset.tabName === 'graph') {
+
+          // Update all tab panels across all sections
+          document.querySelectorAll('.tab-panel').forEach(p => {
+              const isActive = p.dataset.tabName === tabName;
+              p.classList.toggle('active', isActive);
+
+              if (isActive && tabName === 'graph') {
                   window.dispatchEvent(new Event('resize'));
               }
-          }
+          });
+
+          // Also update header tab-bar buttons if present (for visual sync)
+          document.querySelectorAll('.tab-bar .tab-btn').forEach(b => {
+              b.classList.toggle('active', b.dataset.tab === tabName);
+          });
       });
   });
 
-  // 2. Tab Switching (Header)
-  document.querySelectorAll('.tab-bar').forEach(bar => {
-     const scope = bar.dataset.tabScope;
-     
-     bar.querySelectorAll('.tab-btn').forEach(btn => {
-         btn.addEventListener('click', () => {
-             // Update Buttons
-             bar.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-             btn.classList.add('active');
-             
-             // Update Panels
-             const tabName = btn.dataset.tab;
-             // Find panels within the same scope
-             // We look for panels with matching data-tab-scope
-             const panels = document.querySelectorAll(`.tab-panel[data-tab-scope="${scope}"]`);
-             panels.forEach(p => {
-                 const isActive = p.dataset.tabName === tabName;
-                 p.classList.toggle('active', isActive);
-                 
-                 if (isActive && tabName === 'graph') {
-                     // Trigger resize for Cytoscape
-                     window.dispatchEvent(new Event('resize'));
-                 }
-             });
-         });
-     });
+  // 2. Header Tab Switching (if still present, syncs with sidebar)
+  document.querySelectorAll('.tab-bar .tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+          const tabName = btn.dataset.tab;
+
+          // Trigger sidebar button click to keep everything in sync
+          const sidebarBtn = document.querySelector(`.sidebar-nav .nav-item[data-tab="${tabName}"]`);
+          if (sidebarBtn) {
+              sidebarBtn.click();
+          }
+      });
   });
 })();
 "#;

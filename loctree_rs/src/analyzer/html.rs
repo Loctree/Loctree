@@ -3,7 +3,10 @@ use std::io;
 use std::path::Path;
 
 use super::ReportSection;
-use super::assets::{CYTOSCAPE_COSE_BILKENT_JS, CYTOSCAPE_DAGRE_JS, CYTOSCAPE_JS, DAGRE_JS};
+use super::assets::{
+    COSE_BASE_JS, CYTOSCAPE_COSE_BILKENT_JS, CYTOSCAPE_DAGRE_JS, CYTOSCAPE_JS, DAGRE_JS,
+    LAYOUT_BASE_JS,
+};
 
 /// Render HTML report using Leptos SSR
 pub(crate) fn render_html_report(path: &Path, sections: &[ReportSection]) -> io::Result<()> {
@@ -34,6 +37,8 @@ pub(crate) fn render_html_report(path: &Path, sections: &[ReportSection]) -> io:
         cytoscape_path: "loctree-cytoscape.min.js".into(),
         dagre_path: "loctree-dagre.min.js".into(),
         cytoscape_dagre_path: "loctree-cytoscape-dagre.js".into(),
+        layout_base_path: "loctree-layout-base.js".into(),
+        cose_base_path: "loctree-cose-base.js".into(),
         cytoscape_cose_bilkent_path: "loctree-cytoscape-cose-bilkent.js".into(),
     };
 
@@ -58,6 +63,16 @@ fn write_js_assets(dir: &Path) -> io::Result<()> {
     let cy_dagre_path = dir.join("loctree-cytoscape-dagre.js");
     if !cy_dagre_path.exists() {
         fs::write(&cy_dagre_path, CYTOSCAPE_DAGRE_JS)?;
+    }
+    // layout-base (dependency for cose-base)
+    let layout_base_path = dir.join("loctree-layout-base.js");
+    if !layout_base_path.exists() {
+        fs::write(&layout_base_path, LAYOUT_BASE_JS)?;
+    }
+    // cose-base (dependency for cytoscape-cose-bilkent)
+    let cose_base_path = dir.join("loctree-cose-base.js");
+    if !cose_base_path.exists() {
+        fs::write(&cose_base_path, COSE_BASE_JS)?;
     }
     // Cytoscape-cose-bilkent extension (improved force-directed layout)
     let cy_cose_bilkent_path = dir.join("loctree-cytoscape-cose-bilkent.js");
@@ -92,6 +107,9 @@ mod tests {
         let section = ReportSection {
             root: "test-root".into(),
             files_analyzed: 2,
+            total_loc: 100,
+            reexport_files_count: 1,
+            dynamic_imports_count: 1,
             ranked_dups: vec![dup],
             cascades: vec![("a.ts".into(), "b.ts".into())],
             dynamic: vec![("dyn.ts".into(), vec!["./lazy".into()])],
@@ -100,6 +118,7 @@ mod tests {
             unregistered_handlers: Vec::new(),
             unused_handlers: Vec::new(),
             command_counts: (0, 0),
+            command_bridges: Vec::new(),
             open_base: None,
             graph: None,
             graph_warning: None,
@@ -131,6 +150,9 @@ mod tests {
         let section = ReportSection {
             root: malicious.into(),
             files_analyzed: 0,
+            total_loc: 0,
+            reexport_files_count: 0,
+            dynamic_imports_count: 0,
             ranked_dups: Vec::new(),
             cascades: Vec::new(),
             dynamic: Vec::new(),
@@ -139,6 +161,7 @@ mod tests {
             unregistered_handlers: Vec::new(),
             unused_handlers: Vec::new(),
             command_counts: (0, 0),
+            command_bridges: Vec::new(),
             open_base: None,
             graph: None,
             graph_warning: None,

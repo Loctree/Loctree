@@ -552,4 +552,38 @@ pub fn snake_case_func() {}
         assert!(handlers.contains(&"exposed_cmd".to_string()));
         assert!(handlers.contains(&"snakeCaseFunc".to_string()));
     }
+
+    #[test]
+    fn detects_fn_main_entry_point() {
+        let content = r#"
+fn main() {
+    vista_lib::run()
+}
+"#;
+        let analysis = analyze_rust_file(content, "main.rs".to_string());
+        assert!(
+            analysis.entry_points.contains(&"main".to_string()),
+            "Should detect fn main() as entry point, got: {:?}",
+            analysis.entry_points
+        );
+    }
+
+    #[test]
+    fn detects_async_main_entry_point() {
+        let content = r#"
+#[tokio::main]
+async fn main() {
+    app::run().await
+}
+"#;
+        let analysis = analyze_rust_file(content, "main.rs".to_string());
+        assert!(
+            analysis.entry_points.contains(&"main".to_string()),
+            "Should detect async fn main()"
+        );
+        assert!(
+            analysis.entry_points.contains(&"async_main".to_string()),
+            "Should detect #[tokio::main]"
+        );
+    }
 }

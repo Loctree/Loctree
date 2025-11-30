@@ -35,6 +35,72 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Confidence level for detection results.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Confidence {
+    /// High confidence - likely a real issue
+    High,
+    /// Low confidence - may be false positive due to dynamic usage
+    Low,
+}
+
+/// A string literal that might indicate dynamic command usage.
+///
+/// Used to track potential false positives when detecting unused handlers.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StringLiteralMatch {
+    /// File path where the literal was found
+    pub file: String,
+    /// Line number (1-indexed)
+    pub line: usize,
+    /// Context type: "allowlist", "const", "object_key", "array_item"
+    pub context: String,
+}
+
+/// Full command bridge for FE↔BE comparison table.
+///
+/// Represents a single Tauri command with all frontend call sites
+/// and the corresponding backend handler location.
+///
+/// # Status Values
+///
+/// - `"ok"` - Command properly matched (FE calls + BE handler)
+/// - `"missing_handler"` - FE calls exist but no BE handler
+/// - `"unused_handler"` - BE handler exists but no FE calls
+/// - `"unregistered_handler"` - BE handler exists but not in generate_handler![]
+///
+/// # Example
+///
+/// ```rust
+/// use report_leptos::types::CommandBridge;
+///
+/// let bridge = CommandBridge {
+///     name: "get_user".into(),
+///     fe_locations: vec![
+///         ("src/api.ts".into(), 42),
+///         ("src/components/Profile.tsx".into(), 15),
+///     ],
+///     be_location: Some(("src-tauri/src/commands/user.rs".into(), 10, "get_user".into())),
+///     status: "ok".into(),
+///     language: "rs".into(),
+/// };
+/// ```
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct CommandBridge {
+    /// Command name (exposed_name from Tauri)
+    pub name: String,
+    /// Frontend call locations (file, line)
+    #[serde(default)]
+    pub fe_locations: Vec<(String, usize)>,
+    /// Backend handler location (file, line, impl_symbol) - None if missing
+    pub be_location: Option<(String, usize, String)>,
+    /// Status: "ok", "missing_handler", "unused_handler", "unregistered_handler"
+    pub status: String,
+    /// Language (ts, rs, etc.)
+    #[serde(default)]
+    pub language: String,
+}
+
 /// A gap between frontend command invocations and backend handlers.
 ///
 /// Used for Tauri applications to track:
@@ -64,6 +130,11 @@ pub struct CommandGap {
     pub implementation_name: Option<String>,
     /// File paths and line numbers where this command appears
     pub locations: Vec<(String, usize)>,
+    /// Detection confidence level
+    pub confidence: Option<Confidence>,
+    /// String literal matches that may indicate dynamic usage
+    #[serde(default)]
+    pub string_literal_matches: Vec<StringLiteralMatch>,
 }
 
 /// AI-generated insight about code quality or potential issues.
@@ -283,6 +354,12 @@ pub struct ReportSection {
     pub root: String,
     /// Number of files analyzed
     pub files_analyzed: usize,
+    /// Total lines of code across all analyzed files
+    pub total_loc: usize,
+    /// Number of files with re-exports (barrel files)
+    pub reexport_files_count: usize,
+    /// Number of files with dynamic imports
+    pub dynamic_imports_count: usize,
     /// Duplicate exports ranked by priority
     pub ranked_dups: Vec<RankedDup>,
     /// Cascade import pairs (source, target)
@@ -299,6 +376,9 @@ pub struct ReportSection {
     pub unused_handlers: Vec<CommandGap>,
     /// (frontend_command_count, backend_handler_count)
     pub command_counts: (usize, usize),
+    /// Full command bridges for FE↔BE comparison table
+    #[serde(default)]
+    pub command_bridges: Vec<CommandBridge>,
     /// Base URL for opening files in editor
     pub open_base: Option<String>,
     /// Dependency graph data (if generated)

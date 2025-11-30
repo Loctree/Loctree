@@ -7,14 +7,15 @@ use crate::types::RankedDup;
 #[component]
 pub fn DuplicateExportsTable(
     dups: Vec<RankedDup>,
-    limit: usize,
 ) -> impl IntoView {
+    let count = dups.len();
     view! {
         <h3>"Top duplicate exports"</h3>
         {if dups.is_empty() {
             view! { <p class="muted">"None"</p> }.into_any()
         } else {
             view! {
+                <p class="muted">{format!("{} duplicate export groups found", count)}</p>
                 <table>
                     <tr>
                         <th>"Symbol"</th>
@@ -24,7 +25,7 @@ pub fn DuplicateExportsTable(
                         <th>"Canonical"</th>
                         <th>"Refactor targets"</th>
                     </tr>
-                    {dups.into_iter().take(limit).map(|dup| {
+                    {dups.into_iter().map(|dup| {
                         view! {
                             <tr>
                                 <td><code>{dup.name}</code></td>

@@ -8,13 +8,14 @@
 //!
 //! ```text
 //! ReportDocument
+//! ├── Sidebar (navigation via nav-items)
 //! └── ReportSectionView (per analyzed directory)
-//!     ├── TabBar
-//!     ├── TabContent: Insights
+//!     ├── Header (path + stats badges)
+//!     ├── TabContent: Overview
+//!     │   ├── AnalysisSummary
 //!     │   └── AiInsightsPanel
 //!     ├── TabContent: Duplicates
-//!     │   └── DuplicateExportsTable
-//!     ├── TabContent: Cascades
+//!     │   ├── DuplicateExportsTable
 //!     │   └── CascadesList
 //!     ├── TabContent: Dynamic Imports
 //!     │   └── DynamicImportsTable
@@ -31,11 +32,10 @@
 //!
 //! ```rust,ignore
 //! use leptos::prelude::*;
-//! use report_leptos::components::{TabBar, TabContent, AiInsightsPanel};
+//! use report_leptos::components::{TabContent, AiInsightsPanel};
 //!
 //! view! {
-//!     <TabBar section_idx=0 tabs=vec!["Insights", "Graph"] />
-//!     <TabContent section_idx=0 tab_idx=0 active=true>
+//!     <TabContent root_id="my-project" tab_name="overview" active=true>
 //!         <AiInsightsPanel insights=my_insights />
 //!     </TabContent>
 //! }
@@ -61,6 +61,6 @@ pub use dynamic_imports::DynamicImportsTable;
 pub use for_ai::AiSummaryPanel;
 pub use graph::GraphContainer;
 pub use icons::*;
-pub use insights::AiInsightsPanel;
+pub use insights::{AiInsightsPanel, AnalysisSummary};
 pub use section::ReportSectionView;
-pub use tabs::{TabBar, TabContent};
+pub use tabs::TabContent;
