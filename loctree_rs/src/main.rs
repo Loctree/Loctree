@@ -2,8 +2,8 @@ use std::panic;
 use std::path::PathBuf;
 
 use loctree::args::{self, parse_args};
-use loctree::types::Mode;
-use loctree::{OutputMode, analyzer, detect, fs_utils, slicer, snapshot, tree};
+use loctree::types::{GitSubcommand, Mode};
+use loctree::{OutputMode, analyzer, detect, diff, fs_utils, git, slicer, snapshot, tree};
 
 fn install_broken_pipe_handler() {
     let default_hook = panic::take_hook();
@@ -259,6 +259,9 @@ fn main() -> std::io::Result<()> {
         Mode::ForAi => {
             run_for_ai(&root_list, &parsed)?;
         }
+        Mode::Git(ref subcommand) => {
+            run_git(subcommand, &parsed)?;
+        }
     }
 
     Ok(())
@@ -445,5 +448,157 @@ fn run_for_ai(root_list: &[PathBuf], parsed: &args::ParsedArgs) -> std::io::Resu
     let report = generate_for_ai_report(&project_root, &report_sections, &global_analyses);
     print_for_ai_json(&report);
 
+    Ok(())
+}
+
+/// Handle git subcommands for temporal awareness
+fn run_git(subcommand: &GitSubcommand, parsed: &args::ParsedArgs) -> std::io::Result<()> {
+    // Discover git repository from current directory
+    let cwd = std::env::current_dir()?;
+    let repo = git::GitRepo::discover(&cwd)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::NotFound, e.to_string()))?;
+
+    match subcommand {
+        GitSubcommand::Compare { from, to } => run_git_compare(&repo, from, to.as_deref(), parsed),
+        GitSubcommand::Blame { file } => run_git_blame(&repo, file, parsed),
+        GitSubcommand::History {
+            symbol,
+            file,
+            limit,
+        } => run_git_history(&repo, symbol.as_deref(), file.as_deref(), *limit, parsed),
+        GitSubcommand::WhenIntroduced {
+            circular,
+            dead,
+            import,
+        } => run_git_when_introduced(
+            &repo,
+            circular.as_deref(),
+            dead.as_deref(),
+            import.as_deref(),
+            parsed,
+        ),
+    }
+}
+
+/// Compare snapshots between two commits
+fn run_git_compare(
+    repo: &git::GitRepo,
+    from: &str,
+    to: Option<&str>,
+    _parsed: &args::ParsedArgs,
+) -> std::io::Result<()> {
+    // Get commit info
+    let from_commit = repo
+        .get_commit_info(from)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::NotFound, e.to_string()))?;
+
+    let to_commit = if let Some(to_ref) = to {
+        Some(
+            repo.get_commit_info(to_ref)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::NotFound, e.to_string()))?,
+        )
+    } else {
+        None // Working tree
+    };
+
+    // Get changed files between commits
+    let to_ref = to.unwrap_or("HEAD");
+    let changed_files = repo
+        .changed_files(from, to_ref)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+
+    // Try to load existing snapshot from .loctree/snapshot.json
+    let repo_path = repo.path().to_path_buf();
+    let current_snapshot = match snapshot::Snapshot::load(&repo_path) {
+        Ok(snap) => snap,
+        Err(_) => {
+            // No snapshot exists, create an empty one
+            // Suggest running `loctree init` first
+            eprintln!("Warning: No snapshot found. Run 'loctree init' first for full analysis.");
+            eprintln!("Showing file-level changes only.");
+            snapshot::Snapshot::new(vec![repo_path.display().to_string()])
+        }
+    };
+
+    // For MVP: Use the same snapshot for both from and to
+    // This means graph/export diffs will be empty, but file changes will be shown
+    // TODO: In future, checkout commits to temp worktrees and scan them
+    let from_snapshot = current_snapshot.clone();
+    let to_snapshot = current_snapshot;
+
+    // Compare snapshots
+    let snapshot_diff = diff::SnapshotDiff::compare(
+        &from_snapshot,
+        &to_snapshot,
+        Some(from_commit),
+        to_commit,
+        &changed_files,
+    );
+
+    // Output as JSON (agent-first design)
+    let json = serde_json::to_string_pretty(&snapshot_diff)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+    println!("{}", json);
+
+    Ok(())
+}
+
+/// Symbol-level blame for a file
+fn run_git_blame(
+    _repo: &git::GitRepo,
+    file: &str,
+    _parsed: &args::ParsedArgs,
+) -> std::io::Result<()> {
+    // TODO: Implement symbol-level blame
+    // For now, return a placeholder response
+    let response = serde_json::json!({
+        "status": "not_implemented",
+        "message": "git blame is planned for Phase 2",
+        "file": file,
+        "hint": "Use 'loctree git compare' for snapshot comparison"
+    });
+    println!("{}", serde_json::to_string_pretty(&response).unwrap());
+    Ok(())
+}
+
+/// Track symbol or file history
+fn run_git_history(
+    _repo: &git::GitRepo,
+    symbol: Option<&str>,
+    file: Option<&str>,
+    limit: usize,
+    _parsed: &args::ParsedArgs,
+) -> std::io::Result<()> {
+    // TODO: Implement symbol/file history tracking
+    let response = serde_json::json!({
+        "status": "not_implemented",
+        "message": "git history is planned for Phase 3",
+        "symbol": symbol,
+        "file": file,
+        "limit": limit,
+        "hint": "Use 'loctree git compare' for snapshot comparison"
+    });
+    println!("{}", serde_json::to_string_pretty(&response).unwrap());
+    Ok(())
+}
+
+/// Find when a pattern was introduced
+fn run_git_when_introduced(
+    _repo: &git::GitRepo,
+    circular: Option<&str>,
+    dead: Option<&str>,
+    import: Option<&str>,
+    _parsed: &args::ParsedArgs,
+) -> std::io::Result<()> {
+    // TODO: Implement pattern origin finder
+    let response = serde_json::json!({
+        "status": "not_implemented",
+        "message": "git when-introduced is planned for Phase 3",
+        "circular": circular,
+        "dead": dead,
+        "import": import,
+        "hint": "Use 'loctree git compare' for snapshot comparison"
+    });
+    println!("{}", serde_json::to_string_pretty(&response).unwrap());
     Ok(())
 }

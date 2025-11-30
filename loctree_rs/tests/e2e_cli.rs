@@ -444,6 +444,180 @@ mod trace_command {
 }
 
 // ============================================
+// Git Commands Tests (Semantic Analysis)
+// ============================================
+
+mod git_commands {
+    use super::*;
+    use std::process::Command;
+    use tempfile::TempDir;
+
+    /// Create a temporary git repository for testing
+    fn create_test_git_repo() -> TempDir {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path();
+
+        // Initialize git repo
+        Command::new("git")
+            .args(["init"])
+            .current_dir(path)
+            .output()
+            .unwrap();
+
+        // Configure git user
+        Command::new("git")
+            .args(["config", "user.email", "test@test.com"])
+            .current_dir(path)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.name", "Test User"])
+            .current_dir(path)
+            .output()
+            .unwrap();
+
+        // Create initial file and commit
+        std::fs::write(path.join("main.ts"), "export function main() {}").unwrap();
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(path)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "Initial commit"])
+            .current_dir(path)
+            .output()
+            .unwrap();
+
+        // Add second commit
+        std::fs::write(
+            path.join("utils.ts"),
+            "export function add(a: number, b: number) { return a + b; }",
+        )
+        .unwrap();
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(path)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "Add utils"])
+            .current_dir(path)
+            .output()
+            .unwrap();
+
+        temp_dir
+    }
+
+    #[test]
+    fn git_compare_shows_json_output() {
+        let temp_dir = create_test_git_repo();
+
+        loctree()
+            .current_dir(temp_dir.path())
+            .args(["git", "compare", "HEAD~1", "HEAD"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("from_commit"))
+            .stdout(predicate::str::contains("to_commit"))
+            .stdout(predicate::str::contains("files"))
+            .stdout(predicate::str::contains("impact"));
+    }
+
+    #[test]
+    fn git_compare_with_range_notation() {
+        let temp_dir = create_test_git_repo();
+
+        loctree()
+            .current_dir(temp_dir.path())
+            .args(["git", "compare", "HEAD~1..HEAD"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("from_commit"));
+    }
+
+    #[test]
+    fn git_compare_shows_added_files() {
+        let temp_dir = create_test_git_repo();
+
+        loctree()
+            .current_dir(temp_dir.path())
+            .args(["git", "compare", "HEAD~1", "HEAD"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("utils.ts"));
+    }
+
+    #[test]
+    fn git_command_fails_in_non_git_dir() {
+        // Create a truly isolated temp directory (not inside any git repo)
+        let temp_dir = TempDir::new().unwrap();
+
+        // Create a simple file so it's not empty
+        std::fs::write(temp_dir.path().join("test.txt"), "hello").unwrap();
+
+        loctree()
+            .current_dir(temp_dir.path())
+            .args(["git", "compare", "HEAD~1"])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("not a git repository"));
+    }
+
+    #[test]
+    fn git_blame_returns_not_implemented() {
+        let temp_dir = create_test_git_repo();
+
+        loctree()
+            .current_dir(temp_dir.path())
+            .args(["git", "blame", "main.ts"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("not_implemented"))
+            .stdout(predicate::str::contains("Phase 2"));
+    }
+
+    #[test]
+    fn git_history_returns_not_implemented() {
+        let temp_dir = create_test_git_repo();
+
+        loctree()
+            .current_dir(temp_dir.path())
+            .args(["git", "history", "main"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("not_implemented"))
+            .stdout(predicate::str::contains("Phase 3"));
+    }
+
+    #[test]
+    fn git_when_introduced_returns_not_implemented() {
+        let temp_dir = create_test_git_repo();
+
+        loctree()
+            .current_dir(temp_dir.path())
+            .args(["git", "when-introduced", "--dead", "unused_fn"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("not_implemented"))
+            .stdout(predicate::str::contains("Phase 3"));
+    }
+
+    #[test]
+    fn git_compare_shows_commit_info() {
+        let temp_dir = create_test_git_repo();
+
+        loctree()
+            .current_dir(temp_dir.path())
+            .args(["git", "compare", "HEAD~1", "HEAD"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Initial commit"))
+            .stdout(predicate::str::contains("Add utils"));
+    }
+}
+
+// ============================================
 // Helper Functions
 // ============================================
 
