@@ -1,6 +1,7 @@
 # loctree — AI-oriented Project Analyzer
 
 [![CI](https://github.com/LibraxisAI/loctree/actions/workflows/ci.yml/badge.svg)](https://github.com/LibraxisAI/loctree/actions/workflows/ci.yml)
+[![Loctree CI](https://img.shields.io/github/actions/workflow/status/LibraxisAI/loctree/loctree-ci.yml?label=loctree%20ci&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgdmlld0JveD0iMCAwIDE2IDE2Ij48cmVjdCB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIGZpbGw9IiMwMDAiLz48dGV4dCB4PSI4IiB5PSIxMiIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMCIgZmlsbD0iI2E4YThhOCIgdGV4dC1hbmNob3I9Im1pZGRsZSI+TDwvdGV4dD48L3N2Zz4=)](https://github.com/LibraxisAI/loctree/actions/workflows/loctree-ci.yml)
 [![Crates.io](https://img.shields.io/crates/v/loctree.svg)](https://crates.io/crates/loctree)
 [![Downloads](https://img.shields.io/crates/d/loctree.svg)](https://crates.io/crates/loctree)
 [![docs.rs](https://docs.rs/loctree/badge.svg)](https://docs.rs/loctree)

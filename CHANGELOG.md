@@ -6,6 +6,33 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Released]
 
+## [0.5.4] - 2025-11-30
+
+### Added
+- **Loctree CI workflow**: Separate GitHub Actions workflow that runs loctree self-analysis on all inner crates (loctree_rs, reports, landing) with HTML report artifacts.
+- **Version sync script**: `scripts/sync-version.sh` automatically synchronizes version across all crates and hardcoded strings during releases.
+- **`loct` CLI alias**: Short alias for `loctree` command for faster typing.
+
+### Changed
+- **Binary structure refactored**: Moved CLI entry points from `src/main.rs` to `src/bin/loctree.rs` and `src/bin/loct.rs` to eliminate "multiple build targets" warning.
+- **CI matrix**: Loctree CI now runs on both Ubuntu and macOS.
+
+### Fixed
+- **Version sync**: All version references (reports footer, lib.rs doc URL, landing easter eggs) now properly synced to 0.5.4.
+
+## [0.5.3] - 2025-11-29
+
+### Added
+- **COSE-Bilkent graph layout**: Added force-directed layout algorithm for better dependency graph visualization in HTML reports.
+- **`report-leptos` library crate**: Extracted HTML report generation into a standalone crate (v0.1.1) for reuse and cleaner architecture.
+
+### Changed
+- **Report UI redesign**: New dark/light theme with improved visual hierarchy and accessibility.
+- **Shared JS assets**: Moved graph visualization libraries (Cytoscape, Dagre, COSE-Bilkent) to the library crate.
+
+### Fixed
+- **Nested conditions refactored**: Improved `root_scan` and `detect` modules using Rust 2024 if-let chains.
+
 ## [0.5.2] - 2025-11-28
 
 ### Changed

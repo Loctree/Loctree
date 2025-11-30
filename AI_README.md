@@ -1,4 +1,4 @@
-# loctree - AI Agent Quick Reference (v0.5.0-rc)
+# loctree - AI Agent Quick Reference (v0.5.4)
 
 A static analysis tool designed for AI agents working on production codebases. Solves the "context drift" problem where AI generates duplicates, barrel files, and circular dependencies instead of reusing existing components.
 
@@ -16,7 +16,7 @@ loctree slice src/components/ChatPanel.tsx --consumers --json | claude
 
 ```bash
 cargo install --force --path loctree_rs
-loctree --version   # expected: 0.5.0-rc
+loctree --version   # expected: 0.5.4
 ```
 
 ## Primary Workflow for AI Agents
