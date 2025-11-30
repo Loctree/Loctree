@@ -1,0 +1,134 @@
+name: Publish to crates.io
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'loctree-v[0-9]+.[0-9]+.[0-9]+'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write  # Required for Trusted Publishing
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Rust
+        uses: dtolnay/rust-action@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            loctree_rs
+            reports
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+          # Extract version number (strip 'v' or 'loctree-v' prefix)
+          if [[ "$TAG" == loctree-v* ]]; then
+            VERSION="${TAG#loctree-v}"
+          else
+            VERSION="${TAG#v}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+          # Get current versions from Cargo.toml
+          LOCTREE_VERSION=$(grep '^version' loctree_rs/Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          REPORTS_VERSION=$(grep '^version' reports/Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "loctree_current=$LOCTREE_VERSION" >> $GITHUB_OUTPUT
+          echo "reports_current=$REPORTS_VERSION" >> $GITHUB_OUTPUT
+
+          echo "Tag: $TAG"
+          echo "Target version: $VERSION"
+          echo "Current loctree version: $LOCTREE_VERSION"
+          echo "Current report-leptos version: $REPORTS_VERSION"
+
+      - name: Check if version bump needed
+        id: bump
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          LOCTREE_CURRENT="${{ steps.version.outputs.loctree_current }}"
+
+          if [[ "$VERSION" == "$LOCTREE_CURRENT" ]]; then
+            echo "needs_bump=false" >> $GITHUB_OUTPUT
+            echo "Version already matches tag, no bump needed"
+          else
+            echo "needs_bump=true" >> $GITHUB_OUTPUT
+            echo "Version mismatch: Cargo.toml=$LOCTREE_CURRENT, tag=$VERSION"
+          fi
+
+      - name: Bump version if needed
+        if: steps.bump.outputs.needs_bump == 'true'
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+
+          # Update loctree version
+          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" loctree_rs/Cargo.toml
+
+          # Update Cargo.lock
+          cd loctree_rs && cargo check --quiet && cd ..
+
+          echo "Bumped loctree to $VERSION"
+
+      - name: Publish report-leptos
+        run: |
+          cd reports
+          # Check if this version is already published
+          CURRENT=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          if cargo search report-leptos 2>/dev/null | grep -q "report-leptos = \"$CURRENT\""; then
+            echo "report-leptos $CURRENT already published, skipping"
+          else
+            echo "Publishing report-leptos $CURRENT..."
+            cargo publish --no-verify
+          fi
+
+      - name: Wait for crates.io index
+        run: |
+          echo "Waiting for crates.io index to update..."
+          sleep 30
+
+      - name: Publish loctree
+        run: |
+          cd loctree_rs
+          VERSION="${{ steps.version.outputs.version }}"
+
+          # Check if already published
+          if cargo search loctree 2>/dev/null | grep -q "loctree = \"$VERSION\""; then
+            echo "loctree $VERSION already published, skipping"
+          else
+            echo "Publishing loctree $VERSION..."
+            cargo publish
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: loctree ${{ steps.version.outputs.version }}
+          body: |
+            ## loctree ${{ steps.version.outputs.version }}
+
+            Install via cargo:
+            ```bash
+            cargo install loctree
+            ```
+
+            Or download pre-built binaries from the assets below.
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
