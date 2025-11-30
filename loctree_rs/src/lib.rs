@@ -55,7 +55,7 @@
 //!
 //! See the [README](https://github.com/LibraxisAI/Loctree) for full documentation.
 
-#![doc(html_root_url = "https://docs.rs/loctree/0.5.2")]
+#![doc(html_root_url = "https://docs.rs/loctree/0.5.4")]
 #![doc(
     html_favicon_url = "https://raw.githubusercontent.com/LibraxisAI/loctree/main/assets/loctree-logo.svg"
 )]
