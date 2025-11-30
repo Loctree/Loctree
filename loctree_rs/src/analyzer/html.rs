@@ -10,10 +10,7 @@ use super::assets::{
 
 /// Render HTML report using Leptos SSR
 pub(crate) fn render_html_report(path: &Path, sections: &[ReportSection]) -> io::Result<()> {
-    // Only write JS assets if there's an actual parent directory (not empty path)
-    if let Some(dir) = path.parent()
-        && !dir.as_os_str().is_empty()
-    {
+    if let Some(dir) = path.parent() {
         write_js_assets(dir)?;
     }
 
@@ -43,20 +40,11 @@ pub(crate) fn render_html_report(path: &Path, sections: &[ReportSection]) -> io:
         layout_base_path: "loctree-layout-base.js".into(),
         cose_base_path: "loctree-cose-base.js".into(),
         cytoscape_cose_bilkent_path: "loctree-cytoscape-cose-bilkent.js".into(),
-        ..Default::default()
+        wasm_base64: None,
+        wasm_js_glue: None,
     };
 
-    // Check if this project has Tauri command data
-    let has_tauri = sections.iter().any(|s| {
-        !s.missing_handlers.is_empty()
-            || !s.unused_handlers.is_empty()
-            || !s.unregistered_handlers.is_empty()
-            || !s.command_bridges.is_empty()
-            || s.command_counts.0 > 0
-            || s.command_counts.1 > 0
-    });
-
-    let html = report_leptos::render_report(&leptos_sections, &js_assets, has_tauri);
+    let html = report_leptos::render_report(&leptos_sections, &js_assets);
     fs::write(path, html)
 }
 
@@ -99,7 +87,7 @@ fn write_js_assets(dir: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::render_html_report;
-    use crate::analyzer::report::{AiInsight, DupSeverity, RankedDup, ReportSection};
+    use crate::analyzer::report::{AiInsight, RankedDup, ReportSection};
     use std::fs;
     use tempfile::tempdir;
 
@@ -111,17 +99,11 @@ mod tests {
         let dup = RankedDup {
             name: "Foo".into(),
             files: vec!["a.ts".into(), "b.ts".into()],
-            locations: vec![],
             score: 2,
             prod_count: 2,
             dev_count: 0,
             canonical: "a.ts".into(),
-            canonical_line: None,
             refactors: vec!["b.ts".into()],
-            severity: DupSeverity::SamePackage,
-            is_cross_lang: false,
-            packages: vec![],
-            reason: String::new(),
         };
 
         let section = ReportSection {
@@ -132,8 +114,6 @@ mod tests {
             dynamic_imports_count: 1,
             ranked_dups: vec![dup],
             cascades: vec![("a.ts".into(), "b.ts".into())],
-            circular_imports: vec![],
-            lazy_circular_imports: vec![],
             dynamic: vec![("dyn.ts".into(), vec!["./lazy".into()])],
             analyze_limit: 5,
             missing_handlers: Vec::new(),
@@ -142,7 +122,6 @@ mod tests {
             command_counts: (0, 0),
             command_bridges: Vec::new(),
             open_base: None,
-            tree: None,
             graph: None,
             graph_warning: None,
             insights: vec![AiInsight {
@@ -150,13 +129,6 @@ mod tests {
                 severity: "medium".into(),
                 message: "Message".into(),
             }],
-            git_branch: None,
-            git_commit: None,
-            crowds: Vec::new(),
-            dead_exports: Vec::new(),
-            twins_data: None,
-            coverage_gaps: Vec::new(),
-            health_score: None,
         };
 
         render_html_report(&out_path, &[section]).expect("render html");
@@ -164,7 +136,7 @@ mod tests {
 
         // Verify key parts exist in the Leptos-rendered output
         assert!(html.contains("<!DOCTYPE html>"));
-        assert!(html.contains("Loctree Report")); // Title in new Vista design
+        assert!(html.contains("loctree report")); // Title in new Vista design
 
         // The output format might differ slightly from legacy, check for content
         assert!(html.contains("Hint"));
@@ -185,8 +157,6 @@ mod tests {
             dynamic_imports_count: 0,
             ranked_dups: Vec::new(),
             cascades: Vec::new(),
-            circular_imports: Vec::new(),
-            lazy_circular_imports: Vec::new(),
             dynamic: Vec::new(),
             analyze_limit: 1,
             missing_handlers: Vec::new(),
@@ -195,17 +165,9 @@ mod tests {
             command_counts: (0, 0),
             command_bridges: Vec::new(),
             open_base: None,
-            tree: None,
             graph: None,
             graph_warning: None,
             insights: Vec::new(),
-            git_branch: None,
-            git_commit: None,
-            crowds: Vec::new(),
-            dead_exports: Vec::new(),
-            twins_data: None,
-            coverage_gaps: Vec::new(),
-            health_score: None,
         };
 
         render_html_report(&out_path, &[section]).expect("render html");

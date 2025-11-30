@@ -333,6 +333,33 @@ mod tests {
         }
     }
 
+    fn default_opts() -> Options {
+        Options {
+            extensions: None,
+            ignore_paths: Vec::new(),
+            use_gitignore: false,
+            max_depth: None,
+            color: ColorMode::Never,
+            output: OutputMode::Human,
+            summary: false,
+            summary_limit: 5,
+            show_hidden: false,
+            show_ignored: false,
+            loc_threshold: crate::types::DEFAULT_LOC_THRESHOLD,
+            analyze_limit: 8,
+            report_path: None,
+            serve: false,
+            editor_cmd: None,
+            max_graph_nodes: None,
+            max_graph_edges: None,
+            verbose: false,
+            scan_all: false,
+            symbol: None,
+            impact: None,
+            find_artifacts: false,
+        }
+    }
+
     #[test]
     fn gather_files_filters_by_extension_and_depth() {
         let tmp = tempfile::tempdir().expect("tmp dir");

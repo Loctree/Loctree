@@ -67,24 +67,16 @@ pub struct HolographicSlice {
     pub stats: SliceStats,
 }
 
-/// Statistics about the slice.
+/// Statistics about the slice
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SliceStats {
-    /// Number of core files (usually 1).
     pub core_files: usize,
-    /// Total LOC in core layer.
     pub core_loc: usize,
-    /// Number of dependency files.
     pub deps_files: usize,
-    /// Total LOC in deps layer.
     pub deps_loc: usize,
-    /// Number of consumer files.
     pub consumers_files: usize,
-    /// Total LOC in consumers layer.
     pub consumers_loc: usize,
-    /// Total files across all layers.
     pub total_files: usize,
-    /// Total LOC across all layers.
     pub total_loc: usize,
 }
 
@@ -285,14 +277,8 @@ impl HolographicSlice {
         }
 
         // Layer 3: Consumers - files that import target
-        // For barrel files (index.ts), we need to transitively find consumers through re-export chains
         if config.include_consumers {
-            let mut all_consumers = HashSet::new();
-            let mut to_visit: VecDeque<String> = VecDeque::new();
-            let mut visited_for_consumers = HashSet::new();
-
-            // Start with direct consumers
-            let direct_consumers: Vec<String> = imported_by
+            let consumers_list: Vec<String> = imported_by
                 .get(&target_path_norm)
                 .into_iter()
                 .chain(imported_by.get(&target_stripped))
@@ -300,57 +286,14 @@ impl HolographicSlice {
                 .cloned()
                 .collect();
 
-            for consumer in direct_consumers {
-                all_consumers.insert(consumer.clone());
-                to_visit.push_back(consumer);
-            }
-
-            // Transitively follow through barrel files
-            // If A imports barrel B, and B re-exports target, then A is a consumer of target
-            while let Some(current) = to_visit.pop_front() {
-                if visited_for_consumers.contains(&current) {
-                    continue;
-                }
-                visited_for_consumers.insert(current.clone());
-
-                // Check if current file is a barrel that re-exports the target
-                let current_file = snapshot
-                    .files
-                    .iter()
-                    .find(|f| f.path == current || strip_extension(&f.path) == current);
-
-                let is_barrel = current_file
-                    .map(|f| !f.reexports.is_empty())
-                    .unwrap_or(false);
-
-                if is_barrel {
-                    // Find consumers of this barrel and add them
-                    let current_stripped = strip_extension(&current).to_string();
-                    let barrel_consumers: Vec<String> = imported_by
-                        .get(&current)
-                        .into_iter()
-                        .chain(imported_by.get(&current_stripped))
-                        .flatten()
-                        .cloned()
-                        .collect();
-
-                    for consumer in barrel_consumers {
-                        if all_consumers.insert(consumer.clone()) {
-                            to_visit.push_back(consumer);
-                        }
-                    }
-                }
-            }
-
-            // Convert consumer paths to SliceFile objects
-            for consumer_path in all_consumers {
+            for consumer in consumers_list {
                 let file = snapshot
                     .files
                     .iter()
-                    .find(|f| f.path == consumer_path || strip_extension(&f.path) == consumer_path);
+                    .find(|f| f.path == consumer || strip_extension(&f.path) == consumer);
 
                 if let Some(file) = file {
-                    // Avoid duplicates (shouldn't happen with HashSet, but safety check)
+                    // Avoid duplicates
                     if !slice.consumers.iter().any(|c| c.path == file.path) {
                         slice.consumers.push(SliceFile {
                             path: file.path.clone(),
@@ -432,17 +375,7 @@ impl HolographicSlice {
             "\nDeps ({} files, {} LOC):",
             self.stats.deps_files, self.stats.deps_loc
         );
-
-        const DISPLAY_LIMIT: usize = 25;
-
-        for (i, f) in self.deps.iter().enumerate() {
-            if i >= DISPLAY_LIMIT {
-                println!(
-                    "  ... and {} more (use --json for full list)",
-                    self.deps.len() - DISPLAY_LIMIT
-                );
-                break;
-            }
+        for f in &self.deps {
             let indent = "  ".repeat(f.depth);
             println!(
                 "{}[d{}] {} ({} LOC, {})",
@@ -455,15 +388,7 @@ impl HolographicSlice {
                 "\nConsumers ({} files, {} LOC):",
                 self.stats.consumers_files, self.stats.consumers_loc
             );
-
-            for (i, f) in self.consumers.iter().enumerate() {
-                if i >= DISPLAY_LIMIT {
-                    println!(
-                        "  ... and {} more (use --json for full list)",
-                        self.consumers.len() - DISPLAY_LIMIT
-                    );
-                    break;
-                }
+            for f in &self.consumers {
                 println!("  {} ({} LOC, {})", f.path, f.loc, f.language);
             }
         }
@@ -496,19 +421,14 @@ impl HolographicSlice {
     }
 }
 
-/// Auto-create snapshot if it doesn't exist, or prompt in interactive mode
-fn ensure_snapshot(root: &Path, parsed: &ParsedArgs) -> io::Result<bool> {
-    let snapshot_path = root.join(".loctree").join("snapshot.json");
-
+/// Prompt user to create snapshot if it doesn't exist (TTY only)
+fn prompt_create_snapshot(root: &Path, parsed: &ParsedArgs) -> io::Result<bool> {
     if !std::io::stdin().is_terminal() {
-        // Non-interactive: auto-create snapshot silently
-        eprintln!("[loct] No snapshot found, creating one...");
-        crate::snapshot::run_init(&[root.to_path_buf()], parsed)?;
-        eprintln!();
-        return Ok(true);
+        // Non-interactive: just fail with helpful message
+        return Ok(false);
     }
 
-    eprintln!("No snapshot found at {}", snapshot_path.display());
+    eprintln!("No snapshot found at .loctree/snapshot.json");
     eprintln!("Run `loctree` first to create a snapshot.");
     eprintln!();
     eprint!("Create snapshot now? [Y/n] ");
@@ -544,15 +464,9 @@ pub fn run_slice(
         })
         .unwrap_or_else(|| root.to_path_buf());
 
-    // Force rescan if --rescan flag is set (for uncommitted files)
-    if parsed.slice_rescan {
-        if !std::io::stdin().is_terminal() {
-            eprintln!("[loct] Rescanning for new files...");
-        }
-        crate::snapshot::run_init(std::slice::from_ref(&effective_root), parsed)?;
-    } else if !Snapshot::exists(&effective_root) {
-        // Check if snapshot exists, prompt to create if not
-        if ensure_snapshot(&effective_root, parsed)? {
+    // Check if snapshot exists, prompt to create if not
+    if !Snapshot::exists(&effective_root) {
+        if prompt_create_snapshot(&effective_root, parsed)? {
             // Snapshot was created, continue
         } else {
             return Err(io::Error::new(
@@ -569,20 +483,15 @@ pub fn run_slice(
         max_depth: 2,
     };
 
-    let slice = match HolographicSlice::from_path(&snapshot, target, &config) {
-        Some(s) => s,
-        None => {
-            eprintln!();
-            eprintln!("[ERR] Target file '{}' not found in snapshot.", target);
-            eprintln!();
-            eprintln!("   Possible causes:");
-            eprintln!("   - File path is incorrect or uses wrong case");
-            eprintln!("   - File was added after last snapshot (run `loctree` to update)");
-            eprintln!("   - File is excluded by .gitignore or .loctignore");
-            eprintln!();
-            std::process::exit(1);
-        }
-    };
+    let slice = HolographicSlice::from_path(&snapshot, target, &config).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            format!(
+                "Target file '{}' not found in snapshot. Try running `loctree` to update.",
+                target
+            ),
+        )
+    })?;
 
     if json_output {
         println!(
@@ -617,7 +526,6 @@ mod tests {
                 git_repo: None,
                 git_branch: None,
                 git_commit: None,
-                git_scan_id: None,
             },
             files: vec![
                 FileAnalysis {
@@ -668,8 +576,6 @@ mod tests {
                 name: "test_event".to_string(),
                 emits: vec![("src/lib.rs".to_string(), 10, "emit".to_string())],
                 listens: vec![("src/main.rs".to_string(), 20)],
-                is_fe_sync: false,
-                same_file_sync: false,
             }],
             barrels: vec![],
         }
@@ -894,103 +800,5 @@ mod tests {
         assert_eq!(deser.target, "src/main.rs");
         assert_eq!(deser.core.len(), 1);
         assert_eq!(deser.stats.core_loc, 100);
-    }
-
-    #[test]
-    fn test_slice_consumers_through_barrel() {
-        use crate::types::{FileAnalysis, ReexportEntry, ReexportKind};
-
-        // Create a test snapshot with barrel file re-export chain:
-        // Component.tsx -> features/index.ts (barrel) -> App.tsx
-        let snapshot = Snapshot {
-            metadata: SnapshotMetadata {
-                schema_version: "0.5.0-test".to_string(),
-                generated_at: "2025-01-01T00:00:00Z".to_string(),
-                roots: vec!["/test".to_string()],
-                languages: ["typescript".to_string()].into_iter().collect(),
-                file_count: 3,
-                total_loc: 300,
-                scan_duration_ms: 100,
-                resolver_config: None,
-                git_repo: None,
-                git_branch: None,
-                git_commit: None,
-                git_scan_id: None,
-            },
-            files: vec![
-                FileAnalysis {
-                    path: "src/Component.tsx".to_string(),
-                    loc: 100,
-                    language: "typescript".to_string(),
-                    ..FileAnalysis::new("src/Component.tsx".to_string())
-                },
-                {
-                    let mut barrel = FileAnalysis {
-                        path: "src/features/index.ts".to_string(),
-                        loc: 10,
-                        language: "typescript".to_string(),
-                        ..FileAnalysis::new("src/features/index.ts".to_string())
-                    };
-                    barrel.reexports.push(ReexportEntry {
-                        source: "../Component".to_string(),
-                        kind: ReexportKind::Named(vec![(
-                            "MyComponent".to_string(),
-                            "MyComponent".to_string(),
-                        )]),
-                        resolved: Some("src/Component.tsx".to_string()),
-                    });
-                    barrel
-                },
-                FileAnalysis {
-                    path: "src/App.tsx".to_string(),
-                    loc: 150,
-                    language: "typescript".to_string(),
-                    ..FileAnalysis::new("src/App.tsx".to_string())
-                },
-            ],
-            edges: vec![
-                // App.tsx imports from barrel
-                GraphEdge {
-                    from: "src/App.tsx".to_string(),
-                    to: "src/features/index.ts".to_string(),
-                    label: "import".to_string(),
-                },
-                // Barrel re-exports Component
-                GraphEdge {
-                    from: "src/features/index.ts".to_string(),
-                    to: "src/Component.tsx".to_string(),
-                    label: "reexport".to_string(),
-                },
-            ],
-            export_index: Default::default(),
-            command_bridges: vec![],
-            event_bridges: vec![],
-            barrels: vec![],
-        };
-
-        let config = SliceConfig {
-            include_consumers: true,
-            max_depth: 2,
-        };
-
-        let slice = HolographicSlice::from_path(&snapshot, "src/Component.tsx", &config)
-            .expect("slice Component.tsx with consumers through barrel");
-
-        // CRITICAL TEST: App.tsx should show up as a consumer of Component.tsx
-        // even though it imports through the barrel file
-        assert_eq!(
-            slice.consumers.len(),
-            2,
-            "Should have both barrel and App.tsx as consumers"
-        );
-        let consumer_paths: Vec<_> = slice.consumers.iter().map(|f| f.path.as_str()).collect();
-        assert!(
-            consumer_paths.contains(&"src/App.tsx"),
-            "App.tsx should be a consumer (imports through barrel)"
-        );
-        assert!(
-            consumer_paths.contains(&"src/features/index.ts"),
-            "Barrel should be a consumer (directly re-exports)"
-        );
     }
 }

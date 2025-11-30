@@ -9,8 +9,6 @@ use crate::types::{FileAnalysis, Options};
 
 use super::classify::{detect_language, file_kind};
 use super::css::analyze_css_file;
-use super::dart::analyze_dart_file;
-use super::html_analyzer::analyze_html_file;
 use super::js::analyze_js_file;
 use super::py::{analyze_py_file, python_stdlib_set};
 use super::resolvers::{
@@ -18,57 +16,6 @@ use super::resolvers::{
     resolve_rust_import,
 };
 use super::rust::analyze_rust_file;
-use crate::analyzer::ast_js::CommandDetectionConfig;
-
-/// Known binary file extensions that should be skipped
-const BINARY_EXTENSIONS: &[&str] = &[
-    "dat", "bz2", "gz", "zip", "tar", "tgz", "pack", "png", "jpg", "jpeg", "gif", "bmp", "ico",
-    "webp", "svg", "woff", "woff2", "ttf", "eot", "otf", "exe", "dll", "so", "dylib", "node",
-    "wasm", "bin", "o", "a", "lib", "pyc", "pyo", "pdf", "doc", "docx", "xls", "xlsx", "mp3",
-    "mp4", "avi", "mov", "wav",
-];
-
-/// Source code extensions that should never be treated as binary
-const SOURCE_CODE_EXTENSIONS: &[&str] = &[
-    "rs", "ts", "tsx", "js", "jsx", "mjs", "cjs", "py", "go", "dart", "svelte", "vue", "css",
-    "scss", "less", "html", "json", "yaml", "yml", "toml", "md", "txt",
-];
-
-/// Check if a file is likely binary based on extension or magic bytes
-fn is_binary_file(path: &Path) -> bool {
-    // Check extension first
-    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-        let ext_lower = ext.to_lowercase();
-
-        // Known binary extensions - definitely binary
-        if BINARY_EXTENSIONS.contains(&ext_lower.as_str()) {
-            return true;
-        }
-
-        // Known source code extensions - never binary (even with UTF-8 chars)
-        if SOURCE_CODE_EXTENSIONS.contains(&ext_lower.as_str()) {
-            return false;
-        }
-    }
-
-    // Check magic bytes only for unknown extensions
-    if let Ok(mut file) = std::fs::File::open(path) {
-        use std::io::Read;
-        let mut buffer = [0u8; 512];
-        if let Ok(n) = file.read(&mut buffer)
-            && n > 0
-        {
-            // Only null bytes indicate true binary (executables, images, etc.)
-            // UTF-8 encoded text files may have non-ASCII but never null bytes
-            let null_count = buffer[..n].iter().filter(|&&b| b == 0).count();
-            if null_count > 0 {
-                return true;
-            }
-        }
-    }
-
-    false
-}
 
 /// Build a globset from user patterns.
 pub fn build_globset(patterns: &[String]) -> Option<GlobSet> {
@@ -177,7 +124,6 @@ pub fn resolve_event_constants_across_files(analyses: &mut [FileAnalysis]) {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn analyze_file(
     path: &Path,
     root_canon: &Path,
@@ -186,8 +132,6 @@ pub(crate) fn analyze_file(
     py_roots: &[PathBuf],
     py_stdlib: &HashSet<String>,
     symbol: Option<&str>,
-    custom_command_macros: &[String],
-    command_cfg: &CommandDetectionConfig,
 ) -> io::Result<FileAnalysis> {
     let canonical = path.canonicalize()?;
     if !canonical.starts_with(root_canon) {
@@ -197,30 +141,8 @@ pub(crate) fn analyze_file(
         ));
     }
 
-    // Check if file is binary and skip with warning
-    if is_binary_file(&canonical) {
-        eprintln!(
-            "[loctree][warn] Skipping binary file: {}",
-            canonical.display()
-        );
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "binary file skipped",
-        ));
-    }
-
     // nosemgrep:rust.actix.path-traversal.tainted-path.tainted-path - canonicalized and bounded to root_canon above
-    let content = match std::fs::read_to_string(&canonical) {
-        Ok(c) => c,
-        Err(e) if e.kind() == io::ErrorKind::InvalidData => {
-            eprintln!(
-                "[loctree][warn] Skipping file with invalid UTF-8: {}",
-                canonical.display()
-            );
-            return Err(e);
-        }
-        Err(e) => return Err(e),
-    };
+    let content = std::fs::read_to_string(&canonical)?;
     let relative = canonical
         .strip_prefix(root_canon)
         .unwrap_or(&canonical)
@@ -234,21 +156,10 @@ pub(crate) fn analyze_file(
         .unwrap_or_default();
 
     let mut analysis = match ext.as_str() {
-        "rs" => analyze_rust_file(&content, relative, custom_command_macros),
+        "rs" => analyze_rust_file(&content, relative),
         "css" => analyze_css_file(&content, relative),
         "py" => analyze_py_file(
             &content, &canonical, root_canon, extensions, relative, py_roots, py_stdlib,
-        ),
-        "go" => crate::analyzer::go::analyze_go_file(&content, relative),
-        "dart" => analyze_dart_file(&content, relative),
-        "html" | "htm" => analyze_html_file(
-            &content,
-            &canonical,
-            root_canon,
-            extensions,
-            ts_resolver,
-            relative,
-            command_cfg,
         ),
         _ => analyze_js_file(
             &content,
@@ -257,7 +168,6 @@ pub(crate) fn analyze_file(
             extensions,
             ts_resolver,
             relative,
-            command_cfg,
         ),
     };
 
@@ -279,23 +189,14 @@ pub(crate) fn analyze_file(
     analysis.is_test = is_test;
     analysis.is_generated = is_generated;
 
-    // Resolve Rust imports and reexports
+    // Resolve Rust imports
     if ext == "rs" {
         let crate_root = find_rust_crate_root(&canonical);
         if let Some(ref crate_root) = crate_root {
-            // Resolve imports
             for imp in analysis.imports.iter_mut() {
                 if imp.resolved_path.is_none() {
                     imp.resolved_path =
                         resolve_rust_import(&imp.source, &canonical, crate_root, root_canon);
-                }
-            }
-            // Resolve reexports (pub use statements)
-            // This is critical for dead code detection - reexported symbols are NOT dead
-            for re in analysis.reexports.iter_mut() {
-                if re.resolved.is_none() {
-                    re.resolved =
-                        resolve_rust_import(&re.source, &canonical, crate_root, root_canon);
                 }
             }
         }
@@ -306,8 +207,7 @@ pub(crate) fn analyze_file(
         if imp.resolved_path.is_none() && imp.source.starts_with('.') {
             let resolved = match ext.as_str() {
                 "py" => resolve_python_relative(&imp.source, &canonical, root_canon, extensions),
-                "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "css" | "svelte" | "vue" | "html"
-                | "htm" => ts_resolver
+                "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "css" => ts_resolver
                     .and_then(|r| r.resolve(&imp.source, extensions))
                     .or_else(|| {
                         resolve_js_relative(&canonical, root_canon, &imp.source, extensions)
@@ -498,7 +398,6 @@ mod tests {
                 kind: "emit_ident".to_string(),
                 awaited: false,
                 payload: None,
-                is_dynamic: false,
             }],
             event_consts: consts,
             ..Default::default()
@@ -531,16 +430,9 @@ mod tests {
                     symbols: vec![crate::types::ImportSymbol {
                         name: "EVENT_NAME".to_string(),
                         alias: None,
-                        is_default: false,
                     }],
                     resolution: crate::types::ImportResolutionKind::Local,
                     is_type_checking: false,
-                    is_lazy: false,
-                    is_crate_relative: false,
-                    is_super_relative: false,
-                    is_self_relative: false,
-                    raw_path: String::new(),
-                    is_mod_declaration: false,
                 }],
                 event_listens: vec![crate::types::EventRef {
                     raw_name: Some("EVENT_NAME".to_string()),
@@ -549,7 +441,6 @@ mod tests {
                     kind: "listen_ident".to_string(),
                     awaited: false,
                     payload: None,
-                    is_dynamic: false,
                 }],
                 ..Default::default()
             },
@@ -580,7 +471,6 @@ mod tests {
                     kind: "emit_ident".to_string(),
                     awaited: false,
                     payload: None,
-                    is_dynamic: false,
                 }],
                 ..Default::default()
             },
@@ -600,7 +490,6 @@ mod tests {
                 kind: "emit_ident".to_string(),
                 awaited: false,
                 payload: None,
-                is_dynamic: false,
             }],
             ..Default::default()
         }];
@@ -632,16 +521,9 @@ mod tests {
                     symbols: vec![crate::types::ImportSymbol {
                         name: "ORIGINAL".to_string(),
                         alias: Some("ALIASED".to_string()),
-                        is_default: false,
                     }],
                     resolution: crate::types::ImportResolutionKind::Local,
                     is_type_checking: false,
-                    is_lazy: false,
-                    is_crate_relative: false,
-                    is_super_relative: false,
-                    is_self_relative: false,
-                    raw_path: String::new(),
-                    is_mod_declaration: false,
                 }],
                 event_emits: vec![crate::types::EventRef {
                     raw_name: Some("ALIASED".to_string()),
@@ -650,7 +532,6 @@ mod tests {
                     kind: "emit_ident".to_string(),
                     awaited: false,
                     payload: None,
-                    is_dynamic: false,
                 }],
                 ..Default::default()
             },
