@@ -25,135 +25,134 @@ fn install_broken_pipe_handler() {
 }
 
 fn format_usage() -> &'static str {
-    "loctree (Rust) - AI-oriented Project Analyzer\n\n\
-Quick start:\n  \
-  loctree                   Scan current directory, write snapshot to .loctree/\n  \
-  loctree --for-ai          AI summary with quick wins and hub files (JSON)\n  \
-  loctree slice <file>      Extract context for AI agents (deps + consumers)\n  \
-  loctree trace <handler>   Investigate WHY a handler is unused/missing\n  \
-  loctree -A --graph        Analyze imports + generate graph report\n\n\
-Usage: loctree [root ...] [options]\n\n\
-Modes:\n  \
-  init (default)            Scan and save snapshot to .loctree/snapshot.json\n  \
-  slice <file>              Holographic slice: extract core + deps + consumers for AI\n  \
-  trace <handler>           Trace handler: show BE definition, FE invokes, verdict\n  \
-  --for-ai                  AI summary: quick wins, hub files, slice commands (JSON)\n  \
-  --analyze-imports, -A     Import/export analyzer (duplicates, dead symbols, FE↔BE coverage)\n  \
-  --tree                    Directory tree view with LOC counts\n\n\
+    "loctree - Static Analysis for AI Agents\n\n\
+PHILOSOPHY: Scan the WHOLE repo once, then use `slice` to extract context.\n\
+            Never scan subdirectories - always maintain full repo context.\n\n\
+Quick Start:\n  \
+  loctree                        Scan repo → .loctree/snapshot.json\n  \
+  loctree slice src/foo.ts       Extract file context for AI agent\n  \
+  loctree -A --report r.html     Full analysis with visual report\n\n\
+Core Commands:\n  \
+  (no args)         Scan whole repo, save snapshot (incremental)\n  \
+  slice <file>      Extract file + dependencies + consumers for AI\n  \
+  trace <handler>   Debug why a Tauri handler is unused/missing\n  \
+  --for-ai          Quick-wins + hub files summary (JSON)\n\n\
+Analysis (-A):\n  \
+  -A                Full import/export analysis\n  \
+  -A --dead         Find unused exports (Janitor mode)\n  \
+  -A --circular     Find circular imports\n  \
+  -A --graph        Visualize import graph\n  \
+  -A --report <f>   HTML report with FE↔BE coverage\n\n\
 Slice options:\n  \
-  --consumers               Include files that import the target\n  \
-  --json                    Output as JSON (for piping to AI)\n\n\
-Analyzer options (-A):\n  \
-  --ext <list>              Extensions (default: auto-detected or ts,tsx,js,jsx,mjs,cjs,rs,css,py)\n  \
-  --limit <N>               Top-N duplicates (default 8)\n  \
-  --html-report <file>      HTML report output\n  \
-  --graph                   Embed import graph in report\n  \
-  --circular                Find circular imports\n  \
-  --entrypoints             List entry points (main, __main__)\n  \
-  --dead                    List potentially unused exports (Janitor mode)\n  \
-  --sarif                   SARIF 2.1.0 output for CI integration\n  \
-  --serve                   Local server for editor integration\n  \
-  --json                    JSON output\n\n\
-Pipeline checks (CI-friendly):\n  \
-  --fail-on-missing-handlers   Exit 1 if FE invokes missing BE handlers\n  \
-  --fail-on-ghost-events       Exit 1 if events have no listeners/emitters\n  \
-  --fail-on-races              Exit 1 if listener/await races detected\n\n\
+  --consumers       Include files that import the target\n  \
+  --json            Machine-readable output (pipe to AI)\n\n\
 Common:\n  \
-  -I, --ignore <path>       Ignore path (repeatable)\n  \
-  .loctreeignore            Auto-loaded if exists (gitignore-style patterns)\n  \
-  --gitignore, -g           Respect .gitignore\n  \
-  --full-scan               Ignore mtime, re-analyze all files\n  \
-  --verbose                 Show detailed progress\n  \
-  --help, -h                Show this message\n  \
-  --version                 Show version\n\n\
+  -g, --gitignore   Respect .gitignore\n  \
+  --verbose         Detailed progress\n  \
+  --help-full       All options (for agents)\n\n\
 Examples:\n  \
-  loctree                                    # Quick snapshot of current dir\n  \
-  loctree slice src/main.rs --consumers      # Extract context for AI\n  \
-  loctree slice src/App.tsx --json | claude  # Pipe to Claude\n  \
-  loctree -A --circular                      # Find circular imports\n  \
-  loctree -A --dead --confidence high        # Find dead exports\n\n\
-More: loctree --help-full for all options\n"
+  loctree                                    # Init/update snapshot\n  \
+  loctree slice src/main.rs --consumers      # Context for AI\n  \
+  loctree slice src/App.tsx --json | llm     # Pipe to LLM\n  \
+  loctree -A --dead --confidence high        # Find dead code\n  \
+  loctree -A --report out.html --serve       # Interactive report\n\n\
+IMPORTANT: Always run bare `loctree` from repo root first!\n\
+           Then use `slice` for specific files/components.\n\n\
+More: loctree --help-full\n"
 }
 
 fn format_usage_full() -> &'static str {
-    "loctree (Rust) - AI-oriented Project Analyzer - Full reference\n\n\
-Usage: loctree [root ...] [options]\n\n\
-Modes:\n  \
-  init (default)            Scan and save snapshot to .loctree/snapshot.json\n  \
-  slice <file>              Holographic slice: extract context for AI agents\n  \
-  --analyze-imports, -A     Import/export analyzer mode\n  \
-  --tree                    Directory tree view with LOC counts\n\n\
-Slice mode options:\n  \
-  slice <file>              Target file to extract context for\n  \
-  --consumers               Include files that import the target\n  \
-  --json                    Output as JSON (for piping to AI agents)\n\n\
-Presets:\n  \
-  --preset-tauri            Tauri stack defaults (ts,tsx,rs + ignore-symbols)\n  \
-  --preset-styles           CSS/Tailwind defaults (css,scss,ts,tsx)\n  \
-  --ai                      Compact AI-friendly JSON output\n\n\
-Auto-detection:\n  \
-  Stack is auto-detected from: Cargo.toml, tsconfig.json, pyproject.toml, vite.config.*, src-tauri/\n\n\
-Tree mode options:\n  \
-  --summary[=N]             Show totals + top N large files (default 5)\n  \
-  --loc <n>                 LOC threshold for large-file highlighting (default 1000)\n  \
-  -L, --max-depth <n>       Limit recursion depth (0 = direct children only)\n  \
-  --show-hidden, -H         Include dotfiles\n  \
-  --find-artifacts          Find build artifact dirs (node_modules, target, .venv, etc.)\n  \
-  --json                    JSON output instead of tree view\n\n\
-Analyzer mode options (-A):\n  \
-  --ext <list>              Comma-separated extensions (default: auto-detected)\n  \
-  --limit <N>               Top-N duplicate exports / dynamic imports (default 8)\n  \
-  --top-dead-symbols <N>    Cap dead-symbol list (default 20)\n  \
-  --skip-dead-symbols       Omit dead-symbol analysis entirely\n  \
-  --ignore-symbols <list>   Symbols to skip in duplicate counting\n  \
-  --ignore-symbols-preset <name>  Presets: common | tauri\n  \
-  --focus <glob[,..]>       Filter results to matching globs\n  \
-  --exclude-report <glob[,..]>  Exclude files from report (e.g. **/__tests__/**)\n  \
-  --py-root <path>          Extra Python import roots (repeatable)\n  \
-  --html-report <file>      Write HTML report to file\n  \
-  --graph                   Embed import graph in HTML report\n  \
-  --circular                Find circular imports (SCC analysis)\n  \
-  --entrypoints             List entry points (main, __main__, index)\n  \
-  --dead                    List potentially unused exports (Janitor mode)\n  \
-  --confidence <level>      Dead exports confidence filter: normal | high\n  \
-  --sarif                   SARIF 2.1.0 output for CI integration\n  \
-  --symbol <name>           Search for symbol across all files\n  \
-  --impact <file>           Show what files import the target\n  \
-  --check <query>           Find similar existing components/symbols\n  \
-  --serve                   Start local server for editor integration\n  \
-  --serve-once              Start server, exit after report generation\n  \
-  --port <n>                Port for --serve (default: random)\n  \
-  --editor <name>           Editor: code|cursor|windsurf|jetbrains|none (default: auto)\n  \
-  --json                    JSON output\n  \
-  --jsonl                   JSON Lines output (one object per line)\n\n\
-Pipeline checks (CI):\n  \
-  --fail-on-missing-handlers   Exit 1 if FE invokes missing BE handlers\n  \
-  --fail-on-ghost-events       Exit 1 if events lack listeners/emitters\n  \
-  --fail-on-races              Exit 1 if listener/await races detected\n\n\
-Graph limits:\n  \
-  --max-graph-nodes <N>     Skip graph if above node count\n  \
-  --max-graph-edges <N>     Skip graph if above edge count\n\n\
-Common:\n  \
-  -I, --ignore <path>       Ignore path (repeatable)\n  \
-  .loctreeignore            Auto-loaded if exists (gitignore-style patterns)\n  \
-  --gitignore, -g           Respect .gitignore rules\n  \
-  --scan-all                Include node_modules, target, .venv, __pycache__ (normally skipped)\n  \
-  --full-scan               Ignore mtime cache, re-analyze all files\n  \
-  --color[=mode]            Colorize output: auto|always|never (default auto)\n  \
-  --editor-cmd <tpl>        Command template for opening files\n  \
-  --verbose                 Show detailed progress and warnings\n  \
-  --help, -h                Show quick help\n  \
-  --help-full               Show this full reference\n  \
-  --version                 Show version\n\n\
-Examples:\n  \
-  loctree                                        # Snapshot current dir (incremental)\n  \
-  loctree slice src/main.rs --consumers --json   # Extract AI context\n  \
-  loctree -A --circular                          # Find circular imports\n  \
-  loctree -A --entrypoints                       # List entry points\n  \
-  loctree -A --sarif > results.sarif             # CI-friendly output\n  \
-  loctree src -A --graph --html-report r.html    # Full analysis\n  \
-  loctree . --preset-tauri -A --serve            # Tauri project\n  \
-  loctree backend -A --ext py --py-root src      # Python project\n"
+    "loctree - Static Analysis for AI Agents (Full Reference)\n\n\
+PHILOSOPHY: Scan the WHOLE repo once, then use `slice` to extract context.\n\
+            Don't scan subdirectories - always maintain full repo context.\n\n\
+Usage: loctree [options]\n\n\
+=== MODES ===\n\n  \
+(default)         Scan repo, save snapshot to .loctree/snapshot.json\n  \
+slice <file>      Extract file + deps + consumers for AI agents\n  \
+trace <handler>   Debug Tauri handler (shows BE def, FE calls, verdict)\n  \
+--for-ai          Quick-wins + hub files + slice commands (JSON)\n  \
+-A                Import/export analyzer (duplicates, dead, coverage)\n  \
+--tree            Directory tree with LOC counts\n\n\
+=== SLICE MODE ===\n\n  \
+slice <file>      Target file to extract context for\n  \
+--consumers       Include files that import the target\n  \
+--json            JSON output (pipe to AI agent)\n\n\
+=== ANALYZER MODE (-A) ===\n\n\
+Analysis:\n  \
+  --dead            Find unused exports (Janitor mode)\n  \
+  --circular        Find circular imports (SCC analysis)\n  \
+  --entrypoints     List entry points (main, __main__, index)\n  \
+  --symbol <name>   Search for symbol across all files\n  \
+  --impact <file>   Show what imports the target file\n  \
+  --check <query>   Find similar components/symbols (fuzzy match)\n\n\
+Output:\n  \
+  --report <file>   HTML report (alias: --html-report)\n  \
+  --graph           Embed import graph in HTML report\n  \
+  --json            JSON output\n  \
+  --jsonl           JSON Lines (one object per line)\n  \
+  --sarif           SARIF 2.1.0 for CI integration\n\n\
+Filtering:\n  \
+  --ext <list>              Extensions (default: auto-detected)\n  \
+  --focus <glob[,..]>       Filter to matching globs\n  \
+  --exclude-report <glob>   Exclude from report (e.g. **/__tests__/**)\n  \
+  --ignore-symbols <list>   Skip symbols in duplicate counting\n  \
+  --ignore-symbols-preset   Presets: common | tauri\n  \
+  --confidence <level>      Dead exports filter: normal | high\n  \
+  --limit <N>               Top-N duplicates (default 8)\n\n\
+Server:\n  \
+  --serve           Local server for editor click-to-open\n  \
+  --serve-once      Exit after report generation\n  \
+  --port <n>        Port (default: random)\n  \
+  --editor <name>   code|cursor|windsurf|jetbrains|none\n\n\
+=== GIT INTEGRATION ===\n\n  \
+git compare <from> [to]           Compare snapshots between commits\n  \
+git blame <file>                  Symbol-level blame (planned)\n  \
+git history --symbol <name>       Track symbol history (planned)\n  \
+git when-introduced --dead <sym>  Find when issue appeared (planned)\n\n\
+=== CI PIPELINE ===\n\n  \
+--fail-on-missing-handlers   Exit 1 if FE calls missing BE handlers\n  \
+--fail-on-ghost-events       Exit 1 if events lack listeners/emitters\n  \
+--fail-on-races              Exit 1 if listener/await races detected\n\n\
+=== PRESETS ===\n\n  \
+--preset-tauri    Tauri defaults (ts,tsx,rs + tauri ignore-symbols)\n  \
+--preset-styles   CSS/Tailwind defaults (css,scss,ts,tsx)\n\n\
+=== COMMON OPTIONS ===\n\n  \
+-g, --gitignore           Respect .gitignore rules\n  \
+-I, --ignore <path>       Ignore path (repeatable)\n  \
+.loctreeignore            Auto-loaded gitignore-style patterns\n  \
+--full-scan               Ignore mtime cache, re-analyze all\n  \
+--scan-all                Include node_modules, target, .venv\n  \
+--verbose                 Detailed progress\n  \
+--color[=mode]            auto|always|never\n  \
+--version                 Show version\n\n\
+=== TREE MODE ===\n\n  \
+--tree                    Directory tree with LOC counts\n  \
+--summary[=N]             Show totals + top N large files\n  \
+--loc <n>                 LOC threshold (default 1000)\n  \
+-L, --max-depth <n>       Limit recursion depth\n  \
+--show-hidden, -H         Include dotfiles\n  \
+--find-artifacts          Find node_modules, target, .venv\n\n\
+=== ADVANCED ===\n\n  \
+--py-root <path>          Extra Python import roots\n  \
+--max-graph-nodes <N>     Skip graph if too many nodes\n  \
+--max-graph-edges <N>     Skip graph if too many edges\n  \
+--editor-cmd <tpl>        Custom open command template\n  \
+--top-dead-symbols <N>    Cap dead-symbol list (default 20)\n  \
+--skip-dead-symbols       Omit dead-symbol analysis\n\n\
+=== EXAMPLES ===\n\n  \
+# Core workflow - scan once, slice many\n  \
+loctree                                    # Scan repo\n  \
+loctree slice src/main.rs --consumers      # Extract context\n  \
+loctree slice src/App.tsx --json | claude  # Pipe to AI\n\n  \
+# Analysis\n  \
+loctree -A --dead --confidence high        # Find dead exports\n  \
+loctree -A --circular                      # Find circular imports\n  \
+loctree -A --report out.html --serve       # Interactive report\n\n  \
+# CI integration\n  \
+loctree -A --sarif > results.sarif\n  \
+loctree -A --fail-on-missing-handlers\n\n  \
+# Git integration\n  \
+loctree git compare HEAD~5                 # What changed in last 5 commits\n"
 }
 
 fn main() -> std::io::Result<()> {

@@ -30,24 +30,28 @@
     return { nodes, edges };
   };
 
-  const applyDarkTheme = (on, graphs) => {
-    document.documentElement.classList.toggle("dark", on);
+  // Graph-only dark mode (independent of page theme)
+  const applyGraphDarkTheme = (on, graphs) => {
     graphs
       .filter(Boolean)
       .forEach((inst) => {
         if (inst && typeof inst.style === "function") {
           const style = inst.style();
-          style.selector("node").style("color", on ? "#eef2ff" : "#fff").update();
+          // Node text color: light for dark mode, dark for light mode
+          style.selector("node").style("color", on ? "#eef2ff" : "#1a1a2e").update();
+          // Edge text background: dark for dark mode, light for light mode
           style.selector("edge").style("text-background-color", on ? "#0f1115" : "#fff").update();
+          // Graph container background via cytoscape
+          inst.container().style.backgroundColor = on ? "#0f1115" : "#ffffff";
         }
       });
   };
-  const setDarkMode = (on) => applyDarkTheme(on, Array.from(cyInstances));
-  const applyDarkShared = (on) => {
+  const setGraphDarkMode = (on) => applyGraphDarkTheme(on, Array.from(cyInstances));
+  const applyGraphDarkShared = (on) => {
     darkToggles.forEach((chk) => {
       if (chk) chk.checked = on;
     });
-    setDarkMode(on);
+    setGraphDarkMode(on);
   };
 
   graphs.forEach((g) => {
@@ -131,7 +135,7 @@
     toolbar.className = "graph-toolbar";
     toolbar.innerHTML = `
       <label>filter:
-        <input type="text" size="18" placeholder="substring (e.g. features/ai-suite, .tsx)" data-role="filter-text" />
+        <input type="text" size="18" placeholder="path substring or /regex/" data-role="filter-text" title="Filter by path. Use plain text for substring match, or /pattern/ for regex." />
       </label>
       <label>min degree:
         <input type="number" min="0" value="0" style="width:60px" data-role="min-degree" />
@@ -147,11 +151,11 @@
         </select>
       </label>
       <label><input type="checkbox" data-role="toggle-labels" checked /> labels</label>
+      <label><input type="checkbox" data-role="graph-dark" /> graph dark</label>
       <span class="graph-controls">
         <button data-role="fit">fit</button>
         <button data-role="relayout">relayout</button>
         <button data-role="reset">reset</button>
-        <label><input type="checkbox" data-role="dark" /> dark</label>
         <button data-role="fullscreen">fullscreen</button>
         <button data-role="png">png</button>
         <button data-role="json">json</button>
@@ -498,7 +502,7 @@
     const fitBtn = toolbar.querySelector('[data-role="fit"]');
     const relayoutBtn = toolbar.querySelector('[data-role="relayout"]');
     const resetBtn = toolbar.querySelector('[data-role="reset"]');
-    const darkChk = toolbar.querySelector('[data-role="dark"]');
+    const darkChk = toolbar.querySelector('[data-role="graph-dark"]');
     const fsBtn = toolbar.querySelector('[data-role="fullscreen"]');
     const pngBtn = toolbar.querySelector('[data-role="png"]');
     const jsonBtn = toolbar.querySelector('[data-role="json"]');
@@ -545,7 +549,7 @@
 
     if (darkChk) {
       darkToggles.add(darkChk);
-      darkChk.addEventListener("change", () => applyDarkShared(darkChk.checked));
+      darkChk.addEventListener("change", () => applyGraphDarkShared(darkChk.checked));
     }
 
     const fsTarget = container;
@@ -612,12 +616,44 @@
       const path = data.full || data.id;
       const comp = componentMap.get(data.component);
       const compLabel = comp ? `C${comp.id} (${comp.size} nodes${comp.detached ? ", detached" : ""})` : "—";
-      // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method -- SAFETY: path escaped via escapeHtml(); other values are numbers
+
+      // Get current filter text for highlighting
+      const filterInput = toolbar.querySelector('[data-role="filter-text"]');
+      const filterText = (filterInput?.value || "").toLowerCase().trim();
+
+      // Highlight filter match in path
+      let pathHtml;
+      if (filterText && path.toLowerCase().includes(filterText)) {
+        // Case-insensitive highlight
+        const idx = path.toLowerCase().indexOf(filterText);
+        const before = escapeHtml(path.slice(0, idx));
+        const match = escapeHtml(path.slice(idx, idx + filterText.length));
+        const after = escapeHtml(path.slice(idx + filterText.length));
+        pathHtml = `${before}<mark style="background:#ffd700;color:#000;padding:0 2px;border-radius:2px">${match}</mark>${after}`;
+      } else {
+        pathHtml = escapeHtml(path);
+      }
+
+      // Build "open in editor" link if openBase available
+      const openLink = openBase
+        ? `<a href="${openBase}/open?f=${encodeURIComponent(path)}&l=1" style="color:#6af;text-decoration:underline;font-size:10px">open in editor</a>`
+        : "";
+
+      // Get incoming/outgoing edges for context
+      const incomingEdges = cy.edges().filter(e => e.data("target") === data.id);
+      const outgoingEdges = cy.edges().filter(e => e.data("source") === data.id);
+      const edgeInfo = `imports: ${outgoingEdges.length} | imported by: ${incomingEdges.length}`;
+
+      // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method -- SAFETY: path escaped via escapeHtml(); other values are numbers or safe
       tooltip.innerHTML = `
-        <div style="margin-bottom:4px"><strong>${escapeHtml(path)}</strong></div>
+        <div style="margin-bottom:4px"><strong>${pathHtml}</strong></div>
         <div>LOC: ${data.loc || 0} | degree: ${data.degree || 0}</div>
+        <div>${edgeInfo}</div>
         <div>component: ${compLabel}</div>
-        <button data-role="copy-path" style="margin-top:4px;font-size:10px;cursor:pointer">copy path</button>
+        <div style="margin-top:4px;display:flex;gap:8px;align-items:center">
+          <button data-role="copy-path" style="font-size:10px;cursor:pointer">copy path</button>
+          ${openLink}
+        </div>
       `;
       const copyBtn = tooltip.querySelector('[data-role="copy-path"]');
       if (copyBtn)
