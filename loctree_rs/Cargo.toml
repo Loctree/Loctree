@@ -1,6 +1,6 @@
 [package]
 name = "loctree"
-version = "0.5.2"
+version = "0.5.3"
 edition = "2024"
 authors = ["LibraxisAI <the1st@whoai.am>"]
 description = "Fast, language-aware codebase analyzer for detecting dead exports, circular imports, and generating dependency graphs"
