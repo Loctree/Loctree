@@ -296,12 +296,14 @@ pub fn scan_roots(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
                 let collect_edges = cfg.collect_edges
                     || (cfg.parsed.graph && options.report_path.is_some())
                     || options.impact.is_some();
-                if collect_edges && let Some(target) = &re.resolved {
-                    graph_edges.push((
-                        analysis.path.clone(),
-                        target.clone(),
-                        "reexport".to_string(),
-                    ));
+                if collect_edges {
+                    if let Some(target) = &re.resolved {
+                        graph_edges.push((
+                            analysis.path.clone(),
+                            target.clone(),
+                            "reexport".to_string(),
+                        ));
+                    }
                 }
             }
             if !analysis.dynamic_imports.is_empty() {
