@@ -1,18 +1,9 @@
-mod analyzer;
-mod args;
-mod detect;
-mod fs_utils;
-mod similarity;
-mod slicer;
-mod snapshot;
-mod tree;
-mod types;
-
 use std::panic;
 use std::path::PathBuf;
 
-use args::parse_args;
-use types::Mode;
+use loctree::args::{self, parse_args};
+use loctree::types::Mode;
+use loctree::{OutputMode, analyzer, detect, fs_utils, slicer, snapshot, tree};
 
 fn install_broken_pipe_handler() {
     let default_hook = panic::take_hook();
@@ -253,7 +244,7 @@ fn main() -> std::io::Result<()> {
                 .first()
                 .cloned()
                 .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-            let json_output = matches!(parsed.output, types::OutputMode::Json);
+            let json_output = matches!(parsed.output, OutputMode::Json);
             slicer::run_slice(&root, target, parsed.slice_consumers, json_output, &parsed)?;
         }
         Mode::Trace => {
@@ -328,7 +319,7 @@ fn run_trace(
         &registered_impls,
     );
 
-    if matches!(parsed.output, types::OutputMode::Json) {
+    if matches!(parsed.output, OutputMode::Json) {
         print_trace_json(&result);
     } else {
         print_trace_human(&result);

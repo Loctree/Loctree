@@ -1,17 +1,17 @@
 {
   "metadata": {
     "schema_version": "0.5.0-rc",
-    "generated_at": "2025-11-29T23:48:57.628351000Z",
+    "generated_at": "2025-11-30T01:33:13.654202000Z",
     "roots": [
-      "/Users/maciejgad/.claude-worktrees/loctree/awesome-gauss/loctree_rs/tests/fixtures/tauri_app"
+      "/Users/maciejgad/hosted/loctree/loctree_rs/tests/fixtures/tauri_app"
     ],
     "languages": [
-      "rs",
-      "ts"
+      "ts",
+      "rs"
     ],
     "file_count": 2,
     "total_loc": 45,
-    "scan_duration_ms": 46,
+    "scan_duration_ms": 60,
     "resolver_config": null
   },
   "files": [
@@ -79,7 +79,7 @@
       "matches": [],
       "entry_points": [],
       "tauri_registered_handlers": [],
-      "mtime": 1764458929
+      "mtime": 1764415308
     },
     {
       "path": "src-tauri/src/main.rs",
@@ -128,7 +128,7 @@
         "save_data",
         "unused_handler"
       ],
-      "mtime": 1764458929
+      "mtime": 1764415312
     }
   ],
   "edges": [],
@@ -138,33 +138,6 @@
     ]
   },
   "command_bridges": [
-    {
-      "name": "missing_handler",
-      "frontend_calls": [
-        [
-          "src/App.tsx",
-          16
-        ]
-      ],
-      "backend_handler": null,
-      "has_handler": false,
-      "is_called": true
-    },
-    {
-      "name": "save_data",
-      "frontend_calls": [
-        [
-          "src/App.tsx",
-          11
-        ]
-      ],
-      "backend_handler": [
-        "src-tauri/src/main.rs",
-        9
-      ],
-      "has_handler": true,
-      "is_called": true
-    },
     {
       "name": "greet",
       "frontend_calls": [
@@ -189,6 +162,33 @@
       ],
       "has_handler": true,
       "is_called": false
+    },
+    {
+      "name": "save_data",
+      "frontend_calls": [
+        [
+          "src/App.tsx",
+          11
+        ]
+      ],
+      "backend_handler": [
+        "src-tauri/src/main.rs",
+        9
+      ],
+      "has_handler": true,
+      "is_called": true
+    },
+    {
+      "name": "missing_handler",
+      "frontend_calls": [
+        [
+          "src/App.tsx",
+          16
+        ]
+      ],
+      "backend_handler": null,
+      "has_handler": false,
+      "is_called": true
     }
   ],
   "event_bridges": [],

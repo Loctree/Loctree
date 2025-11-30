@@ -1,16 +1,16 @@
 {
   "metadata": {
     "schema_version": "0.5.0-rc",
-    "generated_at": "2025-11-29T23:48:57.619240000Z",
+    "generated_at": "2025-11-30T01:33:13.648941000Z",
     "roots": [
-      "/Users/maciejgad/.claude-worktrees/loctree/awesome-gauss/loctree_rs/tests/fixtures/simple_ts"
+      "/Users/maciejgad/hosted/loctree/loctree_rs/tests/fixtures/simple_ts"
     ],
     "languages": [
       "ts"
     ],
     "file_count": 3,
     "total_loc": 26,
-    "scan_duration_ms": 41,
+    "scan_duration_ms": 57,
     "resolver_config": null
   },
   "files": [
@@ -71,7 +71,7 @@
       "matches": [],
       "entry_points": [],
       "tauri_registered_handlers": [],
-      "mtime": 1764458929
+      "mtime": 1764415285
     },
     {
       "path": "src/utils/date.ts",
@@ -105,7 +105,7 @@
       "matches": [],
       "entry_points": [],
       "tauri_registered_handlers": [],
-      "mtime": 1764458929
+      "mtime": 1764415286
     },
     {
       "path": "src/utils/greeting.ts",
@@ -139,7 +139,7 @@
       "matches": [],
       "entry_points": [],
       "tauri_registered_handlers": [],
-      "mtime": 1764458929
+      "mtime": 1764415285
     }
   ],
   "edges": [
@@ -155,19 +155,19 @@
     }
   ],
   "export_index": {
-    "greet": [
+    "farewell": [
       "src/utils/greeting.ts"
     ],
     "main": [
       "src/index.ts"
     ],
-    "farewell": [
+    "formatDate": [
+      "src/utils/date.ts"
+    ],
+    "greet": [
       "src/utils/greeting.ts"
     ],
     "parseDate": [
-      "src/utils/date.ts"
-    ],
-    "formatDate": [
       "src/utils/date.ts"
     ]
   },

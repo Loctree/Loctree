@@ -12,7 +12,7 @@ pub fn GraphContainer(
     view! {
         <div class="graph-anchor">
             <strong>"Import graph"</strong>
-            <span class="muted">"Graph lives in the bottom drawer. Use fit/reset/filter controls there."</span>
+            <span class="muted">"Use the toolbar below to filter, relayout, and export the graph."</span>
         </div>
 
         {section.graph_warning.map(|warn| {

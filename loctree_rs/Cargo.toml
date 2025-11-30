@@ -10,6 +10,10 @@ readme = "../README.md"
 keywords = ["static-analysis", "dead-code", "imports", "exports", "codebase"]
 categories = ["development-tools", "command-line-utilities"]
 
+[lib]
+name = "loctree"
+path = "src/lib.rs"
+
 [[bin]]
 name = "loctree"
 path = "src/main.rs"
@@ -22,11 +26,10 @@ regex = "1.12"
 globset = "0.4"
 heck = "0.5"
 time = { version = "0.3", features = ["formatting"] }
-report-leptos = { version = "0.1", path = "../reports", optional = true }
+report-leptos = { version = "0.1", path = "../reports" }
 
 [features]
-default = ["leptos-reports"]
-leptos-reports = ["dep:report-leptos"]
+default = []
 
 [dev-dependencies]
 tempfile = "3"
