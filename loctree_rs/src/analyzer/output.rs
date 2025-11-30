@@ -6,131 +6,19 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 use crate::args::ParsedArgs;
-use crate::snapshot::GitContext;
 use crate::types::{FileAnalysis, ImportKind, ImportResolutionKind, OutputMode, ReexportKind};
 
 use super::CommandGap;
+use super::RankedDup;
 use super::ReportSection;
-use super::barrels::analyze_barrel_chaos;
 use super::classify::language_from_path;
-use super::coverage_gaps::find_coverage_gaps;
-use super::crowd::detect_all_crowds_with_edges;
-use super::cycles;
-use super::dead_parrots::{DeadFilterConfig, find_dead_exports};
 use super::graph::{MAX_GRAPH_EDGES, MAX_GRAPH_NODES, build_graph_data};
-use super::health_score::{HealthMetrics, calculate_health_score};
 use super::html::render_html_report;
 use super::insights::collect_ai_insights;
 use super::open_server::current_open_base;
-use super::report::{CommandBridge, TreeNode, TwinsData};
+use super::report::CommandBridge;
 use super::root_scan::{RootContext, normalize_module_id};
 use super::scan::resolve_event_constants_across_files;
-use super::twins::{detect_exact_twins, find_dead_parrots};
-use super::{DupSeverity, RankedDup};
-
-fn build_tree(analyses: &[FileAnalysis], root_path: &std::path::Path) -> Vec<TreeNode> {
-    #[derive(Default)]
-    struct TmpNode {
-        loc: usize,
-        children: std::collections::BTreeMap<String, TmpNode>,
-    }
-
-    let mut root = TmpNode::default();
-    let mut paths: Vec<(Vec<String>, usize)> = analyses
-        .iter()
-        .map(|a| {
-            let file_path = std::path::Path::new(&a.path);
-            // Try to strip root_path prefix for both absolute and relative paths
-            let rel = file_path.strip_prefix(root_path).unwrap_or(file_path);
-            let parts: Vec<_> = rel
-                .iter()
-                .map(|p| p.to_string_lossy().to_string())
-                .collect();
-            (parts, a.loc)
-        })
-        .collect();
-    paths.sort_by(|a, b| a.0.cmp(&b.0));
-
-    for (parts, loc) in paths {
-        let mut cursor = &mut root;
-        for part in parts {
-            let entry = cursor.children.entry(part).or_default();
-            cursor = entry;
-        }
-        cursor.loc = loc;
-    }
-
-    fn finalize(name: Option<String>, node: &TmpNode) -> TreeNode {
-        let mut loc_sum = node.loc;
-        let mut children: Vec<TreeNode> = node
-            .children
-            .iter()
-            .map(|(k, v)| finalize(Some(k.clone()), v))
-            .collect();
-        for c in &children {
-            loc_sum += c.loc;
-        }
-        children.sort_by(|a, b| a.path.cmp(&b.path));
-        TreeNode {
-            path: name.unwrap_or_default(),
-            loc: loc_sum,
-            children,
-        }
-    }
-
-    root.children
-        .iter()
-        .map(|(k, v)| finalize(Some(k.clone()), v))
-        .collect()
-}
-
-/// Build edges for cycle detection even when graph collection is disabled.
-/// Falls back to resolved imports/re-exports in analyses.
-fn build_cycle_edges(
-    graph_edges: &[(String, String, String)],
-    analyses: &[FileAnalysis],
-) -> Vec<(String, String, String)> {
-    if !graph_edges.is_empty() {
-        return graph_edges.to_vec();
-    }
-
-    let mut edges = Vec::new();
-    for analysis in analyses {
-        for imp in &analysis.imports {
-            if let Some(target) = &imp.resolved_path {
-                let kind = if imp.is_mod_declaration {
-                    // Rust `mod foo;` declarations create parent->child module relationships
-                    // These are NOT import edges and should not contribute to cycle detection
-                    "mod"
-                } else if imp.is_type_checking {
-                    "type_import"
-                } else if imp.is_lazy {
-                    "lazy_import"
-                } else {
-                    match imp.kind {
-                        ImportKind::Dynamic => "dynamic_import",
-                        _ => "import",
-                    }
-                };
-                if kind != "type_import" {
-                    edges.push((analysis.path.clone(), target.clone(), kind.to_string()));
-                }
-            }
-        }
-
-        for reexport in &analysis.reexports {
-            if let Some(target) = &reexport.resolved {
-                edges.push((
-                    analysis.path.clone(),
-                    target.clone(),
-                    "reexport".to_string(),
-                ));
-            }
-        }
-    }
-
-    edges
-}
 
 pub struct RootArtifacts {
     pub json_items: Vec<serde_json::Value>,
@@ -148,15 +36,13 @@ pub fn process_root_context(
     global_unregistered_handlers: &[CommandGap],
     global_unused_handlers: &[CommandGap],
     pipeline_summary: &serde_json::Value,
-    git: Option<&GitContext>,
     schema_name: &str,
     schema_version: &str,
-    global_analyses: &[FileAnalysis],
 ) -> RootArtifacts {
     let mut json_items = Vec::new();
     let RootContext {
         root_path,
-        options: _options,
+        options,
         mut analyses,
         export_index,
         dynamic_summary,
@@ -181,7 +67,7 @@ pub fn process_root_context(
         .map(|a| (a.path.clone(), a.clone()))
         .collect();
 
-    let _duplicate_exports: Vec<_> = export_index
+    let duplicate_exports: Vec<_> = export_index
         .into_iter()
         .filter(|(_, files)| files.len() > 1)
         .collect();
@@ -203,27 +89,12 @@ pub fn process_root_context(
             &loc_map,
             fe_commands,
             be_commands,
-            parsed.max_graph_nodes.unwrap_or(MAX_GRAPH_NODES),
-            parsed.max_graph_edges.unwrap_or(MAX_GRAPH_EDGES),
+            options.max_graph_nodes.unwrap_or(MAX_GRAPH_NODES),
+            options.max_graph_edges.unwrap_or(MAX_GRAPH_EDGES),
         )
     } else {
         (None, None)
     };
-
-    let cycle_edges = build_cycle_edges(&graph_edges, &analyses);
-    let (circular_imports, lazy_circular_imports) = cycles::find_cycles_with_lazy(&cycle_edges);
-
-    // Detect crowds (naming collision patterns)
-    // Convert cycle_edges to GraphEdge format for crowd detection
-    let graph_edges_for_crowd: Vec<crate::snapshot::GraphEdge> = cycle_edges
-        .iter()
-        .map(|(from, to, label)| crate::snapshot::GraphEdge {
-            from: from.clone(),
-            to: to.clone(),
-            label: label.clone(),
-        })
-        .collect();
-    let crowds = detect_all_crowds_with_edges(&analyses, &graph_edges_for_crowd);
 
     let mut sorted_paths: Vec<String> = analyses.iter().map(|a| a.path.clone()).collect();
     sorted_paths.sort();
@@ -235,8 +106,6 @@ pub fn process_root_context(
 
     let mut imports_targeted: HashSet<String> = HashSet::new();
     let mut files_json: Vec<_> = Vec::new();
-    let mut casing_issues: Vec<serde_json::Value> = Vec::new();
-    let mut dead_symbols_total = 0usize;
     for path in &sorted_paths {
         if let Some(a) = analysis_by_path.get(path) {
             let mut imports = a.imports.clone();
@@ -263,30 +132,14 @@ pub fn process_root_context(
             for imp in &imports {
                 if let Some(resolved) = &imp.resolved_path {
                     imports_targeted.insert(resolved.clone());
-                    imports_targeted.insert(normalize_module_id(resolved).as_key());
+                    imports_targeted.insert(normalize_module_id(resolved));
                 }
             }
             for re in &reexports {
                 if let Some(resolved) = &re.resolved {
                     imports_targeted.insert(resolved.clone());
-                    imports_targeted.insert(normalize_module_id(resolved).as_key());
-                } else {
-                    imports_targeted.insert(normalize_module_id(&re.source).as_key());
-                    imports_targeted.insert(re.source.clone());
+                    imports_targeted.insert(normalize_module_id(resolved));
                 }
-            }
-            for dyn_imp in &a.dynamic_imports {
-                imports_targeted.insert(dyn_imp.clone());
-                imports_targeted.insert(normalize_module_id(dyn_imp).as_key());
-            }
-
-            for issue in &a.command_payload_casing {
-                casing_issues.push(json!({
-                    "command": issue.command,
-                    "key": issue.key,
-                    "path": issue.path,
-                    "line": issue.line,
-                }));
             }
 
             files_json.push(json!({
@@ -300,12 +153,7 @@ pub fn process_root_context(
                 "imports": imports.iter().map(|i| json!({
                     "source": i.source,
                     "sourceRaw": i.source_raw,
-                    "kind": match i.kind {
-                        ImportKind::Static => "static",
-                        ImportKind::Type => "type",
-                        ImportKind::SideEffect => "side-effect",
-                        ImportKind::Dynamic => "dynamic",
-                    },
+                    "kind": match i.kind { ImportKind::Static => "static", ImportKind::SideEffect => "side-effect", ImportKind::Dynamic => "dynamic" },
                     "resolvedPath": i.resolved_path,
                     "isBareModule": i.is_bare,
                     "resolutionKind": match i.resolution {
@@ -470,34 +318,12 @@ pub fn process_root_context(
             "ok"
         };
 
-        // Check if the handler file emits any events
-        let (comm_type, emits_events) = if let Some((handler_path, _, _)) = &be_location {
-            if let Some(handler_analysis) = analysis_by_path.get(handler_path) {
-                let events: Vec<String> = handler_analysis
-                    .event_emits
-                    .iter()
-                    .map(|e| e.name.clone())
-                    .collect();
-                if events.is_empty() {
-                    ("invoke".to_string(), vec![])
-                } else {
-                    ("invoke+emit".to_string(), events)
-                }
-            } else {
-                ("invoke".to_string(), vec![])
-            }
-        } else {
-            ("invoke".to_string(), vec![])
-        };
-
         command_bridges.push(CommandBridge {
             name: name.clone(),
             fe_locations,
             be_location,
             status: status.to_string(),
             language,
-            comm_type,
-            emits_events,
         });
     }
 
@@ -516,14 +342,10 @@ pub fn process_root_context(
             if analysis.is_test {
                 continue;
             }
-            // Exclude test fixtures from duplicate reports
-            if super::classify::should_exclude_from_reports(&analysis.path) {
-                continue;
-            }
             if exp.export_type == "default" {
                 continue;
             }
-            let norm_path = normalize_module_id(&analysis.path).as_key();
+            let norm_path = normalize_module_id(&analysis.path);
             let entry = symbol_occurrences.entry(exp.name.clone()).or_default();
             let already_present = entry.iter().any(|(_, _, _, _, norm)| norm == &norm_path);
             if already_present {
@@ -680,126 +502,32 @@ pub fn process_root_context(
         a_path.cmp(b_path)
     });
 
-    // Use the canonical find_dead_exports() which includes:
-    // - Transitive reachability from dynamic imports (React.lazy, Next.js dynamic)
-    // - imported_by_name fallback for $lib/, @scope/ aliases
-    // - Skip patterns for framework entry points, .d.ts, configs, tests
     let mut dead_symbols = Vec::new();
-    let dead_exports_for_report = if !parsed.skip_dead_symbols {
-        let open_base = current_open_base();
-        let dead_exports = find_dead_exports(
-            global_analyses,
-            true,
-            open_base.as_deref(),
-            DeadFilterConfig {
-                include_tests: parsed.with_tests,
-                include_helpers: parsed.with_helpers,
-                library_mode: parsed.library_mode,
-                example_globs: parsed.library_example_globs.clone(),
-                python_library_mode: parsed.python_library,
-                include_ambient: false,
-                include_dynamic: false,
-            },
-        );
-
-        // Convert DeadExport results to the JSON format expected by -A mode
-        // Group by symbol name since old algorithm grouped by name
-        let mut by_name: HashMap<String, Vec<String>> = HashMap::new();
-        for de in &dead_exports {
-            by_name
-                .entry(de.symbol.clone())
-                .or_default()
-                .push(de.file.clone());
+    if !parsed.skip_dead_symbols {
+        for (name, occs) in &symbol_occurrences {
+            if occs.iter().all(|(path, _, _, _, norm)| {
+                !imports_targeted.contains(path) && !imports_targeted.contains(norm)
+            }) {
+                let mut paths: Vec<_> = occs.iter().map(|(p, _, _, _, _)| p.clone()).collect();
+                paths.sort();
+                paths.dedup();
+                let public_surface = paths.iter().any(|p| {
+                    p.ends_with("index.ts")
+                        || p.ends_with("index.tsx")
+                        || p.ends_with("mod.rs")
+                        || p.ends_with("lib.rs")
+                });
+                dead_symbols
+                    .push(json!({"name": name, "paths": paths, "publicSurface": public_surface}));
+            }
         }
-
-        for (name, mut paths) in by_name {
-            paths.sort();
-            paths.dedup();
-            let public_surface = paths.iter().any(|p| {
-                p.ends_with("index.ts")
-                    || p.ends_with("index.tsx")
-                    || p.ends_with("mod.rs")
-                    || p.ends_with("lib.rs")
-            });
-            dead_symbols
-                .push(json!({"name": name, "paths": paths, "publicSurface": public_surface}));
-        }
-
         dead_symbols.sort_by(|a, b| {
             let a_name = a["name"].as_str().unwrap_or("");
             let b_name = b["name"].as_str().unwrap_or("");
             a_name.cmp(b_name)
         });
-        dead_symbols_total = dead_symbols.len();
         dead_symbols.truncate(parsed.top_dead_symbols);
-
-        // Keep the original dead_exports for the report
-        dead_exports
-    } else {
-        Vec::new()
-    };
-
-    // Run twins analysis (dead parrots, exact twins, barrel chaos)
-    let twins_data = if !parsed.skip_dead_symbols {
-        // Find dead parrots (0 imports)
-        // Note: include_tests=false for production reports
-        let twins_result = find_dead_parrots(&analyses, true, false);
-
-        // Detect exact twins (same symbol exported from multiple files)
-        let exact_twins = detect_exact_twins(&analyses, false);
-
-        // Analyze barrel chaos (missing barrels, deep chains, inconsistent paths)
-        // Build snapshot from analyses for barrel analysis
-        let snapshot_barrels: Vec<crate::snapshot::BarrelFile> = barrels
-            .iter()
-            .map(|b| crate::snapshot::BarrelFile {
-                path: b.path.clone(),
-                module_id: b.module_id.clone(),
-                reexport_count: b.reexport_count,
-                targets: b.targets.clone(),
-            })
-            .collect();
-
-        let snapshot = crate::snapshot::Snapshot {
-            metadata: crate::snapshot::SnapshotMetadata {
-                schema_version: String::new(),
-                generated_at: String::new(),
-                roots: vec![root_path.display().to_string()],
-                languages: languages.clone(),
-                file_count: analyses.len(),
-                total_loc: analyses.iter().map(|a| a.loc).sum(),
-                scan_duration_ms: 0,
-                resolver_config: None,
-                git_repo: None,
-                git_branch: None,
-                git_commit: None,
-                git_scan_id: None,
-            },
-            files: analyses.clone(),
-            edges: graph_edges
-                .iter()
-                .map(|(from, to, label)| crate::snapshot::GraphEdge {
-                    from: from.clone(),
-                    to: to.clone(),
-                    label: label.clone(),
-                })
-                .collect(),
-            export_index: std::collections::HashMap::new(),
-            command_bridges: Vec::new(),
-            event_bridges: Vec::new(),
-            barrels: snapshot_barrels,
-        };
-        let barrel_analysis = analyze_barrel_chaos(&snapshot);
-
-        // Use the types directly from twins and barrels modules
-        Some(TwinsData {
-            dead_parrots: twins_result.dead_parrots,
-            exact_twins,
-            barrel_chaos: barrel_analysis,
-        })
-    } else {
-        None
-    };
+    }
 
     let duplicate_clusters_count = clusters_json.len();
     let max_cluster_size = symbol_occurrences
@@ -839,46 +567,6 @@ pub fn process_root_context(
         }));
     }
 
-    // Visibility toggles (noise reduction)
-    let duplicates_hidden = parsed.suppress_duplicates;
-    let dynamic_hidden = parsed.suppress_dynamic;
-    let filtered_ranked_for_output = if duplicates_hidden {
-        Vec::new()
-    } else {
-        filtered_ranked.clone()
-    };
-    let clusters_json_for_output = if duplicates_hidden {
-        Vec::new()
-    } else {
-        clusters_json.clone()
-    };
-    let top_clusters_for_output = if duplicates_hidden {
-        Vec::new()
-    } else {
-        top_clusters.clone()
-    };
-    let duplicate_clusters_count_for_output = if duplicates_hidden {
-        0
-    } else {
-        duplicate_clusters_count
-    };
-    let max_cluster_size_for_output = if duplicates_hidden {
-        0
-    } else {
-        max_cluster_size
-    };
-
-    let dynamic_imports_json_for_output = if dynamic_hidden {
-        Vec::new()
-    } else {
-        dynamic_imports_json.clone()
-    };
-    let dynamic_summary_for_output = if dynamic_hidden {
-        Vec::new()
-    } else {
-        dynamic_summary.clone()
-    };
-
     let generated_at = OffsetDateTime::now_utc()
         .format(&Rfc3339)
         .unwrap_or_else(|_| String::new());
@@ -903,7 +591,7 @@ pub fn process_root_context(
         bridges_for_ai.push(cmd.clone());
     }
 
-    if matches!(parsed.output, OutputMode::Json | OutputMode::Jsonl) {
+    if matches!(options.output, OutputMode::Json | OutputMode::Jsonl) {
         if parsed.ai_mode {
             let top_limit = parsed.summary_limit;
             let mut event_alerts = Vec::new();
@@ -930,32 +618,26 @@ pub fn process_root_context(
                 "schemaVersion": schema_version,
                 "generatedAt": generated_at,
                 "rootDir": root_path,
-                "git": {
-                    "repo": git.and_then(|g| g.repo.clone()),
-                    "branch": git.and_then(|g| g.branch.clone()),
-                    "commit": git.and_then(|g| g.commit.clone()),
-                    "scanId": git.and_then(|g| g.scan_id.clone()),
-                },
                 "languages": languages_vec,
                 "filesAnalyzed": analyses.len(),
                 "summary": {
-                    "duplicateExports": filtered_ranked_for_output.len(),
+                    "duplicateExports": filtered_ranked.len(),
                     "reexportFiles": reexport_files.len(),
-                    "dynamicImports": dynamic_summary_for_output.len(),
-                "commands": {
-                    "frontendCalls": fe_commands.len(),
-                    "backendHandlers": be_commands.len(),
-                    "missingHandlers": missing_handlers.len(),
-                    "unusedHandlers": unused_handlers.len(),
-                },
+                    "dynamicImports": dynamic_summary.len(),
+                    "commands": {
+                        "frontendCalls": fe_commands.len(),
+                        "backendHandlers": be_commands.len(),
+                        "missingHandlers": missing_handlers.len(),
+                        "unusedHandlers": unused_handlers.len(),
+                    },
                     "events": {
                         "ghost": ghost_events.len(),
                         "orphan": orphan_listeners.len(),
                         "risks": pipeline_risks.len(),
                     },
                     "clusters": {
-                        "duplicateCount": duplicate_clusters_count_for_output,
-                        "maxClusterSize": max_cluster_size_for_output,
+                        "duplicateCount": duplicate_clusters_count,
+                        "maxClusterSize": max_cluster_size,
                     },
                     "barrels": {
                         "count": barrels.len(),
@@ -963,14 +645,9 @@ pub fn process_root_context(
                     },
                 },
                 "topIssues": {
-                    "duplicateExports": filtered_ranked_for_output.iter().take(top_limit).map(|dup| json!({
+                    "duplicateExports": filtered_ranked.iter().take(top_limit).map(|dup| json!({
                         "name": dup.name,
                         "canonical": dup.canonical,
-                        "canonicalLine": dup.canonical_line,
-                        "locations": dup.locations.iter().map(|loc| json!({
-                            "file": loc.file,
-                            "line": loc.line,
-                        })).collect::<Vec<_>>(),
                         "refactorTargets": dup.refactors,
                         "score": dup.score,
                     })).collect::<Vec<_>>(),
@@ -994,7 +671,7 @@ pub fn process_root_context(
                     "events": event_alerts,
                     "pipelineRisks": pipeline_risks.iter().take(top_limit).cloned().collect::<Vec<_>>(),
                     "deadSymbols": dead_symbols.iter().take(parsed.top_dead_symbols).cloned().collect::<Vec<_>>(),
-                    "duplicateClusters": top_clusters_for_output,
+                    "duplicateClusters": top_clusters,
                     "bridges": bridges_for_ai,
                     "barrels": barrels_json.iter().take(barrel_limit).cloned().collect::<Vec<_>>(),
                 },
@@ -1006,7 +683,7 @@ pub fn process_root_context(
                 }
             });
 
-            if matches!(parsed.output, OutputMode::Jsonl) {
+            if matches!(options.output, OutputMode::Jsonl) {
                 if let Ok(line) = serde_json::to_string(&ai_payload) {
                     println!("{}", line);
                 } else {
@@ -1022,38 +699,22 @@ pub fn process_root_context(
                 "generatedAt": generated_at,
                 "rootDir": root_path,
                 "root": root_path,
-                "git": {
-                    "repo": git.and_then(|g| g.repo.clone()),
-                    "branch": git.and_then(|g| g.branch.clone()),
-                    "commit": git.and_then(|g| g.commit.clone()),
-                    "scanId": git.and_then(|g| g.scan_id.clone()),
-                },
                 "languages": languages_vec,
                 "filesAnalyzed": analyses.len(),
-                "duplicateExports": filtered_ranked_for_output
+                "duplicateExports": filtered_ranked
                     .iter()
-                    .map(|dup| json!({
-                        "name": dup.name,
-                        "files": dup.files,
-                        "locations": dup.locations,
-                    }))
+                    .map(|dup| json!({"name": dup.name, "files": dup.files}))
                     .collect::<Vec<_>>(),
-                "duplicateExportsRanked": filtered_ranked_for_output
+                "duplicateExportsRanked": filtered_ranked
                     .iter()
                     .map(|dup| json!({
                         "name": dup.name,
                         "files": dup.files,
-                        "locations": dup.locations,
                         "score": dup.score,
                         "nonDevCount": dup.prod_count,
                         "devCount": dup.dev_count,
                         "canonical": dup.canonical,
-                        "canonicalLine": dup.canonical_line,
                         "refactorTargets": dup.refactors,
-                        "severity": dup.severity,
-                        "isCrossLang": dup.is_cross_lang,
-                        "packages": dup.packages,
-                        "reason": dup.reason,
                     }))
                     .collect::<Vec<_>>(),
                 "reexportCascades": cascades
@@ -1061,7 +722,7 @@ pub fn process_root_context(
                     .map(|(from, to)| json!({"from": from, "to": to}))
                     .collect::<Vec<_>>(),
                 "barrels": barrels_json,
-                "dynamicImports": dynamic_imports_json_for_output,
+                "dynamicImports": dynamic_imports_json,
                 "commands": {
                     "frontend": fe_commands.iter().map(|(k,v)| json!({"name": k, "locations": v})).collect::<Vec<_>>(),
                     "backend": be_commands.iter().map(|(k,v)| json!({"name": k, "locations": v})).collect::<Vec<_>>(),
@@ -1078,7 +739,6 @@ pub fn process_root_context(
                         }
                         obj
                     }).collect::<Vec<_>>(),
-                    "payloadCasing": casing_issues,
                 },
                 "commands2": commands2,
                 "tauri_analysis": {
@@ -1098,7 +758,7 @@ pub fn process_root_context(
                     "unregistered_handlers": unregistered_handlers.iter().map(|g| &g.name).collect::<Vec<_>>(),
                 },
                 "symbols": symbols_json,
-                "clusters": clusters_json_for_output,
+                "clusters": clusters_json,
                 "pipeline": pipeline_summary,
                 "aiViews": {
                     "defaultExportChains": default_export_chains,
@@ -1121,15 +781,15 @@ pub fn process_root_context(
                         "items": barrels_json,
                     },
                     "ciSummary": {
-                        "duplicateClustersCount": duplicate_clusters_count_for_output,
-                        "maxClusterSize": max_cluster_size_for_output,
-                        "topClusters": top_clusters_for_output,
+                        "duplicateClustersCount": duplicate_clusters_count,
+                        "maxClusterSize": max_cluster_size,
+                        "topClusters": top_clusters,
                     }
                 },
                 "files": files_json,
             });
 
-            if matches!(parsed.output, OutputMode::Jsonl) {
+            if matches!(options.output, OutputMode::Jsonl) {
                 if let Ok(line) = serde_json::to_string(&payload) {
                     println!("{}", line);
                 } else {
@@ -1146,81 +806,26 @@ pub fn process_root_context(
 
         println!("Import/export analysis for {}/", root_path.display());
         println!("  Files analyzed: {}", analyses.len());
-        if duplicates_hidden {
-            println!("  Duplicate exports: (hidden by --no-duplicates)");
-        } else {
-            println!("  Duplicate exports: {}", filtered_ranked_for_output.len());
-        }
+        println!("  Duplicate exports: {}", filtered_ranked.len());
         println!("  Files with re-exports: {}", reexport_files.len());
-        if dynamic_hidden {
-            println!("  Dynamic imports: (hidden by --no-dynamic-imports)");
-        } else {
-            println!("  Dynamic imports: {}", dynamic_summary_for_output.len());
-        }
-        if dead_symbols_total > 0 {
-            println!(
-                "  Dead exports (high confidence): {}{}",
-                dead_symbols_total,
-                if dead_symbols_total > parsed.top_dead_symbols {
-                    format!(" (showing top {})", parsed.top_dead_symbols)
-                } else {
-                    String::new()
-                }
-            );
-        }
+        println!("  Dynamic imports: {}", dynamic_summary.len());
 
-        if !duplicates_hidden && !filtered_ranked_for_output.is_empty() {
-            // Count silenced (cross-lang) duplicates
-            let cross_lang_count = filtered_ranked
-                .iter()
-                .filter(|d| d.severity == DupSeverity::CrossLangExpected)
-                .count();
-            let actionable: Vec<_> = filtered_ranked
-                .iter()
-                .filter(|d| d.severity != DupSeverity::CrossLangExpected)
-                .collect();
-
+        if !duplicate_exports.is_empty() {
             println!(
                 "
-Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
-                actionable.len().min(parsed.analyze_limit),
-                cross_lang_count
+Top duplicate exports (showing up to {}):",
+                parsed.analyze_limit
             );
-            for dup in actionable.iter().take(parsed.analyze_limit) {
-                // Format canonical with line number if available
-                let canonical_str = match dup.canonical_line {
-                    Some(line) => format!("{}:{}", dup.canonical, line),
-                    None => dup.canonical.clone(),
-                };
-                // Format refs with line numbers
-                let refs_str: Vec<String> = dup
-                    .locations
-                    .iter()
-                    .filter(|loc| loc.file != dup.canonical)
-                    .map(|loc| match loc.line {
-                        Some(line) => format!("{}:{}", loc.file, line),
-                        None => loc.file.clone(),
-                    })
-                    .collect();
-                // Severity label
-                let severity_label = match dup.severity {
-                    DupSeverity::CrossCrate => "[CROSS_CRATE]",
-                    DupSeverity::CrossModule => "[CROSS_MODULE]",
-                    DupSeverity::SamePackage => "[SAME_PKG]",
-                    DupSeverity::ReExportOrGeneric => "[REEXPORT]",
-                    DupSeverity::CrossLangExpected => "[CROSS_LANG]",
-                };
-                // Cross-lang indicator
-                let cross_lang_str = if dup.is_cross_lang { " cross-lang" } else { "" };
+            for dup in filtered_ranked.iter().take(parsed.analyze_limit) {
                 println!(
-                    "  - {} {} (score {},{} {} files) canonical: {} | import from: {}",
-                    severity_label,
+                    "  - {} (score {}, {} files: {} prod, {} dev) canonical: {} | refs: {}",
                     dup.name,
                     dup.score,
-                    cross_lang_str,
                     dup.files.len(),
-                    canonical_str,
-                    refs_str.join(", ")
+                    dup.prod_count,
+                    dup.dev_count,
+                    dup.canonical,
+                    dup.refactors.join(", ")
                 );
             }
         }
@@ -1232,12 +837,12 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
             }
         }
 
-        if !dynamic_hidden && !dynamic_summary_for_output.is_empty() {
+        if !dynamic_summary.is_empty() {
             println!(
                 "\nDynamic imports (showing up to {}):",
                 parsed.analyze_limit
             );
-            let mut sorted_dyn = dynamic_summary_for_output.clone();
+            let mut sorted_dyn = dynamic_summary.clone();
             sorted_dyn.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
             for (file, sources) in sorted_dyn.iter().take(parsed.analyze_limit) {
                 println!(
@@ -1272,9 +877,9 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
                     .filter(|g| g.confidence == Some(Confidence::High))
                     .map(|g| g.name.clone())
                     .collect();
-                let smell_conf: Vec<_> = unused_handlers
+                let low_conf: Vec<_> = unused_handlers
                     .iter()
-                    .filter(|g| g.confidence == Some(Confidence::Smell))
+                    .filter(|g| g.confidence == Some(Confidence::Low))
                     .collect();
 
                 if !high_conf.is_empty() {
@@ -1283,9 +888,9 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
                         high_conf.join(", ")
                     );
                 }
-                if !smell_conf.is_empty() {
-                    println!("  Unused handlers (SMELL confidence - possible dynamic usage):");
-                    for g in &smell_conf {
+                if !low_conf.is_empty() {
+                    println!("  Unused handlers (LOW confidence - possible dynamic usage):");
+                    for g in &low_conf {
                         let matches_note = if !g.string_literal_matches.is_empty() {
                             format!(
                                 " ({} string literal matches)",
@@ -1313,8 +918,7 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
     }
 
     let mut report_section = None;
-    // Build ReportSection for HTML reports OR for agent feed (--for-agent-feed/--agent-json)
-    if parsed.report_path.is_some() || parsed.for_agent_feed {
+    if parsed.report_path.is_some() {
         let mut sorted_dyn = dynamic_summary.clone();
         sorted_dyn.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
         let insights = collect_ai_insights(
@@ -1334,115 +938,6 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
         // Calculate total LOC
         let total_loc: usize = analyses.iter().map(|a| a.loc).sum();
 
-        let tree = build_tree(&analyses, &root_path);
-
-        // Compute coverage gaps by building a minimal snapshot
-        let coverage_gaps = {
-            use crate::snapshot::{
-                CommandBridge as SnapshotCommandBridge, EventBridge, Snapshot, SnapshotMetadata,
-            };
-
-            // Convert command_bridges to snapshot format
-            let snapshot_command_bridges: Vec<SnapshotCommandBridge> = command_bridges
-                .iter()
-                .map(|cb| {
-                    let has_handler = cb.be_location.is_some();
-                    let is_called = !cb.fe_locations.is_empty();
-                    let backend_handler = cb
-                        .be_location
-                        .as_ref()
-                        .map(|(path, line, _)| (path.clone(), *line));
-                    let frontend_calls = cb.fe_locations.clone();
-
-                    SnapshotCommandBridge {
-                        name: cb.name.clone(),
-                        has_handler,
-                        is_called,
-                        backend_handler,
-                        frontend_calls,
-                    }
-                })
-                .collect();
-
-            // Build event bridges from analyses (emit/listen patterns)
-            let event_bridges: Vec<EventBridge> = Vec::new(); // TODO: extract from analyses if available
-
-            // Create minimal snapshot for coverage analysis
-            let snapshot = Snapshot {
-                metadata: SnapshotMetadata::default(),
-                files: analyses.clone(),
-                edges: Vec::new(),
-                export_index: HashMap::new(),
-                command_bridges: snapshot_command_bridges,
-                event_bridges,
-                barrels: Vec::new(),
-            };
-
-            find_coverage_gaps(&snapshot)
-        };
-
-        // Calculate health score from available metrics
-        let health_score = {
-            // Count breaking cycles (hard bidirectional cycles)
-            let breaking_cycles = circular_imports.len();
-            // Count structural cycles (lazy/dynamic cycles)
-            let structural_cycles = lazy_circular_imports.len();
-
-            // Count dead exports (HIGH confidence)
-            let dead_exports_count = dead_exports_for_report.len();
-
-            // Count twins data if available
-            let (twins_dead_parrots, twins_same_language, barrel_chaos_count) =
-                if let Some(ref twins) = twins_data {
-                    (
-                        twins.dead_parrots.len(),
-                        twins.exact_twins.len(),
-                        twins.barrel_chaos.missing_barrels.len()
-                            + twins.barrel_chaos.deep_chains.len()
-                            + twins.barrel_chaos.inconsistent_paths.len(),
-                    )
-                } else {
-                    (0, 0, 0)
-                };
-
-            // Count duplicate exports
-            let duplicate_exports = filtered_ranked.len();
-
-            // Count cascade imports
-            let cascade_imports = cascades.len();
-
-            let metrics = HealthMetrics {
-                // CERTAIN severity
-                missing_handlers: missing_sorted.len(),
-                unregistered_handlers: unregistered_sorted.len(),
-                breaking_cycles,
-
-                // HIGH severity
-                unused_high_confidence: unused_sorted.len(),
-                dead_exports: dead_exports_count,
-                twins_dead_parrots,
-
-                // SMELL severity
-                twins_same_language,
-                barrel_chaos_count,
-                structural_cycles,
-                cascade_imports,
-                duplicate_exports,
-
-                // Project context
-                files: analyses.len(),
-                loc: total_loc,
-
-                // Optional: issue details (not populated for now)
-                certain_items: Vec::new(),
-                high_items: Vec::new(),
-                smell_items: Vec::new(),
-            };
-
-            let score = calculate_health_score(&metrics);
-            Some(score.health)
-        };
-
         report_section = Some(ReportSection {
             insights,
             root: root_path.display().to_string(),
@@ -1452,10 +947,8 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
             dynamic_imports_count: dynamic_summary.len(),
             ranked_dups: filtered_ranked.clone(),
             cascades: cascades.clone(),
-            circular_imports: circular_imports.clone(),
-            lazy_circular_imports: lazy_circular_imports.clone(),
             dynamic: sorted_dyn,
-            analyze_limit: parsed.analyze_limit,
+            analyze_limit: options.analyze_limit,
             missing_handlers: missing_sorted,
             unregistered_handlers: unregistered_sorted,
             unused_handlers: unused_sorted,
@@ -1466,16 +959,8 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
             } else {
                 None
             },
-            tree: Some(tree),
             graph: graph_data.clone(),
             graph_warning: graph_warning.clone(),
-            git_branch: git.and_then(|g| g.branch.clone()),
-            git_commit: git.and_then(|g| g.commit.clone()),
-            crowds: crowds.clone(),
-            dead_exports: dead_exports_for_report.clone(),
-            twins_data: twins_data.clone(),
-            coverage_gaps,
-            health_score,
         });
     }
 
@@ -1493,86 +978,11 @@ pub fn write_report(
     if let Some(dir) = report_path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    // Show spinner during HTML generation (can be slow for large codebases)
-    let spinner = if !verbose {
-        Some(crate::progress::Spinner::new("Generating HTML report..."))
-    } else {
-        None
-    };
-    let result = render_html_report(report_path, sections);
-    if let Some(s) = spinner {
-        s.finish_clear();
-    }
-    result?;
-    // Show relative path for cleaner output (with ./ prefix for consistency)
-    let display_path = std::env::current_dir()
-        .ok()
-        .and_then(|cwd| report_path.strip_prefix(&cwd).ok())
-        .map(|p| format!("./{}", p.display()))
-        .unwrap_or_else(|| report_path.display().to_string());
+    render_html_report(report_path, sections)?;
     if verbose {
-        eprintln!("[loctree][debug] wrote HTML to {}", display_path);
+        eprintln!("[loctree][debug] wrote HTML to {}", report_path.display());
     } else {
-        crate::progress::success(&format!("Report → {}", display_path));
+        eprintln!("[loctree] HTML report written to {}", report_path.display());
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::build_tree;
-    use crate::types::FileAnalysis;
-    use std::path::Path;
-
-    #[test]
-    fn build_tree_aggregates_loc_and_hierarchy() {
-        let analyses = vec![
-            FileAnalysis {
-                path: "src/a.ts".into(),
-                loc: 10,
-                ..Default::default()
-            },
-            FileAnalysis {
-                path: "src/nested/b.ts".into(),
-                loc: 20,
-                ..Default::default()
-            },
-            FileAnalysis {
-                path: "src/nested/deeper/c.ts".into(),
-                loc: 30,
-                ..Default::default()
-            },
-        ];
-        let tree = build_tree(&analyses, Path::new("src"));
-        // Expect top-level nodes include a.ts and nested/
-        let a = tree.iter().find(|n| n.path == "a.ts").unwrap();
-        assert_eq!(a.loc, 10);
-        assert!(a.children.is_empty());
-
-        let nested = tree.iter().find(|n| n.path == "nested").unwrap();
-        assert_eq!(nested.loc, 50); // 20 + 30
-        let b = nested.children.iter().find(|c| c.path == "b.ts").unwrap();
-        assert_eq!(b.loc, 20);
-        let deeper = nested.children.iter().find(|c| c.path == "deeper").unwrap();
-        assert_eq!(deeper.path, "deeper");
-        assert_eq!(deeper.loc, 30);
-        assert_eq!(deeper.children.len(), 1);
-        let leaf = &deeper.children[0];
-        assert_eq!(leaf.path, "c.ts");
-        assert_eq!(leaf.loc, 30);
-    }
-
-    #[test]
-    fn build_tree_handles_root_prefix_mismatch() {
-        let analyses = vec![FileAnalysis {
-            path: "other/file.ts".into(),
-            loc: 5,
-            ..Default::default()
-        }];
-        // If strip_prefix fails, it should fall back to the full path parts.
-        let tree = build_tree(&analyses, Path::new("src"));
-        assert_eq!(tree.len(), 1);
-        assert_eq!(tree[0].path, "other");
-        assert_eq!(tree[0].loc, 5);
-    }
 }

@@ -341,7 +341,30 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
     if parsed.dead_exports {
         let high_confidence = parsed.dead_confidence.as_deref() == Some("high");
         let dead_exports = find_dead_exports(&global_analyses, high_confidence);
-        print_dead_exports(&dead_exports, parsed.output, high_confidence);
+        // Apply --focus and --exclude-report filters to dead exports
+        let filtered_dead: Vec<_> = dead_exports
+            .into_iter()
+            .filter(|d| {
+                let path = std::path::PathBuf::from(&d.file);
+                // Check focus_set: if set, file must match
+                let passes_focus = focus_set
+                    .as_ref()
+                    .map(|set| set.is_match(&path))
+                    .unwrap_or(true);
+                // Check exclude_set: if set, file must NOT match
+                let passes_exclude = exclude_set
+                    .as_ref()
+                    .map(|set| !set.is_match(&path))
+                    .unwrap_or(true);
+                passes_focus && passes_exclude
+            })
+            .collect();
+        print_dead_exports(
+            &filtered_dead,
+            parsed.output,
+            high_confidence,
+            parsed.top_dead_symbols,
+        );
         return Ok(());
     }
 
