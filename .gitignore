@@ -32,19 +32,3 @@ loctree-*.min.js
 /reports/loctree-*.js
 /reports/reports/
 /reports/wasm/target
-/loctree_rs/.fastembed_cache
-*.txt
-/assets/Icon Exports
-/loctree_rs/tests/fixtures/tauri_app/src/.loctree
-.replit
-/.tools
-
-.gemini/
-gha-creds-*.json
-GEMINI.md
-**/.loctree/**/report.html
-/loctree_memex/target
-/loctree_server/target
-/target
-brave-mcp-servers-report.md
-reports/report.html
