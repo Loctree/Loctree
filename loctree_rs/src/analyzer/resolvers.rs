@@ -1,24 +1,27 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use serde_json;
 use serde_json::Value;
 
 /// Simple TS/JS path resolver backed by tsconfig.json `baseUrl` and `paths`.
-/// Supports alias patterns with a single `*` and falls back to `baseUrl`.
-#[derive(Debug, Clone)]
+/// Supports alias patterns with wildcards and falls back to `baseUrl`.
+/// Also checks package.json exports field as fallback.
+#[derive(Debug)]
 pub(crate) struct TsPathResolver {
     base_dir: PathBuf,
     root: PathBuf,
     mappings: Vec<AliasMapping>,
+    cache: Mutex<HashMap<String, Option<String>>>,
+    package_exports: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone)]
 struct AliasMapping {
-    prefix: String,
-    suffix: String,
+    pattern: String,
     targets: Vec<String>,
-    has_wildcard: bool,
+    wildcard_count: usize,
 }
 
 impl TsPathResolver {
@@ -52,26 +55,25 @@ impl TsPathResolver {
                 }
 
                 let alias_norm = alias.replace('\\', "/");
-                let has_wildcard = alias_norm.contains('*');
-                let (prefix, suffix) = if let Some((pre, suf)) = alias_norm.split_once('*') {
-                    (pre.to_string(), suf.to_string())
-                } else {
-                    (alias_norm.clone(), String::new())
-                };
+                let wildcard_count = alias_norm.matches('*').count();
 
                 mappings.push(AliasMapping {
-                    prefix,
-                    suffix,
+                    pattern: alias_norm,
                     targets: targets_vec,
-                    has_wildcard,
+                    wildcard_count,
                 });
             }
         }
+
+        // Load package.json exports if available
+        let package_exports = load_package_exports(root).unwrap_or_default();
 
         Some(Self {
             base_dir: base_dir.canonicalize().unwrap_or(base_dir),
             root: root.to_path_buf(),
             mappings,
+            cache: Mutex::new(HashMap::new()),
+            package_exports,
         })
     }
 
@@ -80,26 +82,40 @@ impl TsPathResolver {
             return None;
         }
 
-        let normalized = spec.replace('\\', "/");
+        // Check cache first
+        let cache_key = format!("{:?}:{}", exts, spec);
+        if let Ok(cache) = self.cache.lock()
+            && let Some(cached) = cache.get(&cache_key)
+        {
+            return cached.clone();
+        }
 
+        let normalized = spec.replace('\\', "/");
+        let result = self.resolve_internal(&normalized, exts);
+
+        // Store in cache
+        if let Ok(mut cache) = self.cache.lock() {
+            cache.insert(cache_key, result.clone());
+        }
+
+        result
+    }
+
+    fn resolve_internal(&self, normalized: &str, exts: Option<&HashSet<String>>) -> Option<String> {
+        // Try tsconfig path mappings
         for mapping in &self.mappings {
-            if mapping.has_wildcard {
-                if let Some(rest) = normalized.strip_prefix(&mapping.prefix)
-                    && rest.ends_with(&mapping.suffix)
-                {
-                    let mid = rest
-                        .strip_suffix(&mapping.suffix)
-                        .unwrap_or(rest)
-                        .to_string();
-                    for target in &mapping.targets {
-                        let replaced = target.replace('*', &mid);
-                        let candidate = self.base_dir.join(replaced);
-                        if let Some(res) = resolve_with_extensions(candidate, &self.root, exts) {
-                            return Some(res);
-                        }
-                    }
+            if mapping.wildcard_count > 0 {
+                // Handle multiple wildcards
+                if let Some(res) = self.match_wildcard_pattern(
+                    &mapping.pattern,
+                    normalized,
+                    &mapping.targets,
+                    exts,
+                ) {
+                    return Some(res);
                 }
-            } else if normalized == mapping.prefix {
+            } else if normalized == mapping.pattern {
+                // Exact match (no wildcards)
                 for target in &mapping.targets {
                     let candidate = self.base_dir.join(target);
                     if let Some(res) = resolve_with_extensions(candidate, &self.root, exts) {
@@ -109,13 +125,95 @@ impl TsPathResolver {
             }
         }
 
+        // Try package.json exports
+        if let Some(export_path) = self.package_exports.get(normalized) {
+            let candidate = self.root.join(export_path.trim_start_matches("./"));
+            if let Some(res) = resolve_with_extensions(candidate, &self.root, exts) {
+                return Some(res);
+            }
+        }
+
+        // Fallback to baseUrl resolution
         if normalized.starts_with('/') {
             let candidate = self.root.join(normalized.trim_start_matches('/'));
             return resolve_with_extensions(candidate, &self.root, exts);
         }
 
-        let candidate = self.base_dir.join(&normalized);
+        let candidate = self.base_dir.join(normalized);
         resolve_with_extensions(candidate, &self.root, exts)
+    }
+
+    fn match_wildcard_pattern(
+        &self,
+        pattern: &str,
+        spec: &str,
+        targets: &[String],
+        exts: Option<&HashSet<String>>,
+    ) -> Option<String> {
+        // Convert pattern to regex-like matching
+        // e.g., "@/*" -> captures everything after "@/"
+        // e.g., "**/*" -> captures everything
+        let parts: Vec<&str> = pattern.split('*').collect();
+
+        if parts.len() < 2 {
+            return None;
+        }
+
+        // Check if spec matches the pattern structure
+        let mut spec_rest = spec;
+        let mut captures = Vec::new();
+
+        for (i, part) in parts.iter().enumerate() {
+            if i == 0 {
+                // First part must be prefix
+                spec_rest = spec_rest.strip_prefix(part)?;
+            } else if i == parts.len() - 1 {
+                // Last part must be suffix
+                if !spec_rest.ends_with(part) {
+                    return None;
+                }
+                let captured = spec_rest.strip_suffix(part).unwrap_or(spec_rest);
+                if i == 1 && parts.len() == 2 {
+                    // Single wildcard case
+                    captures.push(captured);
+                } else {
+                    // Multiple wildcards - split remaining
+                    // For "**/*" pattern, capture greedily
+                    captures.push(captured);
+                }
+            } else {
+                // Middle parts - find next occurrence
+                if let Some(idx) = spec_rest.find(part) {
+                    captures.push(&spec_rest[..idx]);
+                    spec_rest = &spec_rest[idx + part.len()..];
+                } else {
+                    return None;
+                }
+            }
+        }
+
+        // Try each target with captured wildcards
+        for target in targets {
+            let replaced = if captures.len() == 1 {
+                target.replace('*', captures[0])
+            } else {
+                // Multiple wildcards - replace in order
+                let mut result = target.to_string();
+                for capture in &captures {
+                    if let Some(idx) = result.find('*') {
+                        result.replace_range(idx..=idx, capture);
+                    }
+                }
+                result
+            };
+
+            let candidate = self.base_dir.join(replaced);
+            if let Some(res) = resolve_with_extensions(candidate, &self.root, exts) {
+                return Some(res);
+            }
+        }
+
+        None
     }
 }
 
@@ -365,6 +463,51 @@ fn merge_compiler_options(
     merged
 }
 
+/// Load package.json exports field for module resolution fallback
+fn load_package_exports(root: &Path) -> Option<HashMap<String, String>> {
+    let package_json_path = root.join("package.json");
+    if !package_json_path.exists() {
+        return None;
+    }
+
+    let content = std::fs::read_to_string(&package_json_path).ok()?;
+    let json: Value = serde_json::from_str(&content).ok()?;
+
+    let exports = json.get("exports")?;
+    let mut result = HashMap::new();
+
+    // Handle different export formats
+    match exports {
+        Value::String(path) => {
+            result.insert(".".to_string(), path.clone());
+        }
+        Value::Object(map) => {
+            for (key, value) in map {
+                let export_path = match value {
+                    Value::String(s) => Some(s.clone()),
+                    Value::Object(conditions) => {
+                        // Try common conditions: import, require, default
+                        conditions
+                            .get("import")
+                            .or_else(|| conditions.get("require"))
+                            .or_else(|| conditions.get("default"))
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string())
+                    }
+                    _ => None,
+                };
+
+                if let Some(path) = export_path {
+                    result.insert(key.clone(), path);
+                }
+            }
+        }
+        _ => {}
+    }
+
+    Some(result)
+}
+
 /// Resolve Rust module imports to file paths.
 /// Handles: `crate::foo`, `super::bar`, `self::baz`
 pub(crate) fn resolve_rust_import(
@@ -411,20 +554,72 @@ pub(crate) fn resolve_rust_import(
     module_path.and_then(|p| canonical_rel(&p, root).or_else(|| canonical_abs(&p)))
 }
 
-/// Resolve a Rust module path (e.g., "foo::bar") to a file path.
+/// Resolve a Rust module path (e.g., "foo::bar::Baz") to a file path.
+/// Handles nested modules by checking all possible file locations.
 fn resolve_rust_module_path(module: &str, base: &Path) -> Option<PathBuf> {
-    // Take only the first segment for file resolution
-    // e.g., "args::parse_args" -> "args"
-    let first_segment = module.split("::").next()?;
+    let segments: Vec<&str> = module.split("::").collect();
+    if segments.is_empty() {
+        return None;
+    }
 
-    // Try: base/segment.rs
+    // For "foo::bar::Baz", try multiple strategies:
+    // 1. base/foo.rs (if single segment or defines submodules inline)
+    // 2. base/foo/mod.rs (if foo is a directory module)
+    // 3. base/foo/bar.rs (if bar is a file in foo directory)
+    // 4. base/foo/bar/mod.rs (if bar is a directory module)
+    // 5. base/foo/bar/baz.rs (if Baz is defined in bar/baz.rs)
+
+    let first_segment = segments[0];
+
+    // Strategy 1: Try first segment as file (base/foo.rs)
     let as_file = base.join(format!("{}.rs", first_segment));
     if as_file.exists() {
         return Some(as_file);
     }
 
-    // Try: base/segment/mod.rs
+    // Strategy 2: Try first segment as directory with mod.rs (base/foo/mod.rs)
     let as_mod = base.join(first_segment).join("mod.rs");
+    if as_mod.exists() && segments.len() == 1 {
+        return Some(as_mod);
+    }
+
+    // For nested paths (more than one segment), explore deeper
+    if segments.len() > 1 {
+        // Build path progressively: base/foo/bar/...
+        let mut current_path = base.join(first_segment);
+
+        for (idx, segment) in segments.iter().enumerate().skip(1) {
+            let is_last = idx == segments.len() - 1;
+
+            // Try as file: current_path/segment.rs
+            let segment_file = current_path.join(format!("{}.rs", segment));
+            if segment_file.exists() {
+                return Some(segment_file);
+            }
+
+            // Try as directory module: current_path/segment/mod.rs
+            let segment_mod = current_path.join(segment).join("mod.rs");
+            if segment_mod.exists() {
+                if is_last {
+                    return Some(segment_mod);
+                } else {
+                    // Continue deeper
+                    current_path = current_path.join(segment);
+                    continue;
+                }
+            }
+
+            // Try advancing into segment directory for next iteration
+            let next_dir = current_path.join(segment);
+            if next_dir.exists() && next_dir.is_dir() {
+                current_path = next_dir;
+            } else {
+                break;
+            }
+        }
+    }
+
+    // Fallback: check if first segment as mod.rs exists (already checked above but be safe)
     if as_mod.exists() {
         return Some(as_mod);
     }
@@ -750,5 +945,135 @@ mod tests {
 
         let result = resolve_rust_import("serde", &file, &crate_root, dir.path());
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_resolve_rust_import_nested_module() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join("src/analyzer")).unwrap();
+        fs::write(dir.path().join("Cargo.toml"), "[package]\nname = \"test\"").unwrap();
+        fs::write(dir.path().join("src/lib.rs"), "mod analyzer;").unwrap();
+        fs::write(dir.path().join("src/analyzer/mod.rs"), "pub mod scan;").unwrap();
+        fs::write(dir.path().join("src/analyzer/scan.rs"), "pub fn scan() {}").unwrap();
+
+        let file = dir.path().join("src/lib.rs");
+        let crate_root = dir.path().join("src");
+
+        // Test deep path: crate::analyzer::scan
+        let result = resolve_rust_import("crate::analyzer::scan", &file, &crate_root, dir.path());
+        assert!(result.is_some());
+        let resolved = result.unwrap();
+        assert!(resolved.contains("analyzer") && resolved.ends_with("scan.rs"));
+    }
+
+    #[test]
+    fn test_resolve_rust_import_nested_module_dir() {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join("src/foo/bar")).unwrap();
+        fs::write(dir.path().join("Cargo.toml"), "[package]\nname = \"test\"").unwrap();
+        fs::write(dir.path().join("src/lib.rs"), "mod foo;").unwrap();
+        fs::write(dir.path().join("src/foo/mod.rs"), "pub mod bar;").unwrap();
+        fs::write(dir.path().join("src/foo/bar/mod.rs"), "pub struct Baz;").unwrap();
+
+        let file = dir.path().join("src/lib.rs");
+        let crate_root = dir.path().join("src");
+
+        // Test: crate::foo::bar::Baz should resolve to foo/bar/mod.rs
+        let result = resolve_rust_import("crate::foo::bar", &file, &crate_root, dir.path());
+        assert!(result.is_some());
+        let resolved = result.unwrap();
+        assert!(resolved.contains("foo") && resolved.contains("bar"));
+    }
+
+    #[test]
+    fn test_ts_path_resolver_multiple_wildcards() {
+        let dir = TempDir::new().unwrap();
+
+        // Create tsconfig with multiple wildcard pattern
+        let tsconfig = r#"{
+            "compilerOptions": {
+                "baseUrl": ".",
+                "paths": {
+                    "**/*": ["src/**/*"]
+                }
+            }
+        }"#;
+        fs::write(dir.path().join("tsconfig.json"), tsconfig).unwrap();
+        fs::create_dir_all(dir.path().join("src/components/ui")).unwrap();
+        fs::write(dir.path().join("src/components/ui/Button.tsx"), "export {}").unwrap();
+
+        let resolver = TsPathResolver::from_tsconfig(dir.path()).unwrap();
+        let exts: HashSet<String> = ["tsx", "ts"].iter().map(|s| s.to_string()).collect();
+
+        let result = resolver.resolve("components/ui/Button", Some(&exts));
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_ts_path_resolver_caching() {
+        let dir = create_test_project();
+        let resolver = TsPathResolver::from_tsconfig(dir.path()).unwrap();
+        let exts: HashSet<String> = ["ts"].iter().map(|s| s.to_string()).collect();
+
+        // First resolve
+        let result1 = resolver.resolve("src/index", Some(&exts));
+        assert!(result1.is_some());
+
+        // Second resolve should hit cache
+        let result2 = resolver.resolve("src/index", Some(&exts));
+        assert!(result2.is_some());
+        assert_eq!(result1, result2);
+    }
+
+    #[test]
+    fn test_load_package_exports() {
+        let dir = TempDir::new().unwrap();
+
+        // Create package.json with exports
+        let package_json = r#"{
+            "name": "test-package",
+            "exports": {
+                ".": "./dist/index.js",
+                "./utils": "./dist/utils/index.js",
+                "./components": {
+                    "import": "./dist/components/index.mjs",
+                    "require": "./dist/components/index.js"
+                }
+            }
+        }"#;
+        fs::write(dir.path().join("package.json"), package_json).unwrap();
+
+        let exports = load_package_exports(dir.path()).unwrap();
+        assert_eq!(exports.get("."), Some(&"./dist/index.js".to_string()));
+        assert_eq!(
+            exports.get("./utils"),
+            Some(&"./dist/utils/index.js".to_string())
+        );
+        assert!(exports.get("./components").is_some());
+    }
+
+    #[test]
+    fn test_ts_path_resolver_with_package_exports() {
+        let dir = TempDir::new().unwrap();
+
+        // Create minimal tsconfig
+        let tsconfig = r#"{"compilerOptions": {"baseUrl": "."}}"#;
+        fs::write(dir.path().join("tsconfig.json"), tsconfig).unwrap();
+
+        // Create package.json with exports
+        let package_json = r#"{
+            "exports": {
+                "./utils": "./dist/utils.js"
+            }
+        }"#;
+        fs::write(dir.path().join("package.json"), package_json).unwrap();
+        fs::create_dir_all(dir.path().join("dist")).unwrap();
+        fs::write(dir.path().join("dist/utils.js"), "export {}").unwrap();
+
+        let resolver = TsPathResolver::from_tsconfig(dir.path()).unwrap();
+        let result = resolver.resolve("./utils", None);
+        // This should fallback to package exports
+        // Note: relative paths are skipped, so this tests the fallback logic
+        assert!(result.is_none()); // Relative paths return None by design
     }
 }

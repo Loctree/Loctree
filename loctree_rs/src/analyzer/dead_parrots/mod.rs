@@ -20,6 +20,45 @@ use super::root_scan::{RootContext, normalize_module_id};
 
 use serde::Serialize;
 
+/// Compare two paths for equality using proper path matching
+/// Handles different separators and avoids false positives like "foo.ts" matching "foo.test.ts"
+fn paths_match(a: &str, b: &str) -> bool {
+    // Quick exact match check first
+    if a == b {
+        return true;
+    }
+
+    // Normalize separators to forward slashes
+    let a_norm = a.replace('\\', "/");
+    let b_norm = b.replace('\\', "/");
+
+    if a_norm == b_norm {
+        return true;
+    }
+
+    // Check if one is a suffix of the other at a path component boundary
+    // This handles "src/App.tsx" vs "App.tsx" but prevents "foo.ts" matching "foo.test.ts"
+    if a_norm.len() > b_norm.len() {
+        // Check if a ends with b at a component boundary
+        if let Some(suffix_start) = a_norm.rfind(&b_norm) {
+            // Valid if b is at the start OR preceded by a separator
+            if suffix_start == 0 || a_norm.chars().nth(suffix_start - 1) == Some('/') {
+                return true;
+            }
+        }
+    } else if b_norm.len() > a_norm.len() {
+        // Check if b ends with a at a component boundary
+        if let Some(suffix_start) = b_norm.rfind(&a_norm) {
+            // Valid if a is at the start OR preceded by a separator
+            if suffix_start == 0 || b_norm.chars().nth(suffix_start - 1) == Some('/') {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
 /// Result of symbol search across the codebase
 #[derive(Debug, Clone, Serialize)]
 pub struct SymbolSearchResult {
@@ -141,15 +180,8 @@ pub fn analyze_impact(
 ) -> Option<ImpactResult> {
     let mut targets = Vec::new();
     for analysis in analyses {
-        // Match paths flexibly (handles "App.tsx" vs "src/App.tsx" when root differs)
-        let matches = analysis.path == target_path
-            || target_path.ends_with(&format!("/{}", analysis.path))
-            || target_path.ends_with(&format!("\\{}", analysis.path))
-            || analysis.path.ends_with(&format!("/{}", target_path))
-            || analysis.path.ends_with(&format!("\\{}", target_path))
-            || analysis.path.contains(target_path)
-            || target_path.contains(&analysis.path);
-        if matches {
+        // Use proper path matching to avoid false positives
+        if paths_match(&analysis.path, target_path) {
             targets.push(analysis.path.clone());
         }
     }
@@ -159,8 +191,10 @@ pub fn analyze_impact(
     }
 
     // Build target sets for both normalized and full paths
-    let normalized_targets: HashSet<String> =
-        targets.iter().map(|t| normalize_module_id(t)).collect();
+    let normalized_targets: HashSet<String> = targets
+        .iter()
+        .map(|t| normalize_module_id(t).as_key())
+        .collect();
     let full_targets: HashSet<String> = targets.iter().cloned().collect();
     let mut dependent_ids = HashSet::new();
 
@@ -168,7 +202,7 @@ pub fn analyze_impact(
         for (source, target, _weight) in &ctx.graph_edges {
             // Match against both normalized module IDs and full paths
             // (edges may use full paths after snapshot format changes)
-            let target_normalized = normalize_module_id(target);
+            let target_normalized = normalize_module_id(target).as_key();
             if normalized_targets.contains(target)
                 || normalized_targets.contains(&target_normalized)
                 || full_targets.contains(target)
@@ -181,7 +215,7 @@ pub fn analyze_impact(
     let mut deps = Vec::new();
     for analysis in analyses {
         // Match against both full path and normalized (edges may use either)
-        let id = normalize_module_id(&analysis.path);
+        let id = normalize_module_id(&analysis.path).as_key();
         if dependent_ids.contains(&id) || dependent_ids.contains(&analysis.path) {
             deps.push(analysis.path.clone());
         }
@@ -299,18 +333,24 @@ pub fn find_dead_exports(analyses: &[FileAnalysis], high_confidence: bool) -> Ve
 
     for analysis in analyses {
         for imp in &analysis.imports {
-            if let Some(target) = &imp.resolved_path {
-                let target_norm = normalize_module_id(target);
-                // Track named imports
-                for sym in &imp.symbols {
-                    used_exports.insert((target_norm.clone(), sym.name.clone()));
-                }
+            let target_norm = if let Some(target) = &imp.resolved_path {
+                // Use resolved path if available
+                normalize_module_id(target).as_key()
+            } else {
+                // Fallback to source for bare imports (e.g., npm packages)
+                // This ensures we don't mark exports as dead when they're imported without resolution
+                normalize_module_id(&imp.source).as_key()
+            };
+
+            // Track named imports
+            for sym in &imp.symbols {
+                used_exports.insert((target_norm.clone(), sym.name.clone()));
             }
         }
         // Track re-exports as usage (if A re-exports B, A uses B)
         for re in &analysis.reexports {
             if let Some(target) = &re.resolved {
-                let target_norm = normalize_module_id(target);
+                let target_norm = normalize_module_id(target).as_key();
                 match &re.kind {
                     ReexportKind::Star => {
                         used_exports.insert((target_norm, "*".to_string()));
@@ -335,13 +375,14 @@ pub fn find_dead_exports(analyses: &[FileAnalysis], high_confidence: bool) -> Ve
         {
             continue;
         }
-        let path_norm = normalize_module_id(&analysis.path);
+        let path_norm = normalize_module_id(&analysis.path).as_key();
 
         // Skip if file is dynamically imported (assume all exports used)
         let is_dyn_imported = analyses.iter().any(|a| {
-            a.dynamic_imports
-                .iter()
-                .any(|imp| imp.contains(&path_norm) || imp.contains(&analysis.path))
+            a.dynamic_imports.iter().any(|imp| {
+                // Use proper path matching to avoid false positives
+                paths_match(imp, &path_norm) || paths_match(imp, &analysis.path)
+            })
         });
         if is_dyn_imported {
             continue;
@@ -608,6 +649,7 @@ mod tests {
             imp.symbols = vec![ImportSymbol {
                 name: "helper".to_string(),
                 alias: None,
+                is_default: false,
             }];
             imp
         }];
@@ -688,5 +730,41 @@ mod tests {
             .collect();
         // Should truncate to limit and show "... and N more"
         print_dead_exports(&dead, OutputMode::Human, false, 50);
+    }
+
+    #[test]
+    fn test_paths_match_exact() {
+        assert!(paths_match("src/App.tsx", "src/App.tsx"));
+        assert!(paths_match("foo.ts", "foo.ts"));
+    }
+
+    #[test]
+    fn test_paths_match_with_separators() {
+        // Should handle different separators
+        assert!(paths_match("src/App.tsx", "src\\App.tsx"));
+        assert!(paths_match(
+            "src\\components\\Button.tsx",
+            "src/components/Button.tsx"
+        ));
+    }
+
+    #[test]
+    fn test_paths_match_suffix() {
+        // Should match when one is a suffix of another at component boundary
+        assert!(paths_match("src/App.tsx", "App.tsx"));
+        assert!(paths_match("src/components/Button.tsx", "Button.tsx"));
+        assert!(paths_match("Button.tsx", "src/components/Button.tsx"));
+    }
+
+    #[test]
+    fn test_paths_match_no_false_positives() {
+        // Should NOT match foo.ts with foo.test.ts (this is the critical fix)
+        assert!(!paths_match("foo.ts", "foo.test.ts"));
+        assert!(!paths_match("Button.tsx", "Button.test.tsx"));
+        assert!(!paths_match("utils.ts", "utils.spec.ts"));
+
+        // Should NOT match when substring is in the middle
+        assert!(!paths_match("App.tsx", "src/MyApp.tsx"));
+        assert!(!paths_match("Button.tsx", "src/BigButton.tsx"));
     }
 }

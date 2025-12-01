@@ -432,12 +432,12 @@ pub fn scan_roots(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
                 .reexports
                 .iter()
                 .filter_map(|r| r.resolved.clone().or_else(|| Some(r.source.clone())))
-                .map(|t| normalize_module_id(&t))
+                .map(|t| normalize_module_id(&t).as_key())
                 .collect();
             targets.sort();
             targets.dedup();
 
-            let module_id = normalize_module_id(&analysis.path);
+            let module_id = normalize_module_id(&analysis.path).as_key();
             let entry = barrel_map.entry(module_id.clone()).or_insert(BarrelInfo {
                 path: analysis.path.clone(),
                 module_id,
@@ -670,20 +670,62 @@ fn is_index_like(path: &str) -> bool {
         || lowered.ends_with("/index.rs")
 }
 
-pub(crate) fn normalize_module_id(path: &str) -> String {
+/// Normalized module identifier with language context
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct NormalizedModule {
+    /// Path without extension and /index suffix
+    pub path: String,
+    /// Language/extension identifier (ts, tsx, js, jsx, mjs, cjs, rs, py, css)
+    pub lang: String,
+}
+
+impl NormalizedModule {
+    /// Format as string for use as map key: "{path}:{lang}"
+    pub fn as_key(&self) -> String {
+        format!("{}:{}", self.path, self.lang)
+    }
+
+    /// Parse from key string created by as_key()
+    pub fn from_key(key: &str) -> Option<Self> {
+        let parts: Vec<&str> = key.rsplitn(2, ':').collect();
+        if parts.len() == 2 {
+            Some(NormalizedModule {
+                path: parts[1].to_string(),
+                lang: parts[0].to_string(),
+            })
+        } else {
+            None
+        }
+    }
+}
+
+/// Normalize module identifier preserving language context
+///
+/// This prevents cross-language collisions where foo.rs, foo.ts, and foo/index.ts
+/// would all map to the same key "foo".
+///
+/// Returns a NormalizedModule with separate path and language fields.
+pub(crate) fn normalize_module_id(path: &str) -> NormalizedModule {
     let mut p = path.replace('\\', "/");
+    let mut lang = String::new();
+
+    // Extract language from extension
     for ext in [
         ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".rs", ".py", ".css",
     ] {
         if let Some(stripped) = p.strip_suffix(ext) {
             p = stripped.to_string();
+            lang = ext.trim_start_matches('.').to_string();
             break;
         }
     }
+
+    // Strip /index suffix
     if let Some(stripped) = p.strip_suffix("/index") {
-        return stripped.to_string();
+        p = stripped.to_string();
     }
-    p
+
+    NormalizedModule { path: p, lang }
 }
 
 /// Build ScanResults from a loaded Snapshot (scan once, analyze many)
@@ -951,4 +993,172 @@ fn build_cascades(analyses: &[FileAnalysis]) -> Vec<(String, String)> {
         }
     }
     cascades
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_normalize_module_id_preserves_language() {
+        // Test that different languages with same base path get different normalized IDs
+        let rust_module = normalize_module_id("src/utils.rs");
+        let ts_module = normalize_module_id("src/utils.ts");
+        let tsx_module = normalize_module_id("src/utils.tsx");
+
+        assert_eq!(rust_module.path, "src/utils");
+        assert_eq!(rust_module.lang, "rs");
+
+        assert_eq!(ts_module.path, "src/utils");
+        assert_eq!(ts_module.lang, "ts");
+
+        assert_eq!(tsx_module.path, "src/utils");
+        assert_eq!(tsx_module.lang, "tsx");
+
+        // Keys should be different to prevent cross-language collisions
+        assert_ne!(rust_module.as_key(), ts_module.as_key());
+        assert_ne!(rust_module.as_key(), tsx_module.as_key());
+        assert_ne!(ts_module.as_key(), tsx_module.as_key());
+    }
+
+    #[test]
+    fn test_normalize_module_id_index_files() {
+        // Test that index files are normalized but preserve language
+        let ts_index = normalize_module_id("src/components/index.ts");
+        let rs_index = normalize_module_id("src/components/index.rs");
+
+        assert_eq!(ts_index.path, "src/components");
+        assert_eq!(ts_index.lang, "ts");
+
+        assert_eq!(rs_index.path, "src/components");
+        assert_eq!(rs_index.lang, "rs");
+
+        // Should not collide
+        assert_ne!(ts_index.as_key(), rs_index.as_key());
+        assert_eq!(ts_index.as_key(), "src/components:ts");
+        assert_eq!(rs_index.as_key(), "src/components:rs");
+    }
+
+    #[test]
+    fn test_normalize_module_id_cross_language_collision() {
+        // This is the core bug fix - ensure foo.rs and foo.ts don't collide
+        let rust_file = normalize_module_id("src/foo.rs");
+        let ts_file = normalize_module_id("src/foo.ts");
+        let ts_index = normalize_module_id("src/foo/index.ts");
+
+        // All have same base path
+        assert_eq!(rust_file.path, "src/foo");
+        assert_eq!(ts_file.path, "src/foo");
+        assert_eq!(ts_index.path, "src/foo");
+
+        // But different languages
+        assert_eq!(rust_file.lang, "rs");
+        assert_eq!(ts_file.lang, "ts");
+        assert_eq!(ts_index.lang, "ts");
+
+        // Keys should prevent collisions
+        assert_eq!(rust_file.as_key(), "src/foo:rs");
+        assert_eq!(ts_file.as_key(), "src/foo:ts");
+        assert_eq!(ts_index.as_key(), "src/foo:ts");
+
+        // Rust and TS files should NOT match
+        assert_ne!(rust_file.as_key(), ts_file.as_key());
+
+        // TS file and TS index SHOULD match (same language, same normalized path)
+        assert_eq!(ts_file.as_key(), ts_index.as_key());
+    }
+
+    #[test]
+    fn test_normalized_module_from_key() {
+        let module = NormalizedModule {
+            path: "src/utils".to_string(),
+            lang: "ts".to_string(),
+        };
+
+        let key = module.as_key();
+        assert_eq!(key, "src/utils:ts");
+
+        let parsed = NormalizedModule::from_key(&key).unwrap();
+        assert_eq!(parsed.path, "src/utils");
+        assert_eq!(parsed.lang, "ts");
+        assert_eq!(parsed, module);
+    }
+
+    #[test]
+    fn test_normalized_module_various_extensions() {
+        // Test all supported extensions
+        let extensions = vec![
+            ("file.ts", "ts"),
+            ("file.tsx", "tsx"),
+            ("file.js", "js"),
+            ("file.jsx", "jsx"),
+            ("file.mjs", "mjs"),
+            ("file.cjs", "cjs"),
+            ("file.rs", "rs"),
+            ("file.py", "py"),
+            ("file.css", "css"),
+        ];
+
+        for (input, expected_lang) in extensions {
+            let module = normalize_module_id(input);
+            assert_eq!(module.path, "file", "Failed for {}", input);
+            assert_eq!(module.lang, expected_lang, "Failed for {}", input);
+        }
+    }
+
+    #[test]
+    fn test_normalized_module_windows_paths() {
+        // Test Windows-style paths are normalized
+        let module = normalize_module_id("src\\utils\\helpers.ts");
+        assert_eq!(module.path, "src/utils/helpers");
+        assert_eq!(module.lang, "ts");
+        assert_eq!(module.as_key(), "src/utils/helpers:ts");
+    }
+
+    #[test]
+    fn test_normalized_module_from_key_round_trip() {
+        // Test round-trip conversion between module and key
+        let test_cases = vec![
+            ("src/utils:ts", "src/utils", "ts"),
+            ("components/Button:tsx", "components/Button", "tsx"),
+            ("lib/helpers:js", "lib/helpers", "js"),
+            ("core:rs", "core", "rs"),
+        ];
+
+        for (key, expected_path, expected_lang) in test_cases {
+            let module = NormalizedModule::from_key(key).unwrap();
+            assert_eq!(module.path, expected_path);
+            assert_eq!(module.lang, expected_lang);
+            assert_eq!(module.as_key(), key);
+        }
+    }
+
+    #[test]
+    fn test_normalized_module_from_key_invalid() {
+        // Test that invalid keys return None
+        assert!(NormalizedModule::from_key("invalid_key_without_colon").is_none());
+        assert!(NormalizedModule::from_key("").is_none());
+    }
+
+    #[test]
+    fn test_normalized_module_hash_and_eq() {
+        // Test that NormalizedModule can be used in HashSet/HashMap
+        use std::collections::HashSet;
+
+        let mut set = HashSet::new();
+
+        let mod1 = normalize_module_id("src/utils.ts");
+        let mod2 = normalize_module_id("src/utils.ts");
+        let mod3 = normalize_module_id("src/utils.rs");
+
+        set.insert(mod1.clone());
+
+        // Same module shouldn't be inserted twice
+        assert!(set.contains(&mod2));
+        assert_eq!(set.len(), 1);
+
+        // Different language should be different
+        set.insert(mod3.clone());
+        assert_eq!(set.len(), 2);
+    }
 }

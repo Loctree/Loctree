@@ -18,6 +18,20 @@ use super::regexes::{
 use super::resolvers::{TsPathResolver, resolve_reexport_target};
 use super::{brace_list_to_names, offset_to_line};
 
+/// Parse import symbols from an import clause.
+///
+/// Tracks whether each symbol is a default import (e.g., `import Foo from './bar'`)
+/// vs a named import (e.g., `import { Foo } from './bar'`). This is critical for
+/// matching imports with exports, as default imports should match "default" exports,
+/// not the aliased name.
+///
+/// Examples:
+/// - `import Foo from './bar'` → ImportSymbol { name: "Foo", is_default: true }
+/// - `import { Foo } from './bar'` → ImportSymbol { name: "Foo", is_default: false }
+/// - `import Bar, { Foo } from './x'` → [
+///   ImportSymbol { name: "Bar", is_default: true },
+///   ImportSymbol { name: "Foo", is_default: false }
+/// ]
 fn parse_import_symbols(raw: &str) -> Vec<ImportSymbol> {
     let mut symbols = Vec::new();
     let trimmed = raw.trim().trim_start_matches("type ").trim();
@@ -28,6 +42,7 @@ fn parse_import_symbols(raw: &str) -> Vec<ImportSymbol> {
             symbols.push(ImportSymbol {
                 name: "*".to_string(),
                 alias: Some(alias.trim().to_string()),
+                is_default: false,
             });
         }
         return symbols;
@@ -41,6 +56,7 @@ fn parse_import_symbols(raw: &str) -> Vec<ImportSymbol> {
             symbols.push(ImportSymbol {
                 name: default_name.to_string(),
                 alias: None,
+                is_default: true,
             });
             default_done = true;
         }
@@ -48,6 +64,7 @@ fn parse_import_symbols(raw: &str) -> Vec<ImportSymbol> {
         symbols.push(ImportSymbol {
             name: trimmed.to_string(),
             alias: None,
+            is_default: true,
         });
         default_done = true;
     }
@@ -65,11 +82,13 @@ fn parse_import_symbols(raw: &str) -> Vec<ImportSymbol> {
                 symbols.push(ImportSymbol {
                     name: name.trim().to_string(),
                     alias: Some(alias.trim().to_string()),
+                    is_default: false,
                 });
             } else {
                 symbols.push(ImportSymbol {
                     name: part.to_string(),
                     alias: None,
+                    is_default: false,
                 });
             }
         }
@@ -80,6 +99,7 @@ fn parse_import_symbols(raw: &str) -> Vec<ImportSymbol> {
         symbols.push(ImportSymbol {
             name: trimmed.to_string(),
             alias: None,
+            is_default: true,
         });
     }
 
@@ -347,6 +367,7 @@ pub(crate) fn analyze_js_file(
             entry.symbols.push(ImportSymbol {
                 name: export_str,
                 alias: None,
+                is_default: false, // Lazy imports are typically named exports
             });
             entry.resolved_path = resolve_reexport_target(path, root, &source_str, extensions)
                 .or_else(|| ts_resolver.and_then(|r| r.resolve(&source_str, extensions)))
@@ -566,5 +587,151 @@ customCommandWrapper("another_cmd", options);
         assert!(export_names.contains(&"localValue".to_string()));
         assert!(export_names.contains(&"MyComp".to_string()));
         assert!(export_names.contains(&"namedA".to_string()));
+    }
+
+    #[test]
+    fn default_import_tracking() {
+        let content = r#"
+import DefaultFoo from "./foo";
+import DefaultBar, { named1, named2 } from "./bar";
+import { named3 } from "./baz";
+import * as Everything from "./everything";
+        "#;
+
+        let analysis = analyze_js_file(
+            content,
+            Path::new("src/app.tsx"),
+            Path::new("src"),
+            Some(&HashSet::from(["ts".to_string(), "tsx".to_string()])),
+            None,
+            "app.tsx".to_string(),
+        );
+
+        // Check default import from "./foo"
+        let foo_import = analysis
+            .imports
+            .iter()
+            .find(|i| i.source == "./foo")
+            .expect("Should find ./foo import");
+        assert_eq!(foo_import.symbols.len(), 1);
+        assert_eq!(foo_import.symbols[0].name, "DefaultFoo");
+        assert!(
+            foo_import.symbols[0].is_default,
+            "DefaultFoo should be marked as default import"
+        );
+
+        // Check mixed default + named imports from "./bar"
+        let bar_import = analysis
+            .imports
+            .iter()
+            .find(|i| i.source == "./bar")
+            .expect("Should find ./bar import");
+        assert_eq!(bar_import.symbols.len(), 3);
+
+        let default_sym = bar_import
+            .symbols
+            .iter()
+            .find(|s| s.name == "DefaultBar")
+            .expect("Should find DefaultBar symbol");
+        assert!(
+            default_sym.is_default,
+            "DefaultBar should be marked as default import"
+        );
+
+        let named1_sym = bar_import
+            .symbols
+            .iter()
+            .find(|s| s.name == "named1")
+            .expect("Should find named1 symbol");
+        assert!(
+            !named1_sym.is_default,
+            "named1 should NOT be marked as default import"
+        );
+
+        // Check named-only import from "./baz"
+        let baz_import = analysis
+            .imports
+            .iter()
+            .find(|i| i.source == "./baz")
+            .expect("Should find ./baz import");
+        assert_eq!(baz_import.symbols.len(), 1);
+        assert_eq!(baz_import.symbols[0].name, "named3");
+        assert!(
+            !baz_import.symbols[0].is_default,
+            "named3 should NOT be marked as default import"
+        );
+
+        // Check namespace import
+        let ns_import = analysis
+            .imports
+            .iter()
+            .find(|i| i.source == "./everything")
+            .expect("Should find ./everything import");
+        assert_eq!(ns_import.symbols.len(), 1);
+        assert_eq!(ns_import.symbols[0].name, "*");
+        assert!(
+            !ns_import.symbols[0].is_default,
+            "Namespace import should NOT be marked as default import"
+        );
+    }
+
+    #[test]
+    fn default_export_matching_scenario() {
+        // This test demonstrates the problem this fix solves:
+        // Default exports should be matchable with default imports,
+        // regardless of the aliased import name.
+
+        let exporter_content = r#"
+export default function MyComponent() {
+    return <div>Hello</div>;
+}
+        "#;
+
+        let importer_content = r#"
+import Foo from "./component";
+import Bar from "./component";
+import Baz from "./component";
+        "#;
+
+        let exporter = analyze_js_file(
+            exporter_content,
+            Path::new("src/component.tsx"),
+            Path::new("src"),
+            None,
+            None,
+            "component.tsx".to_string(),
+        );
+
+        let importer = analyze_js_file(
+            importer_content,
+            Path::new("src/app.tsx"),
+            Path::new("src"),
+            None,
+            None,
+            "app.tsx".to_string(),
+        );
+
+        // The export should be stored with kind "default"
+        assert_eq!(exporter.exports.len(), 1);
+        let export = &exporter.exports[0];
+        assert_eq!(export.name, "MyComponent");
+        assert_eq!(export.kind, "default");
+
+        // All three imports should be marked as default imports
+        // even though they have different names (Foo, Bar, Baz)
+        assert_eq!(importer.imports.len(), 3);
+        for imp in &importer.imports {
+            assert_eq!(imp.symbols.len(), 1);
+            let sym = &imp.symbols[0];
+            assert!(
+                sym.is_default,
+                "{} should be marked as default import",
+                sym.name
+            );
+        }
+
+        // With is_default flag, all three imports (Foo, Bar, Baz) should match
+        // the single default export "MyComponent" because they all have is_default=true
+        // This prevents false positives where MyComponent appears "unused"
     }
 }
