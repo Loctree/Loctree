@@ -16,7 +16,7 @@ const ASCII_LOGO: &str = r#"
 /_/\____/\___/\__/_/   \___/\___/
 
   Scan once, slice many.
-  v0.5.4 | loctree.io
+  v0.5.5 | loctree.io
 "#;
 
 /// Initialize all easter eggs

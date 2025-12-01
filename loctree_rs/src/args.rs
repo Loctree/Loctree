@@ -60,6 +60,14 @@ pub struct ParsedArgs {
     pub slice_target: Option<String>,
     pub slice_consumers: bool,
     pub trace_handler: Option<String>,
+    /// Unified search query
+    pub search_query: Option<String>,
+    /// Filter search to symbol matches only
+    pub search_symbol_only: bool,
+    /// Filter search to dead code only
+    pub search_dead_only: bool,
+    /// Filter search to semantic matches only
+    pub search_semantic_only: bool,
 }
 
 impl Default for ParsedArgs {
@@ -121,6 +129,10 @@ impl Default for ParsedArgs {
             slice_target: None,
             slice_consumers: false,
             trace_handler: None,
+            search_query: None,
+            search_symbol_only: false,
+            search_dead_only: false,
+            search_semantic_only: false,
         }
     }
 }
@@ -574,6 +586,29 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
                     i += 2;
                     continue;
                 }
+                i += 1;
+            }
+            "search" => {
+                parsed.mode = Mode::Search;
+                if let Some(next) = args.get(i + 1)
+                    && !next.starts_with('-')
+                {
+                    parsed.search_query = Some(next.clone());
+                    i += 2;
+                    continue;
+                }
+                i += 1;
+            }
+            "--symbol-only" => {
+                parsed.search_symbol_only = true;
+                i += 1;
+            }
+            "--dead-only" => {
+                parsed.search_dead_only = true;
+                i += 1;
+            }
+            "--semantic-only" | "--sem-only" => {
+                parsed.search_semantic_only = true;
                 i += 1;
             }
             "git" => {

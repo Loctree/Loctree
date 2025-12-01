@@ -36,6 +36,7 @@ Quick Start:\n  \
 Core Commands:\n  \
   (no args)         Scan whole repo, save snapshot (incremental)\n  \
   slice <file>      Extract file + dependencies + consumers for AI\n  \
+  search <query>    Find symbols, semantic matches, dead code status\n  \
   trace <handler>   Debug why a Tauri handler is unused/missing\n  \
   --for-ai          Quick-wins + hub files summary (JSON)\n\n\
 Analysis (-A):\n  \
@@ -70,6 +71,7 @@ Usage: loctree [options]\n\n\
 === MODES ===\n\n  \
 (default)         Scan repo, save snapshot to .loctree/snapshot.json\n  \
 slice <file>      Extract file + deps + consumers for AI agents\n  \
+search <query>    Find symbols, semantic matches, check dead code\n  \
 trace <handler>   Debug Tauri handler (shows BE def, FE calls, verdict)\n  \
 --for-ai          Quick-wins + hub files + slice commands (JSON)\n  \
 -A                Import/export analyzer (duplicates, dead, coverage)\n  \
@@ -78,6 +80,11 @@ trace <handler>   Debug Tauri handler (shows BE def, FE calls, verdict)\n  \
 slice <file>      Target file to extract context for\n  \
 --consumers       Include files that import the target\n  \
 --json            JSON output (pipe to AI agent)\n\n\
+=== SEARCH MODE ===\n\n  \
+search <query>    Find symbols across codebase\n  \
+--symbol-only     Only show exact symbol matches\n  \
+--semantic-only   Only show semantic (fuzzy) matches\n  \
+--dead-only       Only show if symbol is dead code\n\n\
 === ANALYZER MODE (-A) ===\n\n\
 Analysis:\n  \
   --dead            Find unused exports (Janitor mode)\n  \
@@ -257,6 +264,15 @@ fn main() -> std::io::Result<()> {
         }
         Mode::ForAi => {
             run_for_ai(&root_list, &parsed)?;
+        }
+        Mode::Search => {
+            let query = parsed.search_query.as_ref().ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "search requires a query, e.g.: loctree search my_function",
+                )
+            })?;
+            run_search(&root_list, query, &parsed)?;
         }
         Mode::Git(ref subcommand) => {
             run_git(subcommand, &parsed)?;
@@ -462,6 +478,58 @@ fn run_for_ai(root_list: &[PathBuf], parsed: &args::ParsedArgs) -> std::io::Resu
 
     let report = generate_for_ai_report(&project_root, &report_sections, &global_analyses);
     print_for_ai_json(&report);
+
+    Ok(())
+}
+
+/// Unified search - aggregates symbol, semantic, and dead code results
+fn run_search(
+    root_list: &[PathBuf],
+    query: &str,
+    parsed: &args::ParsedArgs,
+) -> std::io::Result<()> {
+    use analyzer::root_scan::{ScanConfig, ScanResults, scan_roots};
+    use analyzer::scan::python_stdlib;
+    use analyzer::search::{print_search_results, run_search as do_search};
+    use std::collections::HashSet;
+
+    let extensions = parsed.extensions.clone().or_else(|| {
+        Some(
+            ["ts", "tsx", "js", "jsx", "mjs", "cjs", "rs", "css", "py"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        )
+    });
+
+    let py_stdlib = python_stdlib();
+
+    let scan_results = scan_roots(ScanConfig {
+        roots: root_list,
+        parsed,
+        extensions,
+        focus_set: &None,
+        exclude_set: &None,
+        ignore_exact: HashSet::new(),
+        ignore_prefixes: Vec::new(),
+        py_stdlib: &py_stdlib,
+        cached_analyses: None,
+        collect_edges: false,
+        custom_command_macros: &[],
+    })?;
+
+    let ScanResults {
+        global_analyses, ..
+    } = scan_results;
+
+    let results = do_search(query, &global_analyses);
+    print_search_results(
+        &results,
+        parsed.output,
+        parsed.search_symbol_only,
+        parsed.search_dead_only,
+        parsed.search_semantic_only,
+    );
 
     Ok(())
 }
