@@ -1,7 +1,7 @@
 //! End-to-End CLI Tests for loctree
 //!
 //! Following TDD principles - tests define expected behavior.
-//! Created by M&K (c)2025 The LibraxisAI Team
+//! Developed with 💀 by The Loctree Team (c)2025
 
 use assert_cmd::Command;
 use assert_cmd::cargo::cargo_bin_cmd;

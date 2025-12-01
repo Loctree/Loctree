@@ -199,4 +199,4 @@ The goal is not "make it work". The goal is: we know WHY it works (or doesn't).
 
 ---
 
-Created by M&K (c)2025 The LibraxisAI Team
+Developed with 💀 by The Loctree Team (c)2025 

@@ -1,5 +1,5 @@
 // Landing page sections
-// Created by M&K (c)2025 The LibraxisAI Team
+// Developed with 💀 by The Loctree Team (c)2025 
 
 /// Version string used across the landing page (single source of truth)
 pub const VERSION: &str = "v0.5.6";

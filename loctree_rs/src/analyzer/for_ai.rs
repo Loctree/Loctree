@@ -5,7 +5,7 @@
 //! - Navigate via slice references
 //! - Get actionable quick wins
 //!
-//! Created by M&K (c)2025 The LibraxisAI Team
+//! Developed with 💀 by The Loctree Team (c)2025
 
 use serde::Serialize;
 

@@ -375,4 +375,4 @@ MIT — use it, fork it, improve it. See [LICENSE](LICENSE).
 
 ---
 
-**Created by M&K (c)2025 The LibraxisAI Team**
+**Developed with 💀 by The Loctree Team (c)2025 **

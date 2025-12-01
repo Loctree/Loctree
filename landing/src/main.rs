@@ -1,5 +1,5 @@
 // loctree Landing Page — Leptos 0.8 Edition
-// Created by M&K (c)2025 The LibraxisAI Team
+// Developed with 💀 by The Loctree Team (c)2025 
 
 mod sections;
 

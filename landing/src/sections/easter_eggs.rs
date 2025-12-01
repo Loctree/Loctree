@@ -75,7 +75,7 @@ fn print_console_art() {
         web_sys::console::log_1(&JsValue::from_str(""));
 
         web_sys::console::log_2(
-            &JsValue::from_str("%c\\(^o^)/ Built with Rust + Leptos by M&K @ LibraxisAI"),
+            &JsValue::from_str("%c\\(^o^)/ Built with Rust + Leptos by M&K @ Loctree"),
             &JsValue::from_str("color: #666; font-size: 10px;"),
         );
 
@@ -173,7 +173,7 @@ fn trigger_konami_easter_egg() {
 
     web_sys::console::log_1(&JsValue::from_str(""));
     web_sys::console::log_2(
-        &JsValue::from_str("%cGang of Bastards @ LibraxisAI"),
+        &JsValue::from_str("%cGang of Bastards @ Loctree"),
         &JsValue::from_str("color: #888; font-size: 10px;"),
     );
 
