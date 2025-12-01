@@ -4,11 +4,14 @@
 
 #![allow(clippy::collapsible_if)]
 
+use super::VERSION;
 use leptos::prelude::*;
 use wasm_bindgen::prelude::*;
 
 /// ASCII art logo for console
-const ASCII_LOGO: &str = r#"
+fn ascii_logo() -> String {
+    format!(
+        r#"
     __            __
    / /___  _____/ /_________  ___
   / / __ \/ ___/ __/ ___/ _ \/ _ \
@@ -16,8 +19,10 @@ const ASCII_LOGO: &str = r#"
 /_/\____/\___/\__/_/   \___/\___/
 
   Scan once, slice many.
-  v0.5.6 | loctree.io
-"#;
+  {VERSION} | loctree.io
+"#
+    )
+}
 
 /// Initialize all easter eggs
 #[component]
@@ -37,7 +42,7 @@ fn print_console_art() {
     if let Some(_window) = web_sys::window() {
         // ASCII logo with style
         web_sys::console::log_2(
-            &JsValue::from_str(&format!("%c{}", ASCII_LOGO)),
+            &JsValue::from_str(&format!("%c{}", ascii_logo())),
             &JsValue::from_str("color: #00ff88; font-family: monospace; font-size: 11px;"),
         );
 
@@ -46,6 +51,13 @@ fn print_console_art() {
         web_sys::console::log_2(
             &JsValue::from_str("%c(o_o) [tip] Run `loct --for-ai` for AI-optimized output"),
             &JsValue::from_str("color: #ffcc00;"),
+        );
+
+        web_sys::console::log_2(
+            &JsValue::from_str(
+                "%c(>‿<) [auto] `loct` writes snapshot + report bundle to .loctree/",
+            ),
+            &JsValue::from_str("color: #00ff88;"),
         );
 
         web_sys::console::log_2(
