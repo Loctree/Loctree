@@ -14,13 +14,13 @@ pub fn Hero() -> impl IntoView {
                             {badge_text}
                         </div>
                         <h1 class="hero-title">
-                            <span class="hero-title-accent">"Scan once,"</span>
+                            <span class="hero-title-accent">"The project map"</span>
                             <br />
-                            "slice many."
+                            "built for AI, not humans."
                         </h1>
                         <p class="hero-description">
-                            "Static analysis tool designed for AI agents. Extract focused context for any file, "
-                            "detect circular imports, find dead exports. One scan, infinite slices."
+                            "Dead code dies here. Static code analysis for agentic codebase context management. "
+                            "Real structure, not file listings. A foundation for autonomous development tools."
                         </p>
                         <div class="hero-actions">
                             <a href="#install" class="btn btn-primary">
