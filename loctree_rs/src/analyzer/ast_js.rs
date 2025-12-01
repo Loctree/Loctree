@@ -397,37 +397,88 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                 "queryCommandValue",
             ];
 
+            // Functions that ARE NOT Tauri invokes - ignore completely
+            const NON_INVOKE_EXCLUSIONS: &[&str] = &[
+                // React hooks that happen to have "Command" in name
+                "useVoiceCommands",
+                "useAssistantToolCommands",
+                "useNewVisitVoiceCommands",
+                "useAiTopicCommands",
+                // Build tools / CLI commands (not Tauri)
+                "runGitCommand",
+                "executeCommand",
+                "buildCommandString",
+                "buildCommandArgs",
+                "classifyCommand",
+                // Internal tracking/context functions
+                "onCommandContext",
+                "enqueueCommandContext",
+                "setLastCommand",
+                "setCommandError",
+                "recordCommandInvokeStart",
+                "recordCommandInvokeFinish",
+                "handleInvokeFailure",
+                "isCommandMissingError",
+                "isRetentionCommandMissing",
+                // Collection/analysis utilities
+                "collectInvokeCommands",
+                "collectUsedCommandsFromRoamLogs",
+                "extractInvokeCommandsFromText",
+                "scanCommandsInFiles",
+                "parseBackendCommands",
+                "buildSessionCommandPayload",
+                // Mention/slash command handlers (UI, not Tauri)
+                "onMentionCommand",
+                "onSlashCommand",
+                // Mock/test utilities
+                "invokeFallbackMock",
+                "resolveMockCommand",
+            ];
+
             if is_potential_command
                 && !DOM_EXCLUSIONS.iter().any(|ex| name.contains(ex))
                 && !DOM_EXCLUSIONS.contains(&name.as_str())
+                && !NON_INVOKE_EXCLUSIONS.contains(&name.as_str())
                 && let Some(arg) = call.arguments.first()
             {
                 let payload = match arg {
                     Argument::StringLiteral(s) => Some(s.value.to_string()),
+                    Argument::TemplateLiteral(t) => {
+                        if t.quasis.len() == 1 && t.expressions.is_empty() {
+                            t.quasis.first().map(|q| q.value.raw.to_string())
+                        } else {
+                            None
+                        }
+                    }
                     _ => None,
                 };
 
-                let generic = call
-                    .type_parameters
-                    .as_ref()
-                    .and_then(|params| params.params.first().map(JsVisitor::type_to_string));
+                if let Some(cmd_name) = payload {
+                    // Filter out command names that are clearly not Tauri commands
+                    const INVALID_COMMAND_NAMES: &[&str] = &[
+                        // CLI tools / shell commands
+                        "node", "npm", "pnpm", "yarn", "bun", "cargo", "rustc", "rustup", "git",
+                        "gh", "python", "python3", "pip", "brew", "apt", "yum", "sh", "bash",
+                        "zsh", "curl", "wget", "docker", "kubectl",
+                        // Generic/test names
+                        "test", "mock", "stub", "fake",
+                    ];
 
-                let line = self.get_line(call.span);
+                    if !INVALID_COMMAND_NAMES.contains(&cmd_name.as_str()) {
+                        let generic = call.type_parameters.as_ref().and_then(|params| {
+                            params.params.first().map(JsVisitor::type_to_string)
+                        });
 
-                self.analysis.command_calls.push(CommandRef {
-                    name: name.clone(),
-                    exposed_name: None,
-                    line,
-                    generic_type: generic,
-                    payload: payload.clone(),
-                });
+                        let line = self.get_line(call.span);
 
-                // Fix collapsible_if
-                if let Some(cmd_name) = payload
-                    && let Some(last) = self.analysis.command_calls.last_mut()
-                {
-                    last.name = cmd_name;
-                    last.payload = None;
+                        self.analysis.command_calls.push(CommandRef {
+                            name: cmd_name,
+                            exposed_name: None,
+                            line,
+                            generic_type: generic,
+                            payload: None,
+                        });
+                    }
                 }
             }
 
@@ -444,6 +495,21 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                 let (event_name, raw_name, kind) = match arg {
                     Argument::StringLiteral(s) => {
                         (s.value.to_string(), Some(s.value.to_string()), "literal")
+                    }
+                    Argument::TemplateLiteral(t) => {
+                        if t.quasis.len() == 1 && t.expressions.is_empty() {
+                            if let Some(q) = t.quasis.first() {
+                                (
+                                    q.value.raw.to_string(),
+                                    Some(q.value.raw.to_string()),
+                                    "literal",
+                                )
+                            } else {
+                                ("?".to_string(), None, "unknown")
+                            }
+                        } else {
+                            ("?".to_string(), None, "unknown")
+                        }
                     }
                     Argument::Identifier(id) => {
                         let id_name = id.name.to_string();

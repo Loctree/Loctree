@@ -382,6 +382,8 @@ mod tests {
             insights: vec![],
             graph: None,
             graph_warning: None,
+            git_branch: None,
+            git_commit: None,
         }
     }
 

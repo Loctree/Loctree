@@ -6,7 +6,27 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Released]
 
-## [0.5.5] - 2025-11-30
+## [0.5.6-dev] - 2025-12-01
+
+### Fixed
+- **AST Parser JSX Fix**: Disabled JSX parsing for `.ts` files (only enabled for `.tsx`/`.jsx`). Previously, TypeScript generics like `<T>` were incorrectly parsed as JSX tags, causing entire files like `api.ts` to fail parsing.
+- **Template Literal Support**: Added detection of Tauri `invoke` calls using backticks (`` `cmd` ``). Commands like `` safeInvoke(`create_user`) `` are now correctly identified.
+- **False Positive Reduction**: Added exclusion lists to prevent non-Tauri functions from being detected as commands:
+  - `NON_INVOKE_EXCLUSIONS`: ~35 patterns like `useVoiceCommands`, `runGitCommand`, `executeCommand`
+  - `INVALID_COMMAND_NAMES`: CLI tools like `node`, `cargo`, `pnpm`, `git`
+- **Payload Requirement**: `CommandRef` is now only created when a valid command name payload exists, eliminating false positives where function names were mistaken for commands.
+
+### Added
+- **Git Context in Reports**: Added `git_branch` and `git_commit` fields to `ReportSection` for future Scan ID system integration.
+- **Parser Debug Logging**: Added error logging when OXC parser encounters issues (visible with `--verbose`).
+
+### Changed
+- **Vista Project Results**: Improved detection accuracy:
+  - Frontend commands: 170 → 254 (+49%)
+  - Missing handlers: 18 → 5 (72% reduction in false positives)
+  - Unused handlers: 137 → 57 (58% reduction in false positives)
+
+## [0.5.5-dev] - 2025-11-30
 
 ### Fixed
 - **AI Context Safety**: Limited verbosity of `slice` and `circular` commands to prevent context flooding in LLMs:

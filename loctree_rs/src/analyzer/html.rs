@@ -129,6 +129,8 @@ mod tests {
                 severity: "medium".into(),
                 message: "Message".into(),
             }],
+            git_branch: None,
+            git_commit: None,
         };
 
         render_html_report(&out_path, &[section]).expect("render html");
@@ -168,6 +170,8 @@ mod tests {
             graph: None,
             graph_warning: None,
             insights: Vec::new(),
+            git_branch: None,
+            git_commit: None,
         };
 
         render_html_report(&out_path, &[section]).expect("render html");

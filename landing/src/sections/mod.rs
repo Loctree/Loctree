@@ -2,7 +2,7 @@
 // Created by M&K (c)2025 The LibraxisAI Team
 
 /// Version string used across the landing page (single source of truth)
-pub const VERSION: &str = "v0.5.6-dev";
+pub const VERSION: &str = "v0.5.6";
 
 mod nav;
 mod hero;

@@ -143,6 +143,8 @@ pub struct ReportSection {
     pub graph: Option<GraphData>,
     pub graph_warning: Option<String>,
     pub insights: Vec<AiInsight>,
+    pub git_branch: Option<String>,
+    pub git_commit: Option<String>,
 }
 
 #[cfg(test)]

@@ -1,6 +1,6 @@
 [package]
 name = "loctree"
-version = "0.5.6-dev"
+version = "0.5.6"
 edition = "2024"
 default-run = "loctree"
 authors = ["LibraxisAI <the1st@whoai.am>"]

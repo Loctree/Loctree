@@ -961,6 +961,8 @@ Top duplicate exports (showing up to {}):",
             },
             graph: graph_data.clone(),
             graph_warning: graph_warning.clone(),
+            git_branch: None,
+            git_commit: None,
         });
     }
 
