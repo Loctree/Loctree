@@ -133,7 +133,21 @@ pub fn print_cycles(cycles: &[Vec<String>], json_output: bool) {
         for (i, cycle) in cycles.iter().enumerate() {
             let mut c = cycle.clone();
             c.reverse(); // Reverse to show cycle in discovery order for readability
-            println!("  Cycle {}: {}", i + 1, c.join(" -> "));
+
+            let cycle_str = if c.len() > 12 {
+                let first_part = c[..5].join(" -> ");
+                let last_part = c[c.len() - 5..].join(" -> ");
+                format!(
+                    "{} -> ... ({} intermediate) ... -> {}",
+                    first_part,
+                    c.len() - 10,
+                    last_part
+                )
+            } else {
+                c.join(" -> ")
+            };
+
+            println!("  Cycle {}: {}", i + 1, cycle_str);
         }
     }
 }

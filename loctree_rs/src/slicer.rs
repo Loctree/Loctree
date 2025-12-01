@@ -375,7 +375,17 @@ impl HolographicSlice {
             "\nDeps ({} files, {} LOC):",
             self.stats.deps_files, self.stats.deps_loc
         );
-        for f in &self.deps {
+
+        const DISPLAY_LIMIT: usize = 25;
+
+        for (i, f) in self.deps.iter().enumerate() {
+            if i >= DISPLAY_LIMIT {
+                println!(
+                    "  ... and {} more (use --json for full list)",
+                    self.deps.len() - DISPLAY_LIMIT
+                );
+                break;
+            }
             let indent = "  ".repeat(f.depth);
             println!(
                 "{}[d{}] {} ({} LOC, {})",
@@ -388,7 +398,15 @@ impl HolographicSlice {
                 "\nConsumers ({} files, {} LOC):",
                 self.stats.consumers_files, self.stats.consumers_loc
             );
-            for f in &self.consumers {
+
+            for (i, f) in self.consumers.iter().enumerate() {
+                if i >= DISPLAY_LIMIT {
+                    println!(
+                        "  ... and {} more (use --json for full list)",
+                        self.consumers.len() - DISPLAY_LIMIT
+                    );
+                    break;
+                }
                 println!("  {} ({} LOC, {})", f.path, f.loc, f.language);
             }
         }
