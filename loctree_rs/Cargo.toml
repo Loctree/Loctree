@@ -31,7 +31,7 @@ regex = "1.12"
 globset = "0.4"
 heck = "0.5"
 time = { version = "0.3", features = ["formatting"] }
-report-leptos = { version = "0.1", path = "../reports" }
+report-leptos = { version = "0.1.1", path = "../reports" }
 git2 = "0.19"
 toml = "0.8"
 

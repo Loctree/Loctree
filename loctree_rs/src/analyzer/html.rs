@@ -40,8 +40,7 @@ pub(crate) fn render_html_report(path: &Path, sections: &[ReportSection]) -> io:
         layout_base_path: "loctree-layout-base.js".into(),
         cose_base_path: "loctree-cose-base.js".into(),
         cytoscape_cose_bilkent_path: "loctree-cytoscape-cose-bilkent.js".into(),
-        wasm_base64: None,
-        wasm_js_glue: None,
+        ..Default::default()
     };
 
     let html = report_leptos::render_report(&leptos_sections, &js_assets);
