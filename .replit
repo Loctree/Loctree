@@ -1,0 +1,38 @@
+[[ports]]
+localPort = 5000
+externalPort = 80
+
+[nix]
+packages = ["trunk", "rustup", "simple-http-server", "gh"]
+channel = "stable-25_05"
+
+[agent]
+expertMode = true
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Loctree Landing"
+
+[[workflows.workflow]]
+name = "Loctree Landing"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "simple-http-server landing/dist -p 5000 --index --cors"
+waitForPort = 5000
+
+[workflows.workflow.metadata]
+outputType = "webview"
+
+[deployment]
+deploymentTarget = "static"
+publicDir = "public_dist"
