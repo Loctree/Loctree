@@ -2,18 +2,18 @@
 //!
 //! Implements the App Shell layout with Sidebar and Main Content areas.
 
-use leptos::prelude::*;
-use crate::styles::{REPORT_CSS, CSP};
+use super::{
+    Icon, ReportSectionView, ICON_COPY, ICON_GRAPH, ICON_LIGHTNING, ICON_SQUARES_FOUR,
+    ICON_TERMINAL,
+};
+use crate::styles::{CSP, REPORT_CSS};
 use crate::types::ReportSection;
 use crate::JsAssets;
-use super::{ReportSectionView, Icon, ICON_SQUARES_FOUR, ICON_COPY, ICON_LIGHTNING, ICON_TERMINAL, ICON_GRAPH};
+use leptos::prelude::*;
 
 /// The complete HTML document for the report
 #[component]
-pub fn ReportDocument(
-    sections: Vec<ReportSection>,
-    js_assets: JsAssets,
-) -> impl IntoView {
+pub fn ReportDocument(sections: Vec<ReportSection>, js_assets: JsAssets) -> impl IntoView {
     view! {
         <html>
             <head>
@@ -64,7 +64,7 @@ pub fn ReportDocument(
                         </nav>
 
                         <div class="app-footer">
-                            "loctree v0.5.6"
+                            "loctree v0.5.7"
                             <br />
                             <span style="color:var(--theme-text-tertiary)">"Snapshot"</span>
                         </div>

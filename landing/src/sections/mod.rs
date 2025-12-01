@@ -1,8 +1,8 @@
 // Landing page sections
-// Developed with 💀 by The Loctree Team (c)2025 
+// Developed with 💀 by The Loctree Team (c)2025
 
 /// Version string used across the landing page (single source of truth)
-pub const VERSION: &str = "v0.5.6";
+pub const VERSION: &str = "v0.5.7";
 
 mod cli_reference;
 mod easter_eggs;

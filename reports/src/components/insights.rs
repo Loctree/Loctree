@@ -1,8 +1,8 @@
 //! AI insights panel component
 
-use leptos::prelude::*;
+use crate::components::{Icon, ICON_ROBOT, ICON_SQUARES_FOUR, ICON_WARNING_CIRCLE};
 use crate::types::AiInsight;
-use crate::components::{Icon, ICON_WARNING_CIRCLE, ICON_ROBOT, ICON_SQUARES_FOUR};
+use leptos::prelude::*;
 
 /// Summary statistics panel
 #[component]
@@ -90,5 +90,6 @@ pub fn AiInsightsPanel(insights: Vec<AiInsight>) -> impl IntoView {
                 }
             }).collect::<Vec<_>>()}
         </ul>
-    }.into_any()
+    }
+    .into_any()
 }

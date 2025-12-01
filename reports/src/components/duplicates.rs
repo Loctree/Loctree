@@ -1,13 +1,11 @@
 //! Duplicate exports table component
 
-use leptos::prelude::*;
 use crate::types::RankedDup;
+use leptos::prelude::*;
 
 /// Table showing duplicate exports across files
 #[component]
-pub fn DuplicateExportsTable(
-    dups: Vec<RankedDup>,
-) -> impl IntoView {
+pub fn DuplicateExportsTable(dups: Vec<RankedDup>) -> impl IntoView {
     let count = dups.len();
     view! {
         <h3>"Top duplicate exports"</h3>

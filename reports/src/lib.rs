@@ -59,7 +59,7 @@
 //!
 //! ---
 //!
-//! Developed with 💀 by The Loctree Team (c)2025 
+//! Developed with 💀 by The Loctree Team (c)2025
 
 #![doc(html_root_url = "https://docs.rs/report-leptos/0.1.0")]
 #![warn(missing_docs)]

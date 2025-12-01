@@ -4,7 +4,8 @@ use leptos::prelude::*;
 pub fn InstallSection() -> impl IntoView {
     let (copied, set_copied) = signal(false);
 
-    let install_command = "curl -fsSL https://raw.githubusercontent.com/Loctree/Loctree/main/tools/install.sh | sh";
+    let install_command =
+        "curl -fsSL https://raw.githubusercontent.com/Loctree/Loctree/main/tools/install.sh | sh";
 
     let copy_cmd = move |_| {
         if let Some(window) = web_sys::window() {

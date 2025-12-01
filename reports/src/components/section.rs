@@ -2,12 +2,12 @@
 //!
 //! Implements the "Section View" layout with a sticky header and scrollable content.
 
-use leptos::prelude::*;
-use crate::types::ReportSection;
 use super::{
-    TabContent, AiInsightsPanel, AnalysisSummary, DuplicateExportsTable,
-    CascadesList, DynamicImportsTable, TauriCommandCoverage, GraphContainer
+    AiInsightsPanel, AnalysisSummary, CascadesList, DuplicateExportsTable, DynamicImportsTable,
+    GraphContainer, TabContent, TauriCommandCoverage,
 };
+use crate::types::ReportSection;
+use leptos::prelude::*;
 
 /// Shorten a path for display: "vista/src" instead of "/Users/maciej/hosted/vista/src"
 fn shorten_path(path: &str) -> String {
@@ -16,7 +16,8 @@ fn shorten_path(path: &str) -> String {
     if parts.len() <= 3 {
         path.to_string()
     } else {
-        parts.iter()
+        parts
+            .iter()
             .rev()
             .take(3)
             .collect::<Vec<_>>()
@@ -30,18 +31,19 @@ fn shorten_path(path: &str) -> String {
 
 /// A complete report section for one analyzed root
 #[component]
-pub fn ReportSectionView(
-    section: ReportSection,
-    active: bool,
-    view_id: String,
-) -> impl IntoView {
-    let root_id = section.root
+pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) -> impl IntoView {
+    let root_id = section
+        .root
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
         .collect::<String>();
 
     let section_clone = section.clone();
-    let view_class = if active { "section-view active" } else { "section-view" };
+    let view_class = if active {
+        "section-view active"
+    } else {
+        "section-view"
+    };
 
     // Stats for header - extract before view! macro to avoid borrow issues
     let file_count = section.files_analyzed;
