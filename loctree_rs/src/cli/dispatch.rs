@@ -95,8 +95,9 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
             parsed.impact = opts.impact.clone();
             parsed.check_sim = opts.similar.clone();
             parsed.search_dead_only = opts.dead_only;
-            // Note: opts.exported_only, opts.lang, opts.limit need handling
-            // in the search handler if needed
+            parsed.search_exported_only = opts.exported_only;
+            parsed.search_lang = opts.lang.clone();
+            parsed.search_limit = opts.limit;
             parsed.root_list = vec![PathBuf::from(".")];
         }
 
@@ -136,8 +137,9 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
                 opts.roots.clone()
             };
             parsed.use_gitignore = true;
-            // Note: name_filter, missing_only, unused_only need to be handled
-            // in the analyzer if we want full support
+            parsed.commands_name_filter = opts.name_filter.clone();
+            parsed.commands_missing_only = opts.missing_only;
+            parsed.commands_unused_only = opts.unused_only;
         }
 
         Command::Events(opts) => {

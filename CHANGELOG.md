@@ -6,6 +6,15 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Released]
 
+## [0.5.7] - 2025-12-01
+
+### Added
+- **One-shot artifact bundle**: Bare `loct`/`loctree` now saves the full analyzer output to `.loctree/` alongside `snapshot.json` — `report.html` (with graph), `analysis.json`, `circular.json`, and `py_races.json`, so you don't need to run extra commands after a scan.
+
+### Changed
+- **Rebrand alignment**: Updated repository/org references to `Loctree/Loctree` and refreshed version strings to v0.5.7 across crates and docs.
+- **Release hygiene**: Rust formatting/clippy cleanups applied for the 0.5.7 publish pipeline.
+
 ## [0.5.6] - 2025-12-01
 
 ### Fixed

@@ -20,7 +20,7 @@ pub fn Features() -> impl IntoView {
                         icon="[1]"
                         title="Holographic Slice"
                         description="3-layer context extraction: Core (target), Deps (imports), Consumers (what uses it). Pipe directly to AI."
-                        code=Some("loctree slice src/App.tsx --consumers --json")
+                        code=Some("loct slice src/App.tsx --consumers --json")
                     />
                     <FeatureCard
                         icon="[2]"

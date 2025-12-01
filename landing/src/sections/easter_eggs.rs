@@ -44,7 +44,7 @@ fn print_console_art() {
         web_sys::console::log_1(&JsValue::from_str(""));
 
         web_sys::console::log_2(
-            &JsValue::from_str("%c(o_o) [tip] Run `loctree --for-ai` for AI-optimized output"),
+            &JsValue::from_str("%c(o_o) [tip] Run `loct --for-ai` for AI-optimized output"),
             &JsValue::from_str("color: #ffcc00;"),
         );
 

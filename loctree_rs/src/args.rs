@@ -70,6 +70,18 @@ pub struct ParsedArgs {
     pub search_semantic_only: bool,
     /// Auto mode: eagerly emit HTML/JSON/cycle artifacts into .loctree
     pub auto_outputs: bool,
+    /// Filter search to exported symbols only
+    pub search_exported_only: bool,
+    /// Language filter for search
+    pub search_lang: Option<String>,
+    /// Limit search results
+    pub search_limit: Option<usize>,
+    /// Command name regex filter (commands subcommand)
+    pub commands_name_filter: Option<String>,
+    /// Only commands missing backend handlers
+    pub commands_missing_only: bool,
+    /// Only commands unused on frontend
+    pub commands_unused_only: bool,
 }
 
 impl Default for ParsedArgs {
@@ -136,6 +148,12 @@ impl Default for ParsedArgs {
             search_dead_only: false,
             search_semantic_only: false,
             auto_outputs: false,
+            search_exported_only: false,
+            search_lang: None,
+            search_limit: None,
+            commands_name_filter: None,
+            commands_missing_only: false,
+            commands_unused_only: false,
         }
     }
 }

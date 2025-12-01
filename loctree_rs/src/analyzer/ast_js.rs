@@ -165,7 +165,9 @@ impl<'a> JsVisitor<'a> {
     fn type_to_string(ty: &TSType<'a>) -> String {
         match ty {
             TSType::TSTypeReference(r) => JsVisitor::type_name_to_string(&r.type_name),
-            _ => "Type".to_string(), // Fallback for complex types
+            // When the type is a complex union/inline construct, return a neutral label
+            // so we don't bloat command payloads with full type ASTs.
+            _ => "Type".to_string(),
         }
     }
 
@@ -479,7 +481,7 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                 && let Some(arg) = call.arguments.first()
             {
                 // Extract command name from first argument (string literal or template literal)
-                let payload = match arg {
+                let cmd_name = match arg {
                     Argument::StringLiteral(s) => Some(s.value.to_string()),
                     Argument::TemplateLiteral(t) => {
                         // Only extract if it's a simple template without expressions
@@ -492,10 +494,10 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                     _ => None,
                 };
 
-                // Only record command if we have an actual command name (from the argument)
-                // Skip if payload is None - that means we couldn't extract the command name
-                // (e.g., dynamic command name or wrapper function definition)
-                if let Some(cmd_name) = payload {
+                // Only record command if we have an actual command name (from the argument).
+                // Skip if cmd_name is None - that means we couldn't extract the command name
+                // (e.g., dynamic command name or wrapper function definition).
+                if let Some(cmd_name) = cmd_name {
                     // Filter out command names that are clearly not Tauri commands
                     // (e.g., CLI tools, shell commands found in scripts/config files)
                     if INVALID_COMMAND_NAMES.contains(&cmd_name.as_str()) {

@@ -52,16 +52,16 @@ fn Terminal() -> impl IntoView {
                 // First command
                 <div class="terminal-line">
                     <span class="terminal-prompt">"$"</span>
-                    <span class="terminal-command">"loctree"</span>
+                    <span class="terminal-command">"loct"</span>
                 </div>
-                <div class="terminal-output muted">"[loctree][detect] Detected: Tauri + Vite"</div>
-                <div class="terminal-output muted">"[loctree][progress] 47 cached, 3 fresh"</div>
+                <div class="terminal-output muted">"[loct][detect] Detected: Tauri + Vite"</div>
+                <div class="terminal-output muted">"[loct][progress] 47 cached, 3 fresh"</div>
                 <div class="terminal-output success">"✓ Snapshot saved to .loctree/snapshot.json"</div>
 
                 // Second command
                 <div class="terminal-line" style="margin-top: 16px;">
                     <span class="terminal-prompt">"$"</span>
-                    <span class="terminal-command">"loctree slice src/App.tsx --consumers"</span>
+                    <span class="terminal-command">"loct slice src/App.tsx --consumers"</span>
                 </div>
 
                 <div class="terminal-output highlight" style="margin-top: 8px;">
