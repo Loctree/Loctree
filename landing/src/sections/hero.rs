@@ -54,9 +54,13 @@ fn Terminal() -> impl IntoView {
                     <span class="terminal-prompt">"$"</span>
                     <span class="terminal-command">"loct"</span>
                 </div>
-                <div class="terminal-output muted">"[loct][detect] Detected: Tauri + Vite"</div>
-                <div class="terminal-output muted">"[loct][progress] 47 cached, 3 fresh"</div>
-                <div class="terminal-output success">"✓ Snapshot saved to .loctree/snapshot.json"</div>
+                <div class="terminal-output muted">"[loctree] Scan mode: incremental (mtime-based)"</div>
+                <div class="terminal-output muted">"Scanned 142 files in 1.44s"</div>
+                <div class="terminal-output muted">"Graph saved to ./.loctree/snapshot.json"</div>
+                <div class="terminal-output muted">"Languages: ts, css, py, js, rs"</div>
+                <div class="terminal-output muted">"Commands: 11 handlers, 2 missing, 5 unused"</div>
+                <div class="terminal-output muted">"Events: 39 tracked"</div>
+                <div class="terminal-output success">"Status: OK"</div>
 
                 // Second command
                 <div class="terminal-line" style="margin-top: 16px;">
