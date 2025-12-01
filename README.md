@@ -6,57 +6,25 @@
 [![Downloads](https://img.shields.io/crates/d/loctree.svg)](https://crates.io/crates/loctree)
 [![docs.rs](https://docs.rs/loctree/badge.svg)](https://docs.rs/loctree)
 [![Semgrep](https://img.shields.io/badge/semgrep-scanned-blue?logo=semgrep)](https://semgrep.dev)
-[![License: MIT OR Apache-2.0](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE-MIT)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![loctree](https://img.shields.io/badge/analyzed_with-loctree-a8a8a8?style=flat&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgdmlld0JveD0iMCAwIDE2IDE2Ij48cmVjdCB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIGZpbGw9IiMwMDAiLz48dGV4dCB4PSI4IiB5PSIxMiIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMCIgZmlsbD0iI2E4YThhOCIgdGV4dC1hbmNob3I9Im1pZGRsZSI+TDwvdGV4dD48L3N2Zz4=)](https://crates.io/crates/loctree)
 
 **loctree** is a static analysis tool designed for AI agents and developers building production-ready software. It helps overcome the common AI tendency to generate excessive artifacts that lead to re-export cascades, circular imports, and spaghetti dependencies.
 
 **Scan once, slice many.** Run `loct` to capture your project's true structure, then use `loct slice` to extract focused context for any AI conversation.
 
-## What's New in 0.8.4
-
-**Security & Analysis Improvements:**
-- **sys.modules Detection** - Python dead code analysis now detects monkey-patching via `sys.modules`
-- **Multi-Query Search** - `loct find` now supports regex and `foo|bar` patterns for faster symbol lookup
-- **Parameter Indexing** - Function parameters are now indexed for comprehensive search
-
-**0.8.1-0.8.3 Highlights:**
-- **React lazy() Fix** - Dynamic imports via `lazy(() => import('./Component'))` correctly tracked
-- **Dual License** - MIT OR Apache-2.0 (standard for Rust ecosystem)
-- **Auto-Snapshot** - All commands work immediately without manual scan
-
-### What's in 0.7.0
-
-**Artifact-First Architecture** - mental model centered around artifacts:
-
-- `.loctree/snapshot.json` - Complete graph data (imports, exports, LOC per file)
-- `.loctree/findings.json` - All detected issues (dead code, cycles, duplicates)
-- `.loctree/agent.json` - AI-optimized context bundle
-- `.loctree/manifest.json` - Index for tooling and AI agents
-
-**Query First** - Use jq-style queries on artifacts:
-
-```bash
-loct '.dead_parrots'              # Show dead code
-loct '.summary.health_score'      # Get health score
-loct '.files | length'            # Count files
-```
-
 ## Quick Start
 
 ```bash
-# Install via Homebrew (macOS/Linux) - PR pending
-brew install loctree  # Coming soon!
-
-# Or install from crates.io
+# Install from crates.io
 cargo install loctree
+
+# Or via install script
+curl -fsSL https://raw.githubusercontent.com/Loctree/Loctree/main/tools/install.sh | sh
 
 # Scan your project (auto-detects stack)
 cd your-project
 loct
-
-# View interactive report (HTML + graph)
-loct report --serve
 
 # Extract context for AI agents
 loct slice src/components/ChatPanel.tsx --consumers --json
@@ -67,47 +35,9 @@ loct --for-ai
 # Find circular imports
 loct cycles
 
-# Semantic duplicate analysis (dead parrots, twins, barrel chaos)
-loct twins
-
 # Detect dead exports
 loct dead --confidence high
-
-# Quick health check (cycles + dead + twins summary)
-loct health
-
-# Full codebase audit (cycles + dead + twins + orphans + shadows + crowds)
-loct audit
-
-# Verify tree-shaking in production bundles
-loct dist dist/bundle.js.map src/
-
-# jq-style queries on snapshot data (NEW!)
-loct '.metadata'                    # extract metadata
-loct '.files | length'              # count files
-loct '.edges[] | select(.from | contains("api"))'  # filter
 ```
-
-## Recommended Commands (by Real-World Testing)
-
-Based on extensive testing across TypeScript, Rust, Python, and Tauri codebases:
-
-| Command | Rating | Best For |
-|---------|--------|----------|
-| `loct slice <file>` | ⭐⭐⭐⭐⭐ | AI context extraction - shows deps + consumers |
-| `loct trace <handler>` | ⭐⭐⭐⭐⭐ | Tauri apps - FE→BE pipeline visualization |
-| `loct find <symbol>` | ⭐⭐⭐⭐⭐ | Symbol search with semantic matching |
-| `loct --for-ai` | ⭐⭐⭐⭐ | AI bundle with quick wins and hub files |
-| `loct query who-imports <file>` | ⭐⭐⭐⭐ | Reverse dependency lookup |
-| `loct health` | ⭐⭐⭐⭐ | Quick health summary (cycles + dead + twins) |
-| `loct coverage` | ⭐⭐⭐⭐ | Test coverage gaps for handlers/events |
-| `loct dead` | ⭐⭐⭐ | Unused exports (JS/TS best, Python limited) |
-
-### Known Limitations
-
-- **Python import resolution** is ~50% accurate for complex package structures
-- **FastAPI/Flask routes** not yet detected as handlers
-- **Python slice/impact** may return empty results for unresolved imports
 
 ## Why loctree?
 
@@ -202,20 +132,6 @@ loct --for-ai
 }
 ```
 
-### Multi-Language Support
-
-loctree supports comprehensive analysis across multiple languages:
-
-| Language | Status | Key Features |
-|----------|--------|--------------|
-| **Rust** | Exceptional | 0% false positives on rust-lang/rust (35,387 files, ~787 files/sec) |
-| **Go** | Perfect | ~0% false positives on golang/go (17,182 files) |
-| **TypeScript/JavaScript** | Full | JSX/TSX support, React patterns, Flow annotations, WeakMap/WeakSet patterns |
-| **Python** | Full | Library mode with stdlib auto-detection, `__all__` tracking |
-| **Svelte** | Full | .d.ts re-export tracking, component analysis |
-| **Vue** | Full | Component analysis, SFC support |
-| **Dart/Flutter** | Full | Complete language support (new in v0.6.x) |
-
 ### Auto-Detect Stack
 
 loctree automatically detects your project type:
@@ -223,11 +139,10 @@ loctree automatically detects your project type:
 | Marker | Stack | Auto-Ignores | Extensions |
 |--------|-------|--------------|------------|
 | `Cargo.toml` | Rust | `target/` | `.rs` |
-| `tsconfig.json` | TypeScript | `node_modules/` | `.ts`, `.tsx`, `.jsx` |
+| `tsconfig.json` | TypeScript | `node_modules/` | `.ts`, `.tsx` |
 | `pyproject.toml` | Python | `.venv/`, `__pycache__/` | `.py` |
 | `src-tauri/` | Tauri | All above | `.ts`, `.tsx`, `.rs` |
 | `vite.config.*` | Vite | `dist/` | Auto |
-| `pubspec.yaml` | Dart/Flutter | `.dart_tool/`, `build/` | `.dart` |
 
 ### Tauri Command Coverage
 
@@ -241,23 +156,6 @@ loct commands
 - **Unregistered handlers** — Backend has `#[tauri::command]` but not in `generate_handler![]`
 - **Unused handlers** — Registered handlers never invoked from frontend
 - **React lazy detection** — Tracks `React.lazy()` dynamic imports
-
-### Test Coverage Analysis
-
-Structural test coverage based on import analysis (no runtime instrumentation):
-
-```bash
-loct coverage                        # All coverage gaps
-loct coverage --handlers             # Only Tauri handler gaps
-loct coverage --min-severity high    # Filter by severity
-loct coverage --json                 # JSON output for CI
-```
-
-Identifies coverage gaps by severity:
-- **CRITICAL** — Handlers called in production but not tested
-- **HIGH** — Events emitted but not tested
-- **MEDIUM** — Exports used in production without test imports
-- **LOW** — Tested but unused code (cleanup candidates)
 
 ### Tree Mode
 
@@ -280,68 +178,20 @@ Find problems before they become tech debt:
 
 ```bash
 # Check if similar component exists before creating
-loct find ChatSurface
+loct find --similar ChatSurface
 # Found: ChatPanel (distance: 2), ChatWindow (distance: 3)
 
-# Find potentially unused exports (improved detection in v0.6.x)
+# Find potentially unused exports
 loct dead --confidence high
 
-# Detect circular import cycles (with visualization in reports)
+# Detect circular import cycles
 loct cycles
 
 # Analyze impact of changing a file
-loct impact src/utils/api.ts
+loct find --impact src/utils/api.ts
 
 # Find a symbol across the codebase
-loct find useAuth
-
-# Twins analysis (dead parrots, exact twins, barrel chaos)
-loct twins
-loct twins --dead-only    # Only exports with 0 imports
-```
-
-**Enhanced Dead Code Detection (v0.6.x):**
-- **Registry Pattern Support** - Detects WeakMap/WeakSet usage (React DevTools, observability tools)
-- **Flow Type Annotations** - Understands Flow syntax alongside TypeScript
-- **Re-export Chains** - Tracks .d.ts files and barrel exports (Svelte, library types)
-- **Python `__all__`** - Respects public API declarations in Python modules
-- **Library Mode Intelligence** - Auto-detects npm packages and Python stdlib to exclude public APIs
-
-```bash
-# Example: Python stdlib analysis
-loct dead --library-mode
-# Skips: __all__ exports, Lib/ directory public APIs
-
-# Example: npm package analysis
-loct dead
-# Auto-detects: package.json "exports" field, excludes public API
-
-## Library / Framework Mode
-
-loctree intelligently handles libraries and frameworks to avoid false positives:
-
-**Automatic Detection:**
-- **npm packages** with `exports` field in package.json
-- **Python stdlib** detection via `Lib/` directory and `__all__` exports
-- **Public API exclusion** - Exports in public APIs are not flagged as dead code
-
-**Manual Activation:**
-```bash
-loct --library-mode
-# or in .loctree/config.toml:
-library_mode = true
-```
-
-**Features:**
-- Ignores example sandboxes, demos, playgrounds, kitchen-sink, docs/examples
-- Tracks `__all__` for Python public API boundaries
-- Customizable via `library_example_globs` in config
-- Outputs `.loctree/report.html` and `.loctree/analysis.json` automatically
-
-**Advanced Pattern Detection:**
-- WeakMap/WeakSet registry patterns (e.g., React DevTools)
-- Flow type annotations
-- TypeScript .d.ts re-export chains
+loct find --symbol useAuth
 
 # List entry points
 loct lint --entrypoints
@@ -357,15 +207,9 @@ loct report --graph --output report.html
 
 Features:
 - Interactive Cytoscape.js dependency graphs
-- Tabbed navigation (Duplicates, Cascades, Commands, Graph, Cycles)
+- Tabbed navigation (Duplicates, Cascades, Commands, Graph)
 - AI Summary panel with quick wins
-- Circular dependency visualization
 - Dark mode support
-
-**Smoke Test Results:**
-- **rust-lang/rust**: 35,387 files analyzed in ~45s (787 files/sec), 91 circular dependencies detected
-- **facebook/react**: 3,951 files in 49s (81 files/sec), 8 circular dependencies found
-- **golang/go**: 17,182 files analyzed with ~0% false positives
 
 ### CI Pipeline Checks
 
@@ -391,24 +235,12 @@ Modes:
   find                      Unified search (symbols, similar, impact)
   dead                      Unused exports (alias/barrel aware)
   cycles                    Circular imports
-  twins                     Semantic duplicates (dead parrots, exact twins, barrel chaos)
   commands                  Tauri FE↔BE bridges (missing/unused)
   events                    Emit/listen/races summary
   tree                      Directory tree with LOC counts
   report --graph            HTML report with graph
   lint --fail --sarif       CI guardrails / SARIF output
-  diff --since <id>         Compare snapshots, show delta
-  query <kind> <target>     Quick queries (who-imports, where-symbol, component-of)
-  '<filter>'                jq-style query on snapshot (e.g., '.metadata', '.files | length')
   --for-ai                  AI-optimized hierarchical JSON (legacy flag)
-
-jq Query options:
-  -r, --raw                 Raw output (no JSON quotes for strings)
-  -c, --compact             Compact output (one line per result)
-  -e, --exit-status         Exit 1 if result is false/null
-  --arg <name> <value>      Bind string variable
-  --argjson <name> <json>   Bind JSON variable
-  --snapshot <path>         Use specific snapshot file
 
 Find options:
   --similar <query>         Similar components/symbols
@@ -418,11 +250,6 @@ Find options:
 Slice options:
   --consumers               Include files that import the target
   --json                    JSON output for piping to AI
-
-Query kinds:
-  who-imports <file>        Files that import target
-  where-symbol <name>       Where symbol is defined/used
-  component-of <file>       Which graph component contains file
 
 Tree options:
   --find-artifacts          Find build dirs (node_modules, target, etc.)
@@ -438,12 +265,6 @@ Common:
 
 ## Installation
 
-### macOS (Homebrew) - pending review
-
-```bash
-brew install loctree
-```
-
 ### From crates.io (Recommended)
 
 ```bash
@@ -456,6 +277,12 @@ cargo install loctree
 git clone https://github.com/Loctree/Loctree
 cd loctree/loctree_rs
 cargo install --path .
+```
+
+### Install script
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Loctree/Loctree/main/tools/install.sh | sh
 ```
 
 ## Project Structure
@@ -487,8 +314,8 @@ cargo install --path .
 ## Development
 
 ```bash
-# Setup git hooks (auto-runs on `make install`)
-make git-hooks
+# Setup git hooks
+./tools/githooks/setup.sh
 
 # Run tests
 cd loctree_rs && cargo test
@@ -527,8 +354,8 @@ Or use the SVG badge:
 
 ## License
 
-Dual-licensed under MIT OR Apache-2.0. See [LICENSE-MIT](LICENSE-MIT) and [LICENSE-APACHE](LICENSE-APACHE).
+MIT — use it, fork it, improve it. See [LICENSE](LICENSE).
 
 ---
 
-**Developed with 💀 by The Loctree Team (c)2025**
+**Developed with 💀 by The Loctree Team (c)2025 **

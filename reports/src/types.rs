@@ -35,49 +35,13 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Confidence level for dead export and handler detection.
-///
-/// CERTAIN - Will definitely break/is definitely unused
-///   - Unregistered handlers (has #[tauri::command] but NOT in invoke_handler![])
-///   - Missing handlers (FE calls invoke() but no handler exists)
-///
-/// HIGH - Very likely unused, worth fixing
-///   - Export with 0 imports across all scanned files
-///   - Handler registered but 0 invoke() calls found
-///
-/// SMELL - Worth checking, might be intentional
-///   - Twins (same name in multiple files)
-///   - Low import count relative to codebase size
-///   - String literal matches found (may be used dynamically)
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// Confidence level for detection results.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Confidence {
-    /// CERTAIN - Will definitely break/is definitely unused
-    Certain,
-    /// HIGH - Very likely unused, worth fixing
+    /// High confidence - likely a real issue
     High,
-    /// SMELL - Worth checking, might be intentional
-    Smell,
-}
-
-impl Confidence {
-    /// Get indicator for this confidence level
-    pub fn indicator(&self) -> &'static str {
-        match self {
-            Confidence::Certain => "[!!]",
-            Confidence::High => "[!]",
-            Confidence::Smell => "[?]",
-        }
-    }
-}
-
-impl std::fmt::Display for Confidence {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Confidence::Certain => write!(f, "CERTAIN"),
-            Confidence::High => write!(f, "HIGH"),
-            Confidence::Smell => write!(f, "SMELL"),
-        }
-    }
+    /// Low confidence - may be false positive due to dynamic usage
+    Low,
 }
 
 /// A string literal that might indicate dynamic command usage.
@@ -119,8 +83,6 @@ pub struct StringLiteralMatch {
 ///     be_location: Some(("src-tauri/src/commands/user.rs".into(), 10, "get_user".into())),
 ///     status: "ok".into(),
 ///     language: "rs".into(),
-///     comm_type: "invoke".into(),
-///     emits_events: vec![],
 /// };
 /// ```
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -137,26 +99,6 @@ pub struct CommandBridge {
     /// Language (ts, rs, etc.)
     #[serde(default)]
     pub language: String,
-    /// Communication pattern: "invoke" | "invoke+emit" | "emit-only"
-    #[serde(default)]
-    pub comm_type: String,
-    /// Events emitted by this command's handler
-    #[serde(default)]
-    pub emits_events: Vec<String>,
-}
-
-/// Directory or file node used by the report tree view.
-///
-/// Contains relative path, aggregated LOC, and children.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct TreeNode {
-    /// Relative path of this file/directory.
-    pub path: String,
-    /// Lines of code aggregated for this node (file LOC + children).
-    pub loc: usize,
-    /// Child nodes.
-    #[serde(default)]
-    pub children: Vec<TreeNode>,
 }
 
 /// A gap between frontend command invocations and backend handlers.
@@ -323,7 +265,6 @@ pub struct GraphComponent {
 ///     ],
 ///     components: vec![],
 ///     main_component_id: 0,
-///     ..Default::default()
 /// };
 ///
 /// // Convert to DOT format for graphviz/dot_ix
@@ -340,18 +281,6 @@ pub struct GraphData {
     pub components: Vec<GraphComponent>,
     /// ID of the main (largest) component
     pub main_component_id: usize,
-    /// Whether this graph was truncated due to size limits
-    #[serde(default)]
-    pub truncated: bool,
-    /// Total number of nodes before truncation (same as nodes.len() if not truncated)
-    #[serde(default)]
-    pub total_nodes: usize,
-    /// Total number of edges before truncation (same as edges.len() if not truncated)
-    #[serde(default)]
-    pub total_edges: usize,
-    /// Reason for truncation, if any
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub truncation_reason: Option<String>,
 }
 
 impl GraphData {
@@ -509,33 +438,6 @@ fn escape_dot_string(s: &str) -> String {
         .replace('\n', "\\n")
 }
 
-/// Location of a duplicate export with line number
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct DupLocation {
-    /// File path
-    pub file: String,
-    /// Line number (1-indexed)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub line: Option<usize>,
-}
-
-/// Severity levels for duplicate exports
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DupSeverity {
-    /// Cross-language expected (Rust↔TS DTOs) - noise
-    CrossLangExpected = 0,
-    /// Re-exports and generic names (new, from, clone) - usually OK
-    ReExportOrGeneric = 1,
-    /// Same-package duplicate - potential issue
-    #[default]
-    SamePackage = 2,
-    /// Same symbol in different modules/packages - worth reviewing
-    CrossModule = 3,
-    /// Same symbol in different crates/packages - REAL issue
-    CrossCrate = 4,
-}
-
 /// A duplicate export found across multiple files.
 ///
 /// Identifies symbols (functions, classes, types) that are exported
@@ -568,7 +470,6 @@ pub enum DupSeverity {
 ///         "src/helpers/format.ts".into(),
 ///         "src/legacy/utils.ts".into(),
 ///     ],
-///     ..Default::default()
 /// };
 /// ```
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -577,9 +478,6 @@ pub struct RankedDup {
     pub name: String,
     /// All files exporting this symbol
     pub files: Vec<String>,
-    /// Locations with line numbers (file, line)
-    #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub locations: Vec<DupLocation>,
     /// Priority score (higher = more important to fix)
     pub score: usize,
     /// Count in production code paths
@@ -588,333 +486,8 @@ pub struct RankedDup {
     pub dev_count: usize,
     /// Recommended canonical location
     pub canonical: String,
-    /// Line number in canonical file
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub canonical_line: Option<usize>,
     /// Files that should import from canonical instead
     pub refactors: Vec<String>,
-    /// Severity level: 0=cross-lang expected, 1=same-package, 2=semantic conflict
-    #[serde(default)]
-    pub severity: DupSeverity,
-    /// True if duplicate spans multiple languages (Rust↔TS)
-    #[serde(default)]
-    pub is_cross_lang: bool,
-    /// Distinct packages/directories containing this symbol
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub packages: Vec<String>,
-    /// Explanation for the severity classification
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub reason: String,
-}
-
-/// Match reason for crowd membership (mirrors loctree_rs::analyzer::crowd::MatchReason).
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum MatchReason {
-    /// File/export name matches pattern
-    NameMatch {
-        /// The matched string (filename, export name, etc.)
-        matched: String,
-    },
-    /// High import similarity with other crowd members
-    ImportSimilarity {
-        /// Similarity score (0.0-1.0)
-        similarity: f32,
-    },
-    /// Exports similar types/functions
-    ExportSimilarity {
-        /// File this one is similar to
-        similar_to: String,
-    },
-}
-
-/// Issue detected in a crowd (mirrors loctree_rs::analyzer::crowd::CrowdIssue).
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum CrowdIssue {
-    /// Multiple files with very similar names
-    NameCollision {
-        /// Files with colliding names
-        files: Vec<String>,
-    },
-    /// Some files have much lower usage than others
-    UsageAsymmetry {
-        /// The primary/most-used file
-        primary: String,
-        /// Underused files that might be redundant
-        underused: Vec<String>,
-    },
-    /// Files export similar things
-    ExportOverlap {
-        /// Files with overlapping exports
-        files: Vec<String>,
-        /// Overlapping export names
-        overlap: Vec<String>,
-    },
-    /// Related functionality is scattered
-    Fragmentation {
-        /// Categories/themes found scattered across crowd
-        categories: Vec<String>,
-    },
-}
-
-/// A member of a crowd.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct CrowdMember {
-    /// File path
-    pub file: String,
-    /// Why this file matched the crowd
-    pub match_reason: MatchReason,
-    /// Number of files importing this one
-    pub importer_count: usize,
-    /// Similarity scores with other members (file, score)
-    #[serde(default)]
-    pub similarity_scores: Vec<(String, f32)>,
-    /// Whether this is a test file
-    #[serde(default)]
-    pub is_test: bool,
-}
-
-/// A group of files with similar names/patterns.
-///
-/// Crowds indicate potential naming collisions, fragmentation,
-/// or copy-paste duplication across the codebase.
-///
-/// # Scoring
-///
-/// - 0-4: Low severity (acceptable naming patterns)
-/// - 4-7: Medium severity (worth reviewing)
-/// - 7-10: High severity (likely problematic)
-///
-/// # Example
-///
-/// ```rust
-/// use report_leptos::types::{Crowd, CrowdMember, MatchReason, CrowdIssue};
-///
-/// let crowd = Crowd {
-///     pattern: "message".into(),
-///     members: vec![
-///         CrowdMember {
-///             file: "src/message.ts".into(),
-///             match_reason: MatchReason::NameMatch {
-///                 matched: "message".into(),
-///             },
-///             importer_count: 15,
-///             similarity_scores: vec![],
-///             is_test: false,
-///         },
-///         CrowdMember {
-///             file: "src/components/Message.tsx".into(),
-///             match_reason: MatchReason::NameMatch {
-///                 matched: "Message".into(),
-///             },
-///             importer_count: 8,
-///             similarity_scores: vec![],
-///             is_test: false,
-///         },
-///     ],
-///     score: 6.5,
-///     issues: vec![
-///         CrowdIssue::NameCollision {
-///             files: vec!["src/message.ts".into(), "src/components/Message.tsx".into()],
-///         },
-///     ],
-/// };
-/// ```
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Crowd {
-    /// Pattern name (e.g., "message", "chat")
-    pub pattern: String,
-    /// Files matching this pattern
-    pub members: Vec<CrowdMember>,
-    /// Severity score (0-10, higher = worse)
-    pub score: f32,
-    /// Issues detected in this crowd
-    #[serde(default)]
-    pub issues: Vec<CrowdIssue>,
-}
-
-/// A dead export (symbol exported but never imported).
-///
-/// Represents code that appears to be unused - exported from a file
-/// but never imported anywhere in the analyzed codebase.
-///
-/// # Example
-///
-/// ```rust
-/// use report_leptos::types::DeadExport;
-///
-/// let dead = DeadExport {
-///     file: "src/utils/legacy.ts".into(),
-///     symbol: "formatOldDate".into(),
-///     line: Some(42),
-///     confidence: "very-high".into(),
-///     reason: "No imports found in codebase".into(),
-///     open_url: Some("loctree://open?f=src/utils/legacy.ts&l=42".into()),
-///     is_test: false,
-/// };
-/// ```
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct DeadExport {
-    /// File path containing the dead export
-    pub file: String,
-    /// Symbol name (function, class, type, etc.)
-    pub symbol: String,
-    /// Line number where symbol is defined (1-indexed)
-    pub line: Option<usize>,
-    /// Confidence level: "high", "very-high"
-    pub confidence: String,
-    /// Human-readable reason why this is considered dead
-    pub reason: String,
-    /// Optional URL for opening in editor (loctree://open protocol)
-    pub open_url: Option<String>,
-    /// Whether this is a test file
-    #[serde(default)]
-    pub is_test: bool,
-}
-
-/// A gap in test coverage
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct CoverageGap {
-    /// Type of gap (handler_without_test, event_without_test, etc.)
-    pub kind: GapKind,
-    /// Target symbol/handler name
-    pub target: String,
-    /// Location (file:line)
-    pub location: String,
-    /// Severity level
-    pub severity: Severity,
-    /// Recommendation message
-    pub recommendation: String,
-    /// Additional context
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub context: Option<String>,
-    /// Related file paths
-    #[serde(default)]
-    pub files: Vec<String>,
-}
-
-/// Type of coverage gap
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum GapKind {
-    /// Handler used in production but not tested
-    HandlerWithoutTest,
-    /// Event emitted in production but not tested
-    EventWithoutTest,
-    /// Export used in production but not tested
-    ExportWithoutTest,
-    /// Tested but not used in production (suspicious)
-    TestedButUnused,
-}
-
-/// Severity level for coverage gaps
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Severity {
-    /// Critical - Handler without test (can break runtime)
-    Critical,
-    /// High - Event without test (data flow issues)
-    High,
-    /// Medium - Export without test (integration gaps)
-    Medium,
-    /// Low - Tested but unused (cleanup candidate)
-    Low,
-}
-
-/// Twins analysis data (dead parrots, exact twins, barrel chaos)
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct TwinsData {
-    /// Dead parrots - symbols with 0 imports
-    pub dead_parrots: Vec<DeadParrot>,
-    /// Exact twins - symbols with same name in different files
-    pub exact_twins: Vec<ExactTwin>,
-    /// Barrel chaos analysis
-    pub barrel_chaos: BarrelChaos,
-}
-
-/// A dead parrot - symbol exported but never imported
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct DeadParrot {
-    /// Symbol name
-    pub name: String,
-    /// File path where exported
-    pub file_path: String,
-    /// Line number
-    pub line: usize,
-    /// Symbol kind (function, type, const, class, etc.)
-    pub kind: String,
-    /// Whether this is a test file
-    #[serde(default)]
-    pub is_test: bool,
-}
-
-/// An exact twin - symbol with same name exported from multiple files
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ExactTwin {
-    /// Symbol name
-    pub name: String,
-    /// All locations where this symbol is exported
-    pub locations: Vec<TwinLocation>,
-}
-
-/// A location where an exact twin is found
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct TwinLocation {
-    /// File path
-    pub file_path: String,
-    /// Line number
-    pub line: usize,
-    /// Export kind
-    pub kind: String,
-    /// Number of imports
-    pub import_count: usize,
-    /// True if this is the canonical (recommended) location
-    pub is_canonical: bool,
-}
-
-/// Barrel chaos analysis
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct BarrelChaos {
-    /// Directories missing barrel files
-    pub missing_barrels: Vec<MissingBarrel>,
-    /// Deep re-export chains
-    pub deep_chains: Vec<ReexportChain>,
-    /// Inconsistent import paths
-    pub inconsistent_paths: Vec<InconsistentImport>,
-}
-
-/// A directory missing a barrel file
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct MissingBarrel {
-    /// Directory path
-    pub directory: String,
-    /// Number of files in directory
-    pub file_count: usize,
-    /// Number of external imports
-    pub external_import_count: usize,
-}
-
-/// A deep re-export chain
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ReexportChain {
-    /// Symbol name
-    pub symbol: String,
-    /// Chain of files (from consumer to definition)
-    pub chain: Vec<String>,
-    /// Depth of chain
-    pub depth: usize,
-}
-
-/// Inconsistent import path for a symbol
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct InconsistentImport {
-    /// Symbol name
-    pub symbol: String,
-    /// Canonical (most-used) path
-    pub canonical_path: String,
-    /// Alternative paths with usage counts
-    pub alternative_paths: Vec<(String, usize)>,
 }
 
 /// A complete report section for one analyzed directory.
@@ -951,12 +524,6 @@ pub struct ReportSection {
     pub ranked_dups: Vec<RankedDup>,
     /// Cascade import pairs (source, target)
     pub cascades: Vec<(String, String)>,
-    /// Circular import components (strict cycles)
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub circular_imports: Vec<Vec<String>>,
-    /// Lazy circular imports (cycles only via dynamic/lazy imports)
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub lazy_circular_imports: Vec<Vec<String>>,
     /// Dynamic imports per file
     pub dynamic: Vec<(String, Vec<String>)>,
     /// Maximum files to analyze (0 = unlimited)
@@ -974,9 +541,6 @@ pub struct ReportSection {
     pub command_bridges: Vec<CommandBridge>,
     /// Base URL for opening files in editor
     pub open_base: Option<String>,
-    /// Directory tree with LOC per node
-    #[serde(default)]
-    pub tree: Option<Vec<TreeNode>>,
     /// Dependency graph data (if generated)
     pub graph: Option<GraphData>,
     /// Warning if graph was skipped (too large, etc.)
@@ -987,19 +551,4 @@ pub struct ReportSection {
     pub git_branch: Option<String>,
     /// Git commit hash (if available)
     pub git_commit: Option<String>,
-    /// Crowd analysis results (naming collision detection)
-    #[serde(default)]
-    pub crowds: Vec<Crowd>,
-    /// Dead exports (exported but never imported)
-    #[serde(default)]
-    pub dead_exports: Vec<DeadExport>,
-    /// Twins analysis (dead parrots, exact twins, barrel chaos)
-    #[serde(default, alias = "twins_data")]
-    pub twins: Option<TwinsData>,
-    /// Test coverage gaps (handlers/events without tests)
-    #[serde(default)]
-    pub coverage_gaps: Vec<CoverageGap>,
-    /// Overall health score 0-100 (higher is better)
-    #[serde(default)]
-    pub health_score: Option<u8>,
 }

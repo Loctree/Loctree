@@ -1,0 +1,52 @@
+# loctree — AI Agent Quick Reference
+
+> You have access to loctree for codebase analysis.
+> Use these commands BEFORE reading files manually or grepping.
+
+**Scan once, slice many.** Capture structure, extract focused context.
+
+## Install & Scan
+```bash
+curl -fsSL https://raw.githubusercontent.com/Loctree/Loctree/main/tools/install.sh | sh
+loct             # creates .loctree/snapshot.json
+```
+
+## Before creating new components
+```bash
+loct find <Name>            # find similar/symbols (avoid duplicates)
+```
+
+## Before refactoring
+```bash
+loct slice <file> --consumers     # what depends on it
+loct report --impact <file>       # what breaks if removed
+loct cycles                       # detect import cycles
+```
+
+## Dead code detection
+```bash
+loct dead --confidence high       # unused exports
+loct report --entrypoints         # main/script entry points
+```
+
+## Focused AI context
+```bash
+loct slice <file> --consumers --json | claude
+loct --for-ai                     # project overview JSON
+```
+
+## Tauri FE<>BE coverage
+```bash
+loct report --preset-tauri src src-tauri/src
+loct trace <handler>              # investigate handler usage
+```
+
+## CI pipeline checks
+```bash
+loct report --fail-on-missing-handlers  # FE->BE integrity
+loct report --fail-on-ghost-events      # unused events
+loct report --sarif > results.sarif     # SARIF output
+```
+
+---
+More: https://loctree.io | Docs: https://docs.rs/loctree

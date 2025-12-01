@@ -3,7 +3,7 @@
 //! This module provides browser-native graph visualization using Rust/WASM.
 //! It accepts graph data as JSON, converts to DOT format, and renders SVG.
 //!
-//! Created by M&K (c)2025 The LibraxisAI Team
+//! Developed with 💀 by The Loctree Team (c)2025 
 
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;

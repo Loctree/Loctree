@@ -23,7 +23,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-action@stable
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
@@ -205,7 +205,7 @@ jobs:
           BODY+="### 📦 Installation\n"
           BODY+="\`\`\`bash\ncargo install loctree\n\`\`\`\n\n"
           BODY+="Or use the install script:\n"
-          BODY+="\`\`\`bash\ncargo install loctree\n\`\`\`\n"
+          BODY+="\`\`\`bash\ncurl -fsSL https://raw.githubusercontent.com/Loctree/Loctree/main/tools/install.sh | sh\n\`\`\`\n"
 
           # Save to file for the release action
           echo -e "$BODY" > /tmp/release_notes.md
@@ -256,30 +256,27 @@ jobs:
           ref: ${{ github.ref }}
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-action@stable
         with:
           targets: ${{ matrix.target }}
 
       - name: Build release binary
         run: |
-          cargo build -p loctree --release --target ${{ matrix.target }}
+          cd loctree_rs
+          cargo build --release --target ${{ matrix.target }}
 
       - name: Prepare artifact (Unix)
         if: runner.os != 'Windows'
         run: |
-          mkdir -p dist
-          cp target/${{ matrix.target }}/release/loctree dist/loctree
-          cp target/${{ matrix.target }}/release/loct dist/loct
-          chmod +x dist/loctree dist/loct
-          tar -czvf ${{ matrix.artifact }}.tar.gz -C dist loctree loct
+          cp loctree_rs/target/${{ matrix.target }}/release/loctree ${{ matrix.artifact }}
+          chmod +x ${{ matrix.artifact }}
+          tar -czvf ${{ matrix.artifact }}.tar.gz ${{ matrix.artifact }}
 
       - name: Prepare artifact (Windows)
         if: runner.os == 'Windows'
         run: |
-          mkdir dist
-          copy target\${{ matrix.target }}\release\loctree.exe dist\loctree.exe
-          copy target\${{ matrix.target }}\release\loct.exe dist\loct.exe
-          Compress-Archive -Path dist\* -DestinationPath ${{ matrix.artifact }}.zip
+          copy loctree_rs\target\${{ matrix.target }}\release\loctree.exe ${{ matrix.artifact }}
+          Compress-Archive -Path ${{ matrix.artifact }} -DestinationPath ${{ matrix.artifact }}.zip
 
       - name: Upload to Release
         uses: softprops/action-gh-release@v1
@@ -291,40 +288,3 @@ jobs:
           fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # Publish to npm after all binaries are built
-  publish-npm:
-    name: Publish to npm
-    needs: build-binaries
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.ref }}
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          registry-url: 'https://registry.npmjs.org'
-
-      - name: Extract version from tag
-        id: version
-        run: |
-          TAG="${GITHUB_REF#refs/tags/}"
-          if [[ "$TAG" == loctree-v* ]]; then
-            VERSION="${TAG#loctree-v}"
-          else
-            VERSION="${TAG#v}"
-          fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-      - name: Update package.json version
-        run: |
-          npm version ${{ steps.version.outputs.version }} --no-git-tag-version --allow-same-version
-
-      - name: Publish to npm
-        run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

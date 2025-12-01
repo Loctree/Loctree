@@ -14,8 +14,64 @@ use crate::types::{
 
 use super::resolvers::{TsPathResolver, resolve_reexport_target};
 
+// Known DOM APIs to exclude from Tauri command detection
+const DOM_EXCLUSIONS: &[&str] = &[
+    "execCommand",
+    "queryCommandState",
+    "queryCommandEnabled",
+    "queryCommandSupported",
+    "queryCommandValue",
+];
+
+// Functions that ARE NOT Tauri invokes - ignore completely (project heuristics)
+// These happen to match "invoke" or "Command" but are not actual Tauri calls
+const NON_INVOKE_EXCLUSIONS: &[&str] = &[
+    // React hooks that happen to have "Command" in name
+    "useVoiceCommands",
+    "useAssistantToolCommands",
+    "useNewVisitVoiceCommands",
+    "useAiTopicCommands",
+    // Build tools / CLI commands (not Tauri)
+    "runGitCommand",
+    "executeCommand",
+    "buildCommandString",
+    "buildCommandArgs",
+    "classifyCommand",
+    // Internal tracking/context functions
+    "onCommandContext",
+    "enqueueCommandContext",
+    "setLastCommand",
+    "setCommandError",
+    "recordCommandInvokeStart",
+    "recordCommandInvokeFinish",
+    "handleInvokeFailure",
+    "isCommandMissingError",
+    "isRetentionCommandMissing",
+    // Collection/analysis utilities
+    "collectInvokeCommands",
+    "collectUsedCommandsFromRoamLogs",
+    "extractInvokeCommandsFromText",
+    "scanCommandsInFiles",
+    "parseBackendCommands",
+    "buildSessionCommandPayload",
+    // Mention/slash command handlers (UI, not Tauri)
+    "onMentionCommand",
+    "onSlashCommand",
+    // Mock/test utilities
+    "invokeFallbackMock",
+    "resolveMockCommand",
+];
+
+// Command names that are clearly not Tauri commands (CLI tools / tests)
+const INVALID_COMMAND_NAMES: &[&str] = &[
+    // CLI tools / shell commands
+    "node", "npm", "pnpm", "yarn", "bun", "cargo", "rustc", "rustup", "git", "gh", "python",
+    "python3", "pip", "brew", "apt", "yum", "sh", "bash", "zsh", "curl", "wget", "docker",
+    "kubectl", // Generic/test names
+    "test", "mock", "stub", "fake",
+];
+
 /// Analyze JS/TS file using OXC AST parser
-#[allow(dead_code)]
 pub(crate) fn analyze_js_file_ast(
     content: &str,
     path: &Path,
@@ -27,12 +83,40 @@ pub(crate) fn analyze_js_file_ast(
     let allocator = Allocator::default();
 
     // Determine source type from file extension
+    // Only enable JSX for .tsx/.jsx files to avoid conflicts with TypeScript generics
+    // (e.g., `const fn = <T>(...) =>` would be parsed as JSX tag with JSX enabled)
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let is_jsx_file = ext == "tsx" || ext == "jsx";
+
     let source_type = SourceType::from_path(path)
         .unwrap_or_default()
         .with_typescript(true)
-        .with_jsx(true);
+        .with_jsx(is_jsx_file);
 
     let ret = Parser::new(&allocator, content, source_type).parse();
+
+    // Log parser errors for debugging (verbose mode only)
+    if !ret.errors.is_empty() && std::env::var("LOCTREE_VERBOSE").is_ok() {
+        eprintln!(
+            "[loctree][debug] Parser errors in {}: {} errors",
+            path.display(),
+            ret.errors.len()
+        );
+        for (i, err) in ret.errors.iter().take(5).enumerate() {
+            // Get line number from error span using the labels field
+            let line_info = err
+                .labels
+                .as_ref()
+                .and_then(|labels| labels.first())
+                .map(|label| {
+                    let offset = label.offset();
+                    let line = content[..offset].bytes().filter(|b| *b == b'\n').count() + 1;
+                    format!(" (line {}, col {})", line, label.offset())
+                })
+                .unwrap_or_default();
+            eprintln!("  [{}]{} {}", i + 1, line_info, err);
+        }
+    }
 
     let mut visitor = JsVisitor {
         analysis: FileAnalysis::new(relative),
@@ -58,7 +142,6 @@ struct JsVisitor<'a> {
 }
 
 impl<'a> JsVisitor<'a> {
-    #[allow(dead_code)]
     fn resolve_path(&self, source: &str) -> Option<String> {
         resolve_reexport_target(self.path, self.root, source, self.extensions)
             .or_else(|| {
@@ -70,13 +153,35 @@ impl<'a> JsVisitor<'a> {
             })
     }
 
-    #[allow(dead_code)]
     fn get_line(&self, span: oxc_span::Span) -> usize {
         self.source_text[..span.start as usize]
             .bytes()
             .filter(|b| *b == b'\n')
             .count()
             + 1
+    }
+
+    /// Extract basic type representation from TSType
+    fn type_to_string(ty: &TSType<'a>) -> String {
+        match ty {
+            TSType::TSTypeReference(r) => JsVisitor::type_name_to_string(&r.type_name),
+            // When the type is a complex union/inline construct, return a neutral label
+            // so we don't bloat command payloads with full type ASTs.
+            _ => "Type".to_string(),
+        }
+    }
+
+    fn type_name_to_string(name: &TSTypeName<'a>) -> String {
+        match name {
+            TSTypeName::IdentifierReference(id) => id.name.to_string(),
+            TSTypeName::QualifiedName(q) => {
+                format!(
+                    "{}.{}",
+                    JsVisitor::type_name_to_string(&q.left),
+                    q.right.name
+                )
+            }
+        }
     }
 }
 
@@ -186,6 +291,8 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                                 ));
                             }
                         }
+                        // Continue traversal
+                        self.visit_variable_declaration(var);
                     }
                     Declaration::FunctionDeclaration(f) => {
                         if let Some(id) = &f.id {
@@ -196,6 +303,10 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                                 "named",
                                 Some(line),
                             ));
+                        }
+                        // Continue traversal
+                        if let Some(body) = &f.body {
+                            self.visit_function_body(body);
                         }
                     }
                     Declaration::ClassDeclaration(c) => {
@@ -208,6 +319,8 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                                 Some(line),
                             ));
                         }
+                        // Continue traversal
+                        self.visit_class(c);
                     }
                     Declaration::TSInterfaceDeclaration(i) => {
                         let name = i.id.name.to_string();
@@ -256,23 +369,57 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
 
     fn visit_export_default_declaration(&mut self, decl: &ExportDefaultDeclaration<'a>) {
         let line = self.get_line(decl.span);
-        let name = match &decl.declaration {
+        match &decl.declaration {
             ExportDefaultDeclarationKind::FunctionDeclaration(f) => {
-                f.id.as_ref()
-                    .map(|i| i.name.to_string())
-                    .unwrap_or("default".to_string())
+                let name =
+                    f.id.as_ref()
+                        .map(|i| i.name.to_string())
+                        .unwrap_or("default".to_string());
+                self.analysis.exports.push(ExportSymbol::new(
+                    name,
+                    "default",
+                    "default",
+                    Some(line),
+                ));
+
+                // Continue traversal
+                if let Some(body) = &f.body {
+                    self.visit_function_body(body);
+                }
             }
             ExportDefaultDeclarationKind::ClassDeclaration(c) => {
-                c.id.as_ref()
-                    .map(|i| i.name.to_string())
-                    .unwrap_or("default".to_string())
+                let name =
+                    c.id.as_ref()
+                        .map(|i| i.name.to_string())
+                        .unwrap_or("default".to_string());
+                self.analysis.exports.push(ExportSymbol::new(
+                    name,
+                    "default",
+                    "default",
+                    Some(line),
+                ));
+
+                // Continue traversal
+                self.visit_class(c);
             }
-            ExportDefaultDeclarationKind::TSInterfaceDeclaration(i) => i.id.name.to_string(),
-            _ => "default".to_string(),
+            ExportDefaultDeclarationKind::TSInterfaceDeclaration(i) => {
+                self.analysis.exports.push(ExportSymbol::new(
+                    i.id.name.to_string(),
+                    "default",
+                    "default",
+                    Some(line),
+                ));
+                // Interfaces don't have executable code bodies (calls), so no need to traverse deep for commands
+            }
+            _ => {
+                self.analysis.exports.push(ExportSymbol::new(
+                    "default".to_string(),
+                    "default",
+                    "default",
+                    Some(line),
+                ));
+            }
         };
-        self.analysis
-            .exports
-            .push(ExportSymbol::new(name, "default", "default", Some(line)));
     }
 
     fn visit_export_all_declaration(&mut self, decl: &ExportAllDeclaration<'a>) {
@@ -285,57 +432,91 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
         });
     }
 
+    // --- DYNAMIC IMPORTS (import("...")) ---
+
+    fn visit_import_expression(&mut self, expr: &ImportExpression<'a>) {
+        // Handle import("./foo")
+        if let Expression::StringLiteral(s) = &expr.source {
+            let source = s.value.to_string();
+            // Track as dynamic import
+            if !self.analysis.dynamic_imports.contains(&source) {
+                self.analysis.dynamic_imports.push(source.clone());
+            }
+        }
+
+        // Continue visiting arguments (if any)
+        self.visit_expression(&expr.source);
+        for arg in &expr.arguments {
+            self.visit_expression(arg);
+        }
+    }
+
     // --- CALL EXPRESSIONS (invoke, etc) ---
 
     fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
-        // Continue visiting children
+        // Continue visiting children (callee/args may contain nested invocations)
         self.visit_arguments(&call.arguments);
         self.visit_expression(&call.callee);
 
         let callee_name = match &call.callee {
             Expression::Identifier(ident) => Some(ident.name.to_string()),
+
             Expression::StaticMemberExpression(member) => {
                 // Handle obj.emit(...)
+
                 Some(member.property.name.to_string())
             }
+
             _ => None,
         };
 
         if let Some(name) = callee_name {
-            // Commands
-            // Fix collapsible_if
-            if (name == "invoke"
-                || name == "invokeSnake"
-                || name == "safeInvoke"
-                || name.starts_with("invoke"))
+            // Commands - detect Tauri invoke patterns
+            let name_lower = name.to_lowercase();
+            let is_potential_command = name_lower.contains("invoke") || name.contains("Command");
+
+            if is_potential_command
+                && !DOM_EXCLUSIONS.contains(&name.as_str())
+                && !NON_INVOKE_EXCLUSIONS.contains(&name.as_str())
                 && let Some(arg) = call.arguments.first()
             {
-                let payload = match arg {
+                // Extract command name from first argument (string literal or template literal)
+                let cmd_name = match arg {
                     Argument::StringLiteral(s) => Some(s.value.to_string()),
+                    Argument::TemplateLiteral(t) => {
+                        // Only extract if it's a simple template without expressions
+                        if t.quasis.len() == 1 && t.expressions.is_empty() {
+                            t.quasis.first().map(|q| q.value.raw.to_string())
+                        } else {
+                            None
+                        }
+                    }
                     _ => None,
                 };
 
-                let generic = call
-                    .type_parameters
-                    .as_ref()
-                    .and_then(|params| params.params.first().map(|_| "Type".to_string()));
+                // Only record command if we have an actual command name (from the argument).
+                // Skip if cmd_name is None - that means we couldn't extract the command name
+                // (e.g., dynamic command name or wrapper function definition).
+                if let Some(cmd_name) = cmd_name {
+                    // Filter out command names that are clearly not Tauri commands
+                    // (e.g., CLI tools, shell commands found in scripts/config files)
+                    if INVALID_COMMAND_NAMES.contains(&cmd_name.as_str()) {
+                        // Skip - not a real Tauri command
+                    } else {
+                        let generic = call.type_parameters.as_ref().and_then(|params| {
+                            params.params.first().map(JsVisitor::type_to_string)
+                        });
 
-                let line = self.get_line(call.span);
+                        let line = self.get_line(call.span);
 
-                self.analysis.command_calls.push(CommandRef {
-                    name: name.clone(),
-                    exposed_name: None,
-                    line,
-                    generic_type: generic,
-                    payload: payload.clone(),
-                });
-
-                // Fix collapsible_if
-                if let Some(cmd_name) = payload
-                    && let Some(last) = self.analysis.command_calls.last_mut()
-                {
-                    last.name = cmd_name;
-                    last.payload = None;
+                        self.analysis.command_calls.push(CommandRef {
+                            name: cmd_name,
+                            exposed_name: None,
+                            line,
+                            generic_type: generic,
+                            payload: None,
+                        });
+                    }
                 }
             }
 
@@ -352,6 +533,21 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                 let (event_name, raw_name, kind) = match arg {
                     Argument::StringLiteral(s) => {
                         (s.value.to_string(), Some(s.value.to_string()), "literal")
+                    }
+                    Argument::TemplateLiteral(t) => {
+                        if t.quasis.len() == 1 && t.expressions.is_empty() {
+                            if let Some(q) = t.quasis.first() {
+                                (
+                                    q.value.raw.to_string(),
+                                    Some(q.value.raw.to_string()),
+                                    "literal",
+                                )
+                            } else {
+                                ("?".to_string(), None, "unknown")
+                            }
+                        } else {
+                            ("?".to_string(), None, "unknown")
+                        }
                     }
                     Argument::Identifier(id) => {
                         let id_name = id.name.to_string();
@@ -403,6 +599,13 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
             self.analysis
                 .event_consts
                 .insert(id.name.to_string(), s.value.to_string());
+        }
+
+        // IMPORTANT: Continue visiting children (e.g. init expression might contain dynamic imports)
+        // Manually visit children since we overrode the default implementation
+        self.visit_binding_pattern(&decl.id);
+        if let Some(init) = &decl.init {
+            self.visit_expression(init);
         }
     }
 }

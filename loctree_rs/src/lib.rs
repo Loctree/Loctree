@@ -53,14 +53,14 @@
 //! loctree --for-ai           # AI-optimized JSON output
 //! ```
 //!
-//! See the [README](https://github.com/LibraxisAI/Loctree) for full documentation.
+//! See the [README](https://github.com/Loctree/Loctree) for full documentation.
 
-#![doc(html_root_url = "https://docs.rs/loctree/0.5.6-dev")]
+#![doc(html_root_url = "https://docs.rs/loctree/0.5.7")]
 #![doc(
-    html_favicon_url = "https://raw.githubusercontent.com/LibraxisAI/loctree/main/assets/loctree-logo.svg"
+    html_favicon_url = "https://raw.githubusercontent.com/Loctree/Loctree/main/assets/loctree-logo.svg"
 )]
 #![doc(
-    html_logo_url = "https://raw.githubusercontent.com/LibraxisAI/loctree/main/assets/loctree-logo.svg"
+    html_logo_url = "https://raw.githubusercontent.com/Loctree/Loctree/main/assets/loctree-logo.svg"
 )]
 
 // ============================================================================
@@ -82,6 +82,30 @@
 /// - [`analyzer::html`] - HTML report generation
 /// - [`analyzer::sarif`] - SARIF 2.1.0 output for CI
 pub mod analyzer;
+
+/// New CLI module for the subcommand-based interface.
+///
+/// Provides the canonical `loct <command> [options]` interface with:
+/// - [`Command`](cli::Command) enum as the source of truth for all commands
+/// - [`GlobalOptions`](cli::GlobalOptions) for shared flags
+/// - Per-command option structs
+/// - Legacy adapter for backward compatibility (until v1.0)
+///
+/// # Key Commands (Human Interface)
+///
+/// - `loct` / `loct auto` - Full auto-scan with stack detection (default)
+/// - `loct scan` - Build/update snapshot
+/// - `loct dead` - Detect unused exports
+/// - `loct commands` - Show Tauri command bridges
+/// - `loct events` - Show event flow
+/// - `loct slice <path>` - Extract holographic context
+///
+/// # Agent Interface
+///
+/// Agents should use `--json` output with regex filters on metadata:
+/// - `loct find --symbol '.*patient.*' --lang ts --json`
+/// - `loct dead --confidence high --json`
+pub mod cli;
 
 /// Command-line argument parsing.
 ///
@@ -260,3 +284,16 @@ pub use analyzer::CommandGap;
 
 /// Ranked duplicate export.
 pub use analyzer::RankedDup;
+
+// ============================================================================
+// CLI types (new subcommand interface)
+// ============================================================================
+
+/// CLI command enum (source of truth for `loct <command>`).
+pub use cli::Command;
+
+/// Global CLI options (--json, --quiet, --verbose, --color).
+pub use cli::GlobalOptions;
+
+/// Parsed command result with deprecation warning support.
+pub use cli::ParsedCommand;

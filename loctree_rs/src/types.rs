@@ -5,8 +5,9 @@ pub const DEFAULT_LOC_THRESHOLD: usize = 1000;
 pub const COLOR_RED: &str = "\u{001b}[31m";
 pub const COLOR_RESET: &str = "\u{001b}[0m";
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum ColorMode {
+    #[default]
     Auto,
     Always,
     Never,

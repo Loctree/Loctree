@@ -1,0 +1,55 @@
+{
+  "name": "loctree",
+  "version": "0.5.6",
+  "tagline": "Scan once, slice many.",
+  "description": "AI-oriented codebase analyzer. Use BEFORE reading files manually.",
+  "install": "curl -fsSL https://raw.githubusercontent.com/Loctree/Loctree/main/tools/install.sh | sh",
+  "commands": {
+    "scan": {
+      "cmd": "loct",
+      "desc": "Scan project, create .loctree/snapshot.json"
+    },
+    "ai_overview": {
+      "cmd": "loct --for-ai",
+      "desc": "Project overview optimized for AI (JSON)"
+    },
+    "slice": {
+      "cmd": "loct slice <file> --consumers --json",
+      "desc": "Extract file context with dependencies for AI"
+    },
+    "check_similar": {
+      "cmd": "loct find <Name>",
+      "desc": "Find similar existing components before creating new"
+    },
+    "circular": {
+      "cmd": "loct cycles",
+      "desc": "Detect circular import cycles"
+    },
+    "dead_code": {
+      "cmd": "loct dead --confidence high",
+      "desc": "Find unused exports"
+    },
+    "impact": {
+      "cmd": "loct report --impact <file>",
+      "desc": "What breaks if file is removed"
+    },
+    "trace": {
+      "cmd": "loct trace <handler>",
+      "desc": "Investigate Tauri handler FE↔BE usage"
+    },
+    "report_graph": {
+      "cmd": "loct report --graph --report out.html",
+      "desc": "Generate HTML/JSON reports with graphs"
+    }
+  },
+  "workflows": {
+    "before_new_component": ["check_similar"],
+    "before_refactor": ["slice", "impact", "circular"],
+    "debugging_tauri": ["trace", "scan"]
+  },
+  "links": {
+    "docs": "https://docs.rs/loctree",
+    "github": "https://github.com/Loctree/Loctree",
+    "crates": "https://crates.io/crates/loctree"
+  }
+}

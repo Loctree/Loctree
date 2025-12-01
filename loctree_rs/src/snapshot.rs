@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use crate::args::ParsedArgs;
-use crate::types::FileAnalysis;
+use crate::types::{FileAnalysis, OutputMode};
 
 /// Current schema version for snapshot format
 pub const SNAPSHOT_SCHEMA_VERSION: &str = "0.5.0-rc";
@@ -407,8 +407,9 @@ impl Snapshot {
         println!("Status: OK");
         println!();
         println!("Next steps:");
-        println!("  loctree . -A --json          # Full analysis with JSON output");
-        println!("  loctree . -A --preset-tauri  # Tauri FE↔BE coverage analysis");
+        println!("  loct dead                    # Find unused exports");
+        println!("  loct commands                # Show Tauri FE↔BE command bridges");
+        println!("  loct slice <file> --json     # Extract context for AI agent");
     }
 }
 
@@ -635,7 +636,229 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
     // Print summary
     snapshot.print_summary();
 
+    // Auto mode: emit full artifact set into ./.loctree to avoid extra commands
+    if parsed.auto_outputs {
+        match write_auto_artifacts(&snapshot_root, &scan_results, parsed) {
+            Ok(paths) => {
+                if !paths.is_empty() {
+                    println!("Artifacts saved under ./.loctree:");
+                    for p in paths {
+                        println!("  - {}", p);
+                    }
+                }
+            }
+            Err(err) => {
+                eprintln!("[loctree][warn] failed to write auto artifacts: {}", err);
+            }
+        }
+    }
+
     Ok(())
+}
+
+/// In auto mode, generate the full set of analysis artifacts inside ./.loctree
+fn write_auto_artifacts(
+    snapshot_root: &Path,
+    scan_results: &crate::analyzer::root_scan::ScanResults,
+    parsed: &ParsedArgs,
+) -> io::Result<Vec<String>> {
+    use crate::analyzer::coverage::{
+        CommandUsage, compute_command_gaps_with_confidence, compute_unregistered_handlers,
+    };
+    use crate::analyzer::cycles::find_cycles;
+    use crate::analyzer::output::{RootArtifacts, process_root_context, write_report};
+    use crate::analyzer::pipelines::build_pipeline_summary;
+    use crate::analyzer::scan::opt_globset;
+    use serde_json::json;
+
+    const DEFAULT_EXCLUDE_REPORT_PATTERNS: &[&str] =
+        &["**/__tests__/**", "scripts/semgrep-fixtures/**"];
+    const SCHEMA_NAME: &str = "loctree-json";
+    const SCHEMA_VERSION: &str = "1.2.0";
+
+    let mut created = Vec::new();
+
+    let loctree_dir = snapshot_root.join(SNAPSHOT_DIR);
+    fs::create_dir_all(&loctree_dir)?;
+
+    let report_path = loctree_dir.join("report.html");
+    let analysis_json_path = loctree_dir.join("analysis.json");
+    let circular_json_path = loctree_dir.join("circular.json");
+    let races_json_path = loctree_dir.join("py_races.json");
+
+    let focus_set = opt_globset(&parsed.focus_patterns);
+    let mut exclude_patterns = parsed.exclude_report_patterns.clone();
+    exclude_patterns.extend(
+        DEFAULT_EXCLUDE_REPORT_PATTERNS
+            .iter()
+            .map(|p| p.to_string()),
+    );
+    let exclude_set = opt_globset(&exclude_patterns);
+
+    let registered_impls: HashSet<String> = scan_results
+        .global_analyses
+        .iter()
+        .flat_map(|a| a.tauri_registered_handlers.iter().cloned())
+        .collect();
+
+    let mut global_be_registered: CommandUsage = std::collections::HashMap::new();
+    for (name, locs) in &scan_results.global_be_commands {
+        for (path, line, impl_name) in locs {
+            if registered_impls.is_empty() || registered_impls.contains(impl_name) {
+                global_be_registered.entry(name.clone()).or_default().push((
+                    path.clone(),
+                    *line,
+                    impl_name.clone(),
+                ));
+            }
+        }
+    }
+
+    let (global_missing_handlers, global_unused_handlers) = compute_command_gaps_with_confidence(
+        &scan_results.global_fe_commands,
+        &global_be_registered,
+        &focus_set,
+        &exclude_set,
+        &scan_results.global_analyses,
+    );
+
+    let global_unregistered_handlers = compute_unregistered_handlers(
+        &scan_results.global_be_commands,
+        &registered_impls,
+        &focus_set,
+        &exclude_set,
+    );
+
+    let pipeline_summary = build_pipeline_summary(
+        &scan_results.global_analyses,
+        &focus_set,
+        &exclude_set,
+        &scan_results.global_fe_commands,
+        &scan_results.global_be_commands,
+        &scan_results.global_fe_payloads,
+        &scan_results.global_be_payloads,
+    );
+
+    let mut json_results = Vec::new();
+    let mut report_sections = Vec::new();
+    let analysis_args = ParsedArgs {
+        graph: true,
+        report_path: Some(report_path.clone()),
+        output: OutputMode::Json,
+        summary: true,
+        summary_limit: parsed.summary_limit,
+        analyze_limit: parsed.analyze_limit,
+        top_dead_symbols: parsed.top_dead_symbols,
+        skip_dead_symbols: parsed.skip_dead_symbols,
+        focus_patterns: parsed.focus_patterns.clone(),
+        exclude_report_patterns: exclude_patterns.clone(),
+        max_graph_nodes: parsed.max_graph_nodes,
+        max_graph_edges: parsed.max_graph_edges,
+        ..ParsedArgs::default()
+    };
+
+    for (idx, ctx) in scan_results.contexts.iter().cloned().enumerate() {
+        let RootArtifacts {
+            json_items,
+            report_section,
+        } = process_root_context(
+            idx,
+            ctx,
+            &analysis_args,
+            &scan_results.global_fe_commands,
+            &scan_results.global_be_commands,
+            &global_missing_handlers,
+            &global_unregistered_handlers,
+            &global_unused_handlers,
+            &pipeline_summary,
+            SCHEMA_NAME,
+            SCHEMA_VERSION,
+        );
+        json_results.extend(json_items);
+        if let Some(section) = report_section {
+            report_sections.push(section);
+        }
+    }
+
+    write_report(&report_path, &report_sections, parsed.verbose)?;
+    created.push(
+        report_path
+            .strip_prefix(snapshot_root)
+            .unwrap_or(&report_path)
+            .display()
+            .to_string(),
+    );
+
+    let all_graph_edges: Vec<_> = scan_results
+        .contexts
+        .iter()
+        .flat_map(|ctx| ctx.graph_edges.clone())
+        .collect();
+    let cycles = find_cycles(&all_graph_edges);
+    fs::write(
+        &circular_json_path,
+        serde_json::to_string_pretty(&json!({ "circularImports": cycles }))
+            .map_err(io::Error::other)?,
+    )?;
+    created.push(
+        circular_json_path
+            .strip_prefix(snapshot_root)
+            .unwrap_or(&circular_json_path)
+            .display()
+            .to_string(),
+    );
+
+    let race_items: Vec<_> = scan_results
+        .global_analyses
+        .iter()
+        .flat_map(|a| {
+            a.py_race_indicators.iter().map(move |ind| {
+                json!({
+                    "path": a.path,
+                    "line": ind.line,
+                    "type": ind.concurrency_type,
+                    "pattern": ind.pattern,
+                    "risk": ind.risk,
+                    "message": ind.message,
+                })
+            })
+        })
+        .collect();
+    fs::write(
+        &races_json_path,
+        serde_json::to_string_pretty(&race_items).map_err(io::Error::other)?,
+    )?;
+    created.push(
+        races_json_path
+            .strip_prefix(snapshot_root)
+            .unwrap_or(&races_json_path)
+            .display()
+            .to_string(),
+    );
+
+    let bundle = json!({
+        "schema": { "name": SCHEMA_NAME, "version": SCHEMA_VERSION },
+        "generatedAt": time::OffsetDateTime::now_utc()
+            .format(&time::format_description::well_known::Iso8601::DEFAULT)
+            .unwrap_or_else(|_| "unknown".to_string()),
+        "analysis": json_results,
+        "pipelineSummary": pipeline_summary,
+        "circularImports": cycles,
+        "pyRaceIndicators": race_items,
+    });
+    fs::write(
+        &analysis_json_path,
+        serde_json::to_string_pretty(&bundle).map_err(io::Error::other)?,
+    )?;
+    created.push(
+        analysis_json_path
+            .strip_prefix(snapshot_root)
+            .unwrap_or(&analysis_json_path)
+            .display()
+            .to_string(),
+    );
+
+    Ok(created)
 }
 
 #[cfg(test)]

@@ -592,14 +592,16 @@ mod tests {
 
     #[test]
     fn test_extract_exports() {
-        let mut file = FileAnalysis::default();
-        file.path = "utils.ts".to_string();
-        file.exports = vec![ExportSymbol::new(
-            "helper".to_string(),
-            "function",
-            "named",
-            Some(10),
-        )];
+        let file = FileAnalysis {
+            path: "utils.ts".to_string(),
+            exports: vec![ExportSymbol::new(
+                "helper".to_string(),
+                "function",
+                "named",
+                Some(10),
+            )],
+            ..Default::default()
+        };
 
         let snapshot = mock_snapshot_with_files(vec![file]);
         let exports = SnapshotDiff::extract_exports(&snapshot);
@@ -674,14 +676,16 @@ mod tests {
     fn test_compare_exports_added() {
         let from = mock_snapshot_with_files(vec![]);
 
-        let mut file = FileAnalysis::default();
-        file.path = "utils.ts".to_string();
-        file.exports = vec![ExportSymbol::new(
-            "helper".to_string(),
-            "function",
-            "named",
-            Some(10),
-        )];
+        let file = FileAnalysis {
+            path: "utils.ts".to_string(),
+            exports: vec![ExportSymbol::new(
+                "helper".to_string(),
+                "function",
+                "named",
+                Some(10),
+            )],
+            ..Default::default()
+        };
         let to = mock_snapshot_with_files(vec![file]);
 
         let diff = SnapshotDiff::compare_exports(&from, &to);
@@ -691,14 +695,16 @@ mod tests {
 
     #[test]
     fn test_compare_exports_removed() {
-        let mut file = FileAnalysis::default();
-        file.path = "utils.ts".to_string();
-        file.exports = vec![ExportSymbol::new(
-            "helper".to_string(),
-            "function",
-            "named",
-            Some(10),
-        )];
+        let file = FileAnalysis {
+            path: "utils.ts".to_string(),
+            exports: vec![ExportSymbol::new(
+                "helper".to_string(),
+                "function",
+                "named",
+                Some(10),
+            )],
+            ..Default::default()
+        };
         let from = mock_snapshot_with_files(vec![file]);
 
         let to = mock_snapshot_with_files(vec![]);
