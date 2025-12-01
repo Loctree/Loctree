@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use crate::args::{ParsedArgs, preset_ignore_symbols};
 use crate::config::LoctreeConfig;
+use crate::snapshot::Snapshot;
 use crate::types::OutputMode;
 
 use super::ReportSection;
@@ -20,7 +21,6 @@ use super::output::{RootArtifacts, process_root_context, write_report};
 use super::pipelines::build_pipeline_summary;
 use super::root_scan::{ScanConfig, ScanResults, scan_results_from_snapshot, scan_roots};
 use super::scan::{opt_globset, python_stdlib};
-use crate::snapshot::Snapshot;
 
 const DEFAULT_EXCLUDE_REPORT_PATTERNS: &[&str] =
     &["**/__tests__/**", "scripts/semgrep-fixtures/**"];
@@ -438,6 +438,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         &global_fe_payloads,
         &global_be_payloads,
     );
+    let git_ctx = Snapshot::current_git_context();
 
     // Handle SARIF output
     if parsed.sarif {
@@ -475,6 +476,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             &global_unregistered_handlers,
             &global_unused_handlers,
             &pipeline_summary,
+            Some(&git_ctx),
             SCHEMA_NAME,
             SCHEMA_VERSION,
         );

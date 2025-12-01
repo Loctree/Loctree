@@ -703,21 +703,29 @@ impl NormalizedModule {
 
 /// Normalize module identifier preserving language context
 ///
-/// This prevents cross-language collisions where foo.rs, foo.ts, and foo/index.ts
-/// would all map to the same key "foo".
+/// - TS/JS family (`ts`, `tsx`, `js`, `jsx`, `mjs`, `cjs`) collapses to `ts`
+///   to reduce FP noise across extensions and barrels.
+/// - Cross-language collisions (e.g., `.rs` vs `.ts`) are still prevented.
+/// - `/index` suffix is stripped so `foo/index.ts` -> `foo:ts`.
 ///
 /// Returns a NormalizedModule with separate path and language fields.
 pub(crate) fn normalize_module_id(path: &str) -> NormalizedModule {
     let mut p = path.replace('\\', "/");
     let mut lang = String::new();
 
-    // Extract language from extension
+    // Extract language family from extension (collapse TS/JS variants)
     for ext in [
         ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".rs", ".py", ".css",
     ] {
         if let Some(stripped) = p.strip_suffix(ext) {
             p = stripped.to_string();
-            lang = ext.trim_start_matches('.').to_string();
+            lang = match ext {
+                ".ts" | ".tsx" | ".js" | ".jsx" | ".mjs" | ".cjs" => "ts".to_string(),
+                ".rs" => "rs".to_string(),
+                ".py" => "py".to_string(),
+                ".css" => "css".to_string(),
+                _ => ext.trim_start_matches('.').to_string(),
+            };
             break;
         }
     }
@@ -1003,7 +1011,7 @@ mod tests {
 
     #[test]
     fn test_normalize_module_id_preserves_language() {
-        // Test that different languages with same base path get different normalized IDs
+        // Test that different languages with same base path get different normalized IDs (except TS/JS family)
         let rust_module = normalize_module_id("src/utils.rs");
         let ts_module = normalize_module_id("src/utils.ts");
         let tsx_module = normalize_module_id("src/utils.tsx");
@@ -1015,12 +1023,12 @@ mod tests {
         assert_eq!(ts_module.lang, "ts");
 
         assert_eq!(tsx_module.path, "src/utils");
-        assert_eq!(tsx_module.lang, "tsx");
+        assert_eq!(tsx_module.lang, "ts");
 
-        // Keys should be different to prevent cross-language collisions
+        // Keys should be different across languages, but TS/JS family collapses
         assert_ne!(rust_module.as_key(), ts_module.as_key());
         assert_ne!(rust_module.as_key(), tsx_module.as_key());
-        assert_ne!(ts_module.as_key(), tsx_module.as_key());
+        assert_eq!(ts_module.as_key(), tsx_module.as_key());
     }
 
     #[test]
@@ -1091,11 +1099,11 @@ mod tests {
         // Test all supported extensions
         let extensions = vec![
             ("file.ts", "ts"),
-            ("file.tsx", "tsx"),
-            ("file.js", "js"),
-            ("file.jsx", "jsx"),
-            ("file.mjs", "mjs"),
-            ("file.cjs", "cjs"),
+            ("file.tsx", "ts"),
+            ("file.js", "ts"),
+            ("file.jsx", "ts"),
+            ("file.mjs", "ts"),
+            ("file.cjs", "ts"),
             ("file.rs", "rs"),
             ("file.py", "py"),
             ("file.css", "css"),
@@ -1122,8 +1130,8 @@ mod tests {
         // Test round-trip conversion between module and key
         let test_cases = vec![
             ("src/utils:ts", "src/utils", "ts"),
-            ("components/Button:tsx", "components/Button", "tsx"),
-            ("lib/helpers:js", "lib/helpers", "js"),
+            ("components/Button:ts", "components/Button", "ts"),
+            ("lib/helpers:ts", "lib/helpers", "ts"),
             ("core:rs", "core", "rs"),
         ];
 

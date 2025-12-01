@@ -23,6 +23,15 @@ pub const SNAPSHOT_DIR: &str = ".loctree";
 /// Default snapshot file name
 pub const SNAPSHOT_FILE: &str = "snapshot.json";
 
+/// Context about the current git workspace (used for metadata and artifact layout)
+#[derive(Clone, Debug)]
+pub struct GitContext {
+    pub repo: Option<String>,
+    pub branch: Option<String>,
+    pub commit: Option<String>,
+    pub scan_id: Option<String>,
+}
+
 /// Metadata about the snapshot
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SnapshotMetadata {
@@ -59,6 +68,9 @@ pub struct SnapshotMetadata {
     /// Git commit hash (short)
     #[serde(default)]
     pub git_commit: Option<String>,
+    /// Combined scan identifier (e.g., branch@sha) for artifact isolation
+    #[serde(default)]
+    pub git_scan_id: Option<String>,
 }
 
 /// Configuration for path resolution (aliases, etc.)
@@ -168,7 +180,7 @@ impl Snapshot {
             .unwrap_or_else(|_| "unknown".to_string());
 
         // Get git info from current directory
-        let git_info = Self::get_git_info();
+        let git_info = Self::current_git_context();
 
         Self {
             metadata: SnapshotMetadata {
@@ -180,9 +192,10 @@ impl Snapshot {
                 total_loc: 0,
                 scan_duration_ms: 0,
                 resolver_config: None,
-                git_repo: git_info.0,
-                git_branch: git_info.1,
-                git_commit: git_info.2,
+                git_repo: git_info.repo,
+                git_branch: git_info.branch,
+                git_commit: git_info.commit,
+                git_scan_id: git_info.scan_id,
             },
             files: Vec::new(),
             edges: Vec::new(),
@@ -252,15 +265,63 @@ impl Snapshot {
         (repo, branch, commit)
     }
 
+    /// Sanitise branch/commit for filesystem path segments
+    fn sanitize_ref(value: &str) -> String {
+        value.replace(['/', '\\', ' ', ':'], "_").trim().to_string()
+    }
+
+    /// Build the current git context (repo, branch, commit, scan_id)
+    pub fn current_git_context() -> GitContext {
+        let (repo, branch, commit) = Self::get_git_info();
+        let scan_id = branch.as_ref().map(|b| {
+            let mut base = Self::sanitize_ref(b);
+            if let Some(c) = &commit {
+                base = format!("{}@{}", base, Self::sanitize_ref(c));
+            }
+            base
+        });
+
+        GitContext {
+            repo,
+            branch,
+            commit,
+            scan_id,
+        }
+    }
+
+    fn candidate_snapshot_paths(root: &Path) -> Vec<PathBuf> {
+        let mut paths = Vec::new();
+        if let Some(seg) = Self::current_git_context().scan_id {
+            paths.push(root.join(SNAPSHOT_DIR).join(seg).join(SNAPSHOT_FILE));
+        }
+        paths.push(root.join(SNAPSHOT_DIR).join(SNAPSHOT_FILE));
+        paths
+    }
+
     /// Get the snapshot file path for a given root
     pub fn snapshot_path(root: &Path) -> PathBuf {
-        root.join(SNAPSHOT_DIR).join(SNAPSHOT_FILE)
+        // Prefer the branch@sha path; fall back to legacy path
+        let paths = Self::candidate_snapshot_paths(root);
+        paths
+            .first()
+            .cloned()
+            .unwrap_or_else(|| root.join(SNAPSHOT_DIR).join(SNAPSHOT_FILE))
+    }
+
+    /// Directory where snapshot and artifacts should be stored for the current scan
+    pub fn artifacts_dir(root: &Path) -> PathBuf {
+        let path = Self::snapshot_path(root);
+        path.parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| root.join(SNAPSHOT_DIR))
     }
 
     /// Check if a snapshot exists for the given root (used by VS2 slice module)
     #[allow(dead_code)]
     pub fn exists(root: &Path) -> bool {
-        Self::snapshot_path(root).exists()
+        Self::candidate_snapshot_paths(root)
+            .iter()
+            .any(|p| p.exists())
     }
 
     /// Search upward for .loctree directory (like git finds .git/)
@@ -280,10 +341,10 @@ impl Snapshot {
 
     /// Save snapshot to disk
     pub fn save(&self, root: &Path) -> io::Result<()> {
-        let snapshot_dir = root.join(SNAPSHOT_DIR);
-        fs::create_dir_all(&snapshot_dir)?;
-
         let snapshot_path = Self::snapshot_path(root);
+        if let Some(dir) = snapshot_path.parent() {
+            fs::create_dir_all(dir)?;
+        }
         let json = serde_json::to_string_pretty(self)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
@@ -295,17 +356,27 @@ impl Snapshot {
     /// Load snapshot from disk (used by VS2 slice module)
     #[allow(dead_code)]
     pub fn load(root: &Path) -> io::Result<Self> {
-        let snapshot_path = Self::snapshot_path(root);
-
-        if !snapshot_path.exists() {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                format!(
-                    "No snapshot found. Run `loctree` first to create one.\nExpected: {}",
-                    snapshot_path.display()
-                ),
-            ));
+        let mut snapshot_path = None;
+        for candidate in Self::candidate_snapshot_paths(root) {
+            if candidate.exists() {
+                snapshot_path = Some(candidate);
+                break;
+            }
         }
+
+        let snapshot_path = match snapshot_path {
+            Some(p) => p,
+            None => {
+                let primary = Self::snapshot_path(root);
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!(
+                        "No snapshot found. Run `loctree` first to create one.\nExpected: {}",
+                        primary.display()
+                    ),
+                ));
+            }
+        };
 
         // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path -- SAFETY: snapshot_path is derived from root/.loctree/snapshot.json where root is validated as existing directory by caller; no user-controlled path segments are interpolated
         let content = fs::read_to_string(&snapshot_path)?;
@@ -346,13 +417,18 @@ impl Snapshot {
     }
 
     /// Print summary of the snapshot
-    pub fn print_summary(&self) {
+    pub fn print_summary(&self, root: &Path) {
         println!(
             "Scanned {} files in {:.2}s",
             self.metadata.file_count,
             self.metadata.scan_duration_ms as f64 / 1000.0
         );
-        println!("Graph saved to ./{}/{}", SNAPSHOT_DIR, SNAPSHOT_FILE);
+        let snapshot_path = Self::snapshot_path(root);
+        let pretty_path = snapshot_path
+            .strip_prefix(root)
+            .map(|p| format!("./{}", p.display()))
+            .unwrap_or_else(|_| snapshot_path.display().to_string());
+        println!("Graph saved to {}", pretty_path);
 
         let languages: Vec<_> = self.metadata.languages.iter().collect();
         if !languages.is_empty() {
@@ -634,7 +710,7 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
     snapshot.save(&snapshot_root)?;
 
     // Print summary
-    snapshot.print_summary();
+    snapshot.print_summary(&snapshot_root);
 
     // Auto mode: emit full artifact set into ./.loctree to avoid extra commands
     if parsed.auto_outputs {
@@ -678,7 +754,7 @@ fn write_auto_artifacts(
 
     let mut created = Vec::new();
 
-    let loctree_dir = snapshot_root.join(SNAPSHOT_DIR);
+    let loctree_dir = Snapshot::artifacts_dir(snapshot_root);
     fs::create_dir_all(&loctree_dir)?;
 
     let report_path = loctree_dir.join("report.html");
@@ -757,6 +833,8 @@ fn write_auto_artifacts(
         ..ParsedArgs::default()
     };
 
+    let git_ctx = Snapshot::current_git_context();
+
     for (idx, ctx) in scan_results.contexts.iter().cloned().enumerate() {
         let RootArtifacts {
             json_items,
@@ -771,6 +849,7 @@ fn write_auto_artifacts(
             &global_unregistered_handlers,
             &global_unused_handlers,
             &pipeline_summary,
+            Some(&git_ctx),
             SCHEMA_NAME,
             SCHEMA_VERSION,
         );
@@ -841,6 +920,12 @@ fn write_auto_artifacts(
         "generatedAt": time::OffsetDateTime::now_utc()
             .format(&time::format_description::well_known::Iso8601::DEFAULT)
             .unwrap_or_else(|_| "unknown".to_string()),
+        "git": {
+            "repo": git_ctx.repo,
+            "branch": git_ctx.branch,
+            "commit": git_ctx.commit,
+            "scanId": git_ctx.scan_id,
+        },
         "analysis": json_results,
         "pipelineSummary": pipeline_summary,
         "circularImports": cycles,
@@ -911,7 +996,42 @@ mod tests {
     #[test]
     fn test_snapshot_path() {
         let path = Snapshot::snapshot_path(Path::new("/some/project"));
-        assert_eq!(path, PathBuf::from("/some/project/.loctree/snapshot.json"));
+        // Accept branch@sha subdir if present, but require .loctree and snapshot.json
+        assert!(path.starts_with("/some/project/.loctree"));
+        assert!(path.ends_with("snapshot.json"));
+    }
+
+    #[test]
+    fn test_snapshot_path_prefers_scan_id_when_available() {
+        let ctx = Snapshot::current_git_context();
+        if let Some(scan) = ctx.scan_id {
+            let path = Snapshot::snapshot_path(Path::new("/tmp/loctree"));
+            let display = path.display().to_string();
+            assert!(
+                display.contains(&scan),
+                "expected snapshot path to include scan id {} but got {}",
+                scan,
+                display
+            );
+            assert!(display.ends_with("/snapshot.json"));
+        }
+    }
+
+    #[test]
+    fn test_artifacts_dir_prefers_scan_id() {
+        let ctx = Snapshot::current_git_context();
+        let dir = Snapshot::artifacts_dir(Path::new("/tmp/loctree"));
+        if let Some(scan) = ctx.scan_id {
+            let display = dir.display().to_string();
+            assert!(
+                display.contains(&scan),
+                "expected artifacts dir to include scan id {} but got {}",
+                scan,
+                display
+            );
+        } else {
+            assert!(dir.ends_with(Path::new(".loctree")));
+        }
     }
 
     #[test]
@@ -1065,6 +1185,7 @@ mod tests {
             git_repo: None,
             git_branch: None,
             git_commit: None,
+            git_scan_id: None,
         };
 
         let json = serde_json::to_string(&metadata).expect("serialize");

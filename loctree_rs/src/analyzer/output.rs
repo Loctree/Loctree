@@ -6,6 +6,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 use crate::args::ParsedArgs;
+use crate::snapshot::GitContext;
 use crate::types::{FileAnalysis, ImportKind, ImportResolutionKind, OutputMode, ReexportKind};
 
 use super::CommandGap;
@@ -36,6 +37,7 @@ pub fn process_root_context(
     global_unregistered_handlers: &[CommandGap],
     global_unused_handlers: &[CommandGap],
     pipeline_summary: &serde_json::Value,
+    git: Option<&GitContext>,
     schema_name: &str,
     schema_version: &str,
 ) -> RootArtifacts {
@@ -618,6 +620,12 @@ pub fn process_root_context(
                 "schemaVersion": schema_version,
                 "generatedAt": generated_at,
                 "rootDir": root_path,
+                "git": {
+                    "repo": git.and_then(|g| g.repo.clone()),
+                    "branch": git.and_then(|g| g.branch.clone()),
+                    "commit": git.and_then(|g| g.commit.clone()),
+                    "scanId": git.and_then(|g| g.scan_id.clone()),
+                },
                 "languages": languages_vec,
                 "filesAnalyzed": analyses.len(),
                 "summary": {
@@ -699,6 +707,12 @@ pub fn process_root_context(
                 "generatedAt": generated_at,
                 "rootDir": root_path,
                 "root": root_path,
+                "git": {
+                    "repo": git.and_then(|g| g.repo.clone()),
+                    "branch": git.and_then(|g| g.branch.clone()),
+                    "commit": git.and_then(|g| g.commit.clone()),
+                    "scanId": git.and_then(|g| g.scan_id.clone()),
+                },
                 "languages": languages_vec,
                 "filesAnalyzed": analyses.len(),
                 "duplicateExports": filtered_ranked
@@ -961,8 +975,8 @@ Top duplicate exports (showing up to {}):",
             },
             graph: graph_data.clone(),
             graph_warning: graph_warning.clone(),
-            git_branch: None,
-            git_commit: None,
+            git_branch: git.and_then(|g| g.branch.clone()),
+            git_commit: git.and_then(|g| g.commit.clone()),
         });
     }
 

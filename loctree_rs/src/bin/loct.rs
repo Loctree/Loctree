@@ -479,6 +479,17 @@ fn run_for_ai(root_list: &[PathBuf], parsed: &args::ParsedArgs) -> std::io::Resu
     );
 
     // Build report sections
+    let pipeline_summary = analyzer::pipelines::build_pipeline_summary(
+        &global_analyses,
+        &focus_set,
+        &exclude_set,
+        &global_fe_commands,
+        &global_be_commands,
+        &std::collections::HashMap::new(),
+        &std::collections::HashMap::new(),
+    );
+    let git_ctx = snapshot::Snapshot::current_git_context();
+
     let mut report_sections = Vec::new();
     for (idx, ctx) in contexts.into_iter().enumerate() {
         let artifacts = process_root_context(
@@ -490,15 +501,8 @@ fn run_for_ai(root_list: &[PathBuf], parsed: &args::ParsedArgs) -> std::io::Resu
             &global_missing,
             &global_unregistered,
             &global_unused,
-            &analyzer::pipelines::build_pipeline_summary(
-                &global_analyses,
-                &focus_set,
-                &exclude_set,
-                &global_fe_commands,
-                &global_be_commands,
-                &std::collections::HashMap::new(),
-                &std::collections::HashMap::new(),
-            ),
+            &pipeline_summary,
+            Some(&git_ctx),
             "loctree-json",
             "1.2.0",
         );

@@ -53,6 +53,11 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
     let dynamic_imports_count = section.dynamic_imports_count;
 
     let short_path = shorten_path(&section.root);
+    let git_label = match (section.git_branch.clone(), section.git_commit.clone()) {
+        (Some(b), Some(c)) => format!("{}@{}", b, c),
+        (Some(b), None) => b,
+        _ => String::new(),
+    };
 
     view! {
         <div id=view_id class=view_class>
@@ -60,6 +65,11 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
                 <div class="header-title">
                     <h1>{short_path}</h1>
                     <p class="header-path" title=section.root.clone()>{section.root.clone()}</p>
+                    {(!git_label.is_empty()).then(|| view! {
+                        <p class="header-path" style="margin-top:4px;color:var(--theme-text-tertiary)" title="git branch @ commit">
+                            {git_label.clone()}
+                        </p>
+                    })}
                 </div>
                 <div class="header-stats">
                     <span class="stat-badge">
