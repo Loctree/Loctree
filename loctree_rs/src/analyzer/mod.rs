@@ -22,6 +22,7 @@ pub mod runner;
 pub mod rust;
 pub mod sarif;
 pub mod scan;
+pub mod search;
 pub mod trace;
 mod tsconfig;
 
