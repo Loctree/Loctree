@@ -432,6 +432,7 @@ mod tests {
                     symbols: vec![crate::types::ImportSymbol {
                         name: "EVENT_NAME".to_string(),
                         alias: None,
+                        is_default: false,
                     }],
                     resolution: crate::types::ImportResolutionKind::Local,
                     is_type_checking: false,
@@ -523,6 +524,7 @@ mod tests {
                     symbols: vec![crate::types::ImportSymbol {
                         name: "ORIGINAL".to_string(),
                         alias: Some("ALIASED".to_string()),
+                        is_default: false,
                     }],
                     resolution: crate::types::ImportResolutionKind::Local,
                     is_type_checking: false,

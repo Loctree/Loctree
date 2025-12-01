@@ -32,3 +32,5 @@ loctree-*.min.js
 /reports/loctree-*.js
 /reports/reports/
 /reports/wasm/target
+/loctree_rs/.fastembed_cache
+*.txt
