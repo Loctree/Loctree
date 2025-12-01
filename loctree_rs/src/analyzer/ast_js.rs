@@ -78,6 +78,23 @@ impl<'a> JsVisitor<'a> {
             .count()
             + 1
     }
+
+    /// Extract basic type representation from TSType
+    fn type_to_string(&self, ty: &TSType<'a>) -> String {
+        match ty {
+            TSType::TSTypeReference(r) => self.type_name_to_string(&r.type_name),
+            _ => "Type".to_string(), // Fallback for complex types
+        }
+    }
+
+    fn type_name_to_string(&self, name: &TSTypeName<'a>) -> String {
+        match name {
+            TSTypeName::IdentifierReference(id) => id.name.to_string(),
+            TSTypeName::QualifiedName(q) => {
+                format!("{}.{}", self.type_name_to_string(&q.left), q.right.name)
+            }
+        }
+    }
 }
 
 impl<'a> Visit<'a> for JsVisitor<'a> {
@@ -285,6 +302,25 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
         });
     }
 
+    // --- DYNAMIC IMPORTS (import("...")) ---
+
+    fn visit_import_expression(&mut self, expr: &ImportExpression<'a>) {
+        // Handle import("./foo")
+        if let Expression::StringLiteral(s) = &expr.source {
+            let source = s.value.to_string();
+            // Track as dynamic import
+            if !self.analysis.dynamic_imports.contains(&source) {
+                self.analysis.dynamic_imports.push(source.clone());
+            }
+        }
+
+        // Continue visiting arguments (if any)
+        self.visit_expression(&expr.source);
+        for arg in &expr.arguments {
+            self.visit_expression(arg);
+        }
+    }
+
     // --- CALL EXPRESSIONS (invoke, etc) ---
 
     fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
@@ -303,11 +339,22 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
 
         if let Some(name) = callee_name {
             // Commands
-            // Fix collapsible_if
-            if (name == "invoke"
-                || name == "invokeSnake"
-                || name == "safeInvoke"
-                || name.starts_with("invoke"))
+            // Match legacy behavior: any function containing "invoke" or "Command"
+            let name_lower = name.to_lowercase();
+            let is_potential_command = name_lower.contains("invoke") || name.contains("Command");
+
+            // Known DOM APIs to exclude (from legacy js.rs)
+            const DOM_EXCLUSIONS: &[&str] = &[
+                "execCommand",
+                "queryCommandState",
+                "queryCommandEnabled",
+                "queryCommandSupported",
+                "queryCommandValue",
+            ];
+
+            if is_potential_command
+                && !DOM_EXCLUSIONS.iter().any(|ex| name.contains(ex))
+                && !DOM_EXCLUSIONS.contains(&name.as_str())
                 && let Some(arg) = call.arguments.first()
             {
                 let payload = match arg {
@@ -318,7 +365,7 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                 let generic = call
                     .type_parameters
                     .as_ref()
-                    .and_then(|params| params.params.first().map(|_| "Type".to_string()));
+                    .and_then(|params| params.params.first().map(|p| self.type_to_string(p)));
 
                 let line = self.get_line(call.span);
 
@@ -403,6 +450,13 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
             self.analysis
                 .event_consts
                 .insert(id.name.to_string(), s.value.to_string());
+        }
+
+        // IMPORTANT: Continue visiting children (e.g. init expression might contain dynamic imports)
+        // Manually visit children since we overrode the default implementation
+        self.visit_binding_pattern(&decl.id);
+        if let Some(init) = &decl.init {
+            self.visit_expression(init);
         }
     }
 }
