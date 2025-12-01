@@ -373,11 +373,15 @@ mod ci_fail_flags {
 
     #[test]
     fn passes_when_no_missing_handlers() {
+        // Must isolate fixture to avoid scanning parent repo (loctree-dev)
+        // which contains other fixtures with missing handlers!
+        let temp = TempDir::new().unwrap();
         let fixture = fixtures_path().join("simple_ts");
+        copy_dir_all(&fixture, temp.path()).unwrap();
 
         // Non-Tauri project shouldn't fail on missing handlers
         loctree()
-            .current_dir(&fixture)
+            .current_dir(temp.path())
             .args(["-A", "--fail-on-missing-handlers"])
             .assert()
             .success();
