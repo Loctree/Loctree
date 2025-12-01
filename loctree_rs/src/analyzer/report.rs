@@ -79,6 +79,18 @@ pub struct GraphData {
     pub edges: Vec<(String, String, String)>, // from, to, kind
     pub components: Vec<GraphComponent>,
     pub main_component_id: usize,
+    /// Whether this graph was truncated due to size limits
+    #[serde(default)]
+    pub truncated: bool,
+    /// Total number of nodes before truncation (same as nodes.len() if not truncated)
+    #[serde(default)]
+    pub total_nodes: usize,
+    /// Total number of edges before truncation (same as edges.len() if not truncated)
+    #[serde(default)]
+    pub total_edges: usize,
+    /// Reason for truncation, if any
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub truncation_reason: Option<String>,
 }
 
 #[derive(Clone, Serialize)]

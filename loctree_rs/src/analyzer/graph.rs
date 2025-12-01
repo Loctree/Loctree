@@ -121,22 +121,54 @@ pub fn build_graph_data(
     if nodes.is_empty() {
         return (None, None);
     }
-    if nodes.len() > max_nodes || graph_edges.len() > max_edges {
-        return (
-            None,
-            Some(format!(
-                "Graph skipped ({} nodes, {} edges exceed limits of {} nodes / {} edges)",
-                nodes.len(),
-                graph_edges.len(),
-                max_nodes,
-                max_edges
-            )),
+
+    // Store original counts before truncation
+    let total_nodes = nodes.len();
+    let total_edges = graph_edges.len();
+    let mut truncated = false;
+    let mut truncation_reason = None;
+
+    // Truncate to limits if exceeded (instead of discarding entire graph)
+    if total_nodes > max_nodes || total_edges > max_edges {
+        truncated = true;
+        truncation_reason = Some(format!(
+            "Graph exceeds limits: {} nodes (limit: {}), {} edges (limit: {})",
+            total_nodes, max_nodes, total_edges, max_edges
+        ));
+
+        // Emit warning to stderr
+        eprintln!(
+            "Warning: Graph truncated: showing {} of {} nodes, {} of {} edges",
+            max_nodes.min(total_nodes),
+            total_nodes,
+            max_edges.min(total_edges),
+            total_edges
         );
     }
 
     let mut nodes_vec: Vec<String> = nodes.into_iter().collect();
     nodes_vec.sort();
-    let (component_nodes, node_to_component, degrees) = compute_components(&nodes_vec, graph_edges);
+
+    // Truncate nodes if necessary
+    if nodes_vec.len() > max_nodes {
+        nodes_vec.truncate(max_nodes);
+    }
+
+    // Truncate edges if necessary (keep only edges between remaining nodes)
+    let truncated_edges: Vec<(String, String, String)> = if truncated {
+        let node_set: HashSet<String> = nodes_vec.iter().cloned().collect();
+        graph_edges
+            .iter()
+            .filter(|(a, b, _)| node_set.contains(a) && node_set.contains(b))
+            .take(max_edges)
+            .cloned()
+            .collect()
+    } else {
+        graph_edges.to_vec()
+    };
+
+    let (component_nodes, node_to_component, degrees) =
+        compute_components(&nodes_vec, &truncated_edges);
     let positions = layout_positions(&component_nodes);
     let main_component_id = if component_nodes.is_empty() { 0 } else { 1 };
 
@@ -146,7 +178,7 @@ pub fn build_graph_data(
         sorted_nodes.sort();
         let cid = idx + 1;
         let comp_set: HashSet<String> = sorted_nodes.iter().cloned().collect();
-        let edge_count = graph_edges
+        let edge_count = truncated_edges
             .iter()
             .filter(|(a, b, _)| comp_set.contains(a) && comp_set.contains(b))
             .count();
@@ -214,9 +246,13 @@ pub fn build_graph_data(
     (
         Some(GraphData {
             nodes: graph_nodes,
-            edges: graph_edges.to_vec(),
+            edges: truncated_edges,
             components: component_meta,
             main_component_id,
+            truncated,
+            total_nodes,
+            total_edges,
+            truncation_reason,
         }),
         None,
     )
@@ -386,6 +422,11 @@ mod tests {
         assert_eq!(g.edges.len(), 1);
         assert_eq!(g.components.len(), 1);
         assert_eq!(g.main_component_id, 1);
+        // Should not be truncated
+        assert!(!g.truncated);
+        assert_eq!(g.total_nodes, 2);
+        assert_eq!(g.total_edges, 1);
+        assert!(g.truncation_reason.is_none());
     }
 
     #[test]
@@ -409,9 +450,16 @@ mod tests {
             100,
         );
 
-        assert!(graph.is_none());
-        assert!(warning.is_some());
-        assert!(warning.unwrap().contains("exceed limits"));
+        // Should return truncated graph, not None
+        assert!(graph.is_some());
+        assert!(warning.is_none());
+
+        let g = graph.unwrap();
+        assert!(g.truncated);
+        assert_eq!(g.total_nodes, 100);
+        assert_eq!(g.nodes.len(), 10); // Truncated to max_nodes
+        assert!(g.truncation_reason.is_some());
+        assert!(g.truncation_reason.unwrap().contains("exceeds limits"));
     }
 
     #[test]
@@ -447,6 +495,53 @@ mod tests {
         // One component should be detached (not main)
         let detached_count = g.components.iter().filter(|c| c.detached).count();
         assert_eq!(detached_count, 1);
+    }
+
+    #[test]
+    fn test_build_graph_data_edge_truncation() {
+        // Create 5 nodes with 10 edges
+        let analyses = vec![
+            mock_file("a.ts", 10),
+            mock_file("b.ts", 10),
+            mock_file("c.ts", 10),
+            mock_file("d.ts", 10),
+            mock_file("e.ts", 10),
+        ];
+        let edges = vec![
+            ("a.ts".to_string(), "b.ts".to_string(), "import".to_string()),
+            ("b.ts".to_string(), "c.ts".to_string(), "import".to_string()),
+            ("c.ts".to_string(), "d.ts".to_string(), "import".to_string()),
+            ("d.ts".to_string(), "e.ts".to_string(), "import".to_string()),
+            ("e.ts".to_string(), "a.ts".to_string(), "import".to_string()),
+            ("a.ts".to_string(), "c.ts".to_string(), "import".to_string()),
+            ("b.ts".to_string(), "d.ts".to_string(), "import".to_string()),
+            ("c.ts".to_string(), "e.ts".to_string(), "import".to_string()),
+            ("d.ts".to_string(), "a.ts".to_string(), "import".to_string()),
+            ("e.ts".to_string(), "b.ts".to_string(), "import".to_string()),
+        ];
+        let loc_map: HashMap<String, usize> = HashMap::new();
+        let fe_commands: CommandUsage = HashMap::new();
+        let be_commands: CommandUsage = HashMap::new();
+
+        // Limit edges to 3
+        let (graph, warning) = build_graph_data(
+            &analyses,
+            &edges,
+            &loc_map,
+            &fe_commands,
+            &be_commands,
+            100, // Allow all nodes
+            3,   // Limit edges
+        );
+
+        assert!(graph.is_some());
+        assert!(warning.is_none());
+
+        let g = graph.unwrap();
+        assert!(g.truncated);
+        assert_eq!(g.total_edges, 10);
+        assert!(g.edges.len() <= 3); // Should be truncated to max 3
+        assert!(g.truncation_reason.is_some());
     }
 
     #[test]

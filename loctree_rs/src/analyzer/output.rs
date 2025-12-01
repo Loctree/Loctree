@@ -132,13 +132,13 @@ pub fn process_root_context(
             for imp in &imports {
                 if let Some(resolved) = &imp.resolved_path {
                     imports_targeted.insert(resolved.clone());
-                    imports_targeted.insert(normalize_module_id(resolved));
+                    imports_targeted.insert(normalize_module_id(resolved).as_key());
                 }
             }
             for re in &reexports {
                 if let Some(resolved) = &re.resolved {
                     imports_targeted.insert(resolved.clone());
-                    imports_targeted.insert(normalize_module_id(resolved));
+                    imports_targeted.insert(normalize_module_id(resolved).as_key());
                 }
             }
 
@@ -345,7 +345,7 @@ pub fn process_root_context(
             if exp.export_type == "default" {
                 continue;
             }
-            let norm_path = normalize_module_id(&analysis.path);
+            let norm_path = normalize_module_id(&analysis.path).as_key();
             let entry = symbol_occurrences.entry(exp.name.clone()).or_default();
             let already_present = entry.iter().any(|(_, _, _, _, norm)| norm == &norm_path);
             if already_present {

@@ -165,6 +165,9 @@ pub enum ImportResolutionKind {
 pub struct ImportSymbol {
     pub name: String,
     pub alias: Option<String>,
+    /// True if this is a default import (import Foo from './bar')
+    #[serde(default)]
+    pub is_default: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

@@ -142,8 +142,8 @@ git when-introduced --dead <sym>  Find when issue appeared (planned)\n\n\
 --find-artifacts          Find node_modules, target, .venv\n\n\
 === ADVANCED ===\n\n  \
 --py-root <path>          Extra Python import roots\n  \
---max-graph-nodes <N>     Skip graph if too many nodes\n  \
---max-graph-edges <N>     Skip graph if too many edges\n  \
+--max-graph-nodes <N>     Truncate graph to N nodes (default: 8000)\n  \
+--max-graph-edges <N>     Truncate graph to N edges (default: 12000)\n  \
 --editor-cmd <tpl>        Custom open command template\n  \
 --top-dead-symbols <N>    Cap dead-symbol list (default 20)\n  \
 --skip-dead-symbols       Omit dead-symbol analysis\n\n\
