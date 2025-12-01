@@ -1,5 +1,5 @@
-use leptos::prelude::*;
 use super::VERSION;
+use leptos::prelude::*;
 
 #[component]
 pub fn Nav() -> impl IntoView {
@@ -9,7 +9,7 @@ pub fn Nav() -> impl IntoView {
     let (prompt_copied, set_prompt_copied) = signal(false);
     let (expanded, set_expanded) = signal(false);
 
-    let install_command = "curl -fsSL https://raw.githubusercontent.com/LibraxisAI/loctree/main/tools/install.sh | sh";
+    let install_command = "curl -fsSL https://raw.githubusercontent.com/Loctree/Loctree/main/tools/install.sh | sh";
 
     let agent_prompt_short = r#"## loctree — AI Agent Quick Reference
 **Scan once, slice many.** Install: `curl -fsSL .../install.sh | sh`
@@ -32,7 +32,7 @@ pub fn Nav() -> impl IntoView {
 
 ### Install & Scan
 ```bash
-curl -fsSL https://raw.githubusercontent.com/LibraxisAI/loctree/main/tools/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/Loctree/Loctree/main/tools/install.sh | sh
 loctree          # creates .loctree/snapshot.json
 ```
 
@@ -87,7 +87,11 @@ loctree -A --sarif > results.sarif      # SARIF output
     let copy_prompt = move |_| {
         if let Some(window) = web_sys::window() {
             let clipboard = window.navigator().clipboard();
-            let content = if expanded.get() { agent_prompt_full } else { agent_prompt_short };
+            let content = if expanded.get() {
+                agent_prompt_full
+            } else {
+                agent_prompt_short
+            };
             let _ = clipboard.write_text(content);
             set_prompt_copied.set(true);
             set_timeout(
@@ -102,7 +106,7 @@ loctree -A --sarif > results.sarif      # SARIF output
             <div class="nav-inner">
                 <a href="/" class="nav-brand">
                     <div class="nav-logo">
-                        <img src="assets/loctree-logo-brutal.svg" alt="loctree" />
+                        <img src="assets/loctree-logo.png" alt="loctree" />
                     </div>
                     <span class="nav-title">"loctree"</span>
                     <span class="nav-version">{VERSION}</span>
@@ -112,7 +116,7 @@ loctree -A --sarif > results.sarif      # SARIF output
                     <a href="#slice" class="nav-link">"Slice"</a>
                     <a href="#cli" class="nav-link">"CLI"</a>
                     <a href="https://docs.rs/loctree" target="_blank" class="nav-link">"Docs"</a>
-                    <a href="https://github.com/LibraxisAI/loctree" target="_blank" class="nav-link">"GitHub"</a>
+                    <a href="https://github.com/Loctree/Loctree" target="_blank" class="nav-link">"GitHub"</a>
                     <button
                         class=move || if drawer_open.get() { "nav-cta active" } else { "nav-cta" }
                         on:click=move |_| set_drawer_open.update(|o| *o = !*o)

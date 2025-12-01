@@ -1,5 +1,5 @@
-use leptos::prelude::*;
 use super::VERSION;
+use leptos::prelude::*;
 
 #[component]
 pub fn Hero() -> impl IntoView {
@@ -26,7 +26,7 @@ pub fn Hero() -> impl IntoView {
                             <a href="#install" class="btn btn-primary">
                                 "Get Started"
                             </a>
-                            <a href="https://github.com/LibraxisAI/loctree" target="_blank" class="btn btn-secondary">
+                            <a href="https://github.com/Loctree/Loctree" target="_blank" class="btn btn-secondary">
                                 "View on GitHub →"
                             </a>
                         </div>

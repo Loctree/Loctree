@@ -8,7 +8,7 @@ Leptos SSR renderer for generating static HTML reports from code analysis data.
 
 ## Overview
 
-`report-leptos` is a standalone library that generates beautiful, interactive HTML reports using [Leptos](https://leptos.dev/) server-side rendering. Originally built for [loctree](https://github.com/LibraxisAI/Loctree) codebase analysis, it can be used independently for any static report generation needs.
+`report-leptos` is a standalone library that generates beautiful, interactive HTML reports using [Leptos](https://leptos.dev/) server-side rendering. Originally built for [loctree](https://github.com/Loctree/Loctree) codebase analysis, it can be used independently for any static report generation needs.
 
 ### Key Features
 
@@ -192,7 +192,7 @@ Or bundle them locally for offline use.
 
 ## Integration with loctree
 
-This library is the rendering engine for [loctree](https://github.com/LibraxisAI/Loctree) HTML reports. When using loctree with `--html-report`:
+This library is the rendering engine for [loctree](https://github.com/Loctree/Loctree) HTML reports. When using loctree with `--html-report`:
 
 ```bash
 loctree src --html-report analysis.html

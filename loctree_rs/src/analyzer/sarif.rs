@@ -139,7 +139,7 @@ pub fn print_sarif(inputs: SarifInputs) {
     let tool = json!({
         "driver": {
             "name": "loctree",
-            "informationUri": "https://github.com/LibraxisAI/loctree",
+            "informationUri": "https://github.com/Loctree/Loctree",
             "version": env!("CARGO_PKG_VERSION"),
             "rules": [
                 { "id": "duplicate-export", "shortDescription": { "text": "Duplicate export detected" } },

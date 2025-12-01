@@ -131,11 +131,7 @@ loct lint --sarif > results.sarif  # GitHub/GitLab integration
 }
 
 #[component]
-fn MistakeRow(
-    wrong: &'static str,
-    right: &'static str,
-    label: &'static str,
-) -> impl IntoView {
+fn MistakeRow(wrong: &'static str, right: &'static str, label: &'static str) -> impl IntoView {
     view! {
         <div class="mistake-row">
             <div class="mistake-label">{label}</div>
@@ -152,10 +148,7 @@ fn MistakeRow(
 }
 
 #[component]
-fn ExampleCard(
-    task: &'static str,
-    cmd: &'static str,
-) -> impl IntoView {
+fn ExampleCard(task: &'static str, cmd: &'static str) -> impl IntoView {
     let (copied, set_copied) = signal(false);
     let cmd_str = cmd;
 

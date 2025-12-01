@@ -4,14 +4,14 @@ umask 022
 
 # loctree Python installer
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/LibraxisAI/loctree/main/tools/install_py.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/Loctree/Loctree/main/tools/install_py.sh | sh
 # Env overrides:
 #   INSTALL_DIR   where to place the runnable `loctree-py` wrapper (default: $HOME/.local/bin)
 #   LOCTREE_HOME  where to store the downloaded loctree.py (default: $HOME/.local/lib/loctree-py)
 
 INSTALL_DIR=${INSTALL_DIR:-"$HOME/.local/bin"}
 LOCTREE_HOME=${LOCTREE_HOME:-"$HOME/.local/lib/loctree-py"}
-RAW_URL="https://raw.githubusercontent.com/LibraxisAI/loctree/main/loctree.py"
+RAW_URL="https://raw.githubusercontent.com/Loctree/Loctree/main/loctree.py"
 
 info() { printf "[loctree-py] %s\n" "$*"; }
 warn() { printf "[loctree-py][warn] %s\n" "$*" >&2; }

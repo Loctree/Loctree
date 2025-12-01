@@ -1,37 +1,37 @@
-# loctree - AI Agent Quick Reference (v0.5.4)
+# loctree - AI Agent Quick Reference (v0.5.6)
 
 A static analysis tool designed for AI agents working on production codebases. Solves the "context drift" problem where AI generates duplicates, barrel files, and circular dependencies instead of reusing existing components.
 
 ## Core Principle: Scan Once, Slice Many
 
 ```bash
-# 1. Scan project (creates .loctree/snapshot.json)
-loctree
+# 1. Scan project (creates .loctree/snapshot.json) - from repo root
+loct
 
 # 2. Extract focused context for any task
-loctree slice src/components/ChatPanel.tsx --consumers --json | claude
+loct slice src/components/ChatPanel.tsx --consumers --json | claude
 ```
 
 ## Installation
 
 ```bash
 cargo install --force --path loctree_rs
-loctree --version   # expected: 0.5.4
+loct --version   # expected: 0.5.6
 ```
 
 ## Primary Workflow for AI Agents
 
-### Step 1: Understand What Exists
+### Step 1: Understand What Exists (auto scan)
 
 Before generating any new component, always check:
 
 ```bash
 # Find similar existing components
-loctree -A --check ChatSurface
+loct find ChatSurface
 # Output: Found: ChatPanel (distance: 2), ChatWindow (distance: 3)
 
 # Search for symbol usage
-loctree -A --symbol useAuth
+loct find useAuth
 ```
 
 ### Step 2: Extract Relevant Context
@@ -40,10 +40,10 @@ Use Holographic Slice to get 3-layer context (Core/Deps/Consumers):
 
 ```bash
 # Human-readable slice
-loctree slice src/features/chat/ChatPanel.tsx --consumers
+loct slice src/features/chat/ChatPanel.tsx --consumers
 
 # JSON for piping to AI
-loctree slice src/features/chat/ChatPanel.tsx --consumers --json | claude "refactor to React Query"
+loct slice src/features/chat/ChatPanel.tsx --consumers --json | claude "refactor to React Query"
 ```
 
 Output structure:
@@ -69,22 +69,24 @@ Total: 6 files, 750 LOC
 
 ```bash
 # Find circular imports (causes runtime issues)
-loctree -A --circular
+loct cycles
 
 # Find dead exports (cleanup candidates)
-loctree -A --dead --confidence high
+loct dead --confidence high
 
 # Analyze impact of changes
-loctree -A --impact src/utils/api.ts
+loct report --impact src/utils/api.ts
 ```
 
-## Modes
+## Core Commands
 
-| Mode | Command | Purpose |
-|------|---------|---------|
-| Init (default) | `loctree` | Scan and save snapshot to .loctree/snapshot.json |
-| Slice | `loctree slice <file>` | Extract 3-layer context for AI |
-| Analyzer | `loctree -A` | Import/export analysis, duplicates, coverage |
+- `loct` / `loct scan` — scan repo, write `.loctree/snapshot.json`
+- `loct slice <file>` — holographic slice (add `--consumers`, `--json`)
+- `loct find <query>` — symbols / similar components / regex search
+- `loct dead` — unused exports
+- `loct cycles` — circular imports
+- `loct commands` / `loct events` — Tauri FE↔BE coverage
+- `loct report --graph --report out.html` — HTML with graphs
 
 ## Auto-Detect Stack
 
@@ -104,14 +106,11 @@ loctree automatically detects project type and configures ignores:
 - `--consumers` - Include files that import the target
 - `--json` - Output as JSON for piping to AI
 
-### Analyzer Mode (-A)
-- `--check <query>` - Find similar components (avoid duplicates)
-- `--dead` - Find unused exports
-- `--symbol <name>` - Find symbol definitions and usage
-- `--impact <file>` - What imports this file (what breaks if removed)
-- `--circular` - Detect circular import cycles
-- `--entrypoints` - List entry points (main functions)
-- `--sarif` - SARIF 2.1.0 output for CI integration
+### Analyzer/Report
+- `dead --confidence high` - Find unused exports
+- `cycles` - Detect circular import cycles
+- `report --graph --report out.html` - HTML/JSON reports
+- `report --sarif > results.sarif` - SARIF 2.1.0 output for CI integration
 
 ### CI Pipeline Checks
 - `--fail-on-missing-handlers` - Exit 1 if FE calls missing BE handlers

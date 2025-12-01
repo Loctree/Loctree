@@ -4,7 +4,7 @@ use leptos::prelude::*;
 pub fn InstallSection() -> impl IntoView {
     let (copied, set_copied) = signal(false);
 
-    let install_command = "curl -fsSL https://raw.githubusercontent.com/LibraxisAI/loctree/main/tools/install.sh | sh";
+    let install_command = "curl -fsSL https://raw.githubusercontent.com/Loctree/Loctree/main/tools/install.sh | sh";
 
     let copy_cmd = move |_| {
         if let Some(window) = web_sys::window() {
@@ -30,13 +30,13 @@ pub fn InstallSection() -> impl IntoView {
                         </button>
                     </div>
                     <div class="install-links">
-                        <a href="https://github.com/LibraxisAI/loctree" target="_blank">"GitHub"</a>
+                        <a href="https://github.com/Loctree/Loctree" target="_blank">"GitHub"</a>
                         <span class="sep">"|"</span>
                         <a href="https://crates.io/crates/loctree" target="_blank">"crates.io"</a>
                         <span class="sep">"|"</span>
                         <a href="https://docs.rs/loctree" target="_blank">"API Docs"</a>
                         <span class="sep">"|"</span>
-                        <a href="https://github.com/LibraxisAI/loctree#readme" target="_blank">"README"</a>
+                        <a href="https://github.com/Loctree/Loctree#readme" target="_blank">"README"</a>
                     </div>
                 </div>
             </div>

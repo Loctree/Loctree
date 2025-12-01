@@ -7,15 +7,15 @@ pub fn Footer() -> impl IntoView {
             <div class="container">
                 <div class="footer-brand">
                     <span class="footer-logo">
-                        <img src="assets/loctree-logo-brutal.svg" alt="loctree" />
+                        <img src="assets/loctree-logo.png" alt="loctree" />
                     </span>
                     <span class="footer-title">"loctree"</span>
                 </div>
                 <div class="footer-links">
-                    <a href="https://github.com/LibraxisAI/loctree" target="_blank" class="footer-link">"GitHub"</a>
+                    <a href="https://github.com/Loctree/Loctree" target="_blank" class="footer-link">"GitHub"</a>
                     <a href="https://crates.io/crates/loctree" target="_blank" class="footer-link">"crates.io"</a>
                     <a href="https://docs.rs/loctree" target="_blank" class="footer-link">"docs.rs"</a>
-                    <a href="https://github.com/LibraxisAI/loctree/blob/main/LICENSE" target="_blank" class="footer-link">"MIT License"</a>
+                    <a href="https://github.com/Loctree/Loctree/blob/main/LICENSE" target="_blank" class="footer-link">"MIT License"</a>
                 </div>
                 <p class="footer-copyright">
                     "Created by M&K (c)2025 The LibraxisAI Team"

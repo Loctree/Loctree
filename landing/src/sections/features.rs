@@ -1,5 +1,5 @@
-use leptos::prelude::*;
 use super::VERSION;
+use leptos::prelude::*;
 
 #[component]
 pub fn Features() -> impl IntoView {

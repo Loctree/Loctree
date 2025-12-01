@@ -1,7 +1,7 @@
 # loctree — AI-oriented Project Analyzer
 
-[![CI](https://github.com/LibraxisAI/loctree/actions/workflows/ci.yml/badge.svg)](https://github.com/LibraxisAI/loctree/actions/workflows/ci.yml)
-[![Loctree CI](https://img.shields.io/github/actions/workflow/status/LibraxisAI/loctree/loctree-ci.yml?label=loctree%20ci&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgdmlld0JveD0iMCAwIDE2IDE2Ij48cmVjdCB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIGZpbGw9IiMwMDAiLz48dGV4dCB4PSI4IiB5PSIxMiIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMCIgZmlsbD0iI2E4YThhOCIgdGV4dC1hbmNob3I9Im1pZGRsZSI+TDwvdGV4dD48L3N2Zz4=)](https://github.com/LibraxisAI/loctree/actions/workflows/loctree-ci.yml)
+[![CI](https://github.com/Loctree/Loctree/actions/workflows/ci.yml/badge.svg)](https://github.com/Loctree/Loctree/actions/workflows/ci.yml)
+[![Loctree CI](https://img.shields.io/github/actions/workflow/status/Loctree/Loctree/loctree-ci.yml?label=loctree%20ci&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgdmlld0JveD0iMCAwIDE2IDE2Ij48cmVjdCB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIGZpbGw9IiMwMDAiLz48dGV4dCB4PSI4IiB5PSIxMiIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMCIgZmlsbD0iI2E4YThhOCIgdGV4dC1hbmNob3I9Im1pZGRsZSI+TDwvdGV4dD48L3N2Zz4=)](https://github.com/Loctree/Loctree/actions/workflows/loctree-ci.yml)
 [![Crates.io](https://img.shields.io/crates/v/loctree.svg)](https://crates.io/crates/loctree)
 [![Downloads](https://img.shields.io/crates/d/loctree.svg)](https://crates.io/crates/loctree)
 [![docs.rs](https://docs.rs/loctree/badge.svg)](https://docs.rs/loctree)
@@ -20,23 +20,23 @@
 cargo install loctree
 
 # Or via install script
-curl -fsSL https://raw.githubusercontent.com/LibraxisAI/loctree/main/tools/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/Loctree/Loctree/main/tools/install.sh | sh
 
 # Scan your project (auto-detects stack)
 cd your-project
-loctree
+loct
 
 # Extract context for AI agents
-loctree slice src/components/ChatPanel.tsx --consumers --json
+loct slice src/components/ChatPanel.tsx --consumers --json
 
 # Get AI-optimized hierarchical output
-loctree --for-ai
+loct --for-ai
 
 # Find circular imports
-loctree -A --circular
+loct cycles
 
-# Trace a Tauri handler through the entire pipeline
-loctree trace get_user
+# Detect dead exports
+loct dead --confidence high
 ```
 
 ## Why loctree?
@@ -291,7 +291,7 @@ cargo install loctree
 ### From source
 
 ```bash
-git clone https://github.com/LibraxisAI/loctree
+git clone https://github.com/Loctree/Loctree
 cd loctree/loctree_rs
 cargo install --path .
 ```
@@ -299,7 +299,7 @@ cargo install --path .
 ### Install script
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/LibraxisAI/loctree/main/tools/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/Loctree/Loctree/main/tools/install.sh | sh
 ```
 
 ## Project Structure
@@ -364,10 +364,10 @@ Show that your project uses loctree:
 Or use the SVG badge:
 
 ```markdown
-[![loctree](https://raw.githubusercontent.com/LibraxisAI/loctree/main/assets/loctree-badge.svg)](https://crates.io/crates/loctree)
+[![loctree](https://raw.githubusercontent.com/Loctree/Loctree/main/assets/loctree-badge.svg)](https://crates.io/crates/loctree)
 ```
 
-[![loctree](https://raw.githubusercontent.com/LibraxisAI/loctree/main/assets/loctree-badge.svg)](https://crates.io/crates/loctree)
+[![loctree](https://raw.githubusercontent.com/Loctree/Loctree/main/assets/loctree-badge.svg)](https://crates.io/crates/loctree)
 
 ## License
 

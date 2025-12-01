@@ -7,7 +7,7 @@
 
 ## Install & Scan
 ```bash
-curl -fsSL https://raw.githubusercontent.com/LibraxisAI/loctree/main/tools/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/Loctree/Loctree/main/tools/install.sh | sh
 loctree          # creates .loctree/snapshot.json
 ```
 

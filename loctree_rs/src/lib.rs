@@ -53,14 +53,14 @@
 //! loctree --for-ai           # AI-optimized JSON output
 //! ```
 //!
-//! See the [README](https://github.com/LibraxisAI/Loctree) for full documentation.
+//! See the [README](https://github.com/Loctree/Loctree) for full documentation.
 
 #![doc(html_root_url = "https://docs.rs/loctree/0.5.6")]
 #![doc(
-    html_favicon_url = "https://raw.githubusercontent.com/LibraxisAI/loctree/main/assets/loctree-logo.svg"
+    html_favicon_url = "https://raw.githubusercontent.com/Loctree/Loctree/main/assets/loctree-logo.svg"
 )]
 #![doc(
-    html_logo_url = "https://raw.githubusercontent.com/LibraxisAI/loctree/main/assets/loctree-logo.svg"
+    html_logo_url = "https://raw.githubusercontent.com/Loctree/Loctree/main/assets/loctree-logo.svg"
 )]
 
 // ============================================================================

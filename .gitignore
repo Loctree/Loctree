@@ -34,3 +34,4 @@ loctree-*.min.js
 /reports/wasm/target
 /loctree_rs/.fastembed_cache
 *.txt
+/assets/Icon Exports
