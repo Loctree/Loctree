@@ -26,12 +26,40 @@ pub(crate) fn analyze_js_file_ast(
     let allocator = Allocator::default();
 
     // Determine source type from file extension
+    // Only enable JSX for .tsx/.jsx files to avoid conflicts with TypeScript generics
+    // (e.g., `const fn = <T>(...) =>` would be parsed as JSX tag with JSX enabled)
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let is_jsx_file = ext == "tsx" || ext == "jsx";
+
     let source_type = SourceType::from_path(path)
         .unwrap_or_default()
         .with_typescript(true)
-        .with_jsx(true);
+        .with_jsx(is_jsx_file);
 
     let ret = Parser::new(&allocator, content, source_type).parse();
+
+    // Log parser errors for debugging
+    if !ret.errors.is_empty() {
+        eprintln!(
+            "[loctree][debug] Parser errors in {}: {} errors",
+            path.display(),
+            ret.errors.len()
+        );
+        for (i, err) in ret.errors.iter().take(5).enumerate() {
+            // Get line number from error span using the labels field
+            let line_info = err
+                .labels
+                .as_ref()
+                .and_then(|labels| labels.first())
+                .map(|label| {
+                    let offset = label.offset();
+                    let line = content[..offset].bytes().filter(|b| *b == b'\n').count() + 1;
+                    format!(" (line {}, col {})", line, label.offset())
+                })
+                .unwrap_or_default();
+            eprintln!("  [{}]{} {}", i + 1, line_info, err);
+        }
+    }
 
     let mut visitor = JsVisitor {
         analysis: FileAnalysis::new(relative),
@@ -384,11 +412,11 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
         };
 
         if let Some(name) = callee_name {
-            // Commands            // Match legacy behavior: any function containing "invoke" or "Command"
+            // Commands - detect Tauri invoke patterns
             let name_lower = name.to_lowercase();
             let is_potential_command = name_lower.contains("invoke") || name.contains("Command");
 
-            // Known DOM APIs to exclude (from legacy js.rs)
+            // Known DOM APIs to exclude
             const DOM_EXCLUSIONS: &[&str] = &[
                 "execCommand",
                 "queryCommandState",
@@ -398,6 +426,7 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
             ];
 
             // Functions that ARE NOT Tauri invokes - ignore completely
+            // These happen to match "invoke" or "Command" but are not actual Tauri calls
             const NON_INVOKE_EXCLUSIONS: &[&str] = &[
                 // React hooks that happen to have "Command" in name
                 "useVoiceCommands",
@@ -441,9 +470,11 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                 && !NON_INVOKE_EXCLUSIONS.contains(&name.as_str())
                 && let Some(arg) = call.arguments.first()
             {
+                // Extract command name from first argument (string literal or template literal)
                 let payload = match arg {
                     Argument::StringLiteral(s) => Some(s.value.to_string()),
                     Argument::TemplateLiteral(t) => {
+                        // Only extract if it's a simple template without expressions
                         if t.quasis.len() == 1 && t.expressions.is_empty() {
                             t.quasis.first().map(|q| q.value.raw.to_string())
                         } else {
@@ -453,8 +484,12 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                     _ => None,
                 };
 
+                // Only record command if we have an actual command name (from the argument)
+                // Skip if payload is None - that means we couldn't extract the command name
+                // (e.g., dynamic command name or wrapper function definition)
                 if let Some(cmd_name) = payload {
                     // Filter out command names that are clearly not Tauri commands
+                    // (e.g., CLI tools, shell commands found in scripts/config files)
                     const INVALID_COMMAND_NAMES: &[&str] = &[
                         // CLI tools / shell commands
                         "node", "npm", "pnpm", "yarn", "bun", "cargo", "rustc", "rustup", "git",
@@ -464,7 +499,9 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                         "test", "mock", "stub", "fake",
                     ];
 
-                    if !INVALID_COMMAND_NAMES.contains(&cmd_name.as_str()) {
+                    if INVALID_COMMAND_NAMES.contains(&cmd_name.as_str()) {
+                        // Skip - not a real Tauri command
+                    } else {
                         let generic = call.type_parameters.as_ref().and_then(|params| {
                             params.params.first().map(JsVisitor::type_to_string)
                         });
