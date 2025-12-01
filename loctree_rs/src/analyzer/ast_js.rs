@@ -15,7 +15,6 @@ use crate::types::{
 use super::resolvers::{TsPathResolver, resolve_reexport_target};
 
 /// Analyze JS/TS file using OXC AST parser
-#[allow(dead_code)]
 pub(crate) fn analyze_js_file_ast(
     content: &str,
     path: &Path,
@@ -58,7 +57,6 @@ struct JsVisitor<'a> {
 }
 
 impl<'a> JsVisitor<'a> {
-    #[allow(dead_code)]
     fn resolve_path(&self, source: &str) -> Option<String> {
         resolve_reexport_target(self.path, self.root, source, self.extensions)
             .or_else(|| {
@@ -70,7 +68,6 @@ impl<'a> JsVisitor<'a> {
             })
     }
 
-    #[allow(dead_code)]
     fn get_line(&self, span: oxc_span::Span) -> usize {
         self.source_text[..span.start as usize]
             .bytes()
@@ -80,18 +77,22 @@ impl<'a> JsVisitor<'a> {
     }
 
     /// Extract basic type representation from TSType
-    fn type_to_string(&self, ty: &TSType<'a>) -> String {
+    fn type_to_string(ty: &TSType<'a>) -> String {
         match ty {
-            TSType::TSTypeReference(r) => self.type_name_to_string(&r.type_name),
+            TSType::TSTypeReference(r) => JsVisitor::type_name_to_string(&r.type_name),
             _ => "Type".to_string(), // Fallback for complex types
         }
     }
 
-    fn type_name_to_string(&self, name: &TSTypeName<'a>) -> String {
+    fn type_name_to_string(name: &TSTypeName<'a>) -> String {
         match name {
             TSTypeName::IdentifierReference(id) => id.name.to_string(),
             TSTypeName::QualifiedName(q) => {
-                format!("{}.{}", self.type_name_to_string(&q.left), q.right.name)
+                format!(
+                    "{}.{}",
+                    JsVisitor::type_name_to_string(&q.left),
+                    q.right.name
+                )
             }
         }
     }
@@ -203,6 +204,8 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                                 ));
                             }
                         }
+                        // Continue traversal
+                        self.visit_variable_declaration(var);
                     }
                     Declaration::FunctionDeclaration(f) => {
                         if let Some(id) = &f.id {
@@ -213,6 +216,10 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                                 "named",
                                 Some(line),
                             ));
+                        }
+                        // Continue traversal
+                        if let Some(body) = &f.body {
+                            self.visit_function_body(body);
                         }
                     }
                     Declaration::ClassDeclaration(c) => {
@@ -225,6 +232,8 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                                 Some(line),
                             ));
                         }
+                        // Continue traversal
+                        self.visit_class(c);
                     }
                     Declaration::TSInterfaceDeclaration(i) => {
                         let name = i.id.name.to_string();
@@ -273,23 +282,57 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
 
     fn visit_export_default_declaration(&mut self, decl: &ExportDefaultDeclaration<'a>) {
         let line = self.get_line(decl.span);
-        let name = match &decl.declaration {
+        match &decl.declaration {
             ExportDefaultDeclarationKind::FunctionDeclaration(f) => {
-                f.id.as_ref()
-                    .map(|i| i.name.to_string())
-                    .unwrap_or("default".to_string())
+                let name =
+                    f.id.as_ref()
+                        .map(|i| i.name.to_string())
+                        .unwrap_or("default".to_string());
+                self.analysis.exports.push(ExportSymbol::new(
+                    name,
+                    "default",
+                    "default",
+                    Some(line),
+                ));
+
+                // Continue traversal
+                if let Some(body) = &f.body {
+                    self.visit_function_body(body);
+                }
             }
             ExportDefaultDeclarationKind::ClassDeclaration(c) => {
-                c.id.as_ref()
-                    .map(|i| i.name.to_string())
-                    .unwrap_or("default".to_string())
+                let name =
+                    c.id.as_ref()
+                        .map(|i| i.name.to_string())
+                        .unwrap_or("default".to_string());
+                self.analysis.exports.push(ExportSymbol::new(
+                    name,
+                    "default",
+                    "default",
+                    Some(line),
+                ));
+
+                // Continue traversal
+                self.visit_class(c);
             }
-            ExportDefaultDeclarationKind::TSInterfaceDeclaration(i) => i.id.name.to_string(),
-            _ => "default".to_string(),
+            ExportDefaultDeclarationKind::TSInterfaceDeclaration(i) => {
+                self.analysis.exports.push(ExportSymbol::new(
+                    i.id.name.to_string(),
+                    "default",
+                    "default",
+                    Some(line),
+                ));
+                // Interfaces don't have executable code bodies (calls), so no need to traverse deep for commands
+            }
+            _ => {
+                self.analysis.exports.push(ExportSymbol::new(
+                    "default".to_string(),
+                    "default",
+                    "default",
+                    Some(line),
+                ));
+            }
         };
-        self.analysis
-            .exports
-            .push(ExportSymbol::new(name, "default", "default", Some(line)));
     }
 
     fn visit_export_all_declaration(&mut self, decl: &ExportAllDeclaration<'a>) {
@@ -330,16 +373,18 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
 
         let callee_name = match &call.callee {
             Expression::Identifier(ident) => Some(ident.name.to_string()),
+
             Expression::StaticMemberExpression(member) => {
                 // Handle obj.emit(...)
+
                 Some(member.property.name.to_string())
             }
+
             _ => None,
         };
 
         if let Some(name) = callee_name {
-            // Commands
-            // Match legacy behavior: any function containing "invoke" or "Command"
+            // Commands            // Match legacy behavior: any function containing "invoke" or "Command"
             let name_lower = name.to_lowercase();
             let is_potential_command = name_lower.contains("invoke") || name.contains("Command");
 
@@ -365,7 +410,7 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                 let generic = call
                     .type_parameters
                     .as_ref()
-                    .and_then(|params| params.params.first().map(|p| self.type_to_string(p)));
+                    .and_then(|params| params.params.first().map(JsVisitor::type_to_string));
 
                 let line = self.get_line(call.span);
 
