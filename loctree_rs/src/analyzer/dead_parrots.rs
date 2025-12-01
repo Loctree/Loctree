@@ -344,21 +344,28 @@ pub fn find_dead_exports(analyses: &[FileAnalysis], high_confidence: bool) -> Ve
 
             // Track named imports
             for sym in &imp.symbols {
-                used_exports.insert((target_norm.clone(), sym.name.clone()));
+                let used_name = if sym.is_default {
+                    "default".to_string()
+                } else {
+                    sym.name.clone()
+                };
+                used_exports.insert((target_norm.clone(), used_name));
             }
         }
         // Track re-exports as usage (if A re-exports B, A uses B)
         for re in &analysis.reexports {
-            if let Some(target) = &re.resolved {
-                let target_norm = normalize_module_id(target).as_key();
-                match &re.kind {
-                    ReexportKind::Star => {
-                        used_exports.insert((target_norm, "*".to_string()));
-                    }
-                    ReexportKind::Named(names) => {
-                        for name in names {
-                            used_exports.insert((target_norm.clone(), name.clone()));
-                        }
+            let target_norm = re
+                .resolved
+                .as_ref()
+                .map(|t| normalize_module_id(t).as_key())
+                .unwrap_or_else(|| normalize_module_id(&re.source).as_key());
+            match &re.kind {
+                ReexportKind::Star => {
+                    used_exports.insert((target_norm, "*".to_string()));
+                }
+                ReexportKind::Named(names) => {
+                    for name in names {
+                        used_exports.insert((target_norm.clone(), name.clone()));
                     }
                 }
             }
@@ -389,6 +396,11 @@ pub fn find_dead_exports(analyses: &[FileAnalysis], high_confidence: bool) -> Ve
         }
 
         for exp in &analysis.exports {
+            if exp.kind == "reexport" {
+                // Skip barrel bindings to avoid double-reporting re-exported symbols
+                continue;
+            }
+
             if exp.name == "default"
                 && (analysis.path.ends_with("page.tsx") || analysis.path.ends_with("layout.tsx"))
             {
@@ -486,7 +498,8 @@ pub fn print_dead_exports(
 mod tests {
     use super::*;
     use crate::types::{
-        ExportSymbol, ImportEntry, ImportKind, ImportSymbol, SymbolMatch as TypesSymbolMatch,
+        ExportSymbol, ImportEntry, ImportKind, ImportSymbol, ReexportEntry, ReexportKind,
+        SymbolMatch as TypesSymbolMatch,
     };
 
     fn mock_file(path: &str) -> FileAnalysis {
@@ -691,6 +704,50 @@ mod tests {
         ];
         let result = find_dead_exports(&analyses, true);
         assert!(!result.iter().any(|d| d.symbol == "default"));
+    }
+
+    #[test]
+    fn test_find_dead_exports_counts_default_import_usage() {
+        let mut importer = mock_file("src/app.ts");
+        importer.imports = vec![{
+            let mut imp = ImportEntry::new("./utils".to_string(), ImportKind::Static);
+            imp.resolved_path = Some("src/utils.ts".to_string());
+            imp.symbols = vec![ImportSymbol {
+                name: "AliasDefault".to_string(),
+                alias: None,
+                is_default: true,
+            }];
+            imp
+        }];
+
+        let mut exporter = mock_file_with_exports("src/utils.ts", vec!["default"]);
+        exporter.exports[0].kind = "default".to_string();
+        exporter.exports[0].export_type = "default".to_string();
+
+        let result = find_dead_exports(&[importer, exporter], false);
+        assert!(
+            result.is_empty(),
+            "default import should mark export as used"
+        );
+    }
+
+    #[test]
+    fn test_find_dead_exports_skips_reexport_bindings() {
+        let mut barrel = mock_file_with_exports("src/index.ts", vec!["Foo"]);
+        if let Some(first) = barrel.exports.first_mut() {
+            first.kind = "reexport".to_string();
+        }
+        barrel.reexports.push(ReexportEntry {
+            source: "./foo".to_string(),
+            kind: ReexportKind::Named(vec!["Foo".to_string()]),
+            resolved: Some("src/foo.ts".to_string()),
+        });
+
+        let result = find_dead_exports(&[barrel], false);
+        assert!(
+            result.is_empty(),
+            "reexport-only barrels should not be reported as dead exports"
+        );
     }
 
     #[test]
