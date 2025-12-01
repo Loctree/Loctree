@@ -4,11 +4,14 @@
 
 #![allow(clippy::collapsible_if)]
 
+use super::VERSION;
 use leptos::prelude::*;
 use wasm_bindgen::prelude::*;
 
 /// ASCII art logo for console
-const ASCII_LOGO: &str = r#"
+fn ascii_logo() -> String {
+    format!(
+        r#"
     __            __
    / /___  _____/ /_________  ___
   / / __ \/ ___/ __/ ___/ _ \/ _ \
@@ -16,8 +19,10 @@ const ASCII_LOGO: &str = r#"
 /_/\____/\___/\__/_/   \___/\___/
 
   Scan once, slice many.
-  v0.5.5 | loctree.io
-"#;
+  {VERSION} | loctree.io
+"#
+    )
+}
 
 /// Initialize all easter eggs
 #[component]
@@ -37,15 +42,22 @@ fn print_console_art() {
     if let Some(_window) = web_sys::window() {
         // ASCII logo with style
         web_sys::console::log_2(
-            &JsValue::from_str(&format!("%c{}", ASCII_LOGO)),
+            &JsValue::from_str(&format!("%c{}", ascii_logo())),
             &JsValue::from_str("color: #00ff88; font-family: monospace; font-size: 11px;"),
         );
 
         web_sys::console::log_1(&JsValue::from_str(""));
 
         web_sys::console::log_2(
-            &JsValue::from_str("%c(o_o) [tip] Run `loctree --for-ai` for AI-optimized output"),
+            &JsValue::from_str("%c(o_o) [tip] Run `loct --for-ai` for AI-optimized output"),
             &JsValue::from_str("color: #ffcc00;"),
+        );
+
+        web_sys::console::log_2(
+            &JsValue::from_str(
+                "%c(>‿<) [auto] `loct` writes snapshot + report bundle to .loctree/",
+            ),
+            &JsValue::from_str("color: #00ff88;"),
         );
 
         web_sys::console::log_2(
@@ -56,7 +68,14 @@ fn print_console_art() {
         web_sys::console::log_1(&JsValue::from_str(""));
 
         web_sys::console::log_2(
-            &JsValue::from_str("%c(T_T) [bug] github.com/LibraxisAI/loctree/issues"),
+            &JsValue::from_str(
+                "%cLoctree — Zombies? Not on my tree! Dead code dies here. — Static code analysis for agentic context. Built with 💀 by humans... and AI agents.",
+            ),
+            &JsValue::from_str("color: #ff6b6b; font-weight: bold;"),
+        );
+
+        web_sys::console::log_2(
+            &JsValue::from_str("%c(T_T) [bug] github.com/Loctree/Loctree/issues"),
             &JsValue::from_str("color: #ff6b6b;"),
         );
 
@@ -68,7 +87,7 @@ fn print_console_art() {
         web_sys::console::log_1(&JsValue::from_str(""));
 
         web_sys::console::log_2(
-            &JsValue::from_str("%c\\(^o^)/ Built with Rust + Leptos by M&K @ LibraxisAI"),
+            &JsValue::from_str("%c\\(^o^)/ Built with Rust + Leptos by M&K @ Loctree"),
             &JsValue::from_str("color: #666; font-size: 10px;"),
         );
 
@@ -82,9 +101,16 @@ fn print_console_art() {
 
 /// Konami code sequence
 const KONAMI_CODE: &[&str] = &[
-    "ArrowUp", "ArrowUp", "ArrowDown", "ArrowDown",
-    "ArrowLeft", "ArrowRight", "ArrowLeft", "ArrowRight",
-    "KeyB", "KeyA"
+    "ArrowUp",
+    "ArrowUp",
+    "ArrowDown",
+    "ArrowDown",
+    "ArrowLeft",
+    "ArrowRight",
+    "ArrowLeft",
+    "ArrowRight",
+    "KeyB",
+    "KeyA",
 ];
 
 /// Setup Konami code listener
@@ -109,8 +135,7 @@ fn setup_konami_listener() {
 
                 // Check for Konami code
                 if seq.len() == 10 {
-                    let matches = seq.iter().zip(KONAMI_CODE.iter())
-                        .all(|(a, b)| a == *b);
+                    let matches = seq.iter().zip(KONAMI_CODE.iter()).all(|(a, b)| a == *b);
 
                     if matches {
                         trigger_konami_easter_egg();
@@ -119,10 +144,8 @@ fn setup_konami_listener() {
                 }
             }) as Box<dyn FnMut(_)>);
 
-            let _ = document.add_event_listener_with_callback(
-                "keydown",
-                closure.as_ref().unchecked_ref(),
-            );
+            let _ = document
+                .add_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref());
 
             closure.forget(); // Keep the closure alive
         }
@@ -162,7 +185,7 @@ fn trigger_konami_easter_egg() {
 
     web_sys::console::log_1(&JsValue::from_str(""));
     web_sys::console::log_2(
-        &JsValue::from_str("%cGang of Bastards @ LibraxisAI"),
+        &JsValue::from_str("%cGang of Bastards @ Loctree"),
         &JsValue::from_str("color: #888; font-size: 10px;"),
     );
 

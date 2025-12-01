@@ -1049,7 +1049,7 @@ mod tests {
             exports.get("./utils"),
             Some(&"./dist/utils/index.js".to_string())
         );
-        assert!(exports.get("./components").is_some());
+        assert!(exports.contains_key("./components"));
     }
 
     #[test]

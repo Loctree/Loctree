@@ -9,10 +9,10 @@ pub fn Features() -> impl IntoView {
             <div class="container">
                 <div class="section-header">
                     <p class="section-eyebrow">{eyebrow}</p>
-                    <h2 class="section-title">"Zombies? Not on my tree!"</h2>
+                    <h2 class="section-title">"Built for AI agents and vibe-coders"</h2>
                     <p class="section-description">
-                        "Static code analysis tool built for agentic codebase context management. "
-                        "Dead Parrots, Ministry of Silly Exports, circular imports — we hunt them all."
+                        "Solve context drift. Find existing components before creating duplicates. "
+                        "Expose hidden dependencies. Slice relevant context."
                     </p>
                 </div>
                 <div class="features-grid">
@@ -24,15 +24,15 @@ pub fn Features() -> impl IntoView {
                     />
                     <FeatureCard
                         icon="[2]"
-                        title="Multi-Language Support"
-                        description="Rust, Go, TypeScript/JavaScript, Python, Svelte, Vue, Dart/Flutter. Auto-detects stack and configures sensible ignores."
-                        code=Some("Supports 7+ languages with library mode")
+                        title="Auto-detect Stack"
+                        description="Detects Rust, TypeScript, Python, Tauri. Configures sensible ignores automatically."
+                        code=Some("Cargo.toml -> Rust | tsconfig.json -> TS")
                     />
                     <FeatureCard
                         icon="[3]"
-                        title="Crowd Detection"
-                        description="Find files clustering around the same thing. 5 hooks all doing 'auth'? Ministry of Silly Exports? We'll find them."
-                        code=Some("loct crowd auth")
+                        title="Duplicate Detection"
+                        description="Before creating new components, find similar existing ones. Prevents AI code duplication."
+                        code=Some("loct find --similar ChatSurface")
                     />
                     <FeatureCard
                         icon="[4]"
@@ -42,8 +42,8 @@ pub fn Features() -> impl IntoView {
                     />
                     <FeatureCard
                         icon="[5]"
-                        title="Dead Parrot Detection"
-                        description="Find exports that look alive but nobody imports. \"It's not dead, it's resting!\" No, it's dead. Remove it."
+                        title="Dead Code Detection"
+                        description="Find unused exports and orphaned code. Clean up before it becomes tech debt."
                         code=Some("loct dead --confidence high")
                     />
                     <FeatureCard
@@ -99,36 +99,6 @@ pub fn Features() -> impl IntoView {
                         title="SARIF Output"
                         description="SARIF 2.1.0 output for GitHub Actions, GitLab CI, and other CI/CD systems."
                         code=Some("loct lint --sarif > results.sarif")
-                    />
-                    <FeatureCard
-                        icon="[15]"
-                        title="Query API"
-                        description="Quick graph queries: who-imports, where-symbol, component-of. Fast answers without full analysis."
-                        code=Some("loct query who-imports src/utils.ts")
-                    />
-                    <FeatureCard
-                        icon="[16]"
-                        title="Snapshot Diff"
-                        description="Compare snapshots to see what changed. Track new cycles, dead exports, and graph changes."
-                        code=Some("loct diff --since main")
-                    />
-                    <FeatureCard
-                        icon="[17]"
-                        title="IDE Integration URLs"
-                        description="SARIF includes loctree://open URLs for direct file:line navigation in VS Code, JetBrains, etc."
-                        code=Some("loctree://open?f=src/app.ts&l=42")
-                    />
-                    <FeatureCard
-                        icon="[18]"
-                        title="MCP Server"
-                        description="Model Context Protocol server for AI agents. Claude, Cursor, and other MCP clients get native access to slices, dead code, and crowd detection."
-                        code=Some("loctree-mcp stdio")
-                    />
-                    <FeatureCard
-                        icon="[19]"
-                        title="Bundle Distribution Analysis"
-                        description="Verify tree-shaking effectiveness. Parse source maps with VLQ decoding to find exports that exist in source but are eliminated from production bundles."
-                        code=Some("loct dist dist/bundle.js.map src/")
                     />
                 </div>
             </div>

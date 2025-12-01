@@ -205,7 +205,7 @@ jobs:
           BODY+="### 📦 Installation\n"
           BODY+="\`\`\`bash\ncargo install loctree\n\`\`\`\n\n"
           BODY+="Or use the install script:\n"
-          BODY+="\`\`\`bash\ncargo install loctree\n\`\`\`\n"
+          BODY+="\`\`\`bash\ncurl -fsSL https://raw.githubusercontent.com/Loctree/Loctree/main/tools/install.sh | sh\n\`\`\`\n"
 
           # Save to file for the release action
           echo -e "$BODY" > /tmp/release_notes.md
@@ -262,19 +262,20 @@ jobs:
 
       - name: Build release binary
         run: |
-          cargo build -p loctree --release --target ${{ matrix.target }}
+          cd loctree_rs
+          cargo build --release --target ${{ matrix.target }}
 
       - name: Prepare artifact (Unix)
         if: runner.os != 'Windows'
         run: |
-          cp target/${{ matrix.target }}/release/loctree ${{ matrix.artifact }}
+          cp loctree_rs/target/${{ matrix.target }}/release/loctree ${{ matrix.artifact }}
           chmod +x ${{ matrix.artifact }}
           tar -czvf ${{ matrix.artifact }}.tar.gz ${{ matrix.artifact }}
 
       - name: Prepare artifact (Windows)
         if: runner.os == 'Windows'
         run: |
-          copy target\${{ matrix.target }}\release\loctree.exe ${{ matrix.artifact }}
+          copy loctree_rs\target\${{ matrix.target }}\release\loctree.exe ${{ matrix.artifact }}
           Compress-Archive -Path ${{ matrix.artifact }} -DestinationPath ${{ matrix.artifact }}.zip
 
       - name: Upload to Release

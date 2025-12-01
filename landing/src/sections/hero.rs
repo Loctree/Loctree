@@ -14,14 +14,13 @@ pub fn Hero() -> impl IntoView {
                             {badge_text}
                         </div>
                         <h1 class="hero-title">
-                            <span class="hero-title-accent">"Dead code dies here."</span>
+                            <span class="hero-title-accent">"The project map"</span>
+                            <br />
+                            "built for AI, not humans."
                         </h1>
                         <p class="hero-description">
-                            "Static code analysis tool built for agentic codebase context management. "
-                            "Find Dead Parrots, Ministry of Silly Exports, and 148-file features before they haunt you."
-                        </p>
-                        <p class="hero-description hero-byline">
-                            "Developed with 💀 by Loctree Team"
+                            "Dead code dies here. Static code analysis for agentic codebase context management. "
+                            "Real structure, not file listings. A foundation for autonomous development tools."
                         </p>
                         <div class="hero-actions">
                             <a href="#install" class="btn btn-primary">
@@ -50,42 +49,45 @@ fn Terminal() -> impl IntoView {
                 <span class="terminal-title">"~/my-project"</span>
             </div>
             <div class="terminal-body">
-                // First command - crowd detection
+                // First command
                 <div class="terminal-line">
                     <span class="terminal-prompt">"$"</span>
-                    <span class="terminal-command">"loct crowd assistant"</span>
+                    <span class="terminal-command">"loct"</span>
                 </div>
-                <div class="terminal-output highlight" style="margin-top: 8px;">
-                    "╭─ CROWD: \"assistant\" ────────────────────╮"
-                </div>
-                <div class="terminal-output warning">
-                    "│ Crowd Score: 10.0/10 (HIGH - oh no!)"
-                </div>
-                <div class="terminal-output">"│"</div>
-                <div class="terminal-output">"│ FILES IN CROWD (38 files)"</div>
-                <div class="terminal-output">"│   AssistantHost.tsx    ████ 50 importers"</div>
-                <div class="terminal-output">"│   useAssistant.ts      ██   12 importers"</div>
-                <div class="terminal-output error">"│   useAssistantOld.ts        0 importers"</div>
-                <div class="terminal-output error">"│   AssistantLegacy.tsx       0 importers"</div>
-                <div class="terminal-output">"│"</div>
-                <div class="terminal-output warning">"│ DEAD PARROTS DETECTED: 2"</div>
-                <div class="terminal-output highlight">
-                    "╰──────────────────────────────────────────╯"
-                </div>
+                <div class="terminal-output muted">"[loctree] Scan mode: incremental (mtime-based)"</div>
+                <div class="terminal-output muted">"Scanned 142 files in 1.44s"</div>
+                <div class="terminal-output muted">"Graph saved to ./.loctree/snapshot.json"</div>
+                <div class="terminal-output muted">"Languages: ts, css, py, js, rs"</div>
+                <div class="terminal-output muted">"Commands: 11 handlers, 2 missing, 5 unused"</div>
+                <div class="terminal-output muted">"Events: 39 tracked"</div>
+                <div class="terminal-output success">"Status: OK"</div>
 
-                // Second command - dead exports
+                // Second command
                 <div class="terminal-line" style="margin-top: 16px;">
                     <span class="terminal-prompt">"$"</span>
-                    <span class="terminal-command">"loct dead"</span>
+                    <span class="terminal-command">"loct slice src/App.tsx --consumers"</span>
                 </div>
-                <div class="terminal-output error" style="margin-top: 8px;">
-                    "Dead Exports (14 found):"
+
+                <div class="terminal-output highlight" style="margin-top: 8px;">
+                    "Slice for: src/App.tsx"
                 </div>
-                <div class="terminal-output">"  - formatLegacyDate in utils.ts:42"</div>
-                <div class="terminal-output">"  - OldPatientForm in forms/index.ts:7"</div>
-                <div class="terminal-output muted">"  ... and 12 more corpses"</div>
+                <div class="terminal-output" style="margin-top: 8px;">
+                    "Core (1 files, 150 LOC):"
+                </div>
+                <div class="terminal-output">"  src/App.tsx"</div>
+
+                <div class="terminal-output" style="margin-top: 8px;">
+                    "Deps (3 files, 420 LOC):"
+                </div>
+                <div class="terminal-output">"  [d1] src/hooks/useAuth.ts"</div>
+                <div class="terminal-output muted">"    [d2] src/contexts/AuthContext.tsx"</div>
+                <div class="terminal-output" style="margin-top: 8px;">
+                    "Consumers (2 files, 180 LOC):"
+                </div>
+                <div class="terminal-output">"  src/main.tsx"</div>
+                <div class="terminal-output">"  src/routes/index.tsx"</div>
                 <div class="terminal-output success" style="margin-top: 8px;">
-                    "Time to clean up the morgue!"
+                    "Total: 6 files, 750 LOC"
                 </div>
             </div>
         </div>

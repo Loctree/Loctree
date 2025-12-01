@@ -14,7 +14,7 @@ pub fn CliReference() -> impl IntoView {
                         <h3 class="cli-group-title">"Modes"</h3>
                         <div class="cli-item">
                             <code class="cli-cmd">"loct"</code>
-                            <span class="cli-desc">"Auto scan + snapshot (use `loct report --serve` for HTML)"</span>
+                            <span class="cli-desc">"Auto scan + snapshot + reports (default)"</span>
                         </div>
                         <div class="cli-item">
                             <code class="cli-cmd">"loct slice <file>"</code>
@@ -40,18 +40,6 @@ pub fn CliReference() -> impl IntoView {
                             <code class="cli-cmd">"loct events"</code>
                             <span class="cli-desc">"Emit/listen/races summary"</span>
                         </div>
-                        <div class="cli-item">
-                            <code class="cli-cmd">"loct query <kind> <target>"</code>
-                            <span class="cli-desc">"Quick queries (who-imports, where-symbol)"</span>
-                        </div>
-                        <div class="cli-item">
-                            <code class="cli-cmd">"loct diff --since <id>"</code>
-                            <span class="cli-desc">"Compare snapshots, show delta"</span>
-                        </div>
-                        <div class="cli-item">
-                            <code class="cli-cmd">"loct dist <map> <src>"</code>
-                            <span class="cli-desc">"Bundle analysis via source maps"</span>
-                        </div>
                     </div>
 
                     <div class="cli-group">
@@ -69,24 +57,24 @@ pub fn CliReference() -> impl IntoView {
                     <div class="cli-group">
                         <h3 class="cli-group-title">"Find / Analyze"</h3>
                         <div class="cli-item">
-                            <code class="cli-cmd">"loct find <query>"</code>
-                            <span class="cli-desc">"One command: fuzzy match + defs/uses + dead status"</span>
+                            <code class="cli-cmd">"loct find --similar <Name>"</code>
+                            <span class="cli-desc">"Find similar components"</span>
                         </div>
                         <div class="cli-item">
-                            <code class="cli-cmd">"loct query who-imports <file>"</code>
-                            <span class="cli-desc">"Quick: files that import target"</span>
+                            <code class="cli-cmd">"loct find --symbol <name>"</code>
+                            <span class="cli-desc">"Search for symbol definitions/usages"</span>
                         </div>
                         <div class="cli-item">
-                            <code class="cli-cmd">"loct query where-symbol <name>"</code>
-                            <span class="cli-desc">"Quick: where symbol is defined"</span>
+                            <code class="cli-cmd">"loct find --impact <file>"</code>
+                            <span class="cli-desc">"Show what imports target"</span>
                         </div>
                         <div class="cli-item">
                             <code class="cli-cmd">"loct dead --confidence high"</code>
                             <span class="cli-desc">"Unused exports with stricter filter"</span>
                         </div>
                         <div class="cli-item">
-                            <code class="cli-cmd">"loct report --serve"</code>
-                            <span class="cli-desc">"HTML with embedded dependency graph + local server"</span>
+                            <code class="cli-cmd">"loct report --graph"</code>
+                            <span class="cli-desc">"HTML with embedded dependency graph"</span>
                         </div>
                         <div class="cli-item">
                             <code class="cli-cmd">"loct lint --sarif"</code>

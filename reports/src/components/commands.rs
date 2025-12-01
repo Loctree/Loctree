@@ -1,8 +1,8 @@
 //! Tauri command coverage component
 
+use crate::types::CommandGap;
 use leptos::prelude::*;
 use std::collections::BTreeMap;
-use crate::types::CommandGap;
 
 /// Tauri frontend-backend command coverage display
 #[component]
@@ -59,7 +59,9 @@ fn CommandGapGroup(gaps: Vec<CommandGap>, open_base: Option<String>) -> impl Int
     let mut groups: BTreeMap<String, Vec<(CommandGap, Vec<String>)>> = BTreeMap::new();
 
     for gap in gaps {
-        let module = gap.locations.first()
+        let module = gap
+            .locations
+            .first()
             .map(|(p, _)| {
                 let parts: Vec<&str> = p.split('/').collect();
                 if parts.len() >= 2 {
@@ -70,7 +72,9 @@ fn CommandGapGroup(gaps: Vec<CommandGap>, open_base: Option<String>) -> impl Int
             })
             .unwrap_or_default();
 
-        let locs: Vec<String> = gap.locations.iter()
+        let locs: Vec<String> = gap
+            .locations
+            .iter()
             .map(|(f, l)| linkify(open_base.as_deref(), f, *l))
             .collect();
 
@@ -106,14 +110,18 @@ fn CommandGapGroup(gaps: Vec<CommandGap>, open_base: Option<String>) -> impl Int
                 </div>
             }
         }).collect::<Vec<_>>()}
-    }.into_any()
+    }
+    .into_any()
 }
 
 /// Create a link to open file at line (if open_base is set)
 fn linkify(base: Option<&str>, file: &str, line: usize) -> String {
     if let Some(base) = base {
         let encoded_file = url_encode(file);
-        format!("<a href=\"{}/open?f={}&l={}\">{file}:{line}</a>", base, encoded_file, line)
+        format!(
+            "<a href=\"{}/open?f={}&l={}\">{file}:{line}</a>",
+            base, encoded_file, line
+        )
     } else {
         format!("{file}:{line}")
     }
@@ -121,10 +129,10 @@ fn linkify(base: Option<&str>, file: &str, line: usize) -> String {
 
 /// Simple URL encoding for file paths
 fn url_encode(s: &str) -> String {
-    s.chars().map(|c| {
-        match c {
+    s.chars()
+        .map(|c| match c {
             'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '~' => c.to_string(),
             _ => format!("%{:02X}", c as u8),
-        }
-    }).collect()
+        })
+        .collect()
 }

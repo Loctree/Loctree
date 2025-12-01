@@ -1,7 +1,5 @@
 use super::VERSION;
-use crate::components::{ICON_MOON, ICON_SUN, Icon};
 use leptos::prelude::*;
-use leptos_router::components::A;
 
 #[component]
 pub fn Nav() -> impl IntoView {
@@ -10,37 +8,22 @@ pub fn Nav() -> impl IntoView {
     let (install_copied, set_install_copied) = signal(false);
     let (prompt_copied, set_prompt_copied) = signal(false);
     let (expanded, set_expanded) = signal(false);
-    let (is_light_mode, set_is_light_mode) = signal(false);
 
-    let toggle_theme = move |_| {
-        set_is_light_mode.update(|light| *light = !*light);
-        if let Some(window) = web_sys::window()
-            && let Some(document) = window.document()
-            && let Some(body) = document.body()
-        {
-            if is_light_mode.get() {
-                let _ = body.class_list().add_1("light-mode");
-            } else {
-                let _ = body.class_list().remove_1("light-mode");
-            }
-        }
-    };
-
-    let install_command = "cargo install loctree";
+    let install_command =
+        "curl -fsSL https://raw.githubusercontent.com/Loctree/Loctree/main/tools/install.sh | sh";
 
     let agent_prompt_short = r#"## loct — AI Agent Quick Reference
-**Scan once, slice many.** Install: `cargo install loctree`
+**Scan once, slice many.** Install: `curl -fsSL .../install.sh | sh`
 
 ### Key Commands
 - `loct` — scan repo, save snapshot + reports to .loctree/
-- `loct query who-imports <file>` — fast dependency check
-- `loct query where-symbol <name>` — find definitions
-- `loct slice <file> --consumers --json` — 3-layer context
-- `loct diff --since main` — compare branches
+- `loct slice <file> --consumers --json` — 3-layer context for AI
 - `loct find --similar <Name>` — avoid duplicates
+- `loct find --impact <file>` — blast radius before refactor
 - `loct dead --confidence high` — unused exports
 - `loct cycles` — circular imports
-- `loct commands --missing/--unused` — Tauri FE↔BE
+- `loct commands --missing/--unused` — Tauri FE↔BE coverage
+- `loct events --json` — emits/listens/races
 - `loct lint --fail --sarif` — CI guardrails"#;
 
     let agent_prompt_full = r#"## loct — AI Agent Quick Reference
@@ -49,21 +32,14 @@ pub fn Nav() -> impl IntoView {
 
 ### Install & Scan
 ```bash
-cargo install loctree
+curl -fsSL https://raw.githubusercontent.com/Loctree/Loctree/main/tools/install.sh | sh
 loct          # snapshot + report.html + analysis.json
-```
-
-### Quick Queries (no full scan)
-```bash
-loct query who-imports <file>     # files importing target
-loct query where-symbol <name>    # find definitions
-loct query component-of <file>    # graph component
 ```
 
 ### Before creating
 ```bash
 loct find --similar <Name>   # find existing, avoid duplicates
-loct query where-symbol <Name>   # check if exists
+loct find --symbol <Name>    # defs + uses
 ```
 
 ### Before refactoring
@@ -73,23 +49,17 @@ loct find --impact <file>             # blast radius
 loct cycles                           # circular imports
 ```
 
-### Compare branches
-```bash
-loct diff --since main        # delta from main
-loct diff --since HEAD~5      # last 5 commits
-```
-
 ### Hygiene
 ```bash
 loct dead --confidence high   # unused exports
 loct commands --missing       # FE calls without handlers
 loct commands --unused        # handlers without FE calls
+loct events --json            # emits/listens/races
 ```
 
-### CI + IDE
+### CI pipeline checks
 ```bash
 loct lint --fail --sarif > results.sarif
-# loctree://open?f=<file>&l=<line> URLs in output
 ```"#;
 
     let copy_install = move |_| {
@@ -124,32 +94,19 @@ loct lint --fail --sarif > results.sarif
     view! {
         <nav class="nav">
             <div class="nav-inner">
-                <A href="/" attr:class="nav-brand">
+                <a href="/" class="nav-brand">
                     <div class="nav-logo">
-                        <img src="/assets/loctree-logo.png" alt="loctree" />
+                        <img src="assets/loctree-logo.png" alt="loctree" />
                     </div>
                     <span class="nav-title">"loctree"</span>
                     <span class="nav-version">{VERSION}</span>
-                </A>
+                </a>
                 <div class="nav-links">
-                    <A href="/features" attr:class="nav-link">"Features"</A>
-                    <A href="/docs" attr:class="nav-link">"Docs"</A>
-                    <A href="/blog" attr:class="nav-link">"Blog"</A>
+                    <a href="#features" class="nav-link">"Features"</a>
+                    <a href="#slice" class="nav-link">"Slice"</a>
+                    <a href="#cli" class="nav-link">"CLI"</a>
+                    <a href="https://docs.rs/loctree" target="_blank" class="nav-link">"Docs"</a>
                     <a href="https://github.com/Loctree/Loctree" target="_blank" class="nav-link">"GitHub"</a>
-                    <div class="theme-switcher-wrapper">
-                        <button
-                            class="theme-switcher"
-                            on:click=toggle_theme
-                            aria-label="Toggle dark/light mode"
-                        >
-                            {move || if is_light_mode.get() {
-                                view! { <Icon path=ICON_SUN size="18" /> }.into_any()
-                            } else {
-                                view! { <Icon path=ICON_MOON size="18" /> }.into_any()
-                            }}
-                        </button>
-                        <span class="theme-tooltip">"Zawsze startujemy z dark mode, bo światło przyciąga bugs."</span>
-                    </div>
                     <button
                         class=move || if drawer_open.get() { "nav-cta active" } else { "nav-cta" }
                         on:click=move |_| set_drawer_open.update(|o| *o = !*o)

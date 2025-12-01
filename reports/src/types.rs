@@ -101,20 +101,6 @@ pub struct CommandBridge {
     pub language: String,
 }
 
-/// Directory or file node used by the report tree view.
-///
-/// Contains relative path, aggregated LOC, and children.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct TreeNode {
-    /// Relative path of this file/directory.
-    pub path: String,
-    /// Lines of code aggregated for this node (file LOC + children).
-    pub loc: usize,
-    /// Child nodes.
-    #[serde(default)]
-    pub children: Vec<TreeNode>,
-}
-
 /// A gap between frontend command invocations and backend handlers.
 ///
 /// Used for Tauri applications to track:
@@ -504,255 +490,6 @@ pub struct RankedDup {
     pub refactors: Vec<String>,
 }
 
-/// Match reason for crowd membership (mirrors loctree_rs::analyzer::crowd::MatchReason).
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum MatchReason {
-    /// File/export name matches pattern
-    NameMatch {
-        /// The matched string (filename, export name, etc.)
-        matched: String,
-    },
-    /// High import similarity with other crowd members
-    ImportSimilarity {
-        /// Similarity score (0.0-1.0)
-        similarity: f32,
-    },
-    /// Exports similar types/functions
-    ExportSimilarity {
-        /// File this one is similar to
-        similar_to: String,
-    },
-}
-
-/// Issue detected in a crowd (mirrors loctree_rs::analyzer::crowd::CrowdIssue).
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum CrowdIssue {
-    /// Multiple files with very similar names
-    NameCollision {
-        /// Files with colliding names
-        files: Vec<String>,
-    },
-    /// Some files have much lower usage than others
-    UsageAsymmetry {
-        /// The primary/most-used file
-        primary: String,
-        /// Underused files that might be redundant
-        underused: Vec<String>,
-    },
-    /// Files export similar things
-    ExportOverlap {
-        /// Files with overlapping exports
-        files: Vec<String>,
-        /// Overlapping export names
-        overlap: Vec<String>,
-    },
-    /// Related functionality is scattered
-    Fragmentation {
-        /// Categories/themes found scattered across crowd
-        categories: Vec<String>,
-    },
-}
-
-/// A member of a crowd.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct CrowdMember {
-    /// File path
-    pub file: String,
-    /// Why this file matched the crowd
-    pub match_reason: MatchReason,
-    /// Number of files importing this one
-    pub importer_count: usize,
-    /// Similarity scores with other members (file, score)
-    #[serde(default)]
-    pub similarity_scores: Vec<(String, f32)>,
-}
-
-/// A group of files with similar names/patterns.
-///
-/// Crowds indicate potential naming collisions, fragmentation,
-/// or copy-paste duplication across the codebase.
-///
-/// # Scoring
-///
-/// - 0-4: Low severity (acceptable naming patterns)
-/// - 4-7: Medium severity (worth reviewing)
-/// - 7-10: High severity (likely problematic)
-///
-/// # Example
-///
-/// ```rust
-/// use report_leptos::types::{Crowd, CrowdMember, MatchReason, CrowdIssue};
-///
-/// let crowd = Crowd {
-///     pattern: "message".into(),
-///     members: vec![
-///         CrowdMember {
-///             file: "src/message.ts".into(),
-///             match_reason: MatchReason::NameMatch {
-///                 matched: "message".into(),
-///             },
-///             importer_count: 15,
-///             similarity_scores: vec![],
-///         },
-///         CrowdMember {
-///             file: "src/components/Message.tsx".into(),
-///             match_reason: MatchReason::NameMatch {
-///                 matched: "Message".into(),
-///             },
-///             importer_count: 8,
-///             similarity_scores: vec![],
-///         },
-///     ],
-///     score: 6.5,
-///     issues: vec![
-///         CrowdIssue::NameCollision {
-///             files: vec!["src/message.ts".into(), "src/components/Message.tsx".into()],
-///         },
-///     ],
-/// };
-/// ```
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Crowd {
-    /// Pattern name (e.g., "message", "chat")
-    pub pattern: String,
-    /// Files matching this pattern
-    pub members: Vec<CrowdMember>,
-    /// Severity score (0-10, higher = worse)
-    pub score: f32,
-    /// Issues detected in this crowd
-    #[serde(default)]
-    pub issues: Vec<CrowdIssue>,
-}
-
-/// A dead export (symbol exported but never imported).
-///
-/// Represents code that appears to be unused - exported from a file
-/// but never imported anywhere in the analyzed codebase.
-///
-/// # Example
-///
-/// ```rust
-/// use report_leptos::types::DeadExport;
-///
-/// let dead = DeadExport {
-///     file: "src/utils/legacy.ts".into(),
-///     symbol: "formatOldDate".into(),
-///     line: Some(42),
-///     confidence: "very-high".into(),
-///     reason: "No imports found in codebase".into(),
-///     open_url: Some("loctree://open?f=src/utils/legacy.ts&l=42".into()),
-/// };
-/// ```
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct DeadExport {
-    /// File path containing the dead export
-    pub file: String,
-    /// Symbol name (function, class, type, etc.)
-    pub symbol: String,
-    /// Line number where symbol is defined (1-indexed)
-    pub line: Option<usize>,
-    /// Confidence level: "high", "very-high"
-    pub confidence: String,
-    /// Human-readable reason why this is considered dead
-    pub reason: String,
-    /// Optional URL for opening in editor (loctree://open protocol)
-    pub open_url: Option<String>,
-}
-
-/// Twins analysis data (dead parrots, exact twins, barrel chaos)
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct TwinsData {
-    /// Dead parrots - symbols with 0 imports
-    pub dead_parrots: Vec<DeadParrot>,
-    /// Exact twins - symbols with same name in different files
-    pub exact_twins: Vec<ExactTwin>,
-    /// Barrel chaos analysis
-    pub barrel_chaos: BarrelChaos,
-}
-
-/// A dead parrot - symbol exported but never imported
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct DeadParrot {
-    /// Symbol name
-    pub name: String,
-    /// File path where exported
-    pub file_path: String,
-    /// Line number
-    pub line: usize,
-    /// Symbol kind (function, type, const, class, etc.)
-    pub kind: String,
-}
-
-/// An exact twin - symbol with same name exported from multiple files
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ExactTwin {
-    /// Symbol name
-    pub name: String,
-    /// All locations where this symbol is exported
-    pub locations: Vec<TwinLocation>,
-}
-
-/// A location where an exact twin is found
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct TwinLocation {
-    /// File path
-    pub file_path: String,
-    /// Line number
-    pub line: usize,
-    /// Export kind
-    pub kind: String,
-    /// Number of imports
-    pub import_count: usize,
-    /// True if this is the canonical (recommended) location
-    pub is_canonical: bool,
-}
-
-/// Barrel chaos analysis
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct BarrelChaos {
-    /// Directories missing barrel files
-    pub missing_barrels: Vec<MissingBarrel>,
-    /// Deep re-export chains
-    pub deep_chains: Vec<ReexportChain>,
-    /// Inconsistent import paths
-    pub inconsistent_paths: Vec<InconsistentImport>,
-}
-
-/// A directory missing a barrel file
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct MissingBarrel {
-    /// Directory path
-    pub directory: String,
-    /// Number of files in directory
-    pub file_count: usize,
-    /// Number of external imports
-    pub external_import_count: usize,
-}
-
-/// A deep re-export chain
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ReexportChain {
-    /// Symbol name
-    pub symbol: String,
-    /// Chain of files (from consumer to definition)
-    pub chain: Vec<String>,
-    /// Depth of chain
-    pub depth: usize,
-}
-
-/// Inconsistent import path for a symbol
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct InconsistentImport {
-    /// Symbol name
-    pub symbol: String,
-    /// Canonical (most-used) path
-    pub canonical_path: String,
-    /// Alternative paths with usage counts
-    pub alternative_paths: Vec<(String, usize)>,
-}
-
 /// A complete report section for one analyzed directory.
 ///
 /// This is the main data structure passed to [`crate::render_report`].
@@ -787,12 +524,6 @@ pub struct ReportSection {
     pub ranked_dups: Vec<RankedDup>,
     /// Cascade import pairs (source, target)
     pub cascades: Vec<(String, String)>,
-    /// Circular import components (strict cycles)
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub circular_imports: Vec<Vec<String>>,
-    /// Lazy circular imports (cycles only via dynamic/lazy imports)
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub lazy_circular_imports: Vec<Vec<String>>,
     /// Dynamic imports per file
     pub dynamic: Vec<(String, Vec<String>)>,
     /// Maximum files to analyze (0 = unlimited)
@@ -810,9 +541,6 @@ pub struct ReportSection {
     pub command_bridges: Vec<CommandBridge>,
     /// Base URL for opening files in editor
     pub open_base: Option<String>,
-    /// Directory tree with LOC per node
-    #[serde(default)]
-    pub tree: Option<Vec<TreeNode>>,
     /// Dependency graph data (if generated)
     pub graph: Option<GraphData>,
     /// Warning if graph was skipped (too large, etc.)
@@ -823,13 +551,4 @@ pub struct ReportSection {
     pub git_branch: Option<String>,
     /// Git commit hash (if available)
     pub git_commit: Option<String>,
-    /// Crowd analysis results (naming collision detection)
-    #[serde(default)]
-    pub crowds: Vec<Crowd>,
-    /// Dead exports (exported but never imported)
-    #[serde(default)]
-    pub dead_exports: Vec<DeadExport>,
-    /// Twins analysis (dead parrots, exact twins, barrel chaos)
-    #[serde(default, alias = "twins_data")]
-    pub twins: Option<TwinsData>,
 }

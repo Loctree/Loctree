@@ -38,6 +38,7 @@ pub struct ScanConfig<'a> {
     pub custom_command_macros: &'a [String],
 }
 
+#[derive(Clone)]
 pub struct RootContext {
     pub root_path: PathBuf,
     pub options: Options,
@@ -65,6 +66,7 @@ pub struct BarrelInfo {
     pub targets: Vec<String>,
 }
 
+#[derive(Clone)]
 pub struct ScanResults {
     pub contexts: Vec<RootContext>,
     pub global_fe_commands: CommandUsage,

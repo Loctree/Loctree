@@ -3,6 +3,7 @@ use std::panic;
 use std::path::PathBuf;
 
 use loctree::args::{self, parse_args};
+use loctree::cli::{self, Command, DispatchResult};
 use loctree::config::LoctreeConfig;
 use loctree::types::{GitSubcommand, Mode};
 use loctree::{OutputMode, analyzer, detect, diff, fs_utils, git, slicer, snapshot, tree};
@@ -166,8 +167,42 @@ loctree git compare HEAD~5                 # What changed in last 5 commits\n"
 fn main() -> std::io::Result<()> {
     install_broken_pipe_handler();
 
-    let mut parsed = match parse_args() {
-        Ok(args) => args,
+    // Get raw args for the new parser
+    let raw_args: Vec<String> = std::env::args().skip(1).collect();
+
+    // Try new subcommand parser first
+    let mut parsed = match cli::parse_command(&raw_args) {
+        Ok(Some(parsed_cmd)) => {
+            // New syntax detected - dispatch through new system
+            match cli::dispatch_command(&parsed_cmd) {
+                DispatchResult::ShowHelp => {
+                    println!("{}", Command::format_help());
+                    return Ok(());
+                }
+                DispatchResult::ShowLegacyHelp => {
+                    println!("{}", Command::format_legacy_help());
+                    return Ok(());
+                }
+                DispatchResult::ShowVersion => {
+                    println!("loctree {}", env!("CARGO_PKG_VERSION"));
+                    return Ok(());
+                }
+                DispatchResult::Exit(code) => {
+                    std::process::exit(code);
+                }
+                DispatchResult::Continue(args) => *args,
+            }
+        }
+        Ok(None) => {
+            // Legacy syntax - fall back to old parser
+            match parse_args() {
+                Ok(args) => args,
+                Err(err) => {
+                    eprintln!("{}", err);
+                    std::process::exit(1);
+                }
+            }
+        }
         Err(err) => {
             eprintln!("{}", err);
             std::process::exit(1);
@@ -196,6 +231,8 @@ fn main() -> std::io::Result<()> {
             parsed.ignore_patterns.extend(loctreeignore_patterns);
         }
     }
+
+    // Handle help/version for legacy path (new path handles these above)
     if parsed.show_help {
         println!("{}", format_usage());
         return Ok(());
