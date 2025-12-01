@@ -407,8 +407,9 @@ impl Snapshot {
         println!("Status: OK");
         println!();
         println!("Next steps:");
-        println!("  loctree . -A --json          # Full analysis with JSON output");
-        println!("  loctree . -A --preset-tauri  # Tauri FE↔BE coverage analysis");
+        println!("  loct dead                    # Find unused exports");
+        println!("  loct commands                # Show Tauri FE↔BE command bridges");
+        println!("  loct slice <file> --json     # Extract context for AI agent");
     }
 }
 
