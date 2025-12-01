@@ -33,6 +33,8 @@ pub enum Mode {
     ForAi,
     /// Git awareness - temporal knowledge from repository history
     Git(GitSubcommand),
+    /// Unified search - returns symbol matches, semantic matches, dead status in one call
+    Search,
 }
 
 /// Git subcommands for temporal awareness - semantic analysis only (no passthrough)

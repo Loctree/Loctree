@@ -124,6 +124,7 @@ pub fn resolve_event_constants_across_files(analyses: &mut [FileAnalysis]) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn analyze_file(
     path: &Path,
     root_canon: &Path,

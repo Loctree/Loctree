@@ -23,6 +23,7 @@ declare -A PATTERNS=(
     ["$ROOT_DIR/loctree_rs/src/lib.rs"]='s|html_root_url = "https://docs.rs/loctree/[^"]*"|html_root_url = "https://docs.rs/loctree/'$VERSION'"|'
     ["$ROOT_DIR/reports/src/components/document.rs"]='s/"loctree v[^"]*"/"loctree v'$VERSION'"/'
     ["$ROOT_DIR/landing/src/sections/easter_eggs.rs"]='s/v[0-9]\+\.[0-9]\+\.[0-9]\+ | loctree.io/v'$VERSION' | loctree.io/'
+    ["$ROOT_DIR/landing/src/sections/mod.rs"]='s/VERSION: \&str = "v[^"]*"/VERSION: \&str = "v'$VERSION'"/'
 )
 
 for file in "${!PATTERNS[@]}"; do

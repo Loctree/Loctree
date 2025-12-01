@@ -3,8 +3,7 @@
 //! Agent-friendly: no need to know which flag to use, get everything at once.
 
 use crate::analyzer::dead_parrots::{
-    DeadFilterConfig, SimilarityCandidate, SymbolSearchResult, find_dead_exports, find_similar,
-    search_symbol,
+    SimilarityCandidate, SymbolSearchResult, find_dead_exports, find_similar, search_symbol,
 };
 use crate::types::{FileAnalysis, OutputMode};
 use serde::Serialize;
@@ -36,7 +35,7 @@ pub fn run_search(query: &str, analyses: &[FileAnalysis]) -> SearchResults {
     let semantic_matches = find_similar(query, analyses);
 
     // 3. Dead code status - check if query appears in dead exports
-    let all_dead = find_dead_exports(analyses, false, None, DeadFilterConfig::default());
+    let all_dead = find_dead_exports(analyses, false);
     let dead_for_query: Vec<_> = all_dead
         .iter()
         .filter(|d| d.symbol.to_lowercase().contains(&query.to_lowercase()))

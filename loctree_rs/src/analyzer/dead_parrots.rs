@@ -18,26 +18,48 @@ use crate::types::{FileAnalysis, OutputMode, ReexportKind};
 
 use super::root_scan::{RootContext, normalize_module_id};
 
+use serde::Serialize;
+
 /// Result of symbol search across the codebase
+#[derive(Debug, Clone, Serialize)]
 pub struct SymbolSearchResult {
     pub found: bool,
-    pub matches: Vec<serde_json::Value>,
+    pub total_matches: usize,
+    pub files: Vec<SymbolFileMatch>,
+}
+
+/// Matches in a single file
+#[derive(Debug, Clone, Serialize)]
+pub struct SymbolFileMatch {
+    pub file: String,
+    pub matches: Vec<SymbolMatch>,
+}
+
+/// A single symbol match
+#[derive(Debug, Clone, Serialize)]
+pub struct SymbolMatch {
+    pub line: usize,
+    pub context: String,
+    pub is_definition: bool,
 }
 
 /// Result of impact analysis
+#[derive(Debug, Clone, Serialize)]
 pub struct ImpactResult {
     pub targets: Vec<String>,
     pub dependents: Vec<String>,
 }
 
 /// Result of similarity check
+#[derive(Debug, Clone, Serialize)]
 pub struct SimilarityCandidate {
-    pub name: String,
-    pub location: String,
+    pub symbol: String,
+    pub file: String,
     pub score: f64,
 }
 
 /// Result of dead exports analysis
+#[derive(Debug, Clone, Serialize)]
 pub struct DeadExport {
     pub file: String,
     pub symbol: String,
@@ -49,18 +71,41 @@ pub struct DeadExport {
 /// Note: The actual symbol search is performed during file scanning (in `analyze_file`).
 /// This function only collects the pre-computed matches from analyses.
 pub fn search_symbol(_symbol: &str, analyses: &[FileAnalysis]) -> SymbolSearchResult {
-    let mut matches = Vec::new();
+    let mut files = Vec::new();
+    let mut total_matches = 0;
+
     for analysis in analyses {
         if !analysis.matches.is_empty() {
-            matches.push(json!({
-                "path": analysis.path,
-                "matches": analysis.matches
-            }));
+            let mut matches = Vec::new();
+            for m in &analysis.matches {
+                // Infer if it's a definition from context keywords
+                let ctx_lower = m.context.to_lowercase();
+                let is_def = ctx_lower.contains("export ")
+                    || ctx_lower.contains("pub ")
+                    || ctx_lower.contains("function ")
+                    || ctx_lower.contains("class ")
+                    || ctx_lower.contains("const ")
+                    || ctx_lower.contains("let ")
+                    || ctx_lower.contains("var ")
+                    || ctx_lower.starts_with("fn ");
+                matches.push(SymbolMatch {
+                    line: m.line,
+                    context: m.context.clone(),
+                    is_definition: is_def,
+                });
+            }
+            total_matches += matches.len();
+            files.push(SymbolFileMatch {
+                file: analysis.path.clone(),
+                matches,
+            });
         }
     }
+
     SymbolSearchResult {
-        found: !matches.is_empty(),
-        matches,
+        found: !files.is_empty(),
+        total_matches,
+        files,
     }
 }
 
@@ -74,25 +119,15 @@ pub fn print_symbol_results(symbol: &str, result: &SymbolSearchResult, json_outp
     if json_output {
         println!(
             "{}",
-            serde_json::to_string_pretty(&result.matches)
+            serde_json::to_string_pretty(&result)
                 .expect("Failed to serialize symbol search results to JSON")
         );
     } else {
-        println!(
-            "Symbol '{}' found in {} files:",
-            symbol,
-            result.matches.len()
-        );
-        for m in &result.matches {
-            let path = m["path"].as_str().unwrap_or_default();
-            let items = m["matches"].as_array();
-            println!("\nFile: {}", path);
-            if let Some(items) = items {
-                for item in items {
-                    let line = item["line"].as_u64().unwrap_or(0);
-                    let ctx = item["context"].as_str().unwrap_or_default();
-                    println!("  {}: {}", line, ctx);
-                }
+        println!("Symbol '{}' found in {} files:", symbol, result.files.len());
+        for file_match in &result.files {
+            println!("\nFile: {}", file_match.file);
+            for m in &file_match.matches {
+                println!("  {}: {}", m.line, m.context);
             }
         }
     }
@@ -193,8 +228,8 @@ pub fn find_similar(query: &str, analyses: &[FileAnalysis]) -> Vec<SimilarityCan
         let path_score = similarity(query, &analysis.path);
         if path_score > 0.3 {
             candidates.push(SimilarityCandidate {
-                name: analysis.path.clone(),
-                location: "file path".to_string(),
+                symbol: analysis.path.clone(),
+                file: "file path".to_string(),
                 score: path_score,
             });
         }
@@ -204,8 +239,8 @@ pub fn find_similar(query: &str, analyses: &[FileAnalysis]) -> Vec<SimilarityCan
             let sym_score = similarity(query, &exp.name);
             if sym_score > 0.4 {
                 candidates.push(SimilarityCandidate {
-                    name: exp.name.clone(),
-                    location: format!("export in {}", analysis.path),
+                    symbol: exp.name.clone(),
+                    file: format!("export in {}", analysis.path),
                     score: sym_score,
                 });
             }
@@ -217,7 +252,7 @@ pub fn find_similar(query: &str, analyses: &[FileAnalysis]) -> Vec<SimilarityCan
             .partial_cmp(&a.score)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
-    candidates.dedup_by(|a, b| a.name == b.name && a.location == b.location);
+    candidates.dedup_by(|a, b| a.symbol == b.symbol && a.file == b.file);
     candidates.truncate(20);
 
     candidates
@@ -234,9 +269,9 @@ pub fn print_similarity_results(
             .iter()
             .map(|c| {
                 json!({
-                    "name": c.name,
-                    "location": c.location,
-                    "similarity": c.score
+                    "symbol": c.symbol,
+                    "file": c.file,
+                    "score": c.score
                 })
             })
             .collect();
@@ -251,7 +286,7 @@ pub fn print_similarity_results(
             println!("  No similar components or symbols found.");
         } else {
             for c in candidates {
-                println!("  - {} ({}) [score: {:.2}]", c.name, c.location, c.score);
+                println!("  - {} ({}) [score: {:.2}]", c.symbol, c.file, c.score);
             }
         }
     }
@@ -409,7 +444,9 @@ pub fn print_dead_exports(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{ExportSymbol, ImportEntry, ImportKind, ImportSymbol, SymbolMatch};
+    use crate::types::{
+        ExportSymbol, ImportEntry, ImportKind, ImportSymbol, SymbolMatch as TypesSymbolMatch,
+    };
 
     fn mock_file(path: &str) -> FileAnalysis {
         FileAnalysis {
@@ -440,7 +477,7 @@ mod tests {
             path: path.to_string(),
             matches: matches
                 .into_iter()
-                .map(|(line, ctx)| SymbolMatch {
+                .map(|(line, ctx)| TypesSymbolMatch {
                     line,
                     context: ctx.to_string(),
                 })
@@ -454,7 +491,7 @@ mod tests {
         let analyses: Vec<FileAnalysis> = vec![];
         let result = search_symbol("foo", &analyses);
         assert!(!result.found);
-        assert!(result.matches.is_empty());
+        assert!(result.files.is_empty());
     }
 
     #[test]
@@ -475,14 +512,15 @@ mod tests {
         ];
         let result = search_symbol("foo", &analyses);
         assert!(result.found);
-        assert_eq!(result.matches.len(), 1);
+        assert_eq!(result.files.len(), 1);
     }
 
     #[test]
     fn test_print_symbol_results_no_matches() {
         let result = SymbolSearchResult {
             found: false,
-            matches: vec![],
+            total_matches: 0,
+            files: vec![],
         };
         // Should not panic
         print_symbol_results("foo", &result, false);
@@ -493,10 +531,15 @@ mod tests {
     fn test_print_symbol_results_with_matches() {
         let result = SymbolSearchResult {
             found: true,
-            matches: vec![json!({
-                "path": "src/utils.ts",
-                "matches": [{"line": 10, "context": "const foo = 1"}]
-            })],
+            total_matches: 1,
+            files: vec![SymbolFileMatch {
+                file: "src/utils.ts".to_string(),
+                matches: vec![SymbolMatch {
+                    line: 10,
+                    context: "const foo = 1".to_string(),
+                    is_definition: true,
+                }],
+            }],
         };
         // Should not panic
         print_symbol_results("foo", &result, false);
@@ -516,7 +559,7 @@ mod tests {
         let result = find_similar("Button", &analyses);
         // Path similarity is computed against full path - shorter path gives higher score
         assert!(!result.is_empty());
-        assert!(result.iter().any(|c| c.name.contains("Button")));
+        assert!(result.iter().any(|c| c.symbol.contains("Button")));
     }
 
     #[test]
@@ -526,7 +569,7 @@ mod tests {
             vec!["useButton", "formatDate"],
         )];
         let result = find_similar("Button", &analyses);
-        assert!(result.iter().any(|c| c.name == "useButton"));
+        assert!(result.iter().any(|c| c.symbol == "useButton"));
     }
 
     #[test]
@@ -540,8 +583,8 @@ mod tests {
     #[test]
     fn test_print_similarity_results_with_matches() {
         let candidates = vec![SimilarityCandidate {
-            name: "fooBar".to_string(),
-            location: "export in src/utils.ts".to_string(),
+            symbol: "fooBar".to_string(),
+            file: "export in src/utils.ts".to_string(),
             score: 0.8,
         }];
         // Should not panic
