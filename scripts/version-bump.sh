@@ -191,6 +191,79 @@ else
   git -C "$ROOT_DIR" commit -m "Bump versions: loctree=$new_loctree_ver report=$new_report_ver landing=$new_landing_ver"
 fi
 
+# Generate changelog entry from conventional commits
+generate_changelog_entry() {
+  local version="$1"
+  local date=$(date +%Y-%m-%d)
+  local last_tag=$(git -C "$ROOT_DIR" describe --tags --abbrev=0 2>/dev/null || echo "")
+  local range="${last_tag:+$last_tag..HEAD}"
+
+  echo "## [$version] - $date"
+  echo ""
+
+  local added=""
+  local changed=""
+  local fixed=""
+  local removed=""
+
+  # Parse conventional commits
+  while IFS= read -r commit; do
+    [[ -z "$commit" ]] && continue
+    local subject="${commit#* }"
+
+    case "$subject" in
+      feat:*|feat\(*\):*)
+        local msg="${subject#feat:}"
+        msg="${msg#feat(*):}"
+        msg="${msg# }"
+        added+="- ${msg}\n"
+        ;;
+      fix:*|fix\(*\):*)
+        local msg="${subject#fix:}"
+        msg="${msg#fix(*):}"
+        msg="${msg# }"
+        fixed+="- ${msg}\n"
+        ;;
+      refactor:*|perf:*|chore:*)
+        local msg="${subject#*:}"
+        msg="${msg# }"
+        changed+="- ${msg}\n"
+        ;;
+      *BREAKING*|*breaking*)
+        changed+="- **BREAKING**: ${subject}\n"
+        ;;
+    esac
+  done < <(git -C "$ROOT_DIR" log --oneline $range 2>/dev/null)
+
+  [[ -n "$added" ]] && echo "### Added" && echo -e "$added"
+  [[ -n "$changed" ]] && echo "### Changed" && echo -e "$changed"
+  [[ -n "$fixed" ]] && echo "### Fixed" && echo -e "$fixed"
+  [[ -n "$removed" ]] && echo "### Removed" && echo -e "$removed"
+}
+
+# Insert changelog entry after ## [Released] line
+if $include_loctree && [[ -f "$ROOT_DIR/CHANGELOG.md" ]]; then
+  echo "==> Generating changelog entry"
+  changelog_entry=$(generate_changelog_entry "$new_loctree_ver")
+
+  if [[ -n "$changelog_entry" ]]; then
+    # Create temp file with new entry inserted after ## [Released]
+    awk -v entry="$changelog_entry" '
+      /^## \[Released\]/ {
+        print
+        print ""
+        print entry
+        next
+      }
+      { print }
+    ' "$ROOT_DIR/CHANGELOG.md" > "$ROOT_DIR/CHANGELOG.md.tmp"
+    mv "$ROOT_DIR/CHANGELOG.md.tmp" "$ROOT_DIR/CHANGELOG.md"
+    echo "  Updated: CHANGELOG.md"
+  else
+    echo "  No conventional commits found since last tag"
+  fi
+fi
+
 echo ""
 echo "Done. Remember to push and tag if desired:"
 echo "  git push origin HEAD"

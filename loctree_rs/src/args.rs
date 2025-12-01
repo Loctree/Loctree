@@ -41,6 +41,10 @@ pub struct ParsedArgs {
     pub fail_on_missing_handlers: bool,
     pub fail_on_ghost_events: bool,
     pub fail_on_races: bool,
+    /// Maximum allowed dead exports before failing (CI policy)
+    pub max_dead: Option<usize>,
+    /// Maximum allowed circular imports before failing (CI policy)
+    pub max_cycles: Option<usize>,
     pub ai_mode: bool,
     pub top_dead_symbols: usize,
     pub skip_dead_symbols: bool,
@@ -124,6 +128,8 @@ impl Default for ParsedArgs {
             fail_on_missing_handlers: false,
             fail_on_ghost_events: false,
             fail_on_races: false,
+            max_dead: None,
+            max_cycles: None,
             ai_mode: false,
             top_dead_symbols: 20,
             skip_dead_symbols: false,
@@ -381,6 +387,42 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
             }
             "--fail-on-races" => {
                 parsed.fail_on_races = true;
+                i += 1;
+            }
+            "--max-dead" => {
+                let next = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--max-dead requires a non-negative integer".to_string())?;
+                let value = next
+                    .parse::<usize>()
+                    .map_err(|_| "--max-dead requires a non-negative integer".to_string())?;
+                parsed.max_dead = Some(value);
+                i += 2;
+            }
+            _ if arg.starts_with("--max-dead=") => {
+                let value = arg
+                    .trim_start_matches("--max-dead=")
+                    .parse::<usize>()
+                    .map_err(|_| "--max-dead requires a non-negative integer".to_string())?;
+                parsed.max_dead = Some(value);
+                i += 1;
+            }
+            "--max-cycles" => {
+                let next = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--max-cycles requires a non-negative integer".to_string())?;
+                let value = next
+                    .parse::<usize>()
+                    .map_err(|_| "--max-cycles requires a non-negative integer".to_string())?;
+                parsed.max_cycles = Some(value);
+                i += 2;
+            }
+            _ if arg.starts_with("--max-cycles=") => {
+                let value = arg
+                    .trim_start_matches("--max-cycles=")
+                    .parse::<usize>()
+                    .map_err(|_| "--max-cycles requires a non-negative integer".to_string())?;
+                parsed.max_cycles = Some(value);
                 i += 1;
             }
             "--show-hidden" | "-H" => {
@@ -1287,6 +1329,8 @@ mod tests {
         assert!(!args.verbose);
         assert!(!args.tauri_preset);
         assert!(!args.fail_on_missing_handlers);
+        assert!(args.max_dead.is_none());
+        assert!(args.max_cycles.is_none());
         assert!(!args.ai_mode);
         assert_eq!(args.top_dead_symbols, 20);
         assert!(!args.dead_exports);

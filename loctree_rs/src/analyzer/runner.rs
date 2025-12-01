@@ -452,11 +452,15 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         let high_confidence = parsed.dead_confidence.as_deref() == Some("high");
         let dead_exports = find_dead_exports(&global_analyses, high_confidence);
 
+        // Get circular imports
+        let circular_imports = super::cycles::find_cycles(&all_graph_edges);
+
         super::sarif::print_sarif(super::sarif::SarifInputs {
             duplicate_exports: &all_ranked_dups,
             missing_handlers: &global_missing_handlers,
             unused_handlers: &global_unused_handlers,
             dead_exports: &dead_exports,
+            circular_imports: &circular_imports,
             pipeline_summary: &pipeline_summary,
         });
         return Ok(());
@@ -598,6 +602,31 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             .unwrap_or(0);
         if race_count > 0 {
             fail_reasons.push(format!("{} potential race(s) detected", race_count));
+        }
+    }
+
+    // Threshold-based CI policy checks
+    if let Some(max_dead) = parsed.max_dead {
+        let high_confidence = parsed.dead_confidence.as_deref() == Some("high");
+        let dead_exports =
+            super::dead_parrots::find_dead_exports(&global_analyses, high_confidence);
+        let dead_count = dead_exports.len();
+        if dead_count > max_dead {
+            fail_reasons.push(format!(
+                "{} dead export(s) exceed threshold of {} (--max-dead)",
+                dead_count, max_dead
+            ));
+        }
+    }
+
+    if let Some(max_cycles) = parsed.max_cycles {
+        let cycles = super::cycles::find_cycles(&all_graph_edges);
+        let cycle_count = cycles.len();
+        if cycle_count > max_cycles {
+            fail_reasons.push(format!(
+                "{} circular import(s) exceed threshold of {} (--max-cycles)",
+                cycle_count, max_cycles
+            ));
         }
     }
 

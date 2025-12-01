@@ -9,6 +9,8 @@ pub struct SarifInputs<'a> {
     pub missing_handlers: &'a [CommandGap],
     pub unused_handlers: &'a [CommandGap],
     pub dead_exports: &'a [DeadExport],
+    /// Circular imports: each cycle is a Vec of file paths
+    pub circular_imports: &'a [Vec<String>],
     pub pipeline_summary: &'a serde_json::Value,
 }
 
@@ -88,6 +90,36 @@ pub fn print_sarif(inputs: SarifInputs) {
         }));
     }
 
+    // Circular imports
+    for cycle in inputs.circular_imports {
+        if cycle.is_empty() {
+            continue;
+        }
+        let cycle_desc = cycle.join(" → ");
+        let first_file = &cycle[0];
+        results.push(json!({
+            "ruleId": "circular-import",
+            "level": "warning",
+            "message": {
+                "text": format!("Circular import detected: {}", cycle_desc)
+            },
+            "locations": [{
+                "physicalLocation": {
+                    "artifactLocation": { "uri": first_file }
+                }
+            }],
+            "relatedLocations": cycle.iter().skip(1).enumerate().map(|(idx, file)| {
+                json!({
+                    "id": idx + 1,
+                    "physicalLocation": {
+                        "artifactLocation": { "uri": file }
+                    },
+                    "message": { "text": format!("Part of cycle at position {}", idx + 2) }
+                })
+            }).collect::<Vec<_>>()
+        }));
+    }
+
     // Ghost events
     if let Some(events) = inputs.pipeline_summary.get("events") {
         if let Some(ghosts) = events.get("ghostEmits").and_then(|v| v.as_array()) {
@@ -146,6 +178,7 @@ pub fn print_sarif(inputs: SarifInputs) {
                 { "id": "missing-handler", "shortDescription": { "text": "Missing backend handler for frontend command" } },
                 { "id": "unused-handler", "shortDescription": { "text": "Unused backend handler" } },
                 { "id": "dead-export", "shortDescription": { "text": "Export defined but never imported" } },
+                { "id": "circular-import", "shortDescription": { "text": "Circular import dependency detected" } },
                 { "id": "ghost-event", "shortDescription": { "text": "Event emitted but not listened to" } },
                 { "id": "orphan-listener", "shortDescription": { "text": "Event listener without emitter" } }
             ]
@@ -213,6 +246,7 @@ mod tests {
             missing_handlers: &[],
             unused_handlers: &[],
             dead_exports: &[],
+            circular_imports: &[],
             pipeline_summary: &json!({}),
         };
         // Should not panic
@@ -227,6 +261,7 @@ mod tests {
             missing_handlers: &[],
             unused_handlers: &[],
             dead_exports: &[],
+            circular_imports: &[],
             pipeline_summary: &json!({}),
         };
         print_sarif(inputs);
@@ -240,6 +275,7 @@ mod tests {
             missing_handlers: &missing,
             unused_handlers: &[],
             dead_exports: &[],
+            circular_imports: &[],
             pipeline_summary: &json!({}),
         };
         print_sarif(inputs);
@@ -253,6 +289,7 @@ mod tests {
             missing_handlers: &[],
             unused_handlers: &unused,
             dead_exports: &[],
+            circular_imports: &[],
             pipeline_summary: &json!({}),
         };
         print_sarif(inputs);
@@ -269,6 +306,25 @@ mod tests {
             missing_handlers: &[],
             unused_handlers: &[],
             dead_exports: &dead,
+            circular_imports: &[],
+            pipeline_summary: &json!({}),
+        };
+        print_sarif(inputs);
+    }
+
+    #[test]
+    fn test_print_sarif_with_circular_imports() {
+        let cycles = vec![vec![
+            "src/a.ts".to_string(),
+            "src/b.ts".to_string(),
+            "src/a.ts".to_string(),
+        ]];
+        let inputs = SarifInputs {
+            duplicate_exports: &[],
+            missing_handlers: &[],
+            unused_handlers: &[],
+            dead_exports: &[],
+            circular_imports: &cycles,
             pipeline_summary: &json!({}),
         };
         print_sarif(inputs);
@@ -288,6 +344,7 @@ mod tests {
             missing_handlers: &[],
             unused_handlers: &[],
             dead_exports: &[],
+            circular_imports: &[],
             pipeline_summary: &summary,
         };
         print_sarif(inputs);
@@ -307,6 +364,7 @@ mod tests {
             missing_handlers: &[],
             unused_handlers: &[],
             dead_exports: &[],
+            circular_imports: &[],
             pipeline_summary: &summary,
         };
         print_sarif(inputs);
@@ -318,6 +376,7 @@ mod tests {
         let missing = vec![mock_gap("api_call", vec![("src/api.ts", 5)])];
         let unused = vec![mock_gap("legacy_fn", vec![("src-tauri/src/main.rs", 100)])];
         let dead = vec![mock_dead("src/old.ts", "deprecated", Some(1))];
+        let cycles = vec![vec!["src/x.ts".to_string(), "src/y.ts".to_string()]];
         let summary = json!({
             "events": {
                 "ghostEmits": [{"name": "evt", "path": "a.ts", "line": 1, "confidence": "low"}],
@@ -330,6 +389,7 @@ mod tests {
             missing_handlers: &missing,
             unused_handlers: &unused,
             dead_exports: &dead,
+            circular_imports: &cycles,
             pipeline_summary: &summary,
         };
         print_sarif(inputs);
@@ -350,6 +410,7 @@ mod tests {
             missing_handlers: &missing,
             unused_handlers: &[],
             dead_exports: &[],
+            circular_imports: &[],
             pipeline_summary: &json!({}),
         };
         print_sarif(inputs);
