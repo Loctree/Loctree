@@ -1,4 +1,5 @@
 pub mod assets;
+pub mod ast_js;
 pub mod classify;
 pub mod coverage;
 mod css;

@@ -1,480 +1,21 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::Path;
 
 use oxc_allocator::Allocator;
-use oxc_ast::ast::ImportOrExportKind;
 use oxc_ast::ast::*;
-use oxc_ast_visit::{Visit, walk::walk_expression};
+use oxc_ast::visit::Visit;
 use oxc_parser::Parser;
-use oxc_semantic::SemanticBuilder;
-use oxc_span::{SourceType, Span};
-use regex::Regex;
+use oxc_span::SourceType;
 
 use crate::types::{
-    CommandPayloadCasing, CommandRef, EventRef, ExportSymbol, FileAnalysis, ImportEntry,
-    ImportKind, ImportSymbol, ReexportEntry, ReexportKind, SignatureUse, SignatureUseKind,
-    StringLiteral,
+    CommandRef, EventRef, ExportSymbol, FileAnalysis, ImportEntry, ImportKind, ImportSymbol,
+    ReexportEntry, ReexportKind,
 };
 
 use super::resolvers::{TsPathResolver, resolve_reexport_target};
 
-#[derive(Clone, Debug)]
-pub struct CommandDetectionConfig {
-    pub dom_exclusions: HashSet<String>,
-    pub non_invoke_exclusions: HashSet<String>,
-    pub invalid_command_names: HashSet<String>,
-}
-
-// Known DOM APIs to exclude from Tauri command detection
-const DOM_EXCLUSIONS: &[&str] = &[
-    "execCommand",
-    "queryCommandState",
-    "queryCommandEnabled",
-    "queryCommandSupported",
-    "queryCommandValue",
-];
-
-// Functions that ARE NOT Tauri invokes - ignore completely (project heuristics)
-// These happen to match "invoke" or "Command" but are not actual Tauri calls
-const NON_INVOKE_EXCLUSIONS: &[&str] = &[
-    // React hooks that happen to have "Command" in name
-    "useVoiceCommands",
-    "useAssistantToolCommands",
-    "useNewVisitVoiceCommands",
-    "useAiTopicCommands",
-    // Build tools / CLI commands (not Tauri)
-    "runGitCommand",
-    "executeCommand",
-    "buildCommandString",
-    "buildCommandArgs",
-    "classifyCommand",
-    // Internal tracking/context functions
-    "onCommandContext",
-    "enqueueCommandContext",
-    "setLastCommand",
-    "setCommandError",
-    "recordCommandInvokeStart",
-    "recordCommandInvokeFinish",
-    "handleInvokeFailure",
-    "isCommandMissingError",
-    "isRetentionCommandMissing",
-    // Collection/analysis utilities
-    "collectInvokeCommands",
-    "collectUsedCommandsFromRoamLogs",
-    "extractInvokeCommandsFromText",
-    "scanCommandsInFiles",
-    "parseBackendCommands",
-    "buildSessionCommandPayload",
-    // Mention/slash command handlers (UI, not Tauri)
-    "onMentionCommand",
-    "onSlashCommand",
-    // Mock/test utilities
-    "invokeFallbackMock",
-    "resolveMockCommand",
-];
-
-// Command names that are clearly not Tauri commands (CLI tools / tests)
-const INVALID_COMMAND_NAMES: &[&str] = &[
-    // CLI tools / shell commands
-    "node", "npm", "pnpm", "yarn", "bun", "cargo", "rustc", "rustup", "git", "gh", "python",
-    "python3", "pip", "brew", "apt", "yum", "sh", "bash", "zsh", "curl", "wget", "docker",
-    "kubectl", // Generic/test names
-    "test", "mock", "stub", "fake",
-];
-
-impl CommandDetectionConfig {
-    pub fn new(
-        dom_exclusions: &[String],
-        non_invoke_exclusions: &[String],
-        invalid_command_names: &[String],
-    ) -> Self {
-        let mut dom: HashSet<String> = DOM_EXCLUSIONS.iter().map(|s| s.to_string()).collect();
-        dom.extend(dom_exclusions.iter().cloned());
-
-        let mut non_invoke: HashSet<String> = NON_INVOKE_EXCLUSIONS
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        non_invoke.extend(non_invoke_exclusions.iter().cloned());
-
-        let mut invalid: HashSet<String> = INVALID_COMMAND_NAMES
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        invalid.extend(invalid_command_names.iter().cloned());
-
-        Self {
-            dom_exclusions: dom,
-            non_invoke_exclusions: non_invoke,
-            invalid_command_names: invalid,
-        }
-    }
-}
-
-impl Default for CommandDetectionConfig {
-    fn default() -> Self {
-        Self::new(&[], &[], &[])
-    }
-}
-
-/// Extract script content from a Svelte file
-/// Handles both `<script>` and `<script lang="ts">` variants
-fn extract_svelte_script(content: &str) -> String {
-    extract_sfc_script(content)
-}
-
-/// Extract script content from a Vue Single File Component (SFC)
-/// Handles `<script>`, `<script setup>`, `<script lang="ts">` variants
-fn extract_vue_script(content: &str) -> String {
-    extract_sfc_script(content)
-}
-
-/// Common SFC script extraction used by both Svelte and Vue
-fn extract_sfc_script(content: &str) -> String {
-    // Match <script> or <script lang="ts"> or <script module> etc.
-    // Use lazy matching to capture all script blocks
-    let script_regex = Regex::new(r#"<script[^>]*>([\s\S]*?)</script>"#).ok();
-
-    if let Some(re) = script_regex {
-        let mut scripts = Vec::new();
-        for caps in re.captures_iter(content) {
-            if let Some(script_content) = caps.get(1) {
-                scripts.push(script_content.as_str().to_string());
-            }
-        }
-        scripts.join("\n")
-    } else {
-        String::new()
-    }
-}
-
-/// Extract template content from a Svelte file (everything outside <script> and <style>)
-fn extract_svelte_template(content: &str) -> String {
-    let mut result = content.to_string();
-    if let Ok(script_re) = Regex::new(r#"<script[^>]*>[\s\S]*?</script>"#) {
-        result = script_re.replace_all(&result, "").to_string();
-    }
-    if let Ok(style_re) = Regex::new(r#"<style[^>]*>[\s\S]*?</style>"#) {
-        result = style_re.replace_all(&result, "").to_string();
-    }
-    result
-}
-
-/// Extract template content from a Vue file (everything inside <template> tags)
-fn extract_vue_template(content: &str) -> String {
-    let template_regex = Regex::new(r#"<template[^>]*>([\s\S]*?)</template>"#).ok();
-
-    if let Some(re) = template_regex {
-        let mut templates = Vec::new();
-        for caps in re.captures_iter(content) {
-            if let Some(template_content) = caps.get(1) {
-                templates.push(template_content.as_str().to_string());
-            }
-        }
-        templates.join("\n")
-    } else {
-        String::new()
-    }
-}
-
-/// Parse Svelte template for function calls and variable references
-fn parse_svelte_template_usages(template: &str) -> Vec<String> {
-    let mut usages = Vec::new();
-
-    // Pattern 1: Function calls {funcName()} or {funcName(args)}
-    if let Ok(re) = Regex::new(r#"\{[^}]*?\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\("#) {
-        for caps in re.captures_iter(template) {
-            if let Some(name) = caps.get(1) {
-                let ident = name.as_str().to_string();
-                if !is_svelte_builtin(&ident) && !usages.contains(&ident) {
-                    usages.push(ident);
-                }
-            }
-        }
-    }
-
-    // Pattern 2: Event handlers on:click={handler}
-    // Also captures arrow functions: on:click={() => save(item)}
-    if let Ok(re) = Regex::new(r#"on:\w+\s*=\s*\{(?:\([^)]*\)\s*=>)?\s*([a-zA-Z_$][a-zA-Z0-9_$]*)"#)
-    {
-        for caps in re.captures_iter(template) {
-            if let Some(name) = caps.get(1) {
-                let ident = name.as_str().to_string();
-                if !is_svelte_builtin(&ident) && !usages.contains(&ident) {
-                    usages.push(ident);
-                }
-            }
-        }
-    }
-
-    // Pattern 2b: Extract function names from arrow function bodies
-    // Matches: on:click={() => functionName(...)} or on:click={(e) => handler(e)}
-    if let Ok(re) =
-        Regex::new(r#"on:\w+\s*=\s*\{(?:\([^)]*\))?\s*=>\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\("#)
-    {
-        for caps in re.captures_iter(template) {
-            if let Some(name) = caps.get(1) {
-                let ident = name.as_str().to_string();
-                if !is_svelte_builtin(&ident) && !usages.contains(&ident) {
-                    usages.push(ident);
-                }
-            }
-        }
-    }
-
-    // Pattern 3: Bind directives bind:value={varName}
-    if let Ok(re) = Regex::new(r#"bind:\w+\s*=\s*\{([a-zA-Z_$][a-zA-Z0-9_$]*)"#) {
-        for caps in re.captures_iter(template) {
-            if let Some(name) = caps.get(1) {
-                let ident = name.as_str().to_string();
-                if !is_svelte_builtin(&ident) && !usages.contains(&ident) {
-                    usages.push(ident);
-                }
-            }
-        }
-    }
-
-    // Pattern 4: Use directives use:action
-    if let Ok(re) = Regex::new(r#"use:([a-zA-Z_$][a-zA-Z0-9_$]*)"#) {
-        for caps in re.captures_iter(template) {
-            if let Some(name) = caps.get(1) {
-                let ident = name.as_str().to_string();
-                if !is_svelte_builtin(&ident) && !usages.contains(&ident) {
-                    usages.push(ident);
-                }
-            }
-        }
-    }
-
-    // Pattern 5: Transition directives transition:fade, in:fly, out:slide
-    if let Ok(re) = Regex::new(r#"(?:transition|in|out|animate):([a-zA-Z_$][a-zA-Z0-9_$]*)"#) {
-        for caps in re.captures_iter(template) {
-            if let Some(name) = caps.get(1) {
-                let ident = name.as_str().to_string();
-                if !is_svelte_builtin(&ident) && !usages.contains(&ident) {
-                    usages.push(ident);
-                }
-            }
-        }
-    }
-
-    // Pattern 6: Component usage <ComponentName />
-    if let Ok(re) = Regex::new(r#"<([A-Z][a-zA-Z0-9_$]*)"#) {
-        for caps in re.captures_iter(template) {
-            if let Some(name) = caps.get(1) {
-                let ident = name.as_str().to_string();
-                if !usages.contains(&ident) {
-                    usages.push(ident);
-                }
-            }
-        }
-    }
-
-    // Pattern 7: Prop passing propName={value}
-    if let Ok(re) =
-        Regex::new(r#"\s[a-zA-Z_$][a-zA-Z0-9_$]*\s*=\s*\{([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\}"#)
-    {
-        for caps in re.captures_iter(template) {
-            if let Some(value) = caps.get(1) {
-                let ident = value.as_str().to_string();
-                if !is_svelte_builtin(&ident) && !usages.contains(&ident) {
-                    usages.push(ident);
-                }
-            }
-        }
-    }
-
-    // Pattern 8: Method calls with optional chaining - obj?.method() or obj.method()
-    // This catches component method references like chatInput?.focusInput()
-    if let Ok(re) =
-        Regex::new(r#"([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\??\.\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\("#)
-    {
-        for caps in re.captures_iter(template) {
-            // Capture the object (e.g., chatInput)
-            if let Some(obj) = caps.get(1) {
-                let ident = obj.as_str().to_string();
-                if !is_svelte_builtin(&ident) && !usages.contains(&ident) {
-                    usages.push(ident);
-                }
-            }
-            // Capture the method name (e.g., focusInput)
-            // This is critical for detecting Svelte component API methods called via bind:this
-            if let Some(method) = caps.get(2) {
-                let method_name = method.as_str().to_string();
-                if !is_svelte_builtin(&method_name) && !usages.contains(&method_name) {
-                    usages.push(method_name);
-                }
-            }
-        }
-    }
-
-    usages
-}
-
-/// Parse Vue template for function calls and variable references
-fn parse_vue_template_usages(template: &str) -> Vec<String> {
-    let mut usages = Vec::new();
-
-    // Pattern 1: Mustache interpolations {{ functionName(...) }} - function calls
-    if let Ok(re) = Regex::new(r#"\{\{[^}]*?\b([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\("#) {
-        for caps in re.captures_iter(template) {
-            if let Some(name) = caps.get(1) {
-                let ident = name.as_str().to_string();
-                if !is_vue_builtin(&ident) && !usages.contains(&ident) {
-                    usages.push(ident);
-                }
-            }
-        }
-    }
-
-    // Pattern 1b: Mustache interpolations {{ variable.property }} - variable references
-    // Captures the root variable name (before the dot)
-    if let Ok(re) = Regex::new(r#"\{\{\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\.?"#) {
-        for caps in re.captures_iter(template) {
-            if let Some(name) = caps.get(1) {
-                let ident = name.as_str().to_string();
-                if !is_vue_builtin(&ident) && !usages.contains(&ident) {
-                    usages.push(ident);
-                }
-            }
-        }
-    }
-
-    // Pattern 2: Event handlers @click="handler" or v-on:click="handler"
-    if let Ok(re) = Regex::new(r#"(?:@|v-on:)\w+\s*=\s*"([a-zA-Z_$][a-zA-Z0-9_$]*)"#) {
-        for caps in re.captures_iter(template) {
-            if let Some(name) = caps.get(1) {
-                let ident = name.as_str().to_string();
-                if !is_vue_builtin(&ident) && !usages.contains(&ident) {
-                    usages.push(ident);
-                }
-            }
-        }
-    }
-
-    // Pattern 3: Prop bindings :prop="computedValue" or v-bind:prop="value"
-    if let Ok(re) = Regex::new(r#"(?::|v-bind:)\w+\s*=\s*"([a-zA-Z_$][a-zA-Z0-9_$]*)"#) {
-        for caps in re.captures_iter(template) {
-            if let Some(name) = caps.get(1) {
-                let ident = name.as_str().to_string();
-                if !is_vue_builtin(&ident) && !usages.contains(&ident) {
-                    usages.push(ident);
-                }
-            }
-        }
-    }
-
-    // Pattern 4: v-model bindings
-    if let Ok(re) = Regex::new(r#"v-model\s*=\s*"([a-zA-Z_$][a-zA-Z0-9_$]*)"#) {
-        for caps in re.captures_iter(template) {
-            if let Some(name) = caps.get(1) {
-                let ident = name.as_str().to_string();
-                if !is_vue_builtin(&ident) && !usages.contains(&ident) {
-                    usages.push(ident);
-                }
-            }
-        }
-    }
-
-    // Pattern 5: Component usage <ComponentName />
-    if let Ok(re) = Regex::new(r#"<([A-Z][a-zA-Z0-9_$]*)"#) {
-        for caps in re.captures_iter(template) {
-            if let Some(name) = caps.get(1) {
-                let ident = name.as_str().to_string();
-                if !usages.contains(&ident) {
-                    usages.push(ident);
-                }
-            }
-        }
-    }
-
-    usages
-}
-
-/// Check if an identifier is a Vue built-in or control flow keyword
-fn is_vue_builtin(name: &str) -> bool {
-    matches!(
-        name,
-        "if" | "else"
-            | "for"
-            | "slot"
-            | "component"
-            | "transition"
-            | "keep-alive"
-            | "teleport"
-            | "suspense"
-            | "console"
-            | "window"
-            | "document"
-            | "Array"
-            | "Object"
-            | "String"
-            | "Number"
-            | "Boolean"
-            | "Date"
-            | "Math"
-            | "JSON"
-            | "Promise"
-            | "Error"
-            | "undefined"
-            | "null"
-            | "true"
-            | "false"
-            | "this"
-    )
-}
-
-/// Check if an identifier is a Svelte built-in or control flow keyword
-fn is_svelte_builtin(name: &str) -> bool {
-    matches!(
-        name,
-        "if" | "else"
-            | "each"
-            | "await"
-            | "then"
-            | "catch"
-            | "key"
-            | "html"
-            | "debug"
-            | "const"
-            | "let"
-            | "var"
-            | "console"
-            | "window"
-            | "document"
-            | "Array"
-            | "Object"
-            | "String"
-            | "Number"
-            | "Boolean"
-            | "Date"
-            | "Math"
-            | "JSON"
-            | "Promise"
-            | "Error"
-            | "undefined"
-            | "null"
-            | "true"
-            | "false"
-            | "this"
-            | "slot"
-            | "svelte"
-    )
-}
-
-/// Check if file uses Flow type annotations
-/// Flow files start with // @flow or /* @flow */
-fn is_flow_file(content: &str) -> bool {
-    // Use floor_char_boundary to avoid panic on UTF-8 multi-byte characters
-    let end_idx = content.len().min(1000);
-    let safe_end = content.floor_char_boundary(end_idx);
-    let first_1000 = &content[..safe_end];
-    first_1000.contains("@flow")
-        || first_1000.contains("// @flow")
-        || first_1000.contains("/* @flow */")
-}
-
 /// Analyze JS/TS file using OXC AST parser
+#[allow(dead_code)]
 pub(crate) fn analyze_js_file_ast(
     content: &str,
     path: &Path,
@@ -482,68 +23,16 @@ pub(crate) fn analyze_js_file_ast(
     extensions: Option<&HashSet<String>>,
     ts_resolver: Option<&TsPathResolver>,
     relative: String,
-    command_cfg: &CommandDetectionConfig,
 ) -> FileAnalysis {
     let allocator = Allocator::default();
 
     // Determine source type from file extension
-    // Only enable JSX for .tsx/.jsx files to avoid conflicts with TypeScript generics
-    // (e.g., `const fn = <T>(...) =>` would be parsed as JSX tag with JSX enabled)
-    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-    let is_jsx_file = ext == "tsx" || ext == "jsx";
-    let is_svelte_file = ext == "svelte";
-    let is_vue_file = ext == "vue";
-    let is_sfc_file = is_svelte_file || is_vue_file;
+    let source_type = SourceType::from_path(path)
+        .unwrap_or_default()
+        .with_typescript(true)
+        .with_jsx(true);
 
-    // Detect Flow type annotations
-    let is_flow = is_flow_file(content);
-
-    // For SFC files (Svelte/Vue), extract script content first
-    let parsed_content: String;
-    let content_to_parse = if is_svelte_file {
-        parsed_content = extract_svelte_script(content);
-        parsed_content.as_str()
-    } else if is_vue_file {
-        parsed_content = extract_vue_script(content);
-        parsed_content.as_str()
-    } else {
-        content
-    };
-
-    // For SFC files (Svelte/Vue), parse as TypeScript
-    let source_type = if is_sfc_file {
-        SourceType::tsx().with_typescript(true)
-    } else {
-        SourceType::from_path(path)
-            .unwrap_or_default()
-            .with_typescript(true)
-            .with_jsx(is_jsx_file)
-    };
-
-    let ret = Parser::new(&allocator, content_to_parse, source_type).parse();
-
-    // Log parser errors for debugging (verbose mode only)
-    if !ret.errors.is_empty() && std::env::var("LOCTREE_VERBOSE").is_ok() {
-        eprintln!(
-            "[loctree][debug] Parser errors in {}: {} errors",
-            path.display(),
-            ret.errors.len()
-        );
-        for (i, err) in ret.errors.iter().take(5).enumerate() {
-            // Get line number from error span using the labels field
-            let line_info = err
-                .labels
-                .as_ref()
-                .and_then(|labels| labels.first())
-                .map(|label| {
-                    let offset = label.offset();
-                    let line = content[..offset].bytes().filter(|b| *b == b'\n').count() + 1;
-                    format!(" (line {}, col {})", line, label.offset())
-                })
-                .unwrap_or_default();
-            eprintln!("  [{}]{} {}", i + 1, line_info, err);
-        }
-    }
+    let ret = Parser::new(&allocator, content, source_type).parse();
 
     let mut visitor = JsVisitor {
         analysis: FileAnalysis::new(relative),
@@ -551,68 +40,10 @@ pub(crate) fn analyze_js_file_ast(
         root,
         extensions,
         ts_resolver,
-        source_text: content_to_parse,
-        command_cfg,
-        namespace_imports: HashMap::new(),
+        source_text: content,
     };
 
     visitor.visit_program(&ret.program);
-
-    // Mark file as Flow if detected
-    visitor.analysis.is_flow_file = is_flow;
-
-    // Use oxc_semantic to track local symbol references
-    // This helps detect when exported symbols are used internally (not dead)
-    let semantic_ret = SemanticBuilder::new().build(&ret.program);
-    if semantic_ret.errors.is_empty() {
-        let semantic = semantic_ret.semantic;
-
-        // Build set of exported symbol names for quick lookup
-        let exported_names: HashSet<&str> = visitor
-            .analysis
-            .exports
-            .iter()
-            .map(|e| e.name.as_str())
-            .collect();
-
-        // Check each symbol - if it's exported AND has references, it's used locally
-        for symbol_id in semantic.scoping().symbol_ids() {
-            let name = semantic.scoping().symbol_name(symbol_id);
-            if exported_names.contains(name) {
-                // Check if this symbol has any references (beyond its declaration)
-                let ref_ids = semantic.scoping().get_resolved_reference_ids(symbol_id);
-                if !ref_ids.is_empty() {
-                    visitor.analysis.local_uses.push(name.to_string());
-                }
-            }
-        }
-    }
-
-    // For Svelte files, also parse the template section to detect function calls
-    // This prevents false positives where exported functions are used in the template
-    // e.g., {badgeText(account)} or on:click={handleClick}
-    if is_svelte_file {
-        let template = extract_svelte_template(content);
-        let template_usages = parse_svelte_template_usages(&template);
-        for usage in template_usages {
-            if !visitor.analysis.local_uses.contains(&usage) {
-                visitor.analysis.local_uses.push(usage);
-            }
-        }
-    }
-
-    // For Vue files, also parse the template section to detect function calls
-    // This prevents false positives where exported functions are used in the template
-    // e.g., {{ formatDate(value) }} or @click="handleClick"
-    if is_vue_file {
-        let template = extract_vue_template(content);
-        let template_usages = parse_vue_template_usages(&template);
-        for usage in template_usages {
-            if !visitor.analysis.local_uses.contains(&usage) {
-                visitor.analysis.local_uses.push(usage);
-            }
-        }
-    }
 
     visitor.analysis
 }
@@ -624,33 +55,12 @@ struct JsVisitor<'a> {
     extensions: Option<&'a HashSet<String>>,
     ts_resolver: Option<&'a TsPathResolver>,
     source_text: &'a str,
-    command_cfg: &'a CommandDetectionConfig,
-    /// Map of namespace import aliases to their resolved paths: alias -> (source, resolved_path)
-    namespace_imports: HashMap<String, (String, Option<String>)>,
 }
 
 impl<'a> JsVisitor<'a> {
+    #[allow(dead_code)]
     fn resolve_path(&self, source: &str) -> Option<String> {
-        let file_ext = self
-            .path
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(|s| s.to_lowercase());
-
-        // For TS/JS files, skip resolve_reexport_target (uses Python logic)
-        // Go straight to TS resolver or JS relative resolution
-        let skip_python = matches!(
-            file_ext.as_deref(),
-            Some("ts") | Some("tsx") | Some("js") | Some("jsx") | Some("mjs") | Some("cjs")
-        );
-
-        let initial = if skip_python {
-            None
-        } else {
-            resolve_reexport_target(self.path, self.root, source, self.extensions)
-        };
-
-        initial
+        resolve_reexport_target(self.path, self.root, source, self.extensions)
             .or_else(|| {
                 self.ts_resolver
                     .and_then(|r| r.resolve(source, self.extensions))
@@ -660,187 +70,17 @@ impl<'a> JsVisitor<'a> {
             })
     }
 
-    fn get_line(&self, span: Span) -> usize {
-        let start = span.start as usize;
-        let capped = std::cmp::min(start, self.source_text.len());
-        self.source_text[..capped]
+    #[allow(dead_code)]
+    fn get_line(&self, span: oxc_span::Span) -> usize {
+        self.source_text[..span.start as usize]
             .bytes()
             .filter(|b| *b == b'\n')
             .count()
             + 1
     }
-
-    fn push_string_literal(&mut self, value: &str, span: Span) {
-        let line = self.get_line(span);
-        self.analysis.string_literals.push(StringLiteral {
-            value: value.to_string(),
-            line,
-        });
-    }
-
-    /// Extract basic type representation from TSType
-    fn type_to_string(ty: &TSType<'a>) -> String {
-        match ty {
-            TSType::TSTypeReference(r) => JsVisitor::type_name_to_string(&r.type_name),
-            // When the type is a complex union/inline construct, return a neutral label
-            // so we don't bloat command payloads with full type ASTs.
-            _ => "Type".to_string(),
-        }
-    }
-
-    fn type_name_to_string(name: &TSTypeName<'a>) -> String {
-        match name {
-            TSTypeName::IdentifierReference(id) => id.name.to_string(),
-            TSTypeName::QualifiedName(q) => {
-                format!(
-                    "{}.{}",
-                    JsVisitor::type_name_to_string(&q.left),
-                    q.right.name
-                )
-            }
-            TSTypeName::ThisExpression(_) => "This".to_string(),
-        }
-    }
-
-    fn record_type_use(
-        &mut self,
-        fn_name: &str,
-        usage: SignatureUseKind,
-        ty: &TSType<'a>,
-        span: Span,
-    ) {
-        let type_name = JsVisitor::type_to_string(ty);
-        if type_name.is_empty() || type_name == "Type" {
-            return;
-        }
-        let line = self.get_line(span);
-        if !self.analysis.local_uses.contains(&type_name) {
-            self.analysis.local_uses.push(type_name.clone());
-        }
-        self.analysis.signature_uses.push(SignatureUse {
-            function: fn_name.to_string(),
-            usage,
-            type_name,
-            line: Some(line),
-        });
-    }
-
-    fn record_param_types(&mut self, fn_name: &str, params: &FormalParameters<'a>) {
-        for param in params.items.iter() {
-            if let Some(ann) = &param.pattern.type_annotation {
-                self.record_type_use(
-                    fn_name,
-                    SignatureUseKind::Parameter,
-                    &ann.type_annotation,
-                    ann.span,
-                );
-            }
-        }
-        if let Some(rest) = &params.rest
-            && let Some(ann) = &rest.argument.type_annotation
-        {
-            self.record_type_use(
-                fn_name,
-                SignatureUseKind::Parameter,
-                &ann.type_annotation,
-                ann.span,
-            );
-        }
-    }
-
-    fn record_function_signature(&mut self, fn_name: &str, func: &Function<'a>) {
-        if let Some(ret) = &func.return_type {
-            self.record_type_use(
-                fn_name,
-                SignatureUseKind::Return,
-                &ret.type_annotation,
-                ret.span,
-            );
-        }
-        self.record_param_types(fn_name, &func.params);
-    }
-
-    fn record_arrow_signature(&mut self, fn_name: &str, func: &ArrowFunctionExpression<'a>) {
-        if let Some(ret) = &func.return_type {
-            self.record_type_use(
-                fn_name,
-                SignatureUseKind::Return,
-                &ret.type_annotation,
-                ret.span,
-            );
-        }
-        self.record_param_types(fn_name, &func.params);
-    }
 }
 
 impl<'a> Visit<'a> for JsVisitor<'a> {
-    fn visit_expression(&mut self, expr: &Expression<'a>) {
-        match expr {
-            Expression::StringLiteral(lit) => {
-                self.push_string_literal(&lit.value, lit.span);
-            }
-            Expression::TemplateLiteral(tpl) => {
-                if tpl.expressions.is_empty()
-                    && tpl.quasis.len() == 1
-                    && let Some(cooked) = &tpl.quasis[0].value.cooked
-                {
-                    self.push_string_literal(cooked, tpl.span);
-                } else if tpl.expressions.is_empty() && tpl.quasis.len() == 1 {
-                    self.push_string_literal(&tpl.quasis[0].value.raw, tpl.span);
-                }
-            }
-            Expression::NewExpression(new_expr) => {
-                // Detect WeakMap/WeakSet constructor calls to identify global registry patterns
-                // Common in React DevTools and other libraries for storing metadata
-                if let Expression::Identifier(ident) = &new_expr.callee {
-                    let name = ident.name.to_string();
-                    if name == "WeakMap" || name == "WeakSet" {
-                        self.analysis.has_weak_collections = true;
-                    }
-                }
-            }
-            _ => {}
-        }
-        walk_expression(self, expr);
-    }
-
-    fn visit_member_expression(&mut self, member: &MemberExpression<'a>) {
-        // Track namespace member access: NS.member where NS is from `import * as NS`
-        // This fixes Issue #5 - namespace member access not tracked
-        if let MemberExpression::StaticMemberExpression(static_member) = member {
-            // Check if the object is an identifier (e.g., `NS` in `NS.transform`)
-            if let Expression::Identifier(obj_ident) = &static_member.object {
-                let namespace_name = obj_ident.name.to_string();
-                let member_name = static_member.property.name.to_string();
-
-                // Check if this identifier is a namespace import
-                if let Some((source, _resolved_path)) = self.namespace_imports.get(&namespace_name)
-                {
-                    // Find the import entry and add this member as a used symbol
-                    for imp in &mut self.analysis.imports {
-                        if &imp.source == source {
-                            // Check if we already have this member symbol
-                            let already_has_member =
-                                imp.symbols.iter().any(|s| s.name == member_name);
-                            if !already_has_member {
-                                // Add the accessed member as an import symbol
-                                imp.symbols.push(ImportSymbol {
-                                    name: member_name.clone(),
-                                    alias: None,
-                                    is_default: false,
-                                });
-                            }
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-
-        // Continue walking the AST
-        oxc_ast_visit::walk::walk_member_expression(self, member);
-    }
-
     // --- IMPORTS ---
 
     fn visit_import_declaration(&mut self, decl: &ImportDeclaration<'a>) {
@@ -848,9 +88,6 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
         let mut entry = ImportEntry::new(source.clone(), ImportKind::Static);
         entry.resolved_path = self.resolve_path(&source);
         entry.is_bare = !source.starts_with('.') && !source.starts_with('/');
-        if matches!(decl.import_kind, ImportOrExportKind::Type) {
-            entry.kind = ImportKind::Type;
-        }
 
         if let Some(specifiers) = &decl.specifiers {
             for spec in specifiers {
@@ -883,15 +120,11 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                         });
                     }
                     ImportDeclarationSpecifier::ImportNamespaceSpecifier(s) => {
-                        let alias = s.local.name.to_string();
                         entry.symbols.push(ImportSymbol {
                             name: "*".to_string(),
-                            alias: Some(alias.clone()),
+                            alias: Some(s.local.name.to_string()),
                             is_default: false,
                         });
-                        // Track namespace import for member expression resolution
-                        self.namespace_imports
-                            .insert(alias, (source.clone(), entry.resolved_path.clone()));
                     }
                 }
             }
@@ -951,17 +184,8 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                                     "named",
                                     Some(line),
                                 ));
-                                if let Some(init) = &d.init {
-                                    if let Expression::FunctionExpression(fun) = init {
-                                        self.record_function_signature(id.name.as_str(), fun);
-                                    } else if let Expression::ArrowFunctionExpression(fun) = init {
-                                        self.record_arrow_signature(id.name.as_str(), fun);
-                                    }
-                                }
                             }
                         }
-                        // Continue traversal
-                        self.visit_variable_declaration(var);
                     }
                     Declaration::FunctionDeclaration(f) => {
                         if let Some(id) = &f.id {
@@ -972,11 +196,6 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                                 "named",
                                 Some(line),
                             ));
-                            self.record_function_signature(id.name.as_str(), f);
-                        }
-                        // Continue traversal
-                        if let Some(body) = &f.body {
-                            self.visit_function_body(body);
                         }
                     }
                     Declaration::ClassDeclaration(c) => {
@@ -989,8 +208,6 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                                 Some(line),
                             ));
                         }
-                        // Continue traversal
-                        self.visit_class(c);
                     }
                     Declaration::TSInterfaceDeclaration(i) => {
                         let name = i.id.name.to_string();
@@ -1039,56 +256,23 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
 
     fn visit_export_default_declaration(&mut self, decl: &ExportDefaultDeclaration<'a>) {
         let line = self.get_line(decl.span);
-        // Default exports are always named "default" for matching with `import X from './file'`
-        // The actual function/class name is stored in export_type for debugging only
-        match &decl.declaration {
+        let name = match &decl.declaration {
             ExportDefaultDeclarationKind::FunctionDeclaration(f) => {
-                let original_name = f.id.as_ref().map(|i| i.name.to_string());
-                self.analysis.exports.push(ExportSymbol::new(
-                    "default".to_string(),
-                    "default",
-                    original_name.as_deref().unwrap_or("default"),
-                    Some(line),
-                ));
-                if let Some(name) = &original_name {
-                    self.record_function_signature(name, f);
-                }
-
-                // Continue traversal
-                if let Some(body) = &f.body {
-                    self.visit_function_body(body);
-                }
+                f.id.as_ref()
+                    .map(|i| i.name.to_string())
+                    .unwrap_or("default".to_string())
             }
             ExportDefaultDeclarationKind::ClassDeclaration(c) => {
-                let original_name = c.id.as_ref().map(|i| i.name.to_string());
-                self.analysis.exports.push(ExportSymbol::new(
-                    "default".to_string(),
-                    "default",
-                    original_name.as_deref().unwrap_or("default"),
-                    Some(line),
-                ));
-
-                // Continue traversal
-                self.visit_class(c);
+                c.id.as_ref()
+                    .map(|i| i.name.to_string())
+                    .unwrap_or("default".to_string())
             }
-            ExportDefaultDeclarationKind::TSInterfaceDeclaration(i) => {
-                self.analysis.exports.push(ExportSymbol::new(
-                    "default".to_string(),
-                    "default",
-                    &i.id.name,
-                    Some(line),
-                ));
-                // Interfaces don't have executable code bodies (calls), so no need to traverse deep for commands
-            }
-            _ => {
-                self.analysis.exports.push(ExportSymbol::new(
-                    "default".to_string(),
-                    "default",
-                    "default",
-                    Some(line),
-                ));
-            }
+            ExportDefaultDeclarationKind::TSInterfaceDeclaration(i) => i.id.name.to_string(),
+            _ => "default".to_string(),
         };
+        self.analysis
+            .exports
+            .push(ExportSymbol::new(name, "default", "default", Some(line)));
     }
 
     fn visit_export_all_declaration(&mut self, decl: &ExportAllDeclaration<'a>) {
@@ -1101,129 +285,57 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
         });
     }
 
-    // --- DYNAMIC IMPORTS (import("...")) ---
-
-    fn visit_import_expression(&mut self, expr: &ImportExpression<'a>) {
-        // Handle import("./foo")
-        if let Expression::StringLiteral(s) = &expr.source {
-            let source = s.value.to_string();
-
-            // Track in dynamic_imports for backward compatibility
-            if !self.analysis.dynamic_imports.contains(&source) {
-                self.analysis.dynamic_imports.push(source.clone());
-            }
-
-            // NEW: Also create an ImportEntry with Dynamic kind for graph edges
-            let mut entry = ImportEntry::new(source.clone(), ImportKind::Dynamic);
-            entry.resolved_path = self.resolve_path(&source);
-            entry.is_bare = !source.starts_with('.') && !source.starts_with('/');
-            // Dynamic imports don't have specific symbols - they import the whole module
-            self.analysis.imports.push(entry);
-
-            // Also track resolved path in dynamic_imports if available
-            if let Some(resolved) = self.resolve_path(&source)
-                && !self.analysis.dynamic_imports.contains(&resolved)
-            {
-                self.analysis.dynamic_imports.push(resolved);
-            }
-        }
-
-        // Continue visiting children
-        self.visit_expression(&expr.source);
-        if let Some(opts) = &expr.options {
-            self.visit_expression(opts);
-        }
-    }
-
     // --- CALL EXPRESSIONS (invoke, etc) ---
 
     fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
-        // Continue visiting children (callee/args may contain nested invocations)
+        // Continue visiting children
         self.visit_arguments(&call.arguments);
         self.visit_expression(&call.callee);
 
         let callee_name = match &call.callee {
             Expression::Identifier(ident) => Some(ident.name.to_string()),
-
             Expression::StaticMemberExpression(member) => {
                 // Handle obj.emit(...)
-
                 Some(member.property.name.to_string())
             }
-
             _ => None,
         };
 
         if let Some(name) = callee_name {
-            // Commands - detect Tauri invoke patterns
-            let name_lower = name.to_lowercase();
-            let is_potential_command = name_lower.contains("invoke") || name.contains("Command");
-
-            if is_potential_command
-                && !self.command_cfg.dom_exclusions.contains(&name)
-                && !self.command_cfg.non_invoke_exclusions.contains(&name)
+            // Commands
+            // Fix collapsible_if
+            if (name == "invoke"
+                || name == "invokeSnake"
+                || name == "safeInvoke"
+                || name.starts_with("invoke"))
                 && let Some(arg) = call.arguments.first()
             {
-                // Extract command name from first argument (string literal or template literal)
-                let cmd_name = match arg {
+                let payload = match arg {
                     Argument::StringLiteral(s) => Some(s.value.to_string()),
-                    Argument::TemplateLiteral(t) => {
-                        // Only extract if it's a simple template without expressions
-                        if t.quasis.len() == 1 && t.expressions.is_empty() {
-                            t.quasis.first().map(|q| q.value.raw.to_string())
-                        } else {
-                            None
-                        }
-                    }
                     _ => None,
                 };
 
-                // Only record command if we have an actual command name (from the argument).
-                // Skip if cmd_name is None - that means we couldn't extract the command name
-                // (e.g., dynamic command name or wrapper function definition).
-                if let Some(cmd_name) = cmd_name {
-                    // Filter out command names that are clearly not Tauri commands
-                    // (e.g., CLI tools, shell commands found in scripts/config files)
-                    if self.command_cfg.invalid_command_names.contains(&cmd_name) {
-                        // Skip - not a real Tauri command
-                    } else {
-                        // Payload casing drift: if command name looks snake_case and payload keys are camelCase
-                        let mut casing_issues: Vec<CommandPayloadCasing> = Vec::new();
-                        if cmd_name.contains('_')
-                            && let Some(Argument::ObjectExpression(obj)) = call.arguments.first()
-                        {
-                            for prop in &obj.properties {
-                                if let ObjectPropertyKind::ObjectProperty(p) = prop
-                                    && let PropertyKey::Identifier(id) = &p.key
-                                {
-                                    let key = id.name.to_string();
-                                    if key.chars().any(|c| c.is_uppercase()) {
-                                        casing_issues.push(CommandPayloadCasing {
-                                            command: cmd_name.clone(),
-                                            key,
-                                            path: self.path.to_string_lossy().to_string(),
-                                            line: self.get_line(p.span),
-                                        });
-                                    }
-                                }
-                            }
-                        }
-                        self.analysis.command_payload_casing.extend(casing_issues);
+                let generic = call
+                    .type_parameters
+                    .as_ref()
+                    .and_then(|params| params.params.first().map(|_| "Type".to_string()));
 
-                        let generic = call.type_arguments.as_ref().and_then(|params| {
-                            params.params.first().map(JsVisitor::type_to_string)
-                        });
+                let line = self.get_line(call.span);
 
-                        let line = self.get_line(call.span);
+                self.analysis.command_calls.push(CommandRef {
+                    name: name.clone(),
+                    exposed_name: None,
+                    line,
+                    generic_type: generic,
+                    payload: payload.clone(),
+                });
 
-                        self.analysis.command_calls.push(CommandRef {
-                            name: cmd_name,
-                            exposed_name: None,
-                            line,
-                            generic_type: generic,
-                            payload: None,
-                        });
-                    }
+                // Fix collapsible_if
+                if let Some(cmd_name) = payload
+                    && let Some(last) = self.analysis.command_calls.last_mut()
+                {
+                    last.name = cmd_name;
+                    last.payload = None;
                 }
             }
 
@@ -1240,21 +352,6 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                 let (event_name, raw_name, kind) = match arg {
                     Argument::StringLiteral(s) => {
                         (s.value.to_string(), Some(s.value.to_string()), "literal")
-                    }
-                    Argument::TemplateLiteral(t) => {
-                        if t.quasis.len() == 1 && t.expressions.is_empty() {
-                            if let Some(q) = t.quasis.first() {
-                                (
-                                    q.value.raw.to_string(),
-                                    Some(q.value.raw.to_string()),
-                                    "literal",
-                                )
-                            } else {
-                                ("?".to_string(), None, "unknown")
-                            }
-                        } else {
-                            ("?".to_string(), None, "unknown")
-                        }
                     }
                     Argument::Identifier(id) => {
                         let id_name = id.name.to_string();
@@ -1307,13 +404,6 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                 .event_consts
                 .insert(id.name.to_string(), s.value.to_string());
         }
-
-        // IMPORTANT: Continue visiting children (e.g. init expression might contain dynamic imports)
-        // Manually visit children since we overrode the default implementation
-        self.visit_binding_pattern(&decl.id);
-        if let Some(init) = &decl.init {
-            self.visit_expression(init);
-        }
     }
 }
 
@@ -1345,7 +435,6 @@ mod tests {
             None,
             None,
             "test.ts".to_string(),
-            &CommandDetectionConfig::default(),
         );
 
         // Imports
@@ -1388,15 +477,7 @@ mod tests {
         let exports: Vec<_> = analysis.exports.iter().map(|e| e.name.as_str()).collect();
         assert!(exports.contains(&"myVar"));
         assert!(exports.contains(&"myFunc"));
-        // Default exports are now named "default" for proper import matching
-        assert!(exports.contains(&"default"));
-        // The original class name is preserved in export_type
-        assert!(
-            analysis
-                .exports
-                .iter()
-                .any(|e| e.name == "default" && e.export_type == "MyClass")
-        );
+        assert!(exports.contains(&"MyClass"));
         assert!(exports.contains(&"reexported"));
 
         // Commands
@@ -1433,7 +514,6 @@ mod tests {
             None,
             None,
             "events.ts".to_string(),
-            &CommandDetectionConfig::default(),
         );
 
         // Constants
@@ -1466,948 +546,5 @@ mod tests {
             .collect();
         assert!(listens.contains(&"data-update")); // Resolved from const
         assert!(listens.contains(&"window-event"));
-    }
-
-    #[test]
-    fn test_dynamic_imports_added_to_imports_list() {
-        let content = r#"
-            // Regular static import
-            import { Button } from './Button';
-
-            // Dynamic import with import()
-            const LazyComponent = import('./LazyComponent');
-
-            // React.lazy with dynamic import
-            const LazyPage = React.lazy(() => import('./pages/Home'));
-        "#;
-
-        let analysis = analyze_js_file_ast(
-            content,
-            Path::new("src/App.tsx"),
-            Path::new("src"),
-            None,
-            None,
-            "App.tsx".to_string(),
-            &CommandDetectionConfig::default(),
-        );
-
-        // Check that static import is captured
-        assert!(analysis.imports.iter().any(|i| i.source == "./Button"));
-
-        // Check that dynamic imports are captured in imports list (not just dynamic_imports)
-        assert!(
-            analysis
-                .imports
-                .iter()
-                .any(|i| i.source == "./LazyComponent")
-        );
-        assert!(analysis.imports.iter().any(|i| i.source == "./pages/Home"));
-
-        // Verify they're marked as Dynamic kind
-        let lazy_import = analysis
-            .imports
-            .iter()
-            .find(|i| i.source == "./LazyComponent")
-            .unwrap();
-        assert!(matches!(lazy_import.kind, ImportKind::Dynamic));
-    }
-
-    #[test]
-    fn test_vue_sfc_script_extraction() {
-        // Vue SFC with script setup (Composition API)
-        let content = r#"
-<script setup lang="ts">
-import { ref, computed } from 'vue'
-
-const count = ref(0)
-
-export function increment() {
-    count.value++
-}
-</script>
-
-<template>
-  <div>{{ count }}</div>
-</template>
-        "#;
-
-        let analysis = analyze_js_file_ast(
-            content,
-            Path::new("src/Counter.vue"),
-            Path::new("src"),
-            None,
-            None,
-            "Counter.vue".to_string(),
-            &CommandDetectionConfig::default(),
-        );
-
-        // Verify imports are detected
-        assert!(
-            analysis.imports.iter().any(|i| i.source == "vue"),
-            "Should detect vue import"
-        );
-
-        // Verify exports are detected
-        assert!(
-            analysis
-                .exports
-                .iter()
-                .any(|e| e.name == "increment" && e.kind == "function"),
-            "Should detect increment export"
-        );
-    }
-
-    #[test]
-    fn test_vue_sfc_options_api() {
-        // Vue SFC with Options API
-        let content = r#"
-<script lang="ts">
-import { defineComponent } from 'vue'
-
-export default defineComponent({
-    data() {
-        return { count: 0 }
-    }
-})
-</script>
-
-<template>
-  <div>{{ count }}</div>
-</template>
-        "#;
-
-        let analysis = analyze_js_file_ast(
-            content,
-            Path::new("src/Counter.vue"),
-            Path::new("src"),
-            None,
-            None,
-            "Counter.vue".to_string(),
-            &CommandDetectionConfig::default(),
-        );
-
-        // Verify import is detected
-        assert!(
-            analysis.imports.iter().any(|i| i.source == "vue"),
-            "Should detect vue import"
-        );
-
-        // Verify default export is detected
-        assert!(
-            analysis.exports.iter().any(|e| e.export_type == "default"),
-            "Should detect default export"
-        );
-    }
-
-    #[test]
-    fn test_vue_script_extraction_basic() {
-        let vue_content = r#"
-<script>
-const message = 'Hello'
-export const greeting = message + ' World'
-</script>
-
-<template>
-  <div>{{ greeting }}</div>
-</template>
-        "#;
-
-        let extracted = extract_vue_script(vue_content);
-        assert!(extracted.contains("const message = 'Hello'"));
-        assert!(extracted.contains("export const greeting"));
-        assert!(!extracted.contains("<template>"));
-    }
-
-    #[test]
-    fn test_svelte_template_function_calls() {
-        let template = r#"
-            <div>
-                <span>{badgeText(account)}</span>
-                <p>{formatDate(date, 'short')}</p>
-            </div>
-        "#;
-
-        let usages = parse_svelte_template_usages(template);
-        assert!(usages.contains(&"badgeText".to_string()));
-        assert!(usages.contains(&"formatDate".to_string()));
-    }
-
-    #[test]
-    fn test_svelte_template_event_handlers() {
-        let template = r#"
-            <button on:click={handleClick}>Click me</button>
-            <input on:input={onInputChange} />
-            <form on:submit={submitForm}>...</form>
-        "#;
-
-        let usages = parse_svelte_template_usages(template);
-        assert!(usages.contains(&"handleClick".to_string()));
-        assert!(usages.contains(&"onInputChange".to_string()));
-        assert!(usages.contains(&"submitForm".to_string()));
-    }
-
-    #[test]
-    fn test_svelte_template_bind_directives() {
-        let template = r#"
-            <input bind:value={inputValue} />
-            <select bind:value={selectedOption}>...</select>
-        "#;
-
-        let usages = parse_svelte_template_usages(template);
-        assert!(usages.contains(&"inputValue".to_string()));
-        assert!(usages.contains(&"selectedOption".to_string()));
-    }
-
-    #[test]
-    fn test_svelte_template_use_directives() {
-        let template = r#"
-            <div use:clickOutside use:tooltip={tooltipParams}>
-                Content
-            </div>
-        "#;
-
-        let usages = parse_svelte_template_usages(template);
-        assert!(usages.contains(&"clickOutside".to_string()));
-        assert!(usages.contains(&"tooltip".to_string()));
-    }
-
-    #[test]
-    fn test_svelte_template_transitions() {
-        let template = r#"
-            <div transition:fade in:fly out:slide animate:flip>
-                Animated content
-            </div>
-        "#;
-
-        let usages = parse_svelte_template_usages(template);
-        assert!(usages.contains(&"fade".to_string()));
-        assert!(usages.contains(&"fly".to_string()));
-        assert!(usages.contains(&"slide".to_string()));
-        assert!(usages.contains(&"flip".to_string()));
-    }
-
-    #[test]
-    fn test_svelte_template_components() {
-        let template = r#"
-            <MyComponent prop={value} />
-            <AnotherWidget />
-            <div><NestedComponent /></div>
-        "#;
-
-        let usages = parse_svelte_template_usages(template);
-        assert!(usages.contains(&"MyComponent".to_string()));
-        assert!(usages.contains(&"AnotherWidget".to_string()));
-        assert!(usages.contains(&"NestedComponent".to_string()));
-    }
-
-    #[test]
-    fn test_svelte_template_control_flow_with_functions() {
-        let template = r#"
-            {#if hasConflicts()}
-                <Warning />
-            {/if}
-            {#each getItems() as item}
-                <Item {item} />
-            {/each}
-            {:else if checkCondition()}
-                <Fallback />
-            {/if}
-        "#;
-
-        let usages = parse_svelte_template_usages(template);
-        assert!(usages.contains(&"hasConflicts".to_string()));
-        assert!(usages.contains(&"getItems".to_string()));
-        assert!(usages.contains(&"checkCondition".to_string()));
-    }
-
-    #[test]
-    fn test_svelte_template_prop_values() {
-        let template = r#"
-            <Component value={myValue} handler={myHandler} />
-        "#;
-
-        let usages = parse_svelte_template_usages(template);
-        assert!(usages.contains(&"myValue".to_string()));
-        assert!(usages.contains(&"myHandler".to_string()));
-    }
-
-    #[test]
-    fn test_svelte_file_full_analysis() {
-        let content = r#"
-<script lang="ts">
-    import type { Account } from './types';
-
-    export function badgeText(account: Account): string {
-        return account.name;
-    }
-
-    export let account: Account;
-</script>
-
-<div class="badge">
-    <span>{badgeText(account)}</span>
-</div>
-
-<style>
-    .badge { color: blue; }
-</style>
-        "#;
-
-        let analysis = analyze_js_file_ast(
-            content,
-            Path::new("src/GitHubAccountBadge.svelte"),
-            Path::new("src"),
-            None,
-            None,
-            "GitHubAccountBadge.svelte".to_string(),
-            &CommandDetectionConfig::default(),
-        );
-
-        assert!(
-            analysis.local_uses.contains(&"badgeText".to_string()),
-            "badgeText should be in local_uses, found: {:?}",
-            analysis.local_uses
-        );
-
-        assert!(
-            analysis.local_uses.contains(&"account".to_string()),
-            "account should be in local_uses, found: {:?}",
-            analysis.local_uses
-        );
-    }
-
-    #[test]
-    fn test_svelte_template_extraction() {
-        let content = r#"
-<script>
-    let count = 0;
-</script>
-
-<button on:click={() => count++}>
-    {count}
-</button>
-
-<style>
-    button { color: red; }
-</style>
-        "#;
-
-        let template = extract_svelte_template(content);
-        assert!(!template.contains("let count = 0"));
-        assert!(!template.contains("button { color: red; }"));
-        assert!(template.contains("on:click"));
-        assert!(template.contains("{count}"));
-    }
-
-    #[test]
-    fn test_svelte_builtins_not_detected() {
-        let template = r#"
-            {#if condition}
-                {#each items as item}
-                    {#await promise then value}
-                        {console.log(value)}
-                    {:catch error}
-                        {error}
-                    {/await}
-                {/each}
-            {/if}
-        "#;
-
-        let usages = parse_svelte_template_usages(template);
-        assert!(!usages.contains(&"if".to_string()));
-        assert!(!usages.contains(&"each".to_string()));
-        assert!(!usages.contains(&"await".to_string()));
-        assert!(!usages.contains(&"then".to_string()));
-        assert!(!usages.contains(&"catch".to_string()));
-        assert!(!usages.contains(&"console".to_string()));
-    }
-
-    // ========== SVELTE ARROW FUNCTION TESTS ==========
-
-    #[test]
-    fn test_svelte_arrow_function_event_handlers() {
-        let template = r#"
-            <button on:click={() => save()}>Save</button>
-            <button on:click={(e) => handleClick(e)}>Click</button>
-            <input on:input={() => validate(value)}>
-        "#;
-
-        let usages = parse_svelte_template_usages(template);
-        assert!(
-            usages.contains(&"save".to_string()),
-            "Should detect 'save' from arrow function, found: {:?}",
-            usages
-        );
-        assert!(
-            usages.contains(&"handleClick".to_string()),
-            "Should detect 'handleClick' from arrow function with param, found: {:?}",
-            usages
-        );
-        assert!(
-            usages.contains(&"validate".to_string()),
-            "Should detect 'validate' from arrow function, found: {:?}",
-            usages
-        );
-    }
-
-    #[test]
-    fn test_svelte_mixed_event_handlers() {
-        let template = r#"
-            <button on:click={directHandler}>Direct</button>
-            <button on:click={() => arrowHandler()}>Arrow</button>
-            <button on:click={(event) => complexHandler(event, data)}>Complex</button>
-        "#;
-
-        let usages = parse_svelte_template_usages(template);
-        assert!(usages.contains(&"directHandler".to_string()));
-        assert!(usages.contains(&"arrowHandler".to_string()));
-        assert!(usages.contains(&"complexHandler".to_string()));
-    }
-
-    #[test]
-    fn test_svelte_component_method_calls() {
-        // Test component method calls via bind:this pattern
-        // Pattern: <ChatInput bind:this={chatInput} /> then chatInput?.focusInput()
-        let template = r#"
-            <ChatInput bind:this={chatInput} />
-            <button on:click={() => chatInput?.focusInput()}>Focus</button>
-            <div>{modal.show()}</div>
-            <input use:action={() => input.getValue()}>
-        "#;
-
-        let usages = parse_svelte_template_usages(template);
-        assert!(
-            usages.contains(&"focusInput".to_string()),
-            "Should detect focusInput method call via optional chaining, found: {:?}",
-            usages
-        );
-        assert!(
-            usages.contains(&"chatInput".to_string()),
-            "Should detect chatInput object, found: {:?}",
-            usages
-        );
-        assert!(
-            usages.contains(&"show".to_string()),
-            "Should detect show method call, found: {:?}",
-            usages
-        );
-        assert!(
-            usages.contains(&"modal".to_string()),
-            "Should detect modal object, found: {:?}",
-            usages
-        );
-        assert!(
-            usages.contains(&"getValue".to_string()),
-            "Should detect getValue method call, found: {:?}",
-            usages
-        );
-        assert!(
-            usages.contains(&"input".to_string()),
-            "Should detect input object, found: {:?}",
-            usages
-        );
-    }
-
-    // ========== VUE TEMPLATE TESTS ==========
-
-    #[test]
-    fn test_vue_template_function_calls() {
-        let template = r#"
-            <div>
-                <span>{{ formatDate(date) }}</span>
-                <p>{{ computeTotal(items, tax) }}</p>
-            </div>
-        "#;
-
-        let usages = parse_vue_template_usages(template);
-        assert!(usages.contains(&"formatDate".to_string()));
-        assert!(usages.contains(&"computeTotal".to_string()));
-    }
-
-    #[test]
-    fn test_vue_template_event_handlers() {
-        let template = r#"
-            <button @click="handleClick">Click</button>
-            <input @input="onInputChange" />
-            <form v-on:submit="submitForm">...</form>
-        "#;
-
-        let usages = parse_vue_template_usages(template);
-        assert!(usages.contains(&"handleClick".to_string()));
-        assert!(usages.contains(&"onInputChange".to_string()));
-        assert!(usages.contains(&"submitForm".to_string()));
-    }
-
-    #[test]
-    fn test_vue_template_prop_bindings() {
-        let template = r#"
-            <Component :value="computedValue" :data="myData" />
-            <div v-bind:class="dynamicClass">Content</div>
-        "#;
-
-        let usages = parse_vue_template_usages(template);
-        assert!(usages.contains(&"computedValue".to_string()));
-        assert!(usages.contains(&"myData".to_string()));
-        assert!(usages.contains(&"dynamicClass".to_string()));
-    }
-
-    #[test]
-    fn test_vue_template_v_model() {
-        let template = r#"
-            <input v-model="username" />
-            <select v-model="selectedOption">...</select>
-        "#;
-
-        let usages = parse_vue_template_usages(template);
-        assert!(usages.contains(&"username".to_string()));
-        assert!(usages.contains(&"selectedOption".to_string()));
-    }
-
-    #[test]
-    fn test_vue_template_components() {
-        let template = r#"
-            <MyComponent :prop="value" />
-            <AnotherWidget />
-            <div><NestedComponent /></div>
-        "#;
-
-        let usages = parse_vue_template_usages(template);
-        assert!(usages.contains(&"MyComponent".to_string()));
-        assert!(usages.contains(&"AnotherWidget".to_string()));
-        assert!(usages.contains(&"NestedComponent".to_string()));
-    }
-
-    #[test]
-    fn test_vue_file_full_analysis() {
-        let content = r#"
-<script setup lang="ts">
-    import type { Product } from './types';
-
-    export function formatPrice(price: number): string {
-        return `$${price.toFixed(2)}`;
-    }
-
-    export const product: Product = { name: 'Widget', price: 29.99 };
-</script>
-
-<template>
-    <div class="product">
-        <h3>{{ product.name }}</h3>
-        <p>{{ formatPrice(product.price) }}</p>
-    </div>
-</template>
-
-<style scoped>
-    .product { border: 1px solid #ccc; }
-</style>
-        "#;
-
-        let analysis = analyze_js_file_ast(
-            content,
-            Path::new("src/ProductCard.vue"),
-            Path::new("src"),
-            None,
-            None,
-            "ProductCard.vue".to_string(),
-            &CommandDetectionConfig::default(),
-        );
-
-        assert!(
-            analysis.local_uses.contains(&"formatPrice".to_string()),
-            "formatPrice should be in local_uses, found: {:?}",
-            analysis.local_uses
-        );
-
-        assert!(
-            analysis.local_uses.contains(&"product".to_string()),
-            "product should be in local_uses, found: {:?}",
-            analysis.local_uses
-        );
-    }
-
-    #[test]
-    fn test_vue_template_extraction() {
-        let content = r#"
-<script>
-    const count = 0;
-</script>
-
-<template>
-    <button @click="increment">
-        {{ count }}
-    </button>
-</template>
-
-<style scoped>
-    button { color: red; }
-</style>
-        "#;
-
-        let template = extract_vue_template(content);
-        assert!(!template.contains("const count = 0"));
-        assert!(!template.contains("button { color: red; }"));
-        assert!(template.contains("@click"));
-        assert!(template.contains("{{ count }}"));
-    }
-
-    #[test]
-    fn test_vue_builtins_not_detected() {
-        let template = r#"
-            <div v-if="condition">
-                <component :is="dynamicComponent" />
-                <transition name="fade">
-                    <keep-alive>
-                        <component />
-                    </keep-alive>
-                </transition>
-            </div>
-        "#;
-
-        let usages = parse_vue_template_usages(template);
-        assert!(!usages.contains(&"if".to_string()));
-        assert!(!usages.contains(&"component".to_string()));
-        assert!(!usages.contains(&"transition".to_string()));
-        assert!(!usages.contains(&"console".to_string()));
-    }
-
-    /// Test import alias tracking - the original export name should be in `name`,
-    /// and the local alias should be in `alias` field.
-    #[test]
-    fn test_import_alias_tracking() {
-        let content = r#"
-            // Test various import alias patterns
-            import { Component as MyComponent } from 'react';
-            import { useState as useStateHook, useEffect } from 'react';
-            import DefaultExport from './module';
-            import { originalName as renamedImport } from './utils';
-            import { default as DefaultWithAlias } from './other';
-
-            // Use the imports (to avoid them being marked as unused in other analyses)
-            MyComponent();
-            useStateHook();
-            useEffect();
-            DefaultExport();
-            renamedImport();
-            DefaultWithAlias();
-        "#;
-
-        let analysis = analyze_js_file_ast(
-            content,
-            Path::new("src/test.tsx"),
-            Path::new("src"),
-            None,
-            None,
-            "test.tsx".to_string(),
-            &CommandDetectionConfig::default(),
-        );
-
-        // Find ALL react imports - they may be separate or merged depending on implementation
-        let react_imports: Vec<_> = analysis
-            .imports
-            .iter()
-            .filter(|i| i.source == "react")
-            .collect();
-
-        // Collect all react symbols across all import entries
-        let all_react_symbols: Vec<_> = react_imports
-            .iter()
-            .flat_map(|i| i.symbols.iter())
-            .collect();
-
-        // We should have 3 symbols from react: Component, useState, useEffect
-        assert_eq!(
-            all_react_symbols.len(),
-            3,
-            "Should have 3 symbols from react total"
-        );
-
-        // Check Component as MyComponent
-        let component_sym = all_react_symbols
-            .iter()
-            .find(|s| s.name == "Component")
-            .expect("Should find Component symbol");
-        assert_eq!(
-            component_sym.alias.as_deref(),
-            Some("MyComponent"),
-            "Alias should be 'MyComponent'"
-        );
-        assert!(
-            !component_sym.is_default,
-            "Component is not a default export"
-        );
-
-        // Check useState as useStateHook
-        let usestate_sym = all_react_symbols
-            .iter()
-            .find(|s| s.name == "useState")
-            .expect("Should find useState symbol");
-
-        assert_eq!(
-            usestate_sym.name, "useState",
-            "Original export name should be 'useState'"
-        );
-        assert_eq!(
-            usestate_sym.alias.as_deref(),
-            Some("useStateHook"),
-            "Alias should be 'useStateHook'"
-        );
-
-        // Check useEffect (no alias)
-        let useeffect_sym = all_react_symbols
-            .iter()
-            .find(|s| s.name == "useEffect")
-            .expect("Should find useEffect symbol");
-
-        assert_eq!(
-            useeffect_sym.name, "useEffect",
-            "Name should be 'useEffect'"
-        );
-        assert_eq!(useeffect_sym.alias, None, "Should have no alias");
-
-        // Check utils import
-        let utils_import = analysis
-            .imports
-            .iter()
-            .find(|i| i.source == "./utils")
-            .expect("Should find ./utils import");
-
-        let original_sym = utils_import
-            .symbols
-            .iter()
-            .find(|s| s.name == "originalName")
-            .expect("Should find originalName symbol");
-
-        assert_eq!(
-            original_sym.name, "originalName",
-            "Original name should be preserved"
-        );
-        assert_eq!(
-            original_sym.alias.as_deref(),
-            Some("renamedImport"),
-            "Alias should be 'renamedImport'"
-        );
-
-        // Check { default as DefaultWithAlias } pattern
-        let other_import = analysis
-            .imports
-            .iter()
-            .find(|i| i.source == "./other")
-            .expect("Should find ./other import");
-
-        let default_alias_sym = &other_import.symbols[0];
-        assert_eq!(
-            default_alias_sym.name, "default",
-            "Should track 'default' as the original export name"
-        );
-        assert_eq!(
-            default_alias_sym.alias.as_deref(),
-            Some("DefaultWithAlias"),
-            "Alias should be 'DefaultWithAlias'"
-        );
-        assert!(
-            !default_alias_sym.is_default,
-            "This is NOT a default import (uses named import syntax)"
-        );
-    }
-
-    /// Test for Issue #5: Namespace member access should be tracked
-    /// When using `import * as namespace`, accessing `namespace.member` should be detected
-    /// as usage of the `member` export from the imported module.
-    #[test]
-    fn test_namespace_member_access_tracking() {
-        let content = r#"
-            import * as amp from '@sveltejs/amp';
-            import * as utils from './utils';
-
-            // These member accesses should be tracked as using 'transform' and 'helper'
-            const result = amp.transform(buffer);
-            utils.helper();
-            const value = utils.CONSTANT;
-        "#;
-
-        let analysis = analyze_js_file_ast(
-            content,
-            Path::new("src/app.ts"),
-            Path::new("src"),
-            None,
-            None,
-            "app.ts".to_string(),
-            &CommandDetectionConfig::default(),
-        );
-
-        // Should have 2 imports
-        assert_eq!(analysis.imports.len(), 2);
-
-        // Check the amp import
-        let amp_import = analysis
-            .imports
-            .iter()
-            .find(|i| i.source == "@sveltejs/amp")
-            .expect("Should find @sveltejs/amp import");
-
-        // Should have both the namespace symbol (*) and the accessed member (transform)
-        assert_eq!(
-            amp_import.symbols.len(),
-            2,
-            "amp import should have 2 symbols: * and transform"
-        );
-        assert!(
-            amp_import.symbols.iter().any(|s| s.name == "*"),
-            "amp import should have namespace symbol"
-        );
-        assert!(
-            amp_import.symbols.iter().any(|s| s.name == "transform"),
-            "amp import should track 'transform' member access"
-        );
-
-        // Check the utils import
-        let utils_import = analysis
-            .imports
-            .iter()
-            .find(|i| i.source == "./utils")
-            .expect("Should find ./utils import");
-
-        // Should have namespace symbol (*), helper, and CONSTANT
-        assert_eq!(
-            utils_import.symbols.len(),
-            3,
-            "utils import should have 3 symbols: *, helper, and CONSTANT"
-        );
-        assert!(
-            utils_import.symbols.iter().any(|s| s.name == "*"),
-            "utils import should have namespace symbol"
-        );
-        assert!(
-            utils_import.symbols.iter().any(|s| s.name == "helper"),
-            "utils import should track 'helper' member access"
-        );
-        assert!(
-            utils_import.symbols.iter().any(|s| s.name == "CONSTANT"),
-            "utils import should track 'CONSTANT' member access"
-        );
-    }
-
-    #[test]
-    fn test_flow_file_detection() {
-        // Test Flow annotation detection at start of file
-        let flow_content = r#"
-// @flow
-export type MyType = {
-    name: string,
-    age: number,
-};
-
-export const myValue = 42;
-        "#;
-
-        let analysis = analyze_js_file_ast(
-            flow_content,
-            Path::new("src/types.js"),
-            Path::new("src"),
-            None,
-            None,
-            "types.js".to_string(),
-            &CommandDetectionConfig::default(),
-        );
-
-        assert!(
-            analysis.is_flow_file,
-            "File with @flow annotation should be detected as Flow file"
-        );
-    }
-
-    #[test]
-    fn test_non_flow_file() {
-        // Test that files without @flow annotation are not marked as Flow
-        let regular_content = r#"
-export type MyType = {
-    name: string,
-    age: number,
-};
-
-export const myValue = 42;
-        "#;
-
-        let analysis = analyze_js_file_ast(
-            regular_content,
-            Path::new("src/types.ts"),
-            Path::new("src"),
-            None,
-            None,
-            "types.ts".to_string(),
-            &CommandDetectionConfig::default(),
-        );
-
-        assert!(
-            !analysis.is_flow_file,
-            "File without @flow annotation should NOT be detected as Flow file"
-        );
-    }
-
-    /// Test WeakMap/WeakSet detection for registry pattern (React DevTools, etc.)
-    #[test]
-    fn test_weakmap_detection() {
-        let content = r#"
-            // React DevTools pattern: store component metadata in WeakMap
-            const componentMap = new WeakMap();
-            const stateMap = new WeakSet();
-
-            export function registerComponent(component) {
-                componentMap.set(component, { name: component.name });
-            }
-
-            export const MyComponent = () => <div>Hello</div>;
-        "#;
-
-        let analysis = analyze_js_file_ast(
-            content,
-            Path::new("src/devtools.tsx"), // Use .tsx for JSX support
-            Path::new("src"),
-            None,
-            None,
-            "devtools.tsx".to_string(),
-            &CommandDetectionConfig::default(),
-        );
-
-        assert!(
-            analysis.has_weak_collections,
-            "Should detect WeakMap/WeakSet usage"
-        );
-
-        // Should export 2 symbols
-        assert_eq!(analysis.exports.len(), 2);
-        assert!(
-            analysis
-                .exports
-                .iter()
-                .any(|e| e.name == "registerComponent")
-        );
-        assert!(analysis.exports.iter().any(|e| e.name == "MyComponent"));
-    }
-
-    /// Test that files without WeakMap/WeakSet don't get flagged
-    #[test]
-    fn test_no_weakmap_detection() {
-        let content = r#"
-            const cache = new Map();
-            export function getCached(key) {
-                return cache.get(key);
-            }
-        "#;
-
-        let analysis = analyze_js_file_ast(
-            content,
-            Path::new("src/cache.ts"),
-            Path::new("src"),
-            None,
-            None,
-            "cache.ts".to_string(),
-            &CommandDetectionConfig::default(),
-        );
-
-        assert!(
-            !analysis.has_weak_collections,
-            "Should NOT flag regular Map as WeakMap"
-        );
     }
 }
