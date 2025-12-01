@@ -4,7 +4,7 @@
 //!
 //! This crate provides a type-safe, component-based approach to generating
 //! beautiful HTML reports using [Leptos](https://leptos.dev/) server-side rendering.
-//! Originally built for [loctree](https://github.com/LibraxisAI/Loctree) codebase
+//! Originally built for [loctree](https://github.com/Loctree/Loctree) codebase
 //! analysis, it can be used independently for any static report generation needs.
 //!
 //! ## Features
@@ -59,7 +59,7 @@
 //!
 //! ---
 //!
-//! Created by M&K (c)2025 The LibraxisAI Team
+//! Developed with 💀 by The Loctree Team (c)2025
 
 #![doc(html_root_url = "https://docs.rs/report-leptos/0.1.0")]
 #![warn(missing_docs)]

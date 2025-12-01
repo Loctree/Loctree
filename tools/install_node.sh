@@ -4,14 +4,14 @@ umask 022
 
 # loctree Node installer
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/LibraxisAI/loctree/main/tools/install_node.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/Loctree/Loctree/main/tools/install_node.sh | sh
 # Env overrides:
 #   INSTALL_DIR   where to place the runnable `loctree-node` wrapper (default: $HOME/.local/bin)
 #   LOCTREE_HOME  where to store the downloaded loctree.mjs (default: $HOME/.local/lib/loctree-node)
 
 INSTALL_DIR=${INSTALL_DIR:-"$HOME/.local/bin"}
 LOCTREE_HOME=${LOCTREE_HOME:-"$HOME/.local/lib/loctree-node"}
-RAW_URL="https://raw.githubusercontent.com/LibraxisAI/loctree/main/loctree.mjs"
+RAW_URL="https://raw.githubusercontent.com/Loctree/Loctree/main/loctree.mjs"
 
 info() { printf "[loctree-node] %s\n" "$*"; }
 warn() { printf "[loctree-node][warn] %s\n" "$*" >&2; }

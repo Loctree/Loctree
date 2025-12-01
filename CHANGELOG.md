@@ -6,6 +6,35 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Released]
 
+## [0.5.7] - 2025-12-01
+
+### Added
+- **One-shot artifact bundle**: Bare `loct`/`loctree` now saves the full analyzer output to `.loctree/` alongside `snapshot.json` — `report.html` (with graph), `analysis.json`, `circular.json`, and `py_races.json`, so you don't need to run extra commands after a scan.
+
+### Changed
+- **Rebrand alignment**: Updated repository/org references to `Loctree/Loctree` and refreshed version strings to v0.5.7 across crates and docs.
+- **Release hygiene**: Rust formatting/clippy cleanups applied for the 0.5.7 publish pipeline.
+
+## [0.5.6] - 2025-12-01
+
+### Fixed
+- **AST Parser JSX Fix**: Disabled JSX parsing for `.ts` files (only enabled for `.tsx`/`.jsx`). Previously, TypeScript generics like `<T>` were incorrectly parsed as JSX tags, causing entire files like `api.ts` to fail parsing.
+- **Template Literal Support**: Added detection of Tauri `invoke` calls using backticks (`` `cmd` ``). Commands like `` safeInvoke(`create_user`) `` are now correctly identified.
+- **False Positive Reduction**: Added exclusion lists to prevent non-Tauri functions from being detected as commands:
+  - `NON_INVOKE_EXCLUSIONS`: ~35 patterns like `useVoiceCommands`, `runGitCommand`, `executeCommand`
+  - `INVALID_COMMAND_NAMES`: CLI tools like `node`, `cargo`, `pnpm`, `git`
+- **Payload Requirement**: `CommandRef` is now only created when a valid command name payload exists, eliminating false positives where function names were mistaken for commands.
+
+### Added
+- **Git Context in Reports**: Added `git_branch` and `git_commit` fields to `ReportSection` for future Scan ID system integration.
+- **Parser Debug Logging**: Added error logging when OXC parser encounters issues (visible with `--verbose`).
+
+### Changed
+- **Vista Project Results**: Improved detection accuracy:
+  - Frontend commands: 170 → 254 (+49%)
+  - Missing handlers: 18 → 5 (72% reduction in false positives)
+  - Unused handlers: 137 → 57 (58% reduction in false positives)
+
 ## [0.5.5] - 2025-11-30
 
 ### Fixed
@@ -352,19 +381,19 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 ## [0.2.0] - 2025-11-21
 
 ### Added
-- Unified CLI features and JSON output across all runtimes (Node.js, Python, Rust): extension filters, ignore patterns, gitignore support, max depth, color modes, JSON output, and summary reporting (commit [`8962e39`](https://github.com/LibraxisAI/loctree/commit/8962e39)).
-- Installation scripts for fast setup: `install.sh`, `install_node.sh`, and `install_py.sh` (commit [`b6824f4`](https://github.com/LibraxisAI/loctree/commit/b6824f4)).
-- `--show-hidden` (`-H`) option to include dotfiles and other hidden entries in output in Rust and Python CLIs (commit [`12310b4`](https://github.com/LibraxisAI/loctree/commit/12310b4)).
+- Unified CLI features and JSON output across all runtimes (Node.js, Python, Rust): extension filters, ignore patterns, gitignore support, max depth, color modes, JSON output, and summary reporting (commit [`8962e39`](https://github.com/Loctree/Loctree/commit/8962e39)).
+- Installation scripts for fast setup: `install.sh`, `install_node.sh`, and `install_py.sh` (commit [`b6824f4`](https://github.com/Loctree/Loctree/commit/b6824f4)).
+- `--show-hidden` (`-H`) option to include dotfiles and other hidden entries in output in Rust and Python CLIs (commit [`12310b4`](https://github.com/Loctree/Loctree/commit/12310b4)).
 
 ### Changed
-- Standardized the project name from `loc-tree` to `loctree` across runtimes, binaries, installers, and documentation; improved CLI UX and argument parsing, and enhanced error messages (commit [`e31d3a4`](https://github.com/LibraxisAI/loctree/commit/e31d3a4)).
-- Usage/help output refined and examples clarified across Rust, Node, and Python CLIs (commit [`b6824f4`](https://github.com/LibraxisAI/loctree/commit/b6824f4) and [`8962e39`](https://github.com/LibraxisAI/loctree/commit/8962e39)).
+- Standardized the project name from `loc-tree` to `loctree` across runtimes, binaries, installers, and documentation; improved CLI UX and argument parsing, and enhanced error messages (commit [`e31d3a4`](https://github.com/Loctree/Loctree/commit/e31d3a4)).
+- Usage/help output refined and examples clarified across Rust, Node, and Python CLIs (commit [`b6824f4`](https://github.com/Loctree/Loctree/commit/b6824f4) and [`8962e39`](https://github.com/Loctree/Loctree/commit/8962e39)).
 
 ### Documentation
-- Expanded and clarified README with installation instructions, usage details, examples, and project structure overview (commits [`e31d3a4`](https://github.com/LibraxisAI/loctree/commit/e31d3a4), [`b6824f4`](https://github.com/LibraxisAI/loctree/commit/b6824f4), [`8962e39`](https://github.com/LibraxisAI/loctree/commit/8962e39)).
+- Expanded and clarified README with installation instructions, usage details, examples, and project structure overview (commits [`e31d3a4`](https://github.com/Loctree/Loctree/commit/e31d3a4), [`b6824f4`](https://github.com/Loctree/Loctree/commit/b6824f4), [`8962e39`](https://github.com/Loctree/Loctree/commit/8962e39)).
 
 ### Other
-- Initial project setup (commit [`2031f80`](https://github.com/LibraxisAI/loctree/commit/2031f80)).
+- Initial project setup (commit [`2031f80`](https://github.com/Loctree/Loctree/commit/2031f80)).
 
 ---
 

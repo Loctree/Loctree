@@ -1,7 +1,7 @@
 # loctree — AI-oriented Project Analyzer
 
-[![CI](https://github.com/LibraxisAI/loctree/actions/workflows/ci.yml/badge.svg)](https://github.com/LibraxisAI/loctree/actions/workflows/ci.yml)
-[![Loctree CI](https://img.shields.io/github/actions/workflow/status/LibraxisAI/loctree/loctree-ci.yml?label=loctree%20ci&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgdmlld0JveD0iMCAwIDE2IDE2Ij48cmVjdCB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIGZpbGw9IiMwMDAiLz48dGV4dCB4PSI4IiB5PSIxMiIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMCIgZmlsbD0iI2E4YThhOCIgdGV4dC1hbmNob3I9Im1pZGRsZSI+TDwvdGV4dD48L3N2Zz4=)](https://github.com/LibraxisAI/loctree/actions/workflows/loctree-ci.yml)
+[![CI](https://github.com/Loctree/Loctree/actions/workflows/ci.yml/badge.svg)](https://github.com/Loctree/Loctree/actions/workflows/ci.yml)
+[![Loctree CI](https://img.shields.io/github/actions/workflow/status/Loctree/Loctree/loctree-ci.yml?label=loctree%20ci&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgdmlld0JveD0iMCAwIDE2IDE2Ij48cmVjdCB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIGZpbGw9IiMwMDAiLz48dGV4dCB4PSI4IiB5PSIxMiIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMCIgZmlsbD0iI2E4YThhOCIgdGV4dC1hbmNob3I9Im1pZGRsZSI+TDwvdGV4dD48L3N2Zz4=)](https://github.com/Loctree/Loctree/actions/workflows/loctree-ci.yml)
 [![Crates.io](https://img.shields.io/crates/v/loctree.svg)](https://crates.io/crates/loctree)
 [![Downloads](https://img.shields.io/crates/d/loctree.svg)](https://crates.io/crates/loctree)
 [![docs.rs](https://docs.rs/loctree/badge.svg)](https://docs.rs/loctree)
@@ -11,7 +11,7 @@
 
 **loctree** is a static analysis tool designed for AI agents and developers building production-ready software. It helps overcome the common AI tendency to generate excessive artifacts that lead to re-export cascades, circular imports, and spaghetti dependencies.
 
-**Scan once, slice many.** Run `loctree` to capture your project's true structure, then use `loctree slice` to extract focused context for any AI conversation.
+**Scan once, slice many.** Run `loct` to capture your project's true structure, then use `loct slice` to extract focused context for any AI conversation.
 
 ## Quick Start
 
@@ -20,23 +20,23 @@
 cargo install loctree
 
 # Or via install script
-curl -fsSL https://raw.githubusercontent.com/LibraxisAI/loctree/main/tools/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/Loctree/Loctree/main/tools/install.sh | sh
 
 # Scan your project (auto-detects stack)
 cd your-project
-loctree
+loct
 
 # Extract context for AI agents
-loctree slice src/components/ChatPanel.tsx --consumers --json
+loct slice src/components/ChatPanel.tsx --consumers --json
 
 # Get AI-optimized hierarchical output
-loctree --for-ai
+loct --for-ai
 
 # Find circular imports
-loctree -A --circular
+loct cycles
 
-# Trace a Tauri handler through the entire pipeline
-loctree trace get_user
+# Detect dead exports
+loct dead --confidence high
 ```
 
 ## Why loctree?
@@ -58,7 +58,7 @@ loctree solves this by:
 Extract 3-layer context for any file — perfect for AI conversations:
 
 ```bash
-loctree slice src/App.tsx --consumers
+loct slice src/App.tsx --consumers
 ```
 
 ```
@@ -84,7 +84,7 @@ Total: 6 files, 750 LOC
 Follow a Tauri command through the entire pipeline:
 
 ```bash
-loctree trace get_user
+loct trace get_user
 ```
 
 ```
@@ -106,7 +106,7 @@ Frontend Invocations:
 Hierarchical JSON designed for AI agents with quick wins and hub files:
 
 ```bash
-loctree --for-ai
+loct --for-ai
 ```
 
 ```json
@@ -149,7 +149,7 @@ loctree automatically detects your project type:
 For Tauri projects, loctree validates the entire command pipeline:
 
 ```bash
-loctree -A --preset-tauri
+loct commands
 ```
 
 - **Missing handlers** — Frontend invokes commands that don't exist in backend
@@ -162,14 +162,14 @@ loctree -A --preset-tauri
 Fast directory tree with LOC counts:
 
 ```bash
-loctree --tree src/
+loct tree src/
 
 # Find build artifacts to clean
-loctree --tree --find-artifacts
+loct tree --find-artifacts
 # Output: /path/to/node_modules, /path/to/target, ...
 
 # Show gitignored files
-loctree --tree --show-ignored
+loct tree --show-ignored
 ```
 
 ### Janitor Mode Tools
@@ -178,23 +178,23 @@ Find problems before they become tech debt:
 
 ```bash
 # Check if similar component exists before creating
-loctree -A --check ChatSurface
+loct find --similar ChatSurface
 # Found: ChatPanel (distance: 2), ChatWindow (distance: 3)
 
 # Find potentially unused exports
-loctree -A --dead --confidence high
+loct dead --confidence high
 
 # Detect circular import cycles
-loctree -A --circular
+loct cycles
 
 # Analyze impact of changing a file
-loctree -A --impact src/utils/api.ts
+loct find --impact src/utils/api.ts
 
 # Find a symbol across the codebase
-loctree -A --symbol useAuth
+loct find --symbol useAuth
 
 # List entry points
-loctree -A --entrypoints
+loct lint --entrypoints
 ```
 
 ### HTML Reports
@@ -202,7 +202,7 @@ loctree -A --entrypoints
 Generate interactive HTML reports with dependency graphs:
 
 ```bash
-loctree -A --html-report report.html --graph
+loct report --graph --output report.html
 ```
 
 Features:
@@ -215,69 +215,52 @@ Features:
 
 ```bash
 # Fail if frontend invokes missing backend handlers
-loctree -A --fail-on-missing-handlers
+loct lint --fail
 
-# Fail if events lack listeners/emitters
-loctree -A --fail-on-ghost-events
-
-# Fail if listener/await races detected
-loctree -A --fail-on-races
+# Fail if events lack listeners/emitters or have races
+loct events --json
 
 # SARIF 2.1.0 output for GitHub/GitLab
-loctree -A --sarif > results.sarif
+loct lint --sarif > results.sarif
 ```
 
 ## CLI Reference
 
 ```
-loctree (Rust) - AI-oriented Project Analyzer
+loct (Rust) - AI-oriented Project Analyzer
 
 Modes:
-  (default)                 Scan and save snapshot to .loctree/snapshot.json
-  slice <file>              Holographic slice for AI agents
-  trace <handler>           Trace handler through pipeline (Tauri)
-  --tree                    Directory tree with LOC counts
-  -A, --analyze-imports     Full import/export analysis
-  --for-ai                  AI-optimized hierarchical JSON
+  (default)                 Scan, save snapshot + reports to .loctree/
+  slice <file>              Holographic slice (add --consumers, --json)
+  find                      Unified search (symbols, similar, impact)
+  dead                      Unused exports (alias/barrel aware)
+  cycles                    Circular imports
+  commands                  Tauri FE↔BE bridges (missing/unused)
+  events                    Emit/listen/races summary
+  tree                      Directory tree with LOC counts
+  report --graph            HTML report with graph
+  lint --fail --sarif       CI guardrails / SARIF output
+  --for-ai                  AI-optimized hierarchical JSON (legacy flag)
+
+Find options:
+  --similar <query>         Similar components/symbols
+  --symbol <name>           Symbol definitions/usages
+  --impact <file>           What imports this file
 
 Slice options:
   --consumers               Include files that import the target
   --json                    JSON output for piping to AI
-
-Trace options:
-  trace <name>              Handler name to trace
 
 Tree options:
   --find-artifacts          Find build dirs (node_modules, target, etc.)
   --show-ignored            Show only gitignored files
   --summary[=N]             Show totals + top N large files
 
-Analyzer options (-A):
-  --circular                Find circular imports
-  --dead                    Find unused exports
-  --entrypoints             List entry points
-  --impact <file>           What imports this file
-  --symbol <name>           Search for symbol
-  --check <query>           Find similar components
-  --sarif                   SARIF 2.1.0 output
-  --html-report <file>      Generate HTML report
-  --graph                   Include dependency graph in HTML
-
-Presets:
-  --preset-tauri            Tauri defaults (ts,tsx,rs + handler checks)
-  --preset-styles           CSS/Tailwind defaults
-
-Pipeline checks:
-  --fail-on-missing-handlers
-  --fail-on-ghost-events
-  --fail-on-races
-
 Common:
   -g, --gitignore           Respect .gitignore
   -I, --ignore <path>       Ignore path (repeatable)
   --full-scan               Re-analyze all (ignore cache)
   --verbose                 Detailed progress
-  --help-full               Full reference
 ```
 
 ## Installation
@@ -291,7 +274,7 @@ cargo install loctree
 ### From source
 
 ```bash
-git clone https://github.com/LibraxisAI/loctree
+git clone https://github.com/Loctree/Loctree
 cd loctree/loctree_rs
 cargo install --path .
 ```
@@ -299,7 +282,7 @@ cargo install --path .
 ### Install script
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/LibraxisAI/loctree/main/tools/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/Loctree/Loctree/main/tools/install.sh | sh
 ```
 
 ## Project Structure
@@ -364,10 +347,10 @@ Show that your project uses loctree:
 Or use the SVG badge:
 
 ```markdown
-[![loctree](https://raw.githubusercontent.com/LibraxisAI/loctree/main/assets/loctree-badge.svg)](https://crates.io/crates/loctree)
+[![loctree](https://raw.githubusercontent.com/Loctree/Loctree/main/assets/loctree-badge.svg)](https://crates.io/crates/loctree)
 ```
 
-[![loctree](https://raw.githubusercontent.com/LibraxisAI/loctree/main/assets/loctree-badge.svg)](https://crates.io/crates/loctree)
+[![loctree](https://raw.githubusercontent.com/Loctree/Loctree/main/assets/loctree-badge.svg)](https://crates.io/crates/loctree)
 
 ## License
 
@@ -375,4 +358,4 @@ MIT — use it, fork it, improve it. See [LICENSE](LICENSE).
 
 ---
 
-**Created by M&K (c)2025 The LibraxisAI Team**
+**Developed with 💀 by The Loctree Team (c)2025 **

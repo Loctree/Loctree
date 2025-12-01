@@ -2,11 +2,11 @@
 name = "report-leptos"
 version = "0.1.1"
 edition = "2021"
-authors = ["LibraxisAI <the1st@whoai.am>"]
+authors = ["Loctree <loct@loctree.io>"]
 description = "Leptos SSR renderer for generating static HTML reports - beautiful, interactive, type-safe"
 license = "MIT"
-repository = "https://github.com/LibraxisAI/Loctree"
-homepage = "https://github.com/LibraxisAI/Loctree"
+repository = "https://github.com/Loctree/Loctree"
+homepage = "https://github.com/Loctree/Loctree"
 documentation = "https://docs.rs/report-leptos"
 readme = "README.md"
 keywords = ["leptos", "ssr", "html", "report", "static-site"]

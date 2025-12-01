@@ -547,4 +547,8 @@ pub struct ReportSection {
     pub graph_warning: Option<String>,
     /// AI-generated insights
     pub insights: Vec<AiInsight>,
+    /// Git branch name (if available)
+    pub git_branch: Option<String>,
+    /// Git commit hash (if available)
+    pub git_commit: Option<String>,
 }

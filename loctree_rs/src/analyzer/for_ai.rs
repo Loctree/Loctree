@@ -5,7 +5,7 @@
 //! - Navigate via slice references
 //! - Get actionable quick wins
 //!
-//! Created by M&K (c)2025 The LibraxisAI Team
+//! Developed with 💀 by The Loctree Team (c)2025
 
 use serde::Serialize;
 
@@ -194,7 +194,7 @@ fn build_section_refs(sections: &[ReportSection]) -> Vec<ForAiSectionRef> {
                 files: s.files_analyzed,
                 loc,
                 issues,
-                slice_cmd: format!("loctree slice {} --json", s.root),
+                slice_cmd: format!("loct slice {} --json", s.root),
             }
         })
         .collect()
@@ -222,7 +222,7 @@ fn extract_quick_wins(sections: &[ReportSection]) -> Vec<QuickWin> {
                 target: gap.name.clone(),
                 location,
                 impact: "Fixes runtime error when frontend calls invoke()".to_string(),
-                trace_cmd: Some(format!("loctree trace {}", gap.name)),
+                trace_cmd: Some(format!("loct trace {}", gap.name)),
             });
             priority += 1;
         }
@@ -246,7 +246,7 @@ fn extract_quick_wins(sections: &[ReportSection]) -> Vec<QuickWin> {
                 target: gap.name.clone(),
                 location,
                 impact: "Handler exists but isn't exposed to frontend".to_string(),
-                trace_cmd: Some(format!("loctree trace {}", gap.name)),
+                trace_cmd: Some(format!("loct trace {}", gap.name)),
             });
             priority += 1;
         }
@@ -274,7 +274,7 @@ fn extract_quick_wins(sections: &[ReportSection]) -> Vec<QuickWin> {
                 target: gap.name.clone(),
                 location,
                 impact: "Dead code - handler defined but never invoked".to_string(),
-                trace_cmd: Some(format!("loctree trace {}", gap.name)),
+                trace_cmd: Some(format!("loct trace {}", gap.name)),
             });
             priority += 1;
         }
@@ -336,7 +336,7 @@ fn find_hub_files(analyses: &[FileAnalysis]) -> Vec<HubFile> {
                 exports_count,
                 importers_count,
                 commands_count,
-                slice_cmd: format!("loctree slice {} --json", a.path),
+                slice_cmd: format!("loct slice {} --json", a.path),
             },
         )
         .collect()
@@ -382,6 +382,8 @@ mod tests {
             insights: vec![],
             graph: None,
             graph_warning: None,
+            git_branch: None,
+            git_commit: None,
         }
     }
 
@@ -478,7 +480,7 @@ mod tests {
         assert_eq!(refs.len(), 2);
         assert_eq!(refs[0].root, "src");
         assert_eq!(refs[0].files, 10);
-        assert!(refs[0].slice_cmd.contains("loctree slice"));
+        assert!(refs[0].slice_cmd.contains("loct slice"));
         assert_eq!(refs[1].root, "lib");
     }
 

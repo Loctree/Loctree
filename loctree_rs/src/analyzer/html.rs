@@ -40,8 +40,7 @@ pub(crate) fn render_html_report(path: &Path, sections: &[ReportSection]) -> io:
         layout_base_path: "loctree-layout-base.js".into(),
         cose_base_path: "loctree-cose-base.js".into(),
         cytoscape_cose_bilkent_path: "loctree-cytoscape-cose-bilkent.js".into(),
-        wasm_base64: None,
-        wasm_js_glue: None,
+        ..Default::default()
     };
 
     let html = report_leptos::render_report(&leptos_sections, &js_assets);
@@ -129,6 +128,8 @@ mod tests {
                 severity: "medium".into(),
                 message: "Message".into(),
             }],
+            git_branch: None,
+            git_commit: None,
         };
 
         render_html_report(&out_path, &[section]).expect("render html");
@@ -168,6 +169,8 @@ mod tests {
             graph: None,
             graph_warning: None,
             insights: Vec::new(),
+            git_branch: None,
+            git_commit: None,
         };
 
         render_html_report(&out_path, &[section]).expect("render html");

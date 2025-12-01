@@ -4,7 +4,7 @@ umask 022
 
 # loctree install script
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/LibraxisAI/loctree/main/tools/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/Loctree/Loctree/main/tools/install.sh | sh
 # Env overrides:
 #   INSTALL_DIR   where to place the runnable `loctree` wrapper (default: $HOME/.local/bin)
 #   CARGO_HOME    override cargo home (default: ~/.cargo)
@@ -12,7 +12,7 @@ umask 022
 INSTALL_DIR=${INSTALL_DIR:-"$HOME/.local/bin"}
 CARGO_HOME=${CARGO_HOME:-"$HOME/.cargo"}
 CARGO_BIN="$CARGO_HOME/bin"
-REPO_URL="https://github.com/LibraxisAI/loctree"
+REPO_URL="https://github.com/Loctree/Loctree"
 # Allow pinning a branch, tag, or commit; defaults to 'main' regardless of which branch this script is fetched from.
 LOCTREE_REF=${LOCTREE_REF:-"main"}
 

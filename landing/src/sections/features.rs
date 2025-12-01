@@ -1,5 +1,5 @@
-use leptos::prelude::*;
 use super::VERSION;
+use leptos::prelude::*;
 
 #[component]
 pub fn Features() -> impl IntoView {
@@ -20,7 +20,7 @@ pub fn Features() -> impl IntoView {
                         icon="[1]"
                         title="Holographic Slice"
                         description="3-layer context extraction: Core (target), Deps (imports), Consumers (what uses it). Pipe directly to AI."
-                        code=Some("loctree slice src/App.tsx --consumers --json")
+                        code=Some("loct slice src/App.tsx --consumers --json")
                     />
                     <FeatureCard
                         icon="[2]"
@@ -32,31 +32,31 @@ pub fn Features() -> impl IntoView {
                         icon="[3]"
                         title="Duplicate Detection"
                         description="Before creating new components, find similar existing ones. Prevents AI code duplication."
-                        code=Some("loctree -A --check ChatSurface")
+                        code=Some("loct find --similar ChatSurface")
                     />
                     <FeatureCard
                         icon="[4]"
                         title="Circular Import Detection"
                         description="Find circular dependencies that compile but break at runtime. Uses SCC algorithm."
-                        code=Some("loctree -A --circular")
+                        code=Some("loct cycles")
                     />
                     <FeatureCard
                         icon="[5]"
                         title="Dead Code Detection"
                         description="Find unused exports and orphaned code. Clean up before it becomes tech debt."
-                        code=Some("loctree -A --dead --confidence high")
+                        code=Some("loct dead --confidence high")
                     />
                     <FeatureCard
                         icon="[6]"
                         title="Impact Analysis"
                         description="See what breaks if you change a file. Understand dependencies before refactoring."
-                        code=Some("loctree -A --impact src/utils/api.ts")
+                        code=Some("loct find --impact src/utils/api.ts")
                     />
                     <FeatureCard
                         icon="[7]"
                         title="Symbol Search"
                         description="Find where any symbol is defined and used across the codebase."
-                        code=Some("loctree -A --symbol useAuth")
+                        code=Some("loct find --symbol useAuth")
                     />
                     <FeatureCard
                         icon="[8]"
@@ -68,37 +68,37 @@ pub fn Features() -> impl IntoView {
                         icon="[9]"
                         title="Entry Points"
                         description="List all main functions and script entry points in your project."
-                        code=Some("loctree -A --entrypoints")
+                        code=Some("loct lint --entrypoints")
                     />
                     <FeatureCard
                         icon="[10]"
                         title="Tauri Bridge Analysis"
                         description="FE-BE coverage. Matches invoke() calls to #[tauri::command]. Handles rename attributes and semantic matching."
-                        code=Some("loctree -A --preset-tauri src src-tauri/src")
+                        code=Some("loct commands")
                     />
                     <FeatureCard
                         icon="[11]"
                         title="Handler Tracing"
                         description="Trace why a handler appears unused. Shows string literals, exports, and dynamic usage patterns."
-                        code=Some("loctree trace toggle_assistant ./src")
+                        code=Some("loct commands --unused")
                     />
                     <FeatureCard
                         icon="[12]"
                         title="Confidence Scoring"
                         description="HIGH/LOW confidence for unused handlers. LOW = potential dynamic usage detected. Filter with --confidence."
-                        code=Some("loctree -A --dead --confidence high")
+                        code=Some("loct dead --confidence high")
                     />
                     <FeatureCard
                         icon="[13]"
                         title="CI Pipeline Checks"
                         description="Fail builds on missing handlers, ghost events, or race conditions."
-                        code=Some("--fail-on-missing-handlers")
+                        code=Some("loct lint --fail")
                     />
                     <FeatureCard
                         icon="[14]"
                         title="SARIF Output"
                         description="SARIF 2.1.0 output for GitHub Actions, GitLab CI, and other CI/CD systems."
-                        code=Some("loctree -A --sarif > results.sarif")
+                        code=Some("loct lint --sarif > results.sarif")
                     />
                 </div>
             </div>

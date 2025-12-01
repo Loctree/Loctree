@@ -1,5 +1,5 @@
-use leptos::prelude::*;
 use super::VERSION;
+use leptos::prelude::*;
 
 #[component]
 pub fn Nav() -> impl IntoView {
@@ -9,67 +9,57 @@ pub fn Nav() -> impl IntoView {
     let (prompt_copied, set_prompt_copied) = signal(false);
     let (expanded, set_expanded) = signal(false);
 
-    let install_command = "curl -fsSL https://raw.githubusercontent.com/LibraxisAI/loctree/main/tools/install.sh | sh";
+    let install_command =
+        "curl -fsSL https://raw.githubusercontent.com/Loctree/Loctree/main/tools/install.sh | sh";
 
-    let agent_prompt_short = r#"## loctree — AI Agent Quick Reference
+    let agent_prompt_short = r#"## loct — AI Agent Quick Reference
 **Scan once, slice many.** Install: `curl -fsSL .../install.sh | sh`
 
 ### Key Commands
-- `loctree` — scan project, save to .loctree/snapshot.json
-- `loctree slice <file> --consumers --json` — 3-layer context for AI
-- `loctree -A --check <Name>` — find similar components (avoid duplicates)
-- `loctree -A --symbol <Name>` — find symbol definitions & usage
-- `loctree -A --circular` — detect import cycles
-- `loctree -A --dead` — find unused exports
-- `loctree -A --impact <file>` — what breaks if removed
-- `loctree -A --entrypoints` — list main/script entry points
-- `loctree -A --preset-tauri src src-tauri/src` — Tauri FE<>BE coverage
-- `loctree -A --fail-on-missing-handlers --sarif` — CI checks"#;
+- `loct` — scan repo, save snapshot + reports to .loctree/
+- `loct slice <file> --consumers --json` — 3-layer context for AI
+- `loct find --similar <Name>` — avoid duplicates
+- `loct find --impact <file>` — blast radius before refactor
+- `loct dead --confidence high` — unused exports
+- `loct cycles` — circular imports
+- `loct commands --missing/--unused` — Tauri FE↔BE coverage
+- `loct events --json` — emits/listens/races
+- `loct lint --fail --sarif` — CI guardrails"#;
 
-    let agent_prompt_full = r#"## loctree — AI Agent Quick Reference
+    let agent_prompt_full = r#"## loct — AI Agent Quick Reference
 
-**Scan once, slice many.** Capture structure, extract focused context.
+**Scan once, slice many.** Default `loct` now writes snapshot + report bundle to .loctree/.
 
 ### Install & Scan
 ```bash
-curl -fsSL https://raw.githubusercontent.com/LibraxisAI/loctree/main/tools/install.sh | sh
-loctree          # creates .loctree/snapshot.json
+curl -fsSL https://raw.githubusercontent.com/Loctree/Loctree/main/tools/install.sh | sh
+loct          # snapshot + report.html + analysis.json
 ```
 
-### Before creating new components
+### Before creating
 ```bash
-loctree -A --check <Name>   # find similar (avoids duplicates)
-loctree -A --symbol <Name>  # find symbol definitions & usage
+loct find --similar <Name>   # find existing, avoid duplicates
+loct find --symbol <Name>    # defs + uses
 ```
 
 ### Before refactoring
 ```bash
-loctree slice <file> --consumers  # what depends on it
-loctree -A --impact <file>        # what breaks if removed
-loctree -A --circular             # detect import cycles
+loct slice <file> --consumers --json  # context for AI
+loct find --impact <file>             # blast radius
+loct cycles                           # circular imports
 ```
 
-### Dead code detection
+### Hygiene
 ```bash
-loctree -A --dead                 # unused exports
-loctree -A --entrypoints          # main/script entry points
-```
-
-### Focused AI context
-```bash
-loctree slice <file> --consumers --json | claude
-```
-
-### Tauri FE<>BE coverage
-```bash
-loctree -A --preset-tauri src src-tauri/src
+loct dead --confidence high   # unused exports
+loct commands --missing       # FE calls without handlers
+loct commands --unused        # handlers without FE calls
+loct events --json            # emits/listens/races
 ```
 
 ### CI pipeline checks
 ```bash
-loctree -A --fail-on-missing-handlers   # FE->BE integrity
-loctree -A --fail-on-ghost-events       # unused events
-loctree -A --sarif > results.sarif      # SARIF output
+loct lint --fail --sarif > results.sarif
 ```"#;
 
     let copy_install = move |_| {
@@ -87,7 +77,11 @@ loctree -A --sarif > results.sarif      # SARIF output
     let copy_prompt = move |_| {
         if let Some(window) = web_sys::window() {
             let clipboard = window.navigator().clipboard();
-            let content = if expanded.get() { agent_prompt_full } else { agent_prompt_short };
+            let content = if expanded.get() {
+                agent_prompt_full
+            } else {
+                agent_prompt_short
+            };
             let _ = clipboard.write_text(content);
             set_prompt_copied.set(true);
             set_timeout(
@@ -102,7 +96,7 @@ loctree -A --sarif > results.sarif      # SARIF output
             <div class="nav-inner">
                 <a href="/" class="nav-brand">
                     <div class="nav-logo">
-                        <img src="assets/loctree-logo-brutal.svg" alt="loctree" />
+                        <img src="assets/loctree-logo.png" alt="loctree" />
                     </div>
                     <span class="nav-title">"loctree"</span>
                     <span class="nav-version">{VERSION}</span>
@@ -112,7 +106,7 @@ loctree -A --sarif > results.sarif      # SARIF output
                     <a href="#slice" class="nav-link">"Slice"</a>
                     <a href="#cli" class="nav-link">"CLI"</a>
                     <a href="https://docs.rs/loctree" target="_blank" class="nav-link">"Docs"</a>
-                    <a href="https://github.com/LibraxisAI/loctree" target="_blank" class="nav-link">"GitHub"</a>
+                    <a href="https://github.com/Loctree/Loctree" target="_blank" class="nav-link">"GitHub"</a>
                     <button
                         class=move || if drawer_open.get() { "nav-cta active" } else { "nav-cta" }
                         on:click=move |_| set_drawer_open.update(|o| *o = !*o)

@@ -1,55 +1,55 @@
 {
   "name": "loctree",
-  "version": "0.5.3",
+  "version": "0.5.6",
   "tagline": "Scan once, slice many.",
   "description": "AI-oriented codebase analyzer. Use BEFORE reading files manually.",
-  "install": "curl -fsSL https://raw.githubusercontent.com/LibraxisAI/loctree/main/tools/install.sh | sh",
+  "install": "curl -fsSL https://raw.githubusercontent.com/Loctree/Loctree/main/tools/install.sh | sh",
   "commands": {
     "scan": {
-      "cmd": "loctree",
+      "cmd": "loct",
       "desc": "Scan project, create .loctree/snapshot.json"
     },
     "ai_overview": {
-      "cmd": "loctree --for-ai",
+      "cmd": "loct --for-ai",
       "desc": "Project overview optimized for AI (JSON)"
     },
     "slice": {
-      "cmd": "loctree slice <file> --consumers --json",
+      "cmd": "loct slice <file> --consumers --json",
       "desc": "Extract file context with dependencies for AI"
     },
     "check_similar": {
-      "cmd": "loctree -A --check <Name>",
+      "cmd": "loct find <Name>",
       "desc": "Find similar existing components before creating new"
     },
-    "find_symbol": {
-      "cmd": "loctree -A --symbol <Name>",
-      "desc": "Find symbol definitions and usage"
-    },
     "circular": {
-      "cmd": "loctree -A --circular",
+      "cmd": "loct cycles",
       "desc": "Detect circular import cycles"
     },
     "dead_code": {
-      "cmd": "loctree -A --dead",
+      "cmd": "loct dead --confidence high",
       "desc": "Find unused exports"
     },
     "impact": {
-      "cmd": "loctree -A --impact <file>",
+      "cmd": "loct report --impact <file>",
       "desc": "What breaks if file is removed"
     },
     "trace": {
-      "cmd": "loctree trace <handler>",
+      "cmd": "loct trace <handler>",
       "desc": "Investigate Tauri handler FE↔BE usage"
+    },
+    "report_graph": {
+      "cmd": "loct report --graph --report out.html",
+      "desc": "Generate HTML/JSON reports with graphs"
     }
   },
   "workflows": {
-    "before_new_component": ["check_similar", "find_symbol"],
+    "before_new_component": ["check_similar"],
     "before_refactor": ["slice", "impact", "circular"],
     "debugging_tauri": ["trace", "scan"]
   },
   "links": {
     "docs": "https://docs.rs/loctree",
-    "github": "https://github.com/LibraxisAI/loctree",
+    "github": "https://github.com/Loctree/Loctree",
     "crates": "https://crates.io/crates/loctree"
   }
 }

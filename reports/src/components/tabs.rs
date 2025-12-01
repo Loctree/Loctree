@@ -13,7 +13,11 @@ pub fn TabContent(
     active: bool,
     children: Children,
 ) -> impl IntoView {
-    let class = if active { "tab-panel active" } else { "tab-panel" };
+    let class = if active {
+        "tab-panel active"
+    } else {
+        "tab-panel"
+    };
 
     view! {
         <div
