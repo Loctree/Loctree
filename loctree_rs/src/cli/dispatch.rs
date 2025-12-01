@@ -41,6 +41,7 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
             parsed.full_scan = opts.full_scan;
             parsed.scan_all = opts.scan_all;
             parsed.use_gitignore = true; // Auto mode respects gitignore by default
+            parsed.auto_outputs = true;
         }
 
         Command::Scan(opts) => {

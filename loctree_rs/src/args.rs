@@ -68,6 +68,8 @@ pub struct ParsedArgs {
     pub search_dead_only: bool,
     /// Filter search to semantic matches only
     pub search_semantic_only: bool,
+    /// Auto mode: eagerly emit HTML/JSON/cycle artifacts into .loctree
+    pub auto_outputs: bool,
 }
 
 impl Default for ParsedArgs {
@@ -133,6 +135,7 @@ impl Default for ParsedArgs {
             search_symbol_only: false,
             search_dead_only: false,
             search_semantic_only: false,
+            auto_outputs: false,
         }
     }
 }
