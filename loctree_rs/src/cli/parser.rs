@@ -281,7 +281,10 @@ fn parse_tree_command(args: &[String]) -> Result<Command, String> {
                 if let Some(next) = args.get(i + 1)
                     && !next.starts_with('-')
                 {
-                    opts.summary = Some(next.parse().map_err(|_| "--summary requires a number")?);
+                    opts.summary = Some(
+                        next.parse()
+                            .map_err(|_| "--summary value must be a number")?,
+                    );
                     i += 2;
                     continue;
                 }

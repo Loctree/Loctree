@@ -6,7 +6,7 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Released]
 
-## [0.5.6-dev] - 2025-12-01
+## [0.5.6] - 2025-12-01
 
 ### Fixed
 - **AST Parser JSX Fix**: Disabled JSX parsing for `.ts` files (only enabled for `.tsx`/`.jsx`). Previously, TypeScript generics like `<T>` were incorrectly parsed as JSX tags, causing entire files like `api.ts` to fail parsing.
@@ -26,7 +26,7 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
   - Missing handlers: 18 → 5 (72% reduction in false positives)
   - Unused handlers: 137 → 57 (58% reduction in false positives)
 
-## [0.5.5-dev] - 2025-11-30
+## [0.5.5] - 2025-11-30
 
 ### Fixed
 - **AI Context Safety**: Limited verbosity of `slice` and `circular` commands to prevent context flooding in LLMs:

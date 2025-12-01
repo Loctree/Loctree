@@ -38,8 +38,8 @@ pub(crate) fn analyze_js_file_ast(
 
     let ret = Parser::new(&allocator, content, source_type).parse();
 
-    // Log parser errors for debugging
-    if !ret.errors.is_empty() {
+    // Log parser errors for debugging (verbose mode only)
+    if !ret.errors.is_empty() && std::env::var("LOCTREE_VERBOSE").is_ok() {
         eprintln!(
             "[loctree][debug] Parser errors in {}: {} errors",
             path.display(),
@@ -395,7 +395,7 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
     // --- CALL EXPRESSIONS (invoke, etc) ---
 
     fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
-        // Continue visiting children
+        // Continue visiting children (callee/args may contain nested invocations)
         self.visit_arguments(&call.arguments);
         self.visit_expression(&call.callee);
 
@@ -416,56 +416,7 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
             let name_lower = name.to_lowercase();
             let is_potential_command = name_lower.contains("invoke") || name.contains("Command");
 
-            // Known DOM APIs to exclude
-            const DOM_EXCLUSIONS: &[&str] = &[
-                "execCommand",
-                "queryCommandState",
-                "queryCommandEnabled",
-                "queryCommandSupported",
-                "queryCommandValue",
-            ];
-
-            // Functions that ARE NOT Tauri invokes - ignore completely
-            // These happen to match "invoke" or "Command" but are not actual Tauri calls
-            const NON_INVOKE_EXCLUSIONS: &[&str] = &[
-                // React hooks that happen to have "Command" in name
-                "useVoiceCommands",
-                "useAssistantToolCommands",
-                "useNewVisitVoiceCommands",
-                "useAiTopicCommands",
-                // Build tools / CLI commands (not Tauri)
-                "runGitCommand",
-                "executeCommand",
-                "buildCommandString",
-                "buildCommandArgs",
-                "classifyCommand",
-                // Internal tracking/context functions
-                "onCommandContext",
-                "enqueueCommandContext",
-                "setLastCommand",
-                "setCommandError",
-                "recordCommandInvokeStart",
-                "recordCommandInvokeFinish",
-                "handleInvokeFailure",
-                "isCommandMissingError",
-                "isRetentionCommandMissing",
-                // Collection/analysis utilities
-                "collectInvokeCommands",
-                "collectUsedCommandsFromRoamLogs",
-                "extractInvokeCommandsFromText",
-                "scanCommandsInFiles",
-                "parseBackendCommands",
-                "buildSessionCommandPayload",
-                // Mention/slash command handlers (UI, not Tauri)
-                "onMentionCommand",
-                "onSlashCommand",
-                // Mock/test utilities
-                "invokeFallbackMock",
-                "resolveMockCommand",
-            ];
-
             if is_potential_command
-                && !DOM_EXCLUSIONS.iter().any(|ex| name.contains(ex))
                 && !DOM_EXCLUSIONS.contains(&name.as_str())
                 && !NON_INVOKE_EXCLUSIONS.contains(&name.as_str())
                 && let Some(arg) = call.arguments.first()
@@ -490,15 +441,6 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                 if let Some(cmd_name) = payload {
                     // Filter out command names that are clearly not Tauri commands
                     // (e.g., CLI tools, shell commands found in scripts/config files)
-                    const INVALID_COMMAND_NAMES: &[&str] = &[
-                        // CLI tools / shell commands
-                        "node", "npm", "pnpm", "yarn", "bun", "cargo", "rustc", "rustup", "git",
-                        "gh", "python", "python3", "pip", "brew", "apt", "yum", "sh", "bash",
-                        "zsh", "curl", "wget", "docker", "kubectl",
-                        // Generic/test names
-                        "test", "mock", "stub", "fake",
-                    ];
-
                     if INVALID_COMMAND_NAMES.contains(&cmd_name.as_str()) {
                         // Skip - not a real Tauri command
                     } else {
@@ -750,3 +692,59 @@ mod tests {
         assert!(listens.contains(&"window-event"));
     }
 }
+// Known DOM APIs to exclude from Tauri command detection
+const DOM_EXCLUSIONS: &[&str] = &[
+    "execCommand",
+    "queryCommandState",
+    "queryCommandEnabled",
+    "queryCommandSupported",
+    "queryCommandValue",
+];
+
+// Functions that ARE NOT Tauri invokes - ignore completely (project heuristics)
+// These happen to match "invoke" or "Command" but are not actual Tauri calls
+const NON_INVOKE_EXCLUSIONS: &[&str] = &[
+    // React hooks that happen to have "Command" in name
+    "useVoiceCommands",
+    "useAssistantToolCommands",
+    "useNewVisitVoiceCommands",
+    "useAiTopicCommands",
+    // Build tools / CLI commands (not Tauri)
+    "runGitCommand",
+    "executeCommand",
+    "buildCommandString",
+    "buildCommandArgs",
+    "classifyCommand",
+    // Internal tracking/context functions
+    "onCommandContext",
+    "enqueueCommandContext",
+    "setLastCommand",
+    "setCommandError",
+    "recordCommandInvokeStart",
+    "recordCommandInvokeFinish",
+    "handleInvokeFailure",
+    "isCommandMissingError",
+    "isRetentionCommandMissing",
+    // Collection/analysis utilities
+    "collectInvokeCommands",
+    "collectUsedCommandsFromRoamLogs",
+    "extractInvokeCommandsFromText",
+    "scanCommandsInFiles",
+    "parseBackendCommands",
+    "buildSessionCommandPayload",
+    // Mention/slash command handlers (UI, not Tauri)
+    "onMentionCommand",
+    "onSlashCommand",
+    // Mock/test utilities
+    "invokeFallbackMock",
+    "resolveMockCommand",
+];
+
+// Command names that are clearly not Tauri commands (CLI tools / tests)
+const INVALID_COMMAND_NAMES: &[&str] = &[
+    // CLI tools / shell commands
+    "node", "npm", "pnpm", "yarn", "bun", "cargo", "rustc", "rustup", "git", "gh", "python",
+    "python3", "pip", "brew", "apt", "yum", "sh", "bash", "zsh", "curl", "wget", "docker",
+    "kubectl", // Generic/test names
+    "test", "mock", "stub", "fake",
+];
