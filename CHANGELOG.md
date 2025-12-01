@@ -6,6 +6,13 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Released]
 
+## [0.5.5] - 2025-11-30
+
+### Fixed
+- **AI Context Safety**: Limited verbosity of `slice` and `circular` commands to prevent context flooding in LLMs:
+  - `slice`: Truncates Deps/Consumers lists > 25 items (showing "... and N more").
+  - `circular`: Compresses dependency cycles longer than 12 steps into `head -> ... (N intermediate) ... -> tail` format.
+
 ## [0.5.4] - 2025-11-30
 
 ### Added
