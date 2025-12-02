@@ -8,8 +8,8 @@ use oxc_parser::Parser;
 use oxc_span::SourceType;
 
 use crate::types::{
-    CommandRef, EventRef, ExportSymbol, FileAnalysis, ImportEntry, ImportKind, ImportSymbol,
-    ReexportEntry, ReexportKind,
+    CommandPayloadCasing, CommandRef, EventRef, ExportSymbol, FileAnalysis, ImportEntry,
+    ImportKind, ImportSymbol, ReexportEntry, ReexportKind,
 };
 
 use super::resolvers::{TsPathResolver, resolve_reexport_target};
@@ -511,6 +511,29 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                     if INVALID_COMMAND_NAMES.contains(&cmd_name.as_str()) {
                         // Skip - not a real Tauri command
                     } else {
+                        // Payload casing drift: if command name looks snake_case and payload keys are camelCase
+                        let mut casing_issues: Vec<CommandPayloadCasing> = Vec::new();
+                        if cmd_name.contains('_') {
+                            if let Some(Argument::ObjectExpression(obj)) = call.arguments.first() {
+                                for prop in &obj.properties {
+                                    if let ObjectPropertyKind::ObjectProperty(p) = prop {
+                                        if let PropertyKey::Identifier(id) = &p.key {
+                                            let key = id.name.to_string();
+                                            if key.chars().any(|c| c.is_uppercase()) {
+                                                casing_issues.push(CommandPayloadCasing {
+                                                    command: cmd_name.clone(),
+                                                    key,
+                                                    path: self.path.to_string_lossy().to_string(),
+                                                    line: self.get_line(p.span),
+                                                });
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        self.analysis.command_payload_casing.extend(casing_issues);
+
                         let generic = call.type_arguments.as_ref().and_then(|params| {
                             params.params.first().map(JsVisitor::type_to_string)
                         });

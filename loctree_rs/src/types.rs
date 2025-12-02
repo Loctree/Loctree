@@ -202,6 +202,14 @@ pub struct CommandRef {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CommandPayloadCasing {
+    pub command: String,
+    pub key: String,
+    pub path: String,
+    pub line: usize,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EventRef {
     pub raw_name: Option<String>,
     pub name: String,
@@ -252,6 +260,8 @@ pub struct FileAnalysis {
     pub command_calls: Vec<CommandRef>,
     #[serde(default)]
     pub command_handlers: Vec<CommandRef>,
+    #[serde(default)]
+    pub command_payload_casing: Vec<CommandPayloadCasing>,
     #[serde(default)]
     pub event_emits: Vec<EventRef>,
     #[serde(default)]
@@ -324,6 +334,7 @@ impl FileAnalysis {
             exports: Vec::new(),
             command_calls: Vec::new(),
             command_handlers: Vec::new(),
+            command_payload_casing: Vec::new(),
             event_emits: Vec::new(),
             event_listens: Vec::new(),
             event_consts: HashMap::new(),

@@ -108,6 +108,7 @@ pub fn process_root_context(
 
     let mut imports_targeted: HashSet<String> = HashSet::new();
     let mut files_json: Vec<_> = Vec::new();
+    let mut casing_issues: Vec<serde_json::Value> = Vec::new();
     let mut dead_symbols_total = 0usize;
     for path in &sorted_paths {
         if let Some(a) = analysis_by_path.get(path) {
@@ -150,6 +151,15 @@ pub fn process_root_context(
             for dyn_imp in &a.dynamic_imports {
                 imports_targeted.insert(dyn_imp.clone());
                 imports_targeted.insert(normalize_module_id(dyn_imp).as_key());
+            }
+
+            for issue in &a.command_payload_casing {
+                casing_issues.push(json!({
+                    "command": issue.command,
+                    "key": issue.key,
+                    "path": issue.path,
+                    "line": issue.line,
+                }));
             }
 
             files_json.push(json!({
@@ -641,12 +651,12 @@ pub fn process_root_context(
                     "duplicateExports": filtered_ranked.len(),
                     "reexportFiles": reexport_files.len(),
                     "dynamicImports": dynamic_summary.len(),
-                    "commands": {
-                        "frontendCalls": fe_commands.len(),
-                        "backendHandlers": be_commands.len(),
-                        "missingHandlers": missing_handlers.len(),
-                        "unusedHandlers": unused_handlers.len(),
-                    },
+                "commands": {
+                    "frontendCalls": fe_commands.len(),
+                    "backendHandlers": be_commands.len(),
+                    "missingHandlers": missing_handlers.len(),
+                    "unusedHandlers": unused_handlers.len(),
+                },
                     "events": {
                         "ghost": ghost_events.len(),
                         "orphan": orphan_listeners.len(),
@@ -762,6 +772,7 @@ pub fn process_root_context(
                         }
                         obj
                     }).collect::<Vec<_>>(),
+                    "payloadCasing": casing_issues,
                 },
                 "commands2": commands2,
                 "tauri_analysis": {
