@@ -389,16 +389,34 @@ pub(crate) fn resolve_python_absolute(
     None
 }
 
+/// Known JS/TS extensions that shouldn't trigger extension probing
+const KNOWN_JS_EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts"];
+
+/// Check if a path has a known JS/TS extension
+fn has_known_js_extension(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| KNOWN_JS_EXTENSIONS.contains(&e.to_lowercase().as_str()))
+        .unwrap_or(false)
+}
+
 pub(crate) fn resolve_with_extensions(
     candidate: PathBuf,
     root: &Path,
     exts: Option<&HashSet<String>>,
 ) -> Option<String> {
-    if candidate.extension().is_none()
+    // Try adding extensions if candidate doesn't have a known JS/TS extension
+    // This handles cases like "Foo.types" where .types is NOT a real extension
+    if !has_known_js_extension(&candidate)
         && let Some(set) = exts
     {
         for ext in set {
-            let with_ext = candidate.with_extension(ext);
+            // IMPORTANT: Append extension to full filename, don't replace
+            // "Foo.types" + "ts" -> "Foo.types.ts" (not "Foo.ts")
+            let mut new_name = candidate.as_os_str().to_os_string();
+            new_name.push(".");
+            new_name.push(ext);
+            let with_ext = PathBuf::from(new_name);
             if with_ext.exists() {
                 return canonical_rel(&with_ext, root).or_else(|| canonical_abs(&with_ext));
             }
@@ -409,7 +427,7 @@ pub(crate) fn resolve_with_extensions(
         canonical_rel(&candidate, root).or_else(|| canonical_abs(&candidate))
     } else {
         // Fallback: if this looks like a directory/module, try index.* inside it
-        if candidate.extension().is_none() {
+        if !has_known_js_extension(&candidate) {
             let dir_path = candidate.clone();
             for index_name in ["index.ts", "index.tsx", "index.js", "index.jsx"] {
                 let index_candidate = dir_path.join(index_name);
