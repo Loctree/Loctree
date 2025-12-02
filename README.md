@@ -365,4 +365,4 @@ MIT — use it, fork it, improve it. See [LICENSE](LICENSE).
 
 ---
 
-**Developed with 💀 by The Loctree Team (c)2025 **
+**Developed with 💀 by The Loctree Team (c)2025**

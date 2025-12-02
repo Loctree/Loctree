@@ -188,7 +188,26 @@ struct JsVisitor<'a> {
 
 impl<'a> JsVisitor<'a> {
     fn resolve_path(&self, source: &str) -> Option<String> {
-        resolve_reexport_target(self.path, self.root, source, self.extensions)
+        let file_ext = self
+            .path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|s| s.to_lowercase());
+
+        // For TS/JS files, skip resolve_reexport_target (uses Python logic)
+        // Go straight to TS resolver or JS relative resolution
+        let skip_python = matches!(
+            file_ext.as_deref(),
+            Some("ts") | Some("tsx") | Some("js") | Some("jsx") | Some("mjs") | Some("cjs")
+        );
+
+        let initial = if skip_python {
+            None
+        } else {
+            resolve_reexport_target(self.path, self.root, source, self.extensions)
+        };
+
+        initial
             .or_else(|| {
                 self.ts_resolver
                     .and_then(|r| r.resolve(source, self.extensions))
@@ -514,12 +533,20 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
         // Handle import("./foo")
         if let Expression::StringLiteral(s) = &expr.source {
             let source = s.value.to_string();
-            // Track as dynamic import
+
+            // Track in dynamic_imports for backward compatibility
             if !self.analysis.dynamic_imports.contains(&source) {
                 self.analysis.dynamic_imports.push(source.clone());
             }
-            // Try to resolve (handles tsconfig aliases / relative) so dead-code and cycle checks
-            // can match against real files instead of raw alias strings.
+
+            // NEW: Also create an ImportEntry with Dynamic kind for graph edges
+            let mut entry = ImportEntry::new(source.clone(), ImportKind::Dynamic);
+            entry.resolved_path = self.resolve_path(&source);
+            entry.is_bare = !source.starts_with('.') && !source.starts_with('/');
+            // Dynamic imports don't have specific symbols - they import the whole module
+            self.analysis.imports.push(entry);
+
+            // Also track resolved path in dynamic_imports if available
             if let Some(resolved) = self.resolve_path(&source)
                 && !self.analysis.dynamic_imports.contains(&resolved)
             {
@@ -857,5 +884,49 @@ mod tests {
             .collect();
         assert!(listens.contains(&"data-update")); // Resolved from const
         assert!(listens.contains(&"window-event"));
+    }
+
+    #[test]
+    fn test_dynamic_imports_added_to_imports_list() {
+        let content = r#"
+            // Regular static import
+            import { Button } from './Button';
+
+            // Dynamic import with import()
+            const LazyComponent = import('./LazyComponent');
+
+            // React.lazy with dynamic import
+            const LazyPage = React.lazy(() => import('./pages/Home'));
+        "#;
+
+        let analysis = analyze_js_file_ast(
+            content,
+            Path::new("src/App.tsx"),
+            Path::new("src"),
+            None,
+            None,
+            "App.tsx".to_string(),
+            &CommandDetectionConfig::default(),
+        );
+
+        // Check that static import is captured
+        assert!(analysis.imports.iter().any(|i| i.source == "./Button"));
+
+        // Check that dynamic imports are captured in imports list (not just dynamic_imports)
+        assert!(
+            analysis
+                .imports
+                .iter()
+                .any(|i| i.source == "./LazyComponent")
+        );
+        assert!(analysis.imports.iter().any(|i| i.source == "./pages/Home"));
+
+        // Verify they're marked as Dynamic kind
+        let lazy_import = analysis
+            .imports
+            .iter()
+            .find(|i| i.source == "./LazyComponent")
+            .unwrap();
+        assert!(matches!(lazy_import.kind, ImportKind::Dynamic));
     }
 }

@@ -1,0 +1,2253 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'self' file: data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' file: data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: file:; connect-src 'self';"><title>loctree report</title><style>
+/* ============================================
+   loctree Report — Vista Galaxy Black Steel
+   ============================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* ============================================
+   Theme: Light Mode (Default)
+   ============================================ */
+:root {
+    /* Light Theme Tokens */
+    --theme-bg-deep: #f5f7fa;
+    --theme-bg-surface: #ffffff;
+    --theme-bg-surface-elevated: #fafbfc;
+
+    --theme-text-primary: #1a1f26;
+    --theme-text-secondary: #4a5568;
+    --theme-text-tertiary: #718096;
+
+    --theme-accent: #3182ce;
+    --theme-accent-rgb: 49, 130, 206;
+
+    --theme-border: rgba(0, 0, 0, 0.1);
+    --theme-border-strong: rgba(0, 0, 0, 0.15);
+    
+    --theme-hover: rgba(0, 0, 0, 0.04);
+    --theme-hover-strong: rgba(0, 0, 0, 0.08);
+
+    /* Scrollbar (Light) */
+    --theme-scrollbar: rgba(0, 0, 0, 0.15);
+    --theme-scrollbar-hover: rgba(0, 0, 0, 0.25);
+
+    /* Gradients (Light) */
+    --gradient-nav: linear-gradient(135deg, rgba(255,255,255,0.98) 0%, rgba(245,247,250,0.95) 100%);
+    --gradient-sidebar: linear-gradient(180deg, rgba(250,251,252,0.98) 0%, rgba(245,247,250,0.95) 100%);
+    --gradient-main: linear-gradient(180deg, rgba(250,251,252,0.95) 0%, rgba(245,247,250,0.9) 100%);
+
+    /* Dimensions */
+    --radius-lg: 20px;
+    --radius-md: 12px;
+    --radius-sm: 6px;
+    
+    --sidebar-width: 280px;
+    --header-height: 68px;
+    
+    --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+    
+    color-scheme: light dark;
+}
+
+/* ============================================
+   Theme: Dark Mode (Vista Galaxy Black Steel)
+   ============================================ */
+.dark,
+html.dark {
+    --theme-bg-deep: #0a0a0e;
+    --theme-bg-surface: #14171c;
+    --theme-bg-surface-elevated: #191d22;
+
+    --theme-text-primary: #e5ecf5;
+    --theme-text-secondary: #b2c0d4;
+    --theme-text-tertiary: #8897ad;
+
+    --theme-accent: #a3b8c7;
+    --theme-accent-rgb: 163, 184, 199;
+
+    --theme-border: rgba(114, 124, 139, 0.18);
+    --theme-border-strong: rgba(114, 124, 139, 0.28);
+    
+    --theme-hover: rgba(255, 255, 255, 0.03);
+    --theme-hover-strong: rgba(255, 255, 255, 0.06);
+
+    /* Scrollbar (Dark) */
+    --theme-scrollbar: rgba(255, 255, 255, 0.15);
+    --theme-scrollbar-hover: rgba(255, 255, 255, 0.25);
+
+    /* Gradients (Dark) */
+    --gradient-nav: linear-gradient(135deg, rgba(10,10,14,0.95) 0%, rgba(32,36,44,0.85) 40%, rgba(120,132,144,0.15) 100%);
+    --gradient-sidebar: linear-gradient(180deg, rgba(12,12,16,0.95) 0%, rgba(24,28,34,0.9) 100%);
+    --gradient-main: linear-gradient(180deg, rgba(12,12,16,0.95) 0%, rgba(16,18,22,0.9) 55%, rgba(22,24,30,0.85) 100%);
+}
+
+/* Auto Dark Mode based on system preference */
+@media (prefers-color-scheme: dark) {
+    :root:not(.light) {
+        --theme-bg-deep: #0a0a0e;
+        --theme-bg-surface: #14171c;
+        --theme-bg-surface-elevated: #191d22;
+
+        --theme-text-primary: #e5ecf5;
+        --theme-text-secondary: #b2c0d4;
+        --theme-text-tertiary: #8897ad;
+
+        --theme-accent: #a3b8c7;
+        --theme-accent-rgb: 163, 184, 199;
+
+        --theme-border: rgba(114, 124, 139, 0.18);
+        --theme-border-strong: rgba(114, 124, 139, 0.28);
+        
+        --theme-hover: rgba(255, 255, 255, 0.03);
+        --theme-hover-strong: rgba(255, 255, 255, 0.06);
+
+        --gradient-nav: linear-gradient(135deg, rgba(10,10,14,0.95) 0%, rgba(32,36,44,0.85) 40%, rgba(120,132,144,0.15) 100%);
+        --gradient-sidebar: linear-gradient(180deg, rgba(12,12,16,0.95) 0%, rgba(24,28,34,0.9) 100%);
+        --gradient-main: linear-gradient(180deg, rgba(12,12,16,0.95) 0%, rgba(16,18,22,0.9) 55%, rgba(22,24,30,0.85) 100%);
+    }
+}
+
+/* Reset & Base */
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+    font-family: var(--font-sans);
+    background: var(--theme-bg-deep);
+    color: var(--theme-text-primary);
+    line-height: 1.5;
+    margin: 0;
+    height: 100vh;
+    overflow: hidden;
+    font-size: 13px;
+}
+
+a { color: inherit; text-decoration: none; }
+code, pre { font-family: var(--font-mono); }
+
+/* Layout Shell */
+.app-shell {
+    display: flex;
+    height: 100vh;
+    width: 100vw;
+    overflow: hidden;
+    background: var(--theme-bg-deep);
+}
+
+/* Sidebar */
+.app-sidebar {
+    width: var(--sidebar-width);
+    background: var(--gradient-sidebar);
+    border-right: 1px solid var(--theme-border);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    z-index: 20;
+}
+
+.sidebar-header {
+    height: var(--header-height);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 24px;
+    border-bottom: 1px solid var(--theme-border);
+}
+
+/* Theme Toggle Button */
+.theme-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-sm);
+    background: var(--theme-hover);
+    border: 1px solid var(--theme-border);
+    color: var(--theme-text-secondary);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+}
+
+.theme-toggle:hover {
+    background: var(--theme-hover-strong);
+    color: var(--theme-text-primary);
+    border-color: var(--theme-border-strong);
+}
+
+/* Show sun icon in dark mode, moon icon in light mode */
+.theme-icon-light { display: block; }
+.theme-icon-dark { display: none; }
+
+.dark .theme-icon-light,
+html.dark .theme-icon-light { display: none; }
+.dark .theme-icon-dark,
+html.dark .theme-icon-dark { display: block; }
+
+@media (prefers-color-scheme: dark) {
+    :root:not(.light) .theme-icon-light { display: none; }
+    :root:not(.light) .theme-icon-dark { display: block; }
+}
+
+.logo-box {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--theme-text-primary);
+    letter-spacing: 0.02em;
+}
+
+.sidebar-nav {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+/* Nav items styled like tab buttons - unified design */
+.nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    border-radius: var(--radius-lg);
+    color: var(--theme-text-secondary);
+    transition: all 0.2s ease;
+    font-size: 13px;
+    font-weight: 500;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    text-decoration: none;
+    /* Prevent label overflow */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+}
+
+.nav-item:hover {
+    background: var(--theme-hover-strong);
+    color: var(--theme-text-primary);
+}
+
+.nav-item.active {
+    background: var(--theme-bg-surface);
+    color: var(--theme-accent);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+}
+
+.nav-section-title {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--theme-text-tertiary);
+    margin: 24px 14px 8px;
+}
+
+/* Main Area */
+.app-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    background: var(--gradient-main);
+    min-width: 0; /* Prevent flex overflow */
+}
+
+/* Sticky Header */
+.app-header {
+    height: var(--header-height);
+    flex-shrink: 0;
+    background: var(--gradient-nav);
+    border-bottom: 1px solid var(--theme-border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 32px;
+    backdrop-filter: blur(12px);
+    z-index: 10;
+}
+
+.header-title h1 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--theme-text-primary);
+}
+
+.header-title p,
+.header-path {
+    margin: 2px 0 0;
+    font-size: 11px;
+    color: var(--theme-text-tertiary);
+    font-family: var(--font-mono);
+    max-width: 300px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Header Stats Badges */
+.header-stats {
+    display: flex;
+    gap: 8px;
+}
+
+.stat-badge {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 8px 14px;
+    background: var(--theme-bg-surface);
+    border: 1px solid var(--theme-border);
+    border-radius: var(--radius-md);
+    min-width: 60px;
+}
+
+.stat-badge-value {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--theme-accent);
+    font-family: var(--font-mono);
+}
+
+.stat-badge-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--theme-text-tertiary);
+    margin-top: 2px;
+}
+
+/* Tabs */
+.header-tabs {
+    display: flex;
+    gap: 6px;
+    background: rgba(0,0,0,0.2);
+    padding: 4px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--theme-border);
+}
+
+.tab-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 16px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--theme-text-secondary);
+    cursor: pointer;
+    transition: all 0.2s;
+    background: transparent;
+    border: none;
+    /* Prevent label overflow */
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.tab-btn:hover {
+    color: var(--theme-text-primary);
+    background: var(--theme-hover);
+}
+
+.tab-btn.active {
+    background: rgba(163, 184, 199, 0.15);
+    color: var(--theme-accent);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+}
+
+/* Content Scroll Area */
+.app-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 32px;
+    scroll-behavior: smooth;
+}
+
+/* Content Panels */
+.content-container {
+    max-width: 1100px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+
+.panel {
+    background: var(--theme-bg-surface);
+    border: 1px solid var(--theme-border);
+    border-radius: var(--radius-lg);
+    padding: 24px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+}
+
+.panel h3 {
+    margin-top: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--theme-text-primary);
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* Tables & Lists */
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.data-table th {
+    text-align: left;
+    color: var(--theme-text-tertiary);
+    font-weight: 500;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--theme-border);
+}
+
+.data-table td {
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(114, 124, 139, 0.08);
+    color: var(--theme-text-secondary);
+}
+
+.data-table tr:last-child td { border-bottom: none; }
+.data-table tr:hover td { background: var(--theme-hover); }
+
+code {
+    background: rgba(0,0,0,0.2);
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: var(--theme-accent);
+    font-size: 0.9em;
+}
+
+/* Analysis Summary */
+.analysis-summary {
+    margin-bottom: 24px;
+}
+
+.analysis-summary h3 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 16px;
+}
+
+.summary-stat {
+    background: var(--theme-bg-surface);
+    border: 1px solid var(--theme-border);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    text-align: center;
+}
+
+.stat-value {
+    display: block;
+    font-size: 28px;
+    font-weight: 600;
+    color: var(--theme-accent);
+    margin-bottom: 4px;
+}
+
+.stat-label {
+    display: block;
+    font-size: 12px;
+    color: var(--theme-text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Command Coverage Summary */
+.coverage-summary {
+    padding: 12px 16px;
+    background: var(--theme-bg-surface-elevated);
+    border: 1px solid var(--theme-border);
+    border-radius: var(--radius-md);
+    margin-bottom: 16px;
+    font-size: 13px;
+}
+
+.text-warning {
+    color: #e67e22;
+}
+
+.text-muted {
+    color: var(--theme-text-tertiary);
+}
+
+/* AI Insights */
+.insight-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.insight-item {
+    padding: 16px;
+    border-radius: var(--radius-md);
+    background: var(--theme-hover);
+    border: 1px solid var(--theme-border);
+    display: flex;
+    gap: 12px;
+}
+
+.insight-icon { flex-shrink: 0; margin-top: 2px; }
+.insight-content strong { display: block; margin-bottom: 4px; color: var(--theme-text-primary); }
+.insight-content p { margin: 0; color: var(--theme-text-secondary); line-height: 1.5; }
+
+/* Graph */
+.graph-wrapper {
+    width: 100%;
+    height: calc(100vh - var(--header-height) - 64px);
+    background: var(--theme-bg-deep);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--theme-border);
+    overflow: hidden;
+    position: relative;
+}
+
+#cy { width: 100%; height: 100%; }
+
+/* Scrollbar - theme-aware */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--theme-scrollbar, rgba(114, 124, 139, 0.2)); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--theme-scrollbar-hover, rgba(114, 124, 139, 0.4)); }
+
+/* Firefox scrollbar */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--theme-scrollbar, rgba(114, 124, 139, 0.2)) transparent;
+}
+
+/* Footer */
+.app-footer {
+    margin-top: auto;
+    padding: 24px 16px;
+    text-align: center;
+    color: var(--theme-text-tertiary);
+    font-size: 11px;
+    border-top: 1px solid var(--theme-border);
+}
+
+/* ============================================
+   Section & Tab Visibility (CRITICAL)
+   ============================================ */
+
+/* Section views - only show active */
+.section-view {
+    display: none;
+    height: 100%;
+    flex-direction: column;
+}
+
+.section-view.active {
+    display: flex;
+}
+
+/* Tab panels - only show active */
+.tab-panel {
+    display: none;
+}
+
+.tab-panel.active {
+    display: block;
+}
+
+/* Tab bar alias for JS selector */
+.tab-bar {
+    /* Inherits from .header-tabs */
+}
+
+/* ============================================
+   Graph Container & Toolbars
+   ============================================ */
+
+/* ============================================
+   Graph Split Layout (Side-by-Side)
+   ============================================ */
+
+.graph-split-container {
+    display: flex;
+    height: calc(100vh - var(--header-height) - 32px);
+    gap: 0;
+    position: relative;
+}
+
+.graph-left-panel {
+    width: 380px;
+    min-width: 280px;
+    max-width: 600px;
+    display: flex;
+    flex-direction: column;
+    background: var(--theme-bg-surface);
+    border-right: 1px solid var(--theme-border);
+    overflow: hidden;
+}
+
+.graph-left-panel .component-panel {
+    flex: 1;
+    overflow-y: auto;
+    margin: 0;
+    border: none;
+    border-radius: 0;
+}
+
+.graph-left-panel .component-panel-header {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    padding: 8px 10px;
+    font-size: 11px;
+}
+
+/* Compact table for left panel */
+.graph-left-panel .component-panel table {
+    font-size: 11px;
+}
+
+.graph-left-panel .component-panel th {
+    padding: 6px 8px;
+    font-size: 10px;
+}
+
+.graph-left-panel .component-panel td {
+    padding: 4px 8px;
+}
+
+.graph-left-panel .component-panel code {
+    font-size: 10px;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: inline-block;
+}
+
+.graph-left-panel .component-toolbar {
+    padding: 6px 10px;
+    font-size: 11px;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.graph-left-panel .component-toolbar label {
+    font-size: 10px;
+}
+
+.graph-left-panel .component-toolbar button {
+    padding: 3px 6px;
+    font-size: 10px;
+}
+
+.graph-left-panel .panel-actions {
+    gap: 6px;
+}
+
+.graph-left-panel .panel-actions label {
+    font-size: 10px;
+}
+
+.graph-left-panel .panel-actions input {
+    padding: 2px 4px;
+    width: 50px !important;
+}
+
+.graph-right-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 400px;
+    overflow: hidden;
+}
+
+.graph-right-panel .graph-toolbar {
+    flex-shrink: 0;
+    margin: 0;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+}
+
+.graph-right-panel .graph {
+    flex: 1;
+    min-height: 0;
+    border-radius: 0;
+    border: none;
+    border-top: 1px solid var(--theme-border);
+}
+
+/* Resize handle */
+.graph-resize-handle {
+    width: 6px;
+    cursor: col-resize;
+    background: var(--theme-border);
+    transition: background 0.15s;
+    flex-shrink: 0;
+}
+
+.graph-resize-handle:hover,
+.graph-resize-handle.active {
+    background: var(--theme-accent);
+}
+
+/* Graph container - fallback for non-split */
+.graph {
+    width: 100%;
+    height: calc(100vh - var(--header-height) - 200px);
+    min-height: 400px;
+    background: var(--theme-bg-deep);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--theme-border);
+}
+
+.graph-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 200px;
+    color: var(--theme-text-tertiary);
+    font-style: italic;
+    background: var(--theme-bg-surface);
+    border-radius: var(--radius-md);
+    border: 1px dashed var(--theme-border);
+}
+
+/* Graph toolbars */
+.graph-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background: var(--theme-bg-surface);
+    border: 1px solid var(--theme-border);
+    border-radius: var(--radius-md);
+    margin-bottom: 12px;
+    font-size: 12px;
+}
+
+.graph-toolbar label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--theme-text-secondary);
+}
+
+.graph-toolbar input[type="text"],
+.graph-toolbar input[type="number"],
+.graph-toolbar select {
+    background: var(--theme-bg-deep);
+    border: 1px solid var(--theme-border);
+    border-radius: var(--radius-sm);
+    padding: 4px 8px;
+    color: var(--theme-text-primary);
+    font-size: 12px;
+    font-family: var(--font-mono);
+}
+
+.graph-toolbar input[type="checkbox"] {
+    accent-color: var(--theme-accent);
+}
+
+.graph-toolbar button {
+    background: var(--theme-bg-surface-elevated);
+    border: 1px solid var(--theme-border);
+    border-radius: var(--radius-sm);
+    padding: 4px 10px;
+    color: var(--theme-text-secondary);
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.graph-toolbar button:hover {
+    background: rgba(163, 184, 199, 0.1);
+    color: var(--theme-text-primary);
+    border-color: var(--theme-accent);
+}
+
+.component-toolbar {
+    background: var(--theme-bg-surface-elevated);
+}
+
+.graph-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-left: auto;
+}
+
+/* Graph legend */
+.graph-legend {
+    display: flex;
+    gap: 16px;
+    padding: 8px 0;
+    font-size: 11px;
+    color: var(--theme-text-tertiary);
+}
+
+.graph-legend span {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+/* Graph hint */
+.graph-hint {
+    padding: 12px 16px;
+    background: rgba(163, 184, 199, 0.05);
+    border: 1px solid var(--theme-border);
+    border-radius: var(--radius-md);
+    font-size: 12px;
+    color: var(--theme-text-tertiary);
+    margin-top: 12px;
+}
+
+/* ============================================
+   Component Panel (Disconnected Components)
+   ============================================ */
+
+.component-panel {
+    background: var(--theme-bg-surface);
+    border: 1px solid var(--theme-border);
+    border-radius: var(--radius-md);
+    margin-bottom: 12px;
+    overflow: hidden;
+}
+
+.component-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    background: var(--theme-bg-surface-elevated);
+    border-bottom: 1px solid var(--theme-border);
+    font-size: 13px;
+}
+
+.component-panel-header strong {
+    color: var(--theme-text-primary);
+}
+
+.panel-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.panel-actions label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--theme-text-secondary);
+}
+
+.panel-actions input {
+    background: var(--theme-bg-deep);
+    border: 1px solid var(--theme-border);
+    border-radius: var(--radius-sm);
+    padding: 4px 8px;
+    color: var(--theme-text-primary);
+    font-size: 12px;
+}
+
+.panel-actions button {
+    background: var(--theme-bg-deep);
+    border: 1px solid var(--theme-border);
+    border-radius: var(--radius-sm);
+    padding: 4px 10px;
+    color: var(--theme-text-secondary);
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.panel-actions button:hover {
+    border-color: var(--theme-accent);
+    color: var(--theme-text-primary);
+}
+
+.component-panel table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+.component-panel th {
+    text-align: left;
+    padding: 10px 16px;
+    color: var(--theme-text-tertiary);
+    font-weight: 500;
+    border-bottom: 1px solid var(--theme-border);
+    background: var(--theme-bg-surface);
+}
+
+.component-panel td {
+    padding: 10px 16px;
+    color: var(--theme-text-secondary);
+    border-bottom: 1px solid rgba(114, 124, 139, 0.08);
+}
+
+.component-panel tr:hover td {
+    background: var(--theme-hover);
+}
+
+.component-panel button {
+    background: transparent;
+    border: 1px solid var(--theme-border);
+    border-radius: var(--radius-sm);
+    padding: 3px 8px;
+    color: var(--theme-text-tertiary);
+    font-size: 10px;
+    cursor: pointer;
+}
+
+.component-panel button:hover {
+    border-color: var(--theme-accent);
+    color: var(--theme-accent);
+}
+
+/* ============================================
+   Tauri Command Tables
+   ============================================ */
+
+.command-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    margin-top: 16px;
+}
+
+.command-table th {
+    text-align: left;
+    padding: 12px 16px;
+    color: var(--theme-text-tertiary);
+    font-weight: 500;
+    border-bottom: 1px solid var(--theme-border);
+}
+
+.command-table td {
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(114, 124, 139, 0.08);
+    color: var(--theme-text-secondary);
+}
+
+.command-pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    background: rgba(163, 184, 199, 0.1);
+    color: var(--theme-accent);
+}
+
+/* Module grouping */
+.module-group {
+    margin-bottom: 24px;
+}
+
+.module-header {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--theme-text-secondary);
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--theme-border);
+}
+
+/* FE↔BE Bridge Comparison Table */
+.bridge-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    margin-top: 16px;
+    background: var(--theme-bg-surface);
+    border: 1px solid var(--theme-border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+}
+
+.bridge-table thead th {
+    text-align: left;
+    padding: 10px 14px;
+    color: var(--theme-text-tertiary);
+    font-weight: 500;
+    background: var(--theme-bg-surface-elevated);
+    border-bottom: 1px solid var(--theme-border);
+}
+
+.bridge-table tbody td {
+    padding: 8px 14px;
+    border-bottom: 1px solid rgba(114, 124, 139, 0.08);
+    color: var(--theme-text-secondary);
+    vertical-align: top;
+}
+
+.bridge-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.bridge-table tbody tr:hover td {
+    background: var(--theme-hover);
+}
+
+.bridge-table .status-cell {
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.bridge-table .loc-cell {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    max-width: 300px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.bridge-table .loc-cell a {
+    color: var(--theme-accent);
+}
+
+.bridge-table .loc-cell a:hover {
+    text-decoration: underline;
+}
+
+/* Bridge row status colors */
+.bridge-table tr.status-ok .status-cell {
+    color: #27ae60;
+}
+
+.bridge-table tr.status-missing .status-cell {
+    color: #e67e22;
+}
+
+.bridge-table tr.status-unused .status-cell {
+    color: var(--theme-text-tertiary);
+}
+
+.bridge-table tr.status-unregistered .status-cell {
+    color: #c0392b;
+}
+
+.bridge-table tr.status-missing {
+    background: rgba(230, 126, 34, 0.05);
+}
+
+.bridge-table tr.status-unregistered {
+    background: rgba(192, 57, 43, 0.05);
+}
+
+/* Gap details toggle */
+.gap-details {
+    margin-top: 24px;
+}
+
+.gap-details summary {
+    cursor: pointer;
+    color: var(--theme-text-tertiary);
+    font-size: 12px;
+    padding: 8px 0;
+}
+
+.gap-details summary:hover {
+    color: var(--theme-text-secondary);
+}
+
+/* Text success color */
+.text-success {
+    color: #27ae60;
+}
+
+/* ============================================
+   Utility Classes
+   ============================================ */
+
+.muted {
+    color: var(--theme-text-tertiary);
+}
+
+.icon-sm {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+}
+
+/* Range slider styling */
+input[type="range"] {
+    -webkit-appearance: none;
+    background: var(--theme-bg-deep);
+    border-radius: 4px;
+    height: 6px;
+    cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px;
+    height: 14px;
+    background: var(--theme-accent);
+    border-radius: 50%;
+    cursor: pointer;
+}
+
+/* ============================================
+   Quick Commands Panel (v0.6 features)
+   ============================================ */
+
+.quick-commands-panel {
+    background: var(--theme-bg-surface);
+    border: 1px solid var(--theme-border);
+    border-radius: var(--radius-lg);
+    padding: 20px 24px;
+    margin-top: 8px;
+}
+
+.quick-commands-panel h3 {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 16px 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--theme-text-primary);
+}
+
+.badge-new {
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    background: linear-gradient(135deg, rgba(163, 184, 199, 0.2) 0%, rgba(79, 129, 225, 0.2) 100%);
+    color: var(--theme-accent);
+    padding: 3px 8px;
+    border-radius: 6px;
+    border: 1px solid rgba(163, 184, 199, 0.3);
+}
+
+.commands-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+}
+
+.command-group {
+    background: var(--theme-bg-surface-elevated);
+    border: 1px solid var(--theme-border);
+    border-radius: var(--radius-md);
+    padding: 16px;
+}
+
+.command-group.highlight {
+    border-color: rgba(163, 184, 199, 0.3);
+    background: linear-gradient(135deg, var(--theme-bg-surface-elevated) 0%, rgba(163, 184, 199, 0.05) 100%);
+}
+
+.command-group h4 {
+    margin: 0 0 6px 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--theme-text-primary);
+}
+
+.command-group .command-desc {
+    margin: 0 0 12px 0;
+    font-size: 11px;
+    color: var(--theme-text-tertiary);
+}
+
+.command-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.command-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    background: var(--theme-bg-deep);
+    border: 1px solid var(--theme-border);
+    border-radius: var(--radius-sm);
+    font-size: 11px;
+}
+
+.command-item:hover {
+    border-color: var(--theme-border-strong);
+}
+
+.command-code {
+    flex: 1;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--theme-accent);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    background: transparent;
+    padding: 0;
+}
+
+.command-desc-inline {
+    font-size: 10px;
+    color: var(--theme-text-tertiary);
+    white-space: nowrap;
+}
+
+.copy-btn {
+    flex-shrink: 0;
+    background: transparent;
+    border: none;
+    padding: 2px 4px;
+    cursor: pointer;
+    font-size: 12px;
+    opacity: 0.6;
+    transition: opacity 0.15s;
+}
+
+.copy-btn:hover {
+    opacity: 1;
+}
+
+.commands-footer {
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid var(--theme-border);
+}
+
+.commands-footer p {
+    margin: 0;
+    font-size: 11px;
+    color: var(--theme-text-tertiary);
+}
+
+.commands-footer code {
+    font-size: 10px;
+    background: var(--theme-bg-deep);
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: var(--theme-accent);
+}
+
+/* ============================================
+   Responsive
+   ============================================ */
+
+@media (max-width: 900px) {
+    .app-shell {
+        flex-direction: column;
+    }
+    
+    .app-sidebar {
+        width: 100%;
+        height: auto;
+        border-right: none;
+        border-bottom: 1px solid var(--theme-border);
+    }
+    
+    .sidebar-nav {
+        flex-direction: row;
+        overflow-x: auto;
+        padding: 12px;
+    }
+    
+    .nav-section-title {
+        display: none;
+    }
+    
+    .app-footer {
+        display: none;
+    }
+    
+    .header-tabs {
+        flex-wrap: wrap;
+    }
+    
+    .graph-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .graph-controls {
+        margin-left: 0;
+        justify-content: center;
+    }
+}
+</style></head><body><div class="app-shell"><aside class="app-sidebar"><div class="sidebar-header"><div class="logo-box"><span style="color:var(--theme-accent)">loctree</span><span style="opacity:0.5">report</span></div><button class="theme-toggle" data-role="theme-toggle" title="Toggle light/dark mode"><svg class="theme-icon-light" xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor" viewBox="0 0 256 256"><path d="M120,40V16a8,8,0,0,1,16,0V40a8,8,0,0,1-16,0Zm72,88a64,64,0,1,1-64-64A64.07,64.07,0,0,1,192,128Zm-16,0a48,48,0,1,0-48,48A48.05,48.05,0,0,0,176,128ZM58.34,69.66A8,8,0,0,0,69.66,58.34l-16-16A8,8,0,0,0,42.34,53.66Zm0,116.68-16,16a8,8,0,0,0,11.32,11.32l16-16a8,8,0,0,0-11.32-11.32ZM192,72a8,8,0,0,0,5.66-2.34l16-16a8,8,0,0,0-11.32-11.32l-16,16A8,8,0,0,0,192,72Zm5.66,114.34a8,8,0,0,0-11.32,11.32l16,16a8,8,0,0,0,11.32-11.32ZM48,128a8,8,0,0,0-8-8H16a8,8,0,0,0,0,16H40A8,8,0,0,0,48,128Zm80,80a8,8,0,0,0-8,8v24a8,8,0,0,0,16,0V216A8,8,0,0,0,128,208Zm112-88H216a8,8,0,0,0,0,16h24a8,8,0,0,0,0-16Z"></path></svg><svg class="theme-icon-dark" xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor" viewBox="0 0 256 256"><path d="M233.54,142.23a8,8,0,0,0-8-2,88.08,88.08,0,0,1-109.8-109.8,8,8,0,0,0-10-10,104.84,104.84,0,0,0-52.91,37A104,104,0,0,0,136,224a103.09,103.09,0,0,0,62.52-20.88,104.84,104.84,0,0,0,37-52.91A8,8,0,0,0,233.54,142.23ZM188.9,190.34A88,88,0,0,1,65.66,67.11a89,89,0,0,1,31.4-26A106,106,0,0,0,96,56,104.11,104.11,0,0,0,200,160a106,106,0,0,0,14.92-1.06A89,89,0,0,1,188.9,190.34Z"></path></svg></button></div><nav class="sidebar-nav"><button data-tab="overview" class="nav-item active"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 256 256" class="icon-sm"><path d="M104,48H48A16,16,0,0,0,32,64v56a16,16,0,0,0,16,16h56a16,16,0,0,0,16-16V64A16,16,0,0,0,104,48Zm0,72H48V64h56Zm104-72H152a16,16,0,0,0-16,16v56a16,16,0,0,0,16,16h56a16,16,0,0,0,16-16V64A16,16,0,0,0,208,48Zm0,72H152V64h56ZM104,152H48a16,16,0,0,0-16,16v56a16,16,0,0,0,16,16h56a16,16,0,0,0,16-16V168A16,16,0,0,0,104,152Zm0,72H48V168h56Zm104-72H152a16,16,0,0,0-16,16v56a16,16,0,0,0,16,16h56a16,16,0,0,0,16-16V168A16,16,0,0,0,208,152Zm0,72H152V168h56Z"></path></svg>Overview</button><button data-tab="dups" class="nav-item"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 256 256" class="icon-sm"><path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"></path></svg>Duplicates</button><button data-tab="dynamic" class="nav-item"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 256 256" class="icon-sm"><path d="M215.79,118.17a8,8,0,0,0-5-5.66L153.18,90.9l14.66-73.33a8,8,0,0,0-13.69-7L37.71,143.17A8,8,0,0,0,44.22,156l57.6,11.52L87.16,240.83A8,8,0,0,0,95,248a7.72,7.72,0,0,0,1.57-.16l116.67-46.67a8,8,0,0,0,2.55-14.5ZM96.82,224,116,128a8,8,0,0,0-6.51-9.54L52.22,107,159.18,32,140,128a8,8,0,0,0,6.51,9.54l57.27,11.45Z"></path></svg>Dynamic imports</button><button data-tab="commands" class="nav-item"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 256 256" class="icon-sm"><path d="M216,48H40A16,16,0,0,0,24,64V192a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V64A16,16,0,0,0,216,48ZM40,64H216V192H40V64Zm84,84H92a8,8,0,0,1-5.66-13.66l32-32a8,8,0,0,1,11.32,11.32L103.31,140l26.35,26.34A8,8,0,0,1,124,148Zm92,0H152a8,8,0,0,1,0-16h64a8,8,0,0,1,0,16Z"></path></svg>Tauri coverage</button><button data-tab="graph" class="nav-item"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 256 256" class="icon-sm"><path d="M208,152a32.06,32.06,0,0,0-25.87,13.26l-52.3-29.06a32,32,0,0,0,0-16.4l52.3-29.06A32.06,32.06,0,0,0,208,104a32,32,0,1,0-31.71-28.29L124,104.78a32,32,0,1,0,0,46.44l52.3,29.06A32,32,0,1,0,208,152ZM208,56a16,16,0,1,1-16,16A16,16,0,0,1,208,56ZM80,128a16,16,0,1,1,16,16A16,16,0,0,1,80,128Zm128,88a16,16,0,1,1,16-16A16,16,0,0,1,208,216Z"></path></svg>Graph</button></nav><div class="app-footer">loctree v0.5.9-dev<br><span style="color:var(--theme-text-tertiary)">Snapshot</span></div></aside><main class="app-main"><!></main></div><script>
+(() => {
+  // -1. Copy Button Handler
+  document.querySelectorAll('.copy-btn[data-copy]').forEach(btn => {
+      btn.addEventListener('click', () => {
+          const text = btn.dataset.copy;
+          navigator.clipboard.writeText(text).then(() => {
+              const orig = btn.textContent;
+              btn.textContent = '✓';
+              setTimeout(() => btn.textContent = orig, 1500);
+          });
+      });
+  });
+  // 0. Theme Initialization & Toggle
+  const initTheme = () => {
+      const stored = localStorage.getItem('loctree-theme');
+      if (stored === 'dark') {
+          document.documentElement.classList.add('dark');
+          document.documentElement.classList.remove('light');
+      } else if (stored === 'light') {
+          document.documentElement.classList.add('light');
+          document.documentElement.classList.remove('dark');
+      } else {
+          if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+              document.documentElement.classList.add('dark');
+          }
+      }
+  };
+
+  const toggleTheme = () => {
+      const isDark = document.documentElement.classList.contains('dark') ||
+          (!document.documentElement.classList.contains('light') &&
+           window.matchMedia('(prefers-color-scheme: dark)').matches);
+
+      if (isDark) {
+          document.documentElement.classList.remove('dark');
+          document.documentElement.classList.add('light');
+          localStorage.setItem('loctree-theme', 'light');
+      } else {
+          document.documentElement.classList.add('dark');
+          document.documentElement.classList.remove('light');
+          localStorage.setItem('loctree-theme', 'dark');
+      }
+
+      document.querySelectorAll('[data-role="dark"]').forEach(chk => {
+          chk.checked = document.documentElement.classList.contains('dark');
+      });
+  };
+
+  initTheme();
+
+  const themeToggle = document.querySelector('[data-role="theme-toggle"]');
+  if (themeToggle) {
+      themeToggle.addEventListener('click', toggleTheme);
+  }
+
+  // 1. Sidebar Navigation (Tab Switching)
+  document.querySelectorAll('.sidebar-nav .nav-item[data-tab]').forEach(btn => {
+      btn.addEventListener('click', () => {
+          const tabName = btn.dataset.tab;
+
+          // Update Sidebar buttons
+          document.querySelectorAll('.sidebar-nav .nav-item').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+
+          // Update all tab panels across all sections
+          document.querySelectorAll('.tab-panel').forEach(p => {
+              const isActive = p.dataset.tabName === tabName;
+              p.classList.toggle('active', isActive);
+
+              if (isActive && tabName === 'graph') {
+                  window.dispatchEvent(new Event('resize'));
+              }
+          });
+
+          // Also update header tab-bar buttons if present (for visual sync)
+          document.querySelectorAll('.tab-bar .tab-btn').forEach(b => {
+              b.classList.toggle('active', b.dataset.tab === tabName);
+          });
+      });
+  });
+
+  // 2. Header Tab Switching (if still present, syncs with sidebar)
+  document.querySelectorAll('.tab-bar .tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+          const tabName = btn.dataset.tab;
+
+          // Trigger sidebar button click to keep everything in sync
+          const sidebarBtn = document.querySelector(`.sidebar-nav .nav-item[data-tab="${tabName}"]`);
+          if (sidebarBtn) {
+              sidebarBtn.click();
+          }
+      });
+  });
+})();
+</script><script src="loctree-cytoscape.min.js"></script><script src="loctree-dagre.min.js"></script><script src="loctree-cytoscape-dagre.js"></script><script src="loctree-layout-base.js"></script><script src="loctree-cose-base.js"></script><script src="loctree-cytoscape-cose-bilkent.js"></script><script>(function () {
+  const graphs = window.__LOCTREE_GRAPHS || [];
+  const escapeHtml = (value = "") =>
+    String(value).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] || c));
+  const formatNum = (n) => (typeof n === "number" && n.toLocaleString ? n.toLocaleString() : n || 0);
+  const cyInstances = new Set();
+  const darkToggles = new Set();
+  const filterElements = (elements, opts) => {
+    const text = (opts.text || "").toLowerCase();
+    const minDeg = parseInt(opts.minDeg || "0", 10) || 0;
+    const allowedComponents = opts.allowedComponents || new Set();
+    let nodes = elements.nodes.map((n) => ({ data: { ...n.data }, position: { ...n.position } }));
+    if (text) nodes = nodes.filter((n) => (n.data.id || "").toLowerCase().includes(text));
+    if (allowedComponents.size) nodes = nodes.filter((n) => allowedComponents.has(n.data.component));
+
+    let edges = elements.edges.map((e) => ({ data: { ...e.data } }));
+    const nodeSet = new Set(nodes.map((n) => n.data.id));
+    edges = edges.filter((e) => nodeSet.has(e.data.source) && nodeSet.has(e.data.target));
+
+    if (minDeg > 0) {
+      const deg = {};
+      edges.forEach((e) => {
+        deg[e.data.source] = (deg[e.data.source] || 0) + 1;
+        deg[e.data.target] = (deg[e.data.target] || 0) + 1;
+      });
+      nodes = nodes.filter((n) => (deg[n.data.id] || 0) >= minDeg);
+      const filteredSet = new Set(nodes.map((n) => n.data.id));
+      edges = edges.filter((e) => filteredSet.has(e.data.source) && filteredSet.has(e.data.target));
+    }
+    return { nodes, edges };
+  };
+
+  // Graph-only dark mode (independent of page theme)
+  const applyGraphDarkTheme = (on, graphs) => {
+    graphs
+      .filter(Boolean)
+      .forEach((inst) => {
+        if (inst && typeof inst.style === "function") {
+          const style = inst.style();
+          // Node text color: light for dark mode, dark for light mode
+          style.selector("node").style("color", on ? "#eef2ff" : "#1a1a2e").update();
+          // Edge text background: dark for dark mode, light for light mode
+          style.selector("edge").style("text-background-color", on ? "#0f1115" : "#fff").update();
+          // Graph container background via cytoscape
+          inst.container().style.backgroundColor = on ? "#0f1115" : "#ffffff";
+        }
+      });
+  };
+  const setGraphDarkMode = (on) => applyGraphDarkTheme(on, Array.from(cyInstances));
+  const applyGraphDarkShared = (on) => {
+    darkToggles.forEach((chk) => {
+      if (chk) chk.checked = on;
+    });
+    setGraphDarkMode(on);
+  };
+
+  graphs.forEach((g) => {
+    const container = document.getElementById(g.id);
+    if (!container || container.dataset.enhanced === "1") return;
+    container.dataset.enhanced = "1";
+
+    const components = Array.isArray(g.components) ? g.components : [];
+    const componentMap = new Map();
+    components.forEach((c) => componentMap.set(c.id, c));
+    const detachedSet = new Set(components.filter((c) => c.detached).map((c) => c.id));
+    const openBase = g.openBase || null;
+
+    const originalParent = container.parentNode;
+    const targetParent = originalParent || container.parentNode;
+
+    // ========================================
+    // Side-by-side split layout
+    // ========================================
+    const splitContainer = document.createElement("div");
+    splitContainer.className = "graph-split-container";
+
+    // LEFT PANEL: Component list with inner scroll
+    const leftPanel = document.createElement("div");
+    leftPanel.className = "graph-left-panel";
+
+    // Component filter toolbar
+    const componentBar = document.createElement("div");
+    componentBar.className = "graph-toolbar component-toolbar";
+    componentBar.innerHTML = `
+      <label>Component filter:
+        <select data-role="component-filter">
+          <option value="all">All components</option>
+          <option value="isolates">Isolates / size≤2</option>
+          <option value="size">Size ≤ slider</option>
+        </select>
+      </label>
+      <label>threshold:
+        <input type="range" min="1" max="64" value="8" data-role="component-threshold" />
+        <span data-role="component-threshold-label">8</span>
+      </label>
+      <span class="graph-controls">
+        <button data-role="component-highlight">Highlight selected</button>
+        <button data-role="component-dim">Dim others</button>
+        <button data-role="component-copy">Copy file list</button>
+        <button data-role="component-export-json">Export JSON</button>
+        <button data-role="component-export-csv">Export CSV</button>
+        <button data-role="component-show-isolates">Show isolates</button>
+      </span>
+    `;
+
+    const componentPanel = document.createElement("div");
+    componentPanel.className = "component-panel";
+    componentPanel.innerHTML = `
+      <div class="component-panel-header">
+        <div><strong>Disconnected components</strong> <span class="muted" data-role="component-summary"></span></div>
+        <div class="panel-actions">
+          <label>show size ≤ <input type="number" min="1" value="8" data-role="component-size-limit" style="width:70px" /></label>
+          <button data-role="component-reset">Reset view</button>
+        </div>
+      </div>
+      <table>
+        <thead><tr><th>id</th><th>size</th><th>sample</th><th>isolated</th><th>edges</th><th>LOC</th><th>actions</th></tr></thead>
+        <tbody data-role="component-table"></tbody>
+      </table>
+    `;
+
+    leftPanel.appendChild(componentBar);
+    leftPanel.appendChild(componentPanel);
+
+    // RESIZE HANDLE
+    const resizeHandle = document.createElement("div");
+    resizeHandle.className = "graph-resize-handle";
+
+    // RIGHT PANEL: Graph pinned to viewport
+    const rightPanel = document.createElement("div");
+    rightPanel.className = "graph-right-panel";
+
+    // Graph controls toolbar
+    const toolbar = document.createElement("div");
+    toolbar.className = "graph-toolbar";
+    toolbar.innerHTML = `
+      <label>filter:
+        <input type="text" size="18" placeholder="path substring or /regex/" data-role="filter-text" title="Filter by path. Use plain text for substring match, or /pattern/ for regex." />
+      </label>
+      <label>min degree:
+        <input type="number" min="0" value="0" style="width:60px" data-role="min-degree" />
+      </label>
+      <label>layout:
+        <select data-role="layout-select">
+          <option value="cose">cose (force)</option>
+          <option value="dagre">dagre (hierarchy)</option>
+          <option value="cose-bilkent">cose-bilkent</option>
+          <option value="concentric" selected>concentric</option>
+          <option value="breadthfirst">breadthfirst</option>
+          <option value="preset">preset (original)</option>
+        </select>
+      </label>
+      <label><input type="checkbox" data-role="toggle-labels" checked /> labels</label>
+      <label><input type="checkbox" data-role="graph-dark" /> graph dark</label>
+      <span class="graph-controls">
+        <button data-role="fit">fit</button>
+        <button data-role="relayout">relayout</button>
+        <button data-role="reset">reset</button>
+        <button data-role="fullscreen">fullscreen</button>
+        <button data-role="png">png</button>
+        <button data-role="json">json</button>
+      </span>
+      <div class="graph-legend">
+        <span><span class="legend-dot" style="background:#4f81e1"></span> file</span>
+        <span><span class="legend-dot" style="background:#888"></span> import</span>
+        <span><span class="legend-dot" style="background:#e67e22"></span> re-export</span>
+        <span><span class="legend-dot" style="background:#d1830f"></span> detached</span>
+      </div>
+    `;
+
+    // Move graph container into right panel
+    container.style.height = "";  // Remove fixed height, let flex handle it
+    container.style.flex = "1";
+    container.style.minHeight = "0";
+
+    rightPanel.appendChild(toolbar);
+    rightPanel.appendChild(container);
+
+    // Assemble split layout
+    splitContainer.appendChild(leftPanel);
+    splitContainer.appendChild(resizeHandle);
+    splitContainer.appendChild(rightPanel);
+
+    if (targetParent) targetParent.appendChild(splitContainer);
+
+    // ========================================
+    // Resize handle drag functionality
+    // ========================================
+    let isResizing = false;
+    let startX = 0;
+    let startWidth = 0;
+
+    resizeHandle.addEventListener("mousedown", (e) => {
+      isResizing = true;
+      startX = e.clientX;
+      startWidth = leftPanel.offsetWidth;
+      resizeHandle.classList.add("active");
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+      e.preventDefault();
+    });
+
+    document.addEventListener("mousemove", (e) => {
+      if (!isResizing) return;
+      const delta = e.clientX - startX;
+      const newWidth = Math.min(600, Math.max(280, startWidth + delta));
+      leftPanel.style.width = newWidth + "px";
+    });
+
+    document.addEventListener("mouseup", () => {
+      if (isResizing) {
+        isResizing = false;
+        resizeHandle.classList.remove("active");
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+      }
+    });
+
+    const componentSelect = componentBar.querySelector('[data-role="component-filter"]');
+    const sizeSlider = componentBar.querySelector('[data-role="component-threshold"]');
+    const sizeLabel = componentBar.querySelector('[data-role="component-threshold-label"]');
+    const tableBody = componentPanel.querySelector('[data-role="component-table"]');
+    const summaryEl = componentPanel.querySelector('[data-role="component-summary"]');
+    const sizeLimitInput = componentPanel.querySelector('[data-role="component-size-limit"]');
+    const componentReset = componentPanel.querySelector('[data-role="component-reset"]');
+
+    const addComponentOptions = () => {
+      const sorted = [...components].sort((a, b) => a.size - b.size || a.id - b.id);
+      sorted.forEach((comp) => {
+        const opt = document.createElement("option");
+        opt.value = `comp-${comp.id}`;
+        const labelSample = comp.sample || (Array.isArray(comp.nodes) && comp.nodes[0]) || "";
+        opt.textContent = `C${comp.id} • ${comp.size} nodes • ${labelSample}`;
+        opt.dataset.size = comp.size;
+        componentSelect.appendChild(opt);
+      });
+    };
+    addComponentOptions();
+
+    const state = {
+      viewComponents: new Set(),
+      highlightComponents: new Set(),
+      sizeThreshold: parseInt(sizeSlider?.value || "8", 10) || 8,
+      dimOthers: true,
+    };
+
+    const syncSize = (val) => {
+      const safe = Math.max(1, Math.min(128, val || state.sizeThreshold));
+      state.sizeThreshold = safe;
+      if (sizeLabel) sizeLabel.textContent = safe;
+      if (sizeSlider && sizeSlider.value !== String(safe)) sizeSlider.value = safe;
+      if (sizeLimitInput && sizeLimitInput.value !== String(safe)) sizeLimitInput.value = safe;
+      const sizeOption = componentSelect.querySelector('option[value="size"]');
+      if (sizeOption) sizeOption.textContent = `Size ≤ ${safe}`;
+    };
+    syncSize(state.sizeThreshold);
+
+    // Layout configuration helper - supports multiple algorithms
+    const getLayoutConfig = (name, nodeCount) => {
+      // Animate only moderate-sized graphs (fewer than 150 nodes) to avoid performance issues
+      const animate = nodeCount < 150;
+      const configs = {
+        cose: {
+          name: "cose",
+          animate,
+          animationDuration: animate ? 500 : 0,
+          fit: true,
+          padding: 30,
+          nodeRepulsion: function(node) { return 8000; },
+          idealEdgeLength: function(edge) { return 100; },
+          edgeElasticity: function(edge) { return 100; },
+          nestingFactor: 1.2,
+          gravity: 1,
+          numIter: 1000,
+          initialTemp: 1000,
+          coolingFactor: 0.99,
+          minTemp: 1.0,
+          randomize: false,
+        },
+        "cose-bilkent": {
+          name: "cose-bilkent",
+          animate,
+          animationDuration: animate ? 500 : 0,
+          fit: true,
+          padding: 30,
+          nodeRepulsion: 4500,
+          idealEdgeLength: 80,
+          edgeElasticity: 0.45,
+          nestingFactor: 0.1,
+          gravity: 0.25,
+          numIter: 2500,
+          tile: true,
+          tilingPaddingVertical: 10,
+          tilingPaddingHorizontal: 10,
+          gravityRangeCompound: 1.5,
+          gravityCompound: 1.0,
+          gravityRange: 3.8,
+          randomize: true,
+        },
+        dagre: {
+          name: "dagre",
+          animate,
+          animationDuration: animate ? 500 : 0,
+          fit: true,
+          padding: 30,
+          rankDir: "TB",  // top-to-bottom (hierarchy: caller → callee)
+          nodeSep: 50,
+          rankSep: 80,
+          edgeSep: 10,
+          ranker: "network-simplex",  // tight-tree, longest-path, network-simplex
+        },
+        concentric: {
+          name: "concentric",
+          animate,
+          animationDuration: animate ? 500 : 0,
+          fit: true,
+          padding: 30,
+          minNodeSpacing: 50,
+          concentric: function(node) { return node.data("degree") || 0; },
+          levelWidth: function(nodes) { return Math.max(1, Math.ceil(nodes.length / 8)); },
+          clockwise: true,
+          startAngle: 3 / 2 * Math.PI,
+        },
+        breadthfirst: {
+          name: "breadthfirst",
+          animate,
+          animationDuration: animate ? 500 : 0,
+          fit: true,
+          padding: 30,
+          directed: true,
+          spacingFactor: 1.5,
+          circle: false,
+          grid: false,
+          avoidOverlap: true,
+        },
+        preset: {
+          name: "preset",
+          animate: false,
+          fit: true,
+        },
+      };
+      return configs[name] || configs.preset;
+    };
+
+    const buildElements = () => {
+      const rawNodes = Array.isArray(g.nodes) ? g.nodes : [];
+      const rawEdges = Array.isArray(g.edges) ? g.edges : [];
+      const nodeToComponent = new Map();
+      const nodes = rawNodes.map((n) => {
+        const size = Math.max(4, Math.min(30, Math.sqrt((n && n.loc) || 1)));
+        const comp = n.component || 0;
+        const compSize = (componentMap.get(comp) || {}).size || 0;
+        const detached = detachedSet.has(comp) || !!n.detached;
+        const isolate = (n.degree || 0) === 0 || compSize <= 2;
+        const id = n.id || "";
+        nodeToComponent.set(id, comp);
+        return {
+          data: {
+            id,
+            label: n.label || id || "",
+            loc: n.loc || 0,
+            size,
+            full: id || "",
+            component: comp,
+            degree: n.degree || 0,
+            detached,
+            componentSize: compSize,
+            isolate: isolate ? 1 : 0,
+            color: detached ? "#d1830f" : "#4f81e1",
+          },
+          position: { x: n.x || 0, y: n.y || 0 },
+        };
+      });
+      const edges = rawEdges.map((e, idx) => {
+        const kind = (e && e[2]) || "import";
+        const sourceComp = nodeToComponent.get(e[0]) || nodeToComponent.get(e[1]) || 0;
+        const detached = detachedSet.has(sourceComp);
+        const color = detached ? "#d1830f" : kind === "reexport" ? "#e67e22" : "#888";
+        return {
+          data: {
+            id: "e" + idx,
+            source: e[0],
+            target: e[1],
+            label: kind,
+            kind,
+            color,
+            component: sourceComp,
+            detached: detached ? 1 : 0,
+          },
+        };
+      });
+      return { nodes, edges };
+    };
+
+    const original = buildElements();
+    const emptyOverlay = document.createElement("div");
+    emptyOverlay.className = "graph-empty";
+    emptyOverlay.style.display = "none";
+    container.appendChild(emptyOverlay);
+    let cy = cytoscape({
+      container,
+      elements: original,
+      style: [
+        { selector: "node", style: { label: "data(label)", "font-size": 10, "text-wrap": "wrap", "text-max-width": 120, "background-color": "data(color)", color: "#fff", width: "data(size)", height: "data(size)", "overlay-padding": 8, "overlay-opacity": 0 } },
+        { selector: "node.detached", style: { "background-color": "#d1830f" } },
+        { selector: "node.isolate", style: { "border-width": 2, "border-color": "#d74d26" } },
+        { selector: "node.highlight", style: { "border-width": 3, "border-color": "#111", "shadow-blur": 12, "shadow-color": "#111", "shadow-opacity": 0.45, "shadow-offset-x": 0, "shadow-offset-y": 0, "z-index": 999 } },
+        { selector: "node.dimmed", style: { opacity: 0.15 } },
+        { selector: "edge", style: { "curve-style": "bezier", width: 1.1, "line-color": "data(color)", "target-arrow-color": "data(color)", "target-arrow-shape": "triangle", "arrow-scale": 0.7, label: "", "font-size": 9, "text-background-color": "#fff", "text-background-opacity": 0.8, "text-background-padding": 2 } },
+        { selector: "edge.detached", style: { "line-color": "#d1830f", "target-arrow-color": "#d1830f" } },
+        { selector: "edge.highlight", style: { width: 2, opacity: 0.9 } },
+        { selector: "edge.dimmed", style: { opacity: 0.08 } },
+      ],
+      layout: { name: "preset", animate: false, fit: true },
+    });
+    cyInstances.add(cy);
+
+    const download = (filename, content, type) => {
+      const blob = new Blob([content], { type });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 500);
+    };
+
+    const gatherSelectedComponents = () => {
+      if (state.highlightComponents.size) return new Set(state.highlightComponents);
+      if (state.viewComponents.size) return new Set(state.viewComponents);
+      return new Set();
+    };
+
+    const applyHighlight = (forceDim) => {
+      const highlightSet = gatherSelectedComponents();
+      const dim = forceDim === undefined ? state.dimOthers : forceDim;
+
+      cy.nodes().removeClass("dimmed highlight isolate detached");
+      cy.edges().removeClass("dimmed highlight detached");
+
+      cy.nodes().filter((n) => n.data("detached")).addClass("detached");
+      cy.edges().filter((e) => e.data("detached")).addClass("detached");
+      cy.nodes()
+        .filter((n) => (n.data("isolate") || 0) === 1 || (n.data("componentSize") || 0) <= 2)
+        .addClass("isolate");
+
+      if (!highlightSet.size) return;
+      const nodes = cy.nodes().filter((n) => highlightSet.has(n.data("component")));
+      const edges = cy.edges().filter((e) => highlightSet.has(e.data("component")));
+      nodes.addClass("highlight");
+      edges.addClass("highlight");
+      if (dim) {
+        cy.nodes().not(nodes).addClass("dimmed");
+        cy.edges().not(edges).addClass("dimmed");
+      }
+    };
+
+    const layoutSelect = toolbar.querySelector('[data-role="layout-select"]');
+    const getSelectedLayout = () => layoutSelect?.value || "concentric";
+
+    const applyFilters = (runLayout = true) => {
+      const text = (toolbar.querySelector('[data-role="filter-text"]')?.value || "").toLowerCase();
+      const minDeg = parseInt(toolbar.querySelector('[data-role="min-degree"]')?.value || "0", 10) || 0;
+      const allowedComponents = state.viewComponents;
+      const filtered = filterElements(original, { text, minDeg, allowedComponents });
+      let nodes = filtered.nodes;
+      let edges = filtered.edges;
+
+      if (nodes.length === 0) {
+        emptyOverlay.style.display = "block";
+        cy.elements().remove();
+        return;
+      }
+      emptyOverlay.style.display = "none";
+
+      cy.elements().remove();
+      cy.add({ nodes, edges });
+
+      const showLabels = toolbar.querySelector('[data-role="toggle-labels"]').checked;
+      const autoHide = nodes.length > 800;
+      const labelsOn = showLabels && !autoHide;
+      cy.style().selector("node").style("label", labelsOn ? "data(label)" : "").update();
+
+      if (runLayout) {
+        const layoutName = getSelectedLayout();
+        const layoutConfig = getLayoutConfig(layoutName, nodes.length);
+        cy.layout(layoutConfig).run();
+      }
+      applyHighlight();
+    };
+
+    const runRelayout = () => {
+      const layoutName = getSelectedLayout();
+      const nodeCount = cy.nodes().length;
+      const layoutConfig = getLayoutConfig(layoutName, nodeCount);
+      cy.layout(layoutConfig).run();
+    };
+
+    // Fit / reset / relayout / dark / fullscreen
+    const fitBtn = toolbar.querySelector('[data-role="fit"]');
+    const relayoutBtn = toolbar.querySelector('[data-role="relayout"]');
+    const resetBtn = toolbar.querySelector('[data-role="reset"]');
+    const darkChk = toolbar.querySelector('[data-role="graph-dark"]');
+    const fsBtn = toolbar.querySelector('[data-role="fullscreen"]');
+    const pngBtn = toolbar.querySelector('[data-role="png"]');
+    const jsonBtn = toolbar.querySelector('[data-role="json"]');
+
+    if (fitBtn) fitBtn.addEventListener("click", () => cy.fit());
+    if (relayoutBtn) relayoutBtn.addEventListener("click", runRelayout);
+    if (layoutSelect) layoutSelect.addEventListener("change", runRelayout);
+    if (resetBtn)
+      resetBtn.addEventListener("click", () => {
+        cy.elements().remove();
+        cy.add(original);
+        state.viewComponents = new Set();
+        state.highlightComponents = new Set();
+        layoutSelect.value = "preset";
+        applyFilters(false);
+        cy.layout({ name: "preset", animate: false, fit: true }).run();
+      });
+
+    if (pngBtn)
+      pngBtn.addEventListener("click", () => {
+        const dark = darkChk && darkChk.checked;
+        const dataUrl = cy.png({ bg: dark ? "#0f1115" : "#ffffff", full: true, scale: 2 });
+        const a = document.createElement("a");
+        a.href = dataUrl;
+        a.download = `${g.id}-graph.png`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      });
+
+    if (jsonBtn)
+      jsonBtn.addEventListener("click", () => {
+        const payload = {
+          nodes: cy.nodes().map((n) => n.data()),
+          edges: cy.edges().map((e) => ({ source: e.data("source"), target: e.data("target"), kind: e.data("kind") })),
+          filter: toolbar.querySelector('[data-role="filter-text"]')?.value || "",
+          minDegree: parseInt(toolbar.querySelector('[data-role="min-degree"]')?.value || "0", 10) || 0,
+          components,
+          highlightedComponents: Array.from(state.highlightComponents),
+          viewedComponents: Array.from(state.viewComponents),
+        };
+        download(`${g.id}-graph.json`, JSON.stringify(payload, null, 2), "application/json");
+      });
+
+    if (darkChk) {
+      darkToggles.add(darkChk);
+      darkChk.addEventListener("change", () => applyGraphDarkShared(darkChk.checked));
+    }
+
+    const fsTarget = container;
+    if (fsBtn && fsTarget && fsTarget.requestFullscreen) {
+      fsBtn.addEventListener("click", () => {
+        if (document.fullscreenElement) {
+          document.exitFullscreen();
+        } else {
+          fsTarget.requestFullscreen().catch(() => {});
+        }
+      });
+      document.addEventListener("fullscreenchange", () => {
+        fsBtn.textContent = document.fullscreenElement ? "exit fullscreen" : "fullscreen";
+        if (!document.fullscreenElement) cy.fit();
+      });
+    }
+
+    // Tooltip on hover/click (sticky behavior)
+    const tooltip = document.createElement("div");
+    tooltip.style.position = "fixed";
+    tooltip.style.pointerEvents = "auto";
+    tooltip.style.background = "#111";
+    tooltip.style.color = "#fff";
+    tooltip.style.padding = "6px 8px";
+    tooltip.style.borderRadius = "6px";
+    tooltip.style.fontSize = "12px";
+    tooltip.style.display = "none";
+    tooltip.style.zIndex = 9999;
+    document.body.appendChild(tooltip);
+
+    let nodeHover = false;
+    let tooltipHover = false;
+    let hideTimeout = null;
+
+    const hideTip = () => {
+      if (hideTimeout) {
+        clearTimeout(hideTimeout);
+        hideTimeout = null;
+      }
+      nodeHover = false;
+      tooltipHover = false;
+      tooltip.style.display = "none";
+    };
+
+    const scheduleHide = () => {
+      if (hideTimeout) {
+        clearTimeout(hideTimeout);
+      }
+      hideTimeout = setTimeout(() => {
+        if (!nodeHover && !tooltipHover) {
+          hideTip();
+        }
+      }, 350);
+    };
+
+    const showTip = (evt, node) => {
+      // Cancel any pending hide
+      if (hideTimeout) {
+        clearTimeout(hideTimeout);
+        hideTimeout = null;
+      }
+
+      const data = node.data();
+      const path = data.full || data.id;
+      const comp = componentMap.get(data.component);
+      const compLabel = comp ? `C${comp.id} (${comp.size} nodes${comp.detached ? ", detached" : ""})` : "—";
+
+      // Get current filter text for highlighting
+      const filterInput = toolbar.querySelector('[data-role="filter-text"]');
+      const filterText = (filterInput?.value || "").toLowerCase().trim();
+
+      // Highlight filter match in path
+      let pathHtml;
+      if (filterText && path.toLowerCase().includes(filterText)) {
+        // Case-insensitive highlight
+        const idx = path.toLowerCase().indexOf(filterText);
+        const before = escapeHtml(path.slice(0, idx));
+        const match = escapeHtml(path.slice(idx, idx + filterText.length));
+        const after = escapeHtml(path.slice(idx + filterText.length));
+        pathHtml = `${before}<mark style="background:#ffd700;color:#000;padding:0 2px;border-radius:2px">${match}</mark>${after}`;
+      } else {
+        pathHtml = escapeHtml(path);
+      }
+
+      // Build "open in editor" link if openBase available
+      const openLink = openBase
+        ? `<a href="${openBase}/open?f=${encodeURIComponent(path)}&l=1" style="color:#6af;text-decoration:underline;font-size:10px">open in editor</a>`
+        : "";
+
+      // Get incoming/outgoing edges for context
+      const incomingEdges = cy.edges().filter(e => e.data("target") === data.id);
+      const outgoingEdges = cy.edges().filter(e => e.data("source") === data.id);
+      const edgeInfo = `imports: ${outgoingEdges.length} | imported by: ${incomingEdges.length}`;
+
+      // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method -- SAFETY: path escaped via escapeHtml(); other values are numbers or safe
+      tooltip.innerHTML = `
+        <div style="margin-bottom:4px"><strong>${pathHtml}</strong></div>
+        <div>LOC: ${data.loc || 0} | degree: ${data.degree || 0}</div>
+        <div>${edgeInfo}</div>
+        <div>component: ${compLabel}</div>
+        <div style="margin-top:4px;display:flex;gap:8px;align-items:center">
+          <button data-role="copy-path" style="font-size:10px;cursor:pointer">copy path</button>
+          ${openLink}
+        </div>
+      `;
+      const copyBtn = tooltip.querySelector('[data-role="copy-path"]');
+      if (copyBtn)
+        copyBtn.addEventListener("click", () => navigator.clipboard.writeText(path));
+      const rect = container.getBoundingClientRect();
+      // Fixed positioning is relative to viewport, no scroll offset needed
+      let left = rect.left + evt.renderedPosition.x + 12;
+      let top = rect.top + evt.renderedPosition.y + 12;
+      // Ensure tooltip stays within viewport bounds
+      const tooltipWidth = 220;
+      const tooltipHeight = 120;
+      const maxLeft = window.innerWidth - tooltipWidth - 10;
+      const maxTop = window.innerHeight - tooltipHeight - 10;
+      if (left > maxLeft) left = maxLeft;
+      if (top > maxTop) top = Math.max(10, top - tooltipHeight - 24);
+      tooltip.style.left = left + "px";
+      tooltip.style.top = top + "px";
+      tooltip.style.display = "block";
+      nodeHover = true;
+    };
+
+    tooltip.addEventListener("mouseenter", () => {
+      tooltipHover = true;
+      if (hideTimeout) {
+        clearTimeout(hideTimeout);
+        hideTimeout = null;
+      }
+    });
+    tooltip.addEventListener("mouseleave", () => {
+      tooltipHover = false;
+      scheduleHide();
+    });
+
+    cy.off("mouseover");
+    cy.off("mouseout");
+    cy.off("tap");
+    cy.off("tapdrag");
+    cy.off("pan");
+    cy.off("zoom");
+    cy.on("mouseover", "node", (evt) => {
+      nodeHover = true;
+      if (hideTimeout) { clearTimeout(hideTimeout); hideTimeout = null; }
+      showTip(evt, evt.target);
+    });
+    cy.on("mouseout", "node", () => {
+      nodeHover = false;
+      scheduleHide();
+    });
+    cy.on("tap", "node", (evt) => {
+      nodeHover = true;
+      showTip(evt, evt.target);
+    });
+    cy.on("tapdrag", "node", () => {
+      nodeHover = false;
+      hideTip();
+    });
+    // Hide tooltip on pan/zoom to avoid stale position
+    cy.on("pan zoom", () => {
+      if (tooltip.style.display !== "none") {
+        hideTip();
+      }
+    });
+
+    const updateComponentFilter = () => {
+      const val = componentSelect.value;
+      const set = new Set();
+      if (val === "isolates") {
+        components.filter((c) => c.size <= 2 || c.isolated_count > 0).forEach((c) => set.add(c.id));
+      } else if (val === "size") {
+        components.filter((c) => c.size <= state.sizeThreshold).forEach((c) => set.add(c.id));
+      } else if (val.startsWith("comp-")) {
+        const id = parseInt(val.replace("comp-", ""), 10);
+        if (Number.isFinite(id)) set.add(id);
+      }
+      state.viewComponents = set;
+      state.highlightComponents = new Set(set);
+      applyFilters();
+    };
+
+    const renderComponentTable = () => {
+      const limit = parseInt(sizeLimitInput.value || state.sizeThreshold, 10) || state.sizeThreshold;
+      syncSize(limit);
+      const rows = [...components].sort((a, b) => a.size - b.size || a.id - b.id);
+      const filtered = rows.filter((c) => c.size <= limit);
+      tableBody.innerHTML = "";
+      filtered.forEach((comp) => {
+        const sample = comp.sample || (comp.nodes && comp.nodes[0]) || "";
+        const sampleHref = openBase ? `${openBase}/open?f=${encodeURIComponent(sample)}&l=1` : null;
+        const sampleCell = sampleHref ? `<a href="${sampleHref}">${escapeHtml(sample)}</a>` : `<code>${escapeHtml(sample)}</code>`;
+        const warn = comp.detached ? " ⚠️" : "";
+        const tr = document.createElement("tr");
+        const edgeCount = comp.edges !== undefined ? comp.edges : comp.edge_count;
+        // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method -- SAFETY: all values are numbers or escaped via escapeHtml()
+        tr.innerHTML = `<td>C${comp.id}${warn}</td><td>${comp.size}</td><td>${sampleCell}</td><td>${comp.isolated_count}</td><td>${edgeCount || 0}</td><td>${formatNum(comp.loc_sum)}</td><td><button data-role="component-focus" data-comp="${comp.id}">Highlight</button></td>`;
+        tableBody.appendChild(tr);
+      });
+      summaryEl.textContent = `${filtered.length} / ${components.length} components ≤ ${limit} nodes • detached: ${detachedSet.size} • isolates: ${
+        components.filter((c) => c.size <= 2 || c.isolated_count > 0).length
+      }`;
+      tableBody.querySelectorAll('[data-role="component-focus"]').forEach((btn) => {
+        btn.addEventListener("click", (evt) => {
+          const compId = parseInt(evt.currentTarget.getAttribute("data-comp"), 10);
+          if (!Number.isFinite(compId)) return;
+          componentSelect.value = `comp-${compId}`;
+          state.viewComponents = new Set([compId]);
+          state.highlightComponents = new Set([compId]);
+          applyFilters();
+          const nodes = cy.nodes().filter((n) => n.data("component") === compId);
+          if (nodes.length) cy.fit(nodes, 30);
+        });
+      });
+    };
+
+    const showIsolatesBtn = componentBar.querySelector('[data-role="component-show-isolates"]');
+    const highlightBtn = componentBar.querySelector('[data-role="component-highlight"]');
+    const dimBtn = componentBar.querySelector('[data-role="component-dim"]');
+    const copyBtn = componentBar.querySelector('[data-role="component-copy"]');
+    const exportJsonBtn = componentBar.querySelector('[data-role="component-export-json"]');
+    const exportCsvBtn = componentBar.querySelector('[data-role="component-export-csv"]');
+
+    const gatherNodesForExport = () => {
+      const target = gatherSelectedComponents();
+      const nodes = target.size ? cy.nodes().filter((n) => target.has(n.data("component"))) : cy.nodes();
+      return nodes.map((n) => n.data());
+    };
+
+    if (showIsolatesBtn) showIsolatesBtn.addEventListener("click", () => {
+      componentSelect.value = "isolates";
+      updateComponentFilter();
+    });
+    if (componentSelect) componentSelect.addEventListener("change", updateComponentFilter);
+    if (sizeSlider)
+      sizeSlider.addEventListener("input", (e) => {
+        syncSize(parseInt(e.target.value, 10));
+        if (componentSelect.value === "size") updateComponentFilter();
+        renderComponentTable();
+      });
+    if (sizeLimitInput)
+      sizeLimitInput.addEventListener("input", (e) => {
+        syncSize(parseInt(e.target.value, 10));
+        if (componentSelect.value === "size") updateComponentFilter();
+        renderComponentTable();
+      });
+    if (componentReset)
+      componentReset.addEventListener("click", () => {
+        componentSelect.value = "all";
+        state.viewComponents = new Set();
+        state.highlightComponents = new Set();
+        applyFilters();
+      });
+    if (highlightBtn)
+      highlightBtn.addEventListener("click", () => {
+        state.dimOthers = false;
+        applyHighlight(false);
+        const comps = gatherSelectedComponents();
+        if (comps.size) {
+          const nodes = cy.nodes().filter((n) => comps.has(n.data("component")));
+          if (nodes.length) cy.fit(nodes, 30);
+        }
+      });
+    if (dimBtn) dimBtn.addEventListener("click", () => {
+      state.dimOthers = true;
+      applyHighlight(true);
+    });
+    if (copyBtn)
+      copyBtn.addEventListener("click", () => {
+        const nodes = gatherNodesForExport();
+        const lines = nodes.map((n) => `${n.id || ""}, loc=${n.loc || 0}, degree=${n.degree || 0}, comp=C${n.component || "?"}`);
+        navigator.clipboard.writeText(lines.join("\n"));
+      });
+    if (exportJsonBtn)
+      exportJsonBtn.addEventListener("click", () => {
+        const nodes = gatherNodesForExport();
+        download(`${g.id}-component.json`, JSON.stringify(nodes, null, 2), "application/json");
+      });
+    if (exportCsvBtn)
+      exportCsvBtn.addEventListener("click", () => {
+        const nodes = gatherNodesForExport();
+        const header = "path,loc,degree,component";
+        const rows = nodes.map((n) => `${n.id || ""},${n.loc || 0},${n.degree || 0},C${n.component || ""}`);
+        download(`${g.id}-component.csv`, [header, ...rows].join("\n"), "text/csv");
+      });
+
+    toolbar.querySelectorAll("input").forEach((inp) => {
+      inp.addEventListener("input", () => applyFilters());
+      inp.addEventListener("change", () => applyFilters());
+    });
+
+    renderComponentTable();
+    applyFilters();
+    // Initial fit after layout completes (layout is async)
+    cy.one("layoutstop", () => {
+      cy.fit();
+    });
+  });
+})();
+</script></body></html>

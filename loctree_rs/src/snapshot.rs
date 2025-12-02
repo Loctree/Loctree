@@ -208,11 +208,13 @@ impl Snapshot {
 
     /// Get git repository info (repo name, branch, commit)
     fn get_git_info() -> (Option<String>, Option<String>, Option<String>) {
-        use std::process::Command;
+        use std::process::{Command, Stdio};
 
         // Get repo name from remote origin URL
+        // Suppress stderr to avoid "not a git repository" spam in non-git dirs
         let repo = Command::new("git")
             .args(["remote", "get-url", "origin"])
+            .stderr(Stdio::null())
             .output()
             .ok()
             .and_then(|output| {
@@ -235,6 +237,7 @@ impl Snapshot {
         // Get current branch
         let branch = Command::new("git")
             .args(["rev-parse", "--abbrev-ref", "HEAD"])
+            .stderr(Stdio::null())
             .output()
             .ok()
             .and_then(|output| {
@@ -250,6 +253,7 @@ impl Snapshot {
         // Get short commit hash
         let commit = Command::new("git")
             .args(["rev-parse", "--short", "HEAD"])
+            .stderr(Stdio::null())
             .output()
             .ok()
             .and_then(|output| {
