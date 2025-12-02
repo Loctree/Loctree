@@ -208,6 +208,16 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
         Command::Version => {
             parsed.show_version = true;
         }
+
+        Command::Query(_) => {
+            // Query is handled specially in dispatch_command
+            // as it doesn't go through ParsedArgs
+        }
+
+        Command::Diff(_) => {
+            // Diff is handled specially in dispatch_command
+            // as it doesn't go through ParsedArgs
+        }
     }
 
     parsed
@@ -248,12 +258,232 @@ pub fn dispatch_command(parsed_cmd: &ParsedCommand) -> DispatchResult {
         Command::Version => {
             return DispatchResult::ShowVersion;
         }
+        Command::Query(opts) => {
+            // Execute query and return result
+            return handle_query_command(opts, &parsed_cmd.global);
+        }
+        Command::Diff(opts) => {
+            // Execute diff and return result
+            return handle_diff_command(opts, &parsed_cmd.global);
+        }
         _ => {}
     }
 
     // Convert to ParsedArgs for the existing handlers
     let parsed_args = command_to_parsed_args(&parsed_cmd.command, &parsed_cmd.global);
     DispatchResult::Continue(Box::new(parsed_args))
+}
+
+/// Handle the query command directly
+fn handle_query_command(opts: &QueryOptions, global: &GlobalOptions) -> DispatchResult {
+    use crate::query::{query_component_of, query_where_symbol, query_who_imports};
+    use crate::snapshot::Snapshot;
+    use std::path::Path;
+
+    // Load snapshot from current directory
+    let root = Path::new(".");
+    let snapshot = match Snapshot::load(root) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[loct][error] Failed to load snapshot: {}", e);
+            eprintln!("[loct][hint] Run 'loct scan' first to create a snapshot.");
+            return DispatchResult::Exit(1);
+        }
+    };
+
+    // Execute the query
+    let result = match opts.kind {
+        QueryKind::WhoImports => query_who_imports(&snapshot, &opts.target),
+        QueryKind::WhereSymbol => query_where_symbol(&snapshot, &opts.target),
+        QueryKind::ComponentOf => query_component_of(&snapshot, &opts.target),
+    };
+
+    // Output results
+    if global.json {
+        // JSON output
+        match serde_json::to_string_pretty(&result) {
+            Ok(json) => println!("{}", json),
+            Err(e) => {
+                eprintln!("[loct][error] Failed to serialize results: {}", e);
+                return DispatchResult::Exit(1);
+            }
+        }
+    } else {
+        // Human-readable output
+        println!("{} '{}':", result.kind, result.target);
+        if result.results.is_empty() {
+            println!("  (no results)");
+        } else {
+            for m in &result.results {
+                if let Some(line) = m.line {
+                    print!("  {}:{}", m.file, line);
+                } else {
+                    print!("  {}", m.file);
+                }
+                if let Some(ref ctx) = m.context {
+                    print!(" - {}", ctx);
+                }
+                println!();
+            }
+        }
+    }
+
+    DispatchResult::Exit(0)
+}
+
+/// Handle the diff command directly
+fn handle_diff_command(opts: &DiffOptions, global: &GlobalOptions) -> DispatchResult {
+    use crate::diff::SnapshotDiff;
+    use crate::snapshot::Snapshot;
+    use std::path::Path;
+
+    // For MVP: Load snapshots from paths or IDs
+    // `--since` is required and points to a snapshot path or ID
+    let since_path = opts.since.as_ref().expect("--since is required");
+
+    // Load "from" snapshot
+    let from_snapshot = match Snapshot::load(Path::new(since_path)) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!(
+                "[loct][error] Failed to load snapshot from '{}': {}",
+                since_path, e
+            );
+            eprintln!("[loct][hint] Provide a valid snapshot path or run 'loct scan' first.");
+            return DispatchResult::Exit(1);
+        }
+    };
+
+    // Load "to" snapshot (current if not specified)
+    let to_snapshot = if let Some(ref to_path) = opts.to {
+        match Snapshot::load(Path::new(to_path)) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!(
+                    "[loct][error] Failed to load snapshot from '{}': {}",
+                    to_path, e
+                );
+                return DispatchResult::Exit(1);
+            }
+        }
+    } else {
+        // Load current snapshot from .loctree/
+        match Snapshot::load(Path::new(".")) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("[loct][error] Failed to load current snapshot: {}", e);
+                eprintln!("[loct][hint] Run 'loct scan' first to create a snapshot.");
+                return DispatchResult::Exit(1);
+            }
+        }
+    };
+
+    // For now, we don't have git commit info in this flow
+    // In future, we could extract it from snapshot metadata
+    let from_commit = None;
+    let to_commit = None;
+
+    // We don't have changed_files info without git integration
+    // For snapshot-to-snapshot diff, we'll compute it from the diff itself
+    let changed_files = vec![];
+
+    // Compare snapshots
+    let diff = SnapshotDiff::compare(
+        &from_snapshot,
+        &to_snapshot,
+        from_commit,
+        to_commit,
+        &changed_files,
+    );
+
+    // Output results
+    if global.json || opts.jsonl {
+        // JSON/JSONL output
+        if opts.jsonl {
+            // One-line JSON (compact)
+            match serde_json::to_string(&diff) {
+                Ok(json) => println!("{}", json),
+                Err(e) => {
+                    eprintln!("[loct][error] Failed to serialize diff: {}", e);
+                    return DispatchResult::Exit(1);
+                }
+            }
+        } else {
+            // Pretty JSON
+            match serde_json::to_string_pretty(&diff) {
+                Ok(json) => println!("{}", json),
+                Err(e) => {
+                    eprintln!("[loct][error] Failed to serialize diff: {}", e);
+                    return DispatchResult::Exit(1);
+                }
+            }
+        }
+    } else {
+        // Human-readable output
+        println!("Snapshot Diff:");
+        println!("  From: {}", since_path);
+        if let Some(ref to_path) = opts.to {
+            println!("  To:   {}", to_path);
+        } else {
+            println!("  To:   (current)");
+        }
+        println!();
+        println!("Summary: {}", diff.impact.summary);
+        println!("Risk Score: {:.2}", diff.impact.risk_score);
+        println!();
+
+        if !diff.files.added.is_empty() {
+            println!("Files Added ({}):", diff.files.added.len());
+            for path in &diff.files.added {
+                println!("  + {}", path.display());
+            }
+            println!();
+        }
+
+        if !diff.files.removed.is_empty() {
+            println!("Files Removed ({}):", diff.files.removed.len());
+            for path in &diff.files.removed {
+                println!("  - {}", path.display());
+            }
+            println!();
+        }
+
+        if !diff.files.modified.is_empty() {
+            println!("Files Modified ({}):", diff.files.modified.len());
+            for path in &diff.files.modified {
+                println!("  ~ {}", path.display());
+            }
+            println!();
+        }
+
+        if !diff.exports.removed.is_empty() {
+            println!("Exports Removed ({}):", diff.exports.removed.len());
+            for export in &diff.exports.removed {
+                println!(
+                    "  - {} ({}) in {}",
+                    export.name,
+                    export.kind,
+                    export.file.display()
+                );
+            }
+            println!();
+        }
+
+        if !diff.exports.added.is_empty() {
+            println!("Exports Added ({}):", diff.exports.added.len());
+            for export in &diff.exports.added {
+                println!(
+                    "  + {} ({}) in {}",
+                    export.name,
+                    export.kind,
+                    export.file.display()
+                );
+            }
+            println!();
+        }
+    }
+
+    DispatchResult::Exit(0)
 }
 
 #[cfg(test)]

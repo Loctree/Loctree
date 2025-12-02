@@ -114,6 +114,9 @@ pub struct DeadExport {
     pub symbol: String,
     pub line: Option<usize>,
     pub confidence: String,
+    /// IDE integration URL (loctree://open?f={file}&l={line})
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub open_url: Option<String>,
 }
 
 /// Search for symbol occurrences across analyzed files
@@ -337,7 +340,11 @@ pub fn print_similarity_results(
 }
 
 /// Find potentially dead (unused) exports in the codebase
-pub fn find_dead_exports(analyses: &[FileAnalysis], high_confidence: bool) -> Vec<DeadExport> {
+pub fn find_dead_exports(
+    analyses: &[FileAnalysis],
+    high_confidence: bool,
+    open_base: Option<&str>,
+) -> Vec<DeadExport> {
     // Build usage set: (resolved_path, symbol_name)
     let mut used_exports: HashSet<(String, String)> = HashSet::new();
 
@@ -428,6 +435,7 @@ pub fn find_dead_exports(analyses: &[FileAnalysis], high_confidence: bool) -> Ve
             let star_used = used_exports.contains(&(path_norm.clone(), "*".to_string()));
 
             if !is_used && !star_used {
+                let open_url = super::build_open_url(&analysis.path, exp.line, open_base);
                 dead_candidates.push(DeadExport {
                     file: analysis.path.clone(),
                     symbol: exp.name.clone(),
@@ -437,6 +445,7 @@ pub fn find_dead_exports(analyses: &[FileAnalysis], high_confidence: bool) -> Ve
                     } else {
                         "high".to_string()
                     },
+                    open_url: Some(open_url),
                 });
             }
         }
@@ -659,7 +668,7 @@ mod tests {
     #[test]
     fn test_find_dead_exports_empty() {
         let analyses: Vec<FileAnalysis> = vec![];
-        let result = find_dead_exports(&analyses, false);
+        let result = find_dead_exports(&analyses, false, None);
         assert!(result.is_empty());
     }
 
@@ -680,7 +689,7 @@ mod tests {
         let exporter = mock_file_with_exports("src/utils.ts", vec!["helper"]);
 
         let analyses = vec![importer, exporter];
-        let result = find_dead_exports(&analyses, false);
+        let result = find_dead_exports(&analyses, false, None);
         assert!(result.is_empty());
     }
 
@@ -690,7 +699,7 @@ mod tests {
             mock_file("src/app.ts"),
             mock_file_with_exports("src/utils.ts", vec!["unusedHelper"]),
         ];
-        let result = find_dead_exports(&analyses, false);
+        let result = find_dead_exports(&analyses, false, None);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].symbol, "unusedHelper");
     }
@@ -702,7 +711,7 @@ mod tests {
         test_file.is_test = true;
 
         let analyses = vec![mock_file("src/app.ts"), test_file];
-        let result = find_dead_exports(&analyses, false);
+        let result = find_dead_exports(&analyses, false, None);
         assert!(result.is_empty());
     }
 
@@ -712,7 +721,7 @@ mod tests {
             mock_file("src/app.ts"),
             mock_file_with_exports("src/utils.ts", vec!["default", "helper"]),
         ];
-        let result = find_dead_exports(&analyses, true);
+        let result = find_dead_exports(&analyses, true, None);
         assert!(!result.iter().any(|d| d.symbol == "default"));
     }
 
@@ -723,7 +732,7 @@ mod tests {
 
         let exporter = mock_file_with_exports("src/utils/index.ts", vec!["foo"]);
 
-        let result = find_dead_exports(&[importer, exporter], false);
+        let result = find_dead_exports(&[importer, exporter], false, None);
         assert!(
             result.is_empty(),
             "dynamic import should mark module as used"
@@ -748,7 +757,7 @@ mod tests {
         exporter.exports[0].kind = "default".to_string();
         exporter.exports[0].export_type = "default".to_string();
 
-        let result = find_dead_exports(&[importer, exporter], false);
+        let result = find_dead_exports(&[importer, exporter], false, None);
         assert!(
             result.is_empty(),
             "default import should mark export as used"
@@ -767,7 +776,7 @@ mod tests {
             resolved: Some("src/foo.ts".to_string()),
         });
 
-        let result = find_dead_exports(&[barrel], false);
+        let result = find_dead_exports(&[barrel], false, None);
         assert!(
             result.is_empty(),
             "reexport-only barrels should not be reported as dead exports"
@@ -781,6 +790,7 @@ mod tests {
             symbol: "unused".to_string(),
             line: Some(10),
             confidence: "high".to_string(),
+            open_url: Some("loctree://open?f=src%2Futils.ts&l=10".to_string()),
         }];
         // Should not panic
         print_dead_exports(&dead, OutputMode::Json, false, 20);
@@ -793,6 +803,7 @@ mod tests {
             symbol: "unused".to_string(),
             line: None,
             confidence: "high".to_string(),
+            open_url: None,
         }];
         // Should not panic
         print_dead_exports(&dead, OutputMode::Human, false, 20);
@@ -807,6 +818,7 @@ mod tests {
                 symbol: format!("unused{}", i),
                 line: Some(i),
                 confidence: "high".to_string(),
+                open_url: Some(format!("loctree://open?f=src%2Ffile{}.ts&l={}", i, i)),
             })
             .collect();
         // Should truncate to limit and show "... and N more"

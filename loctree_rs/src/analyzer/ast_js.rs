@@ -3,16 +3,23 @@ use std::path::Path;
 
 use oxc_allocator::Allocator;
 use oxc_ast::ast::*;
-use oxc_ast_visit::Visit;
+use oxc_ast_visit::{Visit, walk::walk_expression};
 use oxc_parser::Parser;
-use oxc_span::SourceType;
+use oxc_span::{SourceType, Span};
 
 use crate::types::{
     CommandPayloadCasing, CommandRef, EventRef, ExportSymbol, FileAnalysis, ImportEntry,
-    ImportKind, ImportSymbol, ReexportEntry, ReexportKind,
+    ImportKind, ImportSymbol, ReexportEntry, ReexportKind, StringLiteral,
 };
 
 use super::resolvers::{TsPathResolver, resolve_reexport_target};
+
+#[derive(Clone, Debug)]
+pub struct CommandDetectionConfig {
+    pub dom_exclusions: HashSet<String>,
+    pub non_invoke_exclusions: HashSet<String>,
+    pub invalid_command_names: HashSet<String>,
+}
 
 // Known DOM APIs to exclude from Tauri command detection
 const DOM_EXCLUSIONS: &[&str] = &[
@@ -71,6 +78,41 @@ const INVALID_COMMAND_NAMES: &[&str] = &[
     "test", "mock", "stub", "fake",
 ];
 
+impl CommandDetectionConfig {
+    pub fn new(
+        dom_exclusions: &[String],
+        non_invoke_exclusions: &[String],
+        invalid_command_names: &[String],
+    ) -> Self {
+        let mut dom: HashSet<String> = DOM_EXCLUSIONS.iter().map(|s| s.to_string()).collect();
+        dom.extend(dom_exclusions.iter().cloned());
+
+        let mut non_invoke: HashSet<String> = NON_INVOKE_EXCLUSIONS
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        non_invoke.extend(non_invoke_exclusions.iter().cloned());
+
+        let mut invalid: HashSet<String> = INVALID_COMMAND_NAMES
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        invalid.extend(invalid_command_names.iter().cloned());
+
+        Self {
+            dom_exclusions: dom,
+            non_invoke_exclusions: non_invoke,
+            invalid_command_names: invalid,
+        }
+    }
+}
+
+impl Default for CommandDetectionConfig {
+    fn default() -> Self {
+        Self::new(&[], &[], &[])
+    }
+}
+
 /// Analyze JS/TS file using OXC AST parser
 pub(crate) fn analyze_js_file_ast(
     content: &str,
@@ -79,6 +121,7 @@ pub(crate) fn analyze_js_file_ast(
     extensions: Option<&HashSet<String>>,
     ts_resolver: Option<&TsPathResolver>,
     relative: String,
+    command_cfg: &CommandDetectionConfig,
 ) -> FileAnalysis {
     let allocator = Allocator::default();
 
@@ -125,6 +168,7 @@ pub(crate) fn analyze_js_file_ast(
         extensions,
         ts_resolver,
         source_text: content,
+        command_cfg,
     };
 
     visitor.visit_program(&ret.program);
@@ -139,6 +183,7 @@ struct JsVisitor<'a> {
     extensions: Option<&'a HashSet<String>>,
     ts_resolver: Option<&'a TsPathResolver>,
     source_text: &'a str,
+    command_cfg: &'a CommandDetectionConfig,
 }
 
 impl<'a> JsVisitor<'a> {
@@ -153,12 +198,22 @@ impl<'a> JsVisitor<'a> {
             })
     }
 
-    fn get_line(&self, span: oxc_span::Span) -> usize {
-        self.source_text[..span.start as usize]
+    fn get_line(&self, span: Span) -> usize {
+        let start = span.start as usize;
+        let capped = std::cmp::min(start, self.source_text.len());
+        self.source_text[..capped]
             .bytes()
             .filter(|b| *b == b'\n')
             .count()
             + 1
+    }
+
+    fn push_string_literal(&mut self, value: &str, span: Span) {
+        let line = self.get_line(span);
+        self.analysis.string_literals.push(StringLiteral {
+            value: value.to_string(),
+            line,
+        });
     }
 
     /// Extract basic type representation from TSType
@@ -187,6 +242,26 @@ impl<'a> JsVisitor<'a> {
 }
 
 impl<'a> Visit<'a> for JsVisitor<'a> {
+    fn visit_expression(&mut self, expr: &Expression<'a>) {
+        match expr {
+            Expression::StringLiteral(lit) => {
+                self.push_string_literal(&lit.value, lit.span);
+            }
+            Expression::TemplateLiteral(tpl) => {
+                if tpl.expressions.is_empty()
+                    && tpl.quasis.len() == 1
+                    && let Some(cooked) = &tpl.quasis[0].value.cooked
+                {
+                    self.push_string_literal(cooked, tpl.span);
+                } else if tpl.expressions.is_empty() && tpl.quasis.len() == 1 {
+                    self.push_string_literal(&tpl.quasis[0].value.raw, tpl.span);
+                }
+            }
+            _ => {}
+        }
+        walk_expression(self, expr);
+    }
+
     // --- IMPORTS ---
 
     fn visit_import_declaration(&mut self, decl: &ImportDeclaration<'a>) {
@@ -484,8 +559,8 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
             let is_potential_command = name_lower.contains("invoke") || name.contains("Command");
 
             if is_potential_command
-                && !DOM_EXCLUSIONS.contains(&name.as_str())
-                && !NON_INVOKE_EXCLUSIONS.contains(&name.as_str())
+                && !self.command_cfg.dom_exclusions.contains(&name)
+                && !self.command_cfg.non_invoke_exclusions.contains(&name)
                 && let Some(arg) = call.arguments.first()
             {
                 // Extract command name from first argument (string literal or template literal)
@@ -508,7 +583,7 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                 if let Some(cmd_name) = cmd_name {
                     // Filter out command names that are clearly not Tauri commands
                     // (e.g., CLI tools, shell commands found in scripts/config files)
-                    if INVALID_COMMAND_NAMES.contains(&cmd_name.as_str()) {
+                    if self.command_cfg.invalid_command_names.contains(&cmd_name) {
                         // Skip - not a real Tauri command
                     } else {
                         // Payload casing drift: if command name looks snake_case and payload keys are camelCase
@@ -669,6 +744,7 @@ mod tests {
             None,
             None,
             "test.ts".to_string(),
+            &CommandDetectionConfig::default(),
         );
 
         // Imports
@@ -748,6 +824,7 @@ mod tests {
             None,
             None,
             "events.ts".to_string(),
+            &CommandDetectionConfig::default(),
         );
 
         // Constants

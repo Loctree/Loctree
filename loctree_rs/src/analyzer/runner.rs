@@ -21,6 +21,7 @@ use super::output::{RootArtifacts, process_root_context, write_report};
 use super::pipelines::build_pipeline_summary;
 use super::root_scan::{ScanConfig, ScanResults, scan_results_from_snapshot, scan_roots};
 use super::scan::{opt_globset, python_stdlib};
+use crate::analyzer::ast_js::CommandDetectionConfig;
 
 const DEFAULT_EXCLUDE_REPORT_PATTERNS: &[&str] =
     &["**/__tests__/**", "scripts/semgrep-fixtures/**"];
@@ -165,6 +166,11 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         .map(|root| LoctreeConfig::load(root))
         .unwrap_or_default();
     let custom_command_macros = loctree_config.tauri.command_macros;
+    let command_detection = CommandDetectionConfig::new(
+        &loctree_config.tauri.dom_exclusions,
+        &loctree_config.tauri.non_invoke_exclusions,
+        &loctree_config.tauri.invalid_command_names,
+    );
 
     let mut exclude_patterns = parsed.exclude_report_patterns.clone();
     exclude_patterns.extend(
@@ -249,6 +255,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                                 || parsed.impact.is_some()
                                 || parsed.circular,
                             custom_command_macros: &custom_command_macros,
+                            command_detection: command_detection.clone(),
                         })?
                     }
                 }
@@ -266,6 +273,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                     cached_analyses: None,
                     collect_edges: parsed.graph || parsed.impact.is_some() || parsed.circular,
                     custom_command_macros: &custom_command_macros,
+                    command_detection: command_detection.clone(),
                 })?
             }
         } else {
@@ -282,6 +290,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                 cached_analyses: None,
                 collect_edges: parsed.graph || parsed.impact.is_some() || parsed.circular,
                 custom_command_macros: &custom_command_macros,
+                command_detection: command_detection.clone(),
             })?
         }
     } else {
@@ -298,6 +307,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             cached_analyses: None,
             collect_edges: parsed.graph || parsed.impact.is_some() || parsed.circular,
             custom_command_macros: &custom_command_macros,
+            command_detection,
         })?
     };
     let ScanResults {
@@ -341,7 +351,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
 
     if parsed.dead_exports {
         let high_confidence = parsed.dead_confidence.as_deref() == Some("high");
-        let dead_exports = find_dead_exports(&global_analyses, high_confidence);
+        let dead_exports = find_dead_exports(&global_analyses, high_confidence, None);
         // Apply --focus and --exclude-report filters to dead exports
         let filtered_dead: Vec<_> = dead_exports
             .into_iter()
@@ -451,7 +461,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
 
         // Get dead exports
         let high_confidence = parsed.dead_confidence.as_deref() == Some("high");
-        let dead_exports = find_dead_exports(&global_analyses, high_confidence);
+        let dead_exports = find_dead_exports(&global_analyses, high_confidence, None);
 
         // Get circular imports
         let circular_imports = super::cycles::find_cycles(&all_graph_edges);
@@ -610,7 +620,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
     if let Some(max_dead) = parsed.max_dead {
         let high_confidence = parsed.dead_confidence.as_deref() == Some("high");
         let dead_exports =
-            super::dead_parrots::find_dead_exports(&global_analyses, high_confidence);
+            super::dead_parrots::find_dead_exports(&global_analyses, high_confidence, None);
         let dead_count = dead_exports.len();
         if dead_count > max_dead {
             fail_reasons.push(format!(

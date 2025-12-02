@@ -101,6 +101,35 @@ pub struct Options {
     pub find_artifacts: bool,
 }
 
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            extensions: None,
+            ignore_paths: Vec::new(),
+            use_gitignore: true,
+            max_depth: None,
+            color: ColorMode::Auto,
+            output: OutputMode::Human,
+            summary: false,
+            summary_limit: 50,
+            show_hidden: false,
+            show_ignored: false,
+            loc_threshold: 500,
+            analyze_limit: 100,
+            report_path: None,
+            serve: false,
+            editor_cmd: None,
+            max_graph_nodes: None,
+            max_graph_edges: None,
+            verbose: false,
+            scan_all: false,
+            symbol: None,
+            impact: None,
+            find_artifacts: false,
+        }
+    }
+}
+
 pub struct LineEntry {
     pub label: String,
     pub loc: Option<usize>,
@@ -209,6 +238,13 @@ pub struct CommandPayloadCasing {
     pub line: usize,
 }
 
+/// JS/TS string literal captured for dynamic/registry awareness
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct StringLiteral {
+    pub value: String,
+    pub line: usize,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EventRef {
     pub raw_name: Option<String>,
@@ -262,6 +298,9 @@ pub struct FileAnalysis {
     pub command_handlers: Vec<CommandRef>,
     #[serde(default)]
     pub command_payload_casing: Vec<CommandPayloadCasing>,
+    /// String literals collected from JS/TS files (for dynamic/registry awareness)
+    #[serde(default)]
+    pub string_literals: Vec<StringLiteral>,
     #[serde(default)]
     pub event_emits: Vec<EventRef>,
     #[serde(default)]
@@ -335,6 +374,7 @@ impl FileAnalysis {
             command_calls: Vec::new(),
             command_handlers: Vec::new(),
             command_payload_casing: Vec::new(),
+            string_literals: Vec::new(),
             event_emits: Vec::new(),
             event_listens: Vec::new(),
             event_consts: HashMap::new(),

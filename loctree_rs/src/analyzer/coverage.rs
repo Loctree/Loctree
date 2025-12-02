@@ -124,6 +124,22 @@ pub fn find_string_literal_matches(
                 });
             }
         }
+
+        // Check string literals (registry-style arrays/objects)
+        for lit in &analysis.string_literals {
+            let val_normalized = normalize_cmd_name(&lit.value);
+            if variations.contains(&val_normalized)
+                || variations
+                    .iter()
+                    .any(|v| lit.value.contains(v) || val_normalized.contains(v))
+            {
+                matches.push(StringLiteralMatch {
+                    file: analysis.path.clone(),
+                    line: lit.line,
+                    context: format!("string \"{}\"", lit.value),
+                });
+            }
+        }
     }
 
     matches

@@ -69,6 +69,9 @@ pub struct QuickWin {
     pub impact: String,
     /// Command to investigate further
     pub trace_cmd: Option<String>,
+    /// IDE integration URL (loctree://open?f={file}&l={line})
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub open_url: Option<String>,
 }
 
 /// High-connectivity file that makes good context anchor
@@ -210,11 +213,15 @@ fn extract_quick_wins(sections: &[ReportSection]) -> Vec<QuickWin> {
             if priority > 10 {
                 break;
             }
-            let location = gap
+            let (location, open_url) = gap
                 .locations
                 .first()
-                .map(|(f, l)| format!("{}:{}", f, l))
-                .unwrap_or_else(|| "unknown".to_string());
+                .map(|(f, l)| {
+                    let loc = format!("{}:{}", f, l);
+                    let url = super::build_open_url(f, Some(*l), section.open_base.as_deref());
+                    (loc, Some(url))
+                })
+                .unwrap_or_else(|| ("unknown".to_string(), None));
 
             wins.push(QuickWin {
                 priority,
@@ -223,6 +230,7 @@ fn extract_quick_wins(sections: &[ReportSection]) -> Vec<QuickWin> {
                 location,
                 impact: "Fixes runtime error when frontend calls invoke()".to_string(),
                 trace_cmd: Some(format!("loct trace {}", gap.name)),
+                open_url,
             });
             priority += 1;
         }
@@ -234,11 +242,15 @@ fn extract_quick_wins(sections: &[ReportSection]) -> Vec<QuickWin> {
             if priority > 15 {
                 break;
             }
-            let location = gap
+            let (location, open_url) = gap
                 .locations
                 .first()
-                .map(|(f, l)| format!("{}:{}", f, l))
-                .unwrap_or_else(|| "unknown".to_string());
+                .map(|(f, l)| {
+                    let loc = format!("{}:{}", f, l);
+                    let url = super::build_open_url(f, Some(*l), section.open_base.as_deref());
+                    (loc, Some(url))
+                })
+                .unwrap_or_else(|| ("unknown".to_string(), None));
 
             wins.push(QuickWin {
                 priority,
@@ -247,6 +259,7 @@ fn extract_quick_wins(sections: &[ReportSection]) -> Vec<QuickWin> {
                 location,
                 impact: "Handler exists but isn't exposed to frontend".to_string(),
                 trace_cmd: Some(format!("loct trace {}", gap.name)),
+                open_url,
             });
             priority += 1;
         }
@@ -262,11 +275,15 @@ fn extract_quick_wins(sections: &[ReportSection]) -> Vec<QuickWin> {
             if priority > 20 {
                 break;
             }
-            let location = gap
+            let (location, open_url) = gap
                 .locations
                 .first()
-                .map(|(f, l)| format!("{}:{}", f, l))
-                .unwrap_or_else(|| "unknown".to_string());
+                .map(|(f, l)| {
+                    let loc = format!("{}:{}", f, l);
+                    let url = super::build_open_url(f, Some(*l), section.open_base.as_deref());
+                    (loc, Some(url))
+                })
+                .unwrap_or_else(|| ("unknown".to_string(), None));
 
             wins.push(QuickWin {
                 priority,
@@ -275,6 +292,7 @@ fn extract_quick_wins(sections: &[ReportSection]) -> Vec<QuickWin> {
                 location,
                 impact: "Dead code - handler defined but never invoked".to_string(),
                 trace_cmd: Some(format!("loct trace {}", gap.name)),
+                open_url,
             });
             priority += 1;
         }

@@ -346,6 +346,11 @@ fn run_trace(
         .map(|root| LoctreeConfig::load(root))
         .unwrap_or_default();
     let custom_command_macros = loctree_config.tauri.command_macros;
+    let command_detection = analyzer::ast_js::CommandDetectionConfig::new(
+        &loctree_config.tauri.dom_exclusions,
+        &loctree_config.tauri.non_invoke_exclusions,
+        &loctree_config.tauri.invalid_command_names,
+    );
 
     let scan_results = scan_roots(ScanConfig {
         roots: root_list,
@@ -359,6 +364,7 @@ fn run_trace(
         cached_analyses: None,
         collect_edges: false,
         custom_command_macros: &custom_command_macros,
+        command_detection,
     })?;
 
     let ScanResults {
@@ -418,6 +424,11 @@ fn run_for_ai(root_list: &[PathBuf], parsed: &args::ParsedArgs) -> std::io::Resu
         .map(|root| LoctreeConfig::load(root))
         .unwrap_or_default();
     let custom_command_macros = loctree_config.tauri.command_macros;
+    let command_detection = analyzer::ast_js::CommandDetectionConfig::new(
+        &loctree_config.tauri.dom_exclusions,
+        &loctree_config.tauri.non_invoke_exclusions,
+        &loctree_config.tauri.invalid_command_names,
+    );
 
     let scan_results = scan_roots(ScanConfig {
         roots: root_list,
@@ -431,6 +442,7 @@ fn run_for_ai(root_list: &[PathBuf], parsed: &args::ParsedArgs) -> std::io::Resu
         cached_analyses: None,
         collect_edges: true, // Need edges for hub files
         custom_command_macros: &custom_command_macros,
+        command_detection,
     })?;
 
     let ScanResults {
@@ -544,6 +556,16 @@ fn run_search(
     });
 
     let py_stdlib = python_stdlib();
+    let loctree_config = root_list
+        .first()
+        .map(|root| LoctreeConfig::load(root))
+        .unwrap_or_default();
+    let custom_command_macros = loctree_config.tauri.command_macros;
+    let command_detection = analyzer::ast_js::CommandDetectionConfig::new(
+        &loctree_config.tauri.dom_exclusions,
+        &loctree_config.tauri.non_invoke_exclusions,
+        &loctree_config.tauri.invalid_command_names,
+    );
 
     let scan_results = scan_roots(ScanConfig {
         roots: root_list,
@@ -556,7 +578,8 @@ fn run_search(
         py_stdlib: &py_stdlib,
         cached_analyses: None,
         collect_edges: false,
-        custom_command_macros: &[],
+        custom_command_macros: &custom_command_macros,
+        command_detection,
     })?;
 
     let ScanResults {

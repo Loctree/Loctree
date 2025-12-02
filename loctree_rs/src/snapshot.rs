@@ -563,6 +563,11 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
         .map(|root| LoctreeConfig::load(root))
         .unwrap_or_default();
     let custom_command_macros = loctree_config.tauri.command_macros;
+    let command_detection = crate::analyzer::ast_js::CommandDetectionConfig::new(
+        &loctree_config.tauri.dom_exclusions,
+        &loctree_config.tauri.non_invoke_exclusions,
+        &loctree_config.tauri.invalid_command_names,
+    );
 
     let scan_config = ScanConfig {
         roots: root_list,
@@ -576,6 +581,7 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
         cached_analyses: cached_analyses.as_ref(),
         collect_edges: true, // Always collect edges for snapshot (needed by slice)
         custom_command_macros: &custom_command_macros,
+        command_detection,
     };
 
     // Perform the scan
@@ -970,7 +976,7 @@ fn write_auto_artifacts(
         .flat_map(|ctx| ctx.filtered_ranked.clone())
         .collect();
     let high_confidence = parsed.dead_confidence.as_deref() == Some("high");
-    let dead_exports = find_dead_exports(&scan_results.global_analyses, high_confidence);
+    let dead_exports = find_dead_exports(&scan_results.global_analyses, high_confidence, None);
 
     let sarif_content = generate_sarif_string(SarifInputs {
         duplicate_exports: &all_ranked_dups,

@@ -119,6 +119,17 @@ pub enum Command {
 
     /// Show version.
     Version,
+
+    /// Query snapshot data (who-imports, where-symbol, component-of).
+    ///
+    /// Interactive queries against the cached snapshot for fast lookups.
+    Query(QueryOptions),
+
+    /// Compare two snapshots and show delta.
+    ///
+    /// Analyzes semantic changes between commits: files changed, imports added/removed,
+    /// exports changed, and impact on consumers.
+    Diff(DiffOptions),
 }
 
 impl Default for Command {
@@ -337,6 +348,22 @@ pub struct ReportOptions {
     pub editor: Option<String>,
 }
 
+/// Options for the `diff` command.
+#[derive(Debug, Clone, Default)]
+pub struct DiffOptions {
+    /// Snapshot ID or path to compare against (from)
+    pub since: Option<String>,
+
+    /// Second snapshot ID or path (to). If omitted, compare against current state
+    pub to: Option<String>,
+
+    /// Output as JSONL (one line per change)
+    pub jsonl: bool,
+
+    /// Show only new problems (added dead exports, new cycles, new missing handlers)
+    pub problems_only: bool,
+}
+
 /// Options for the `help` command.
 #[derive(Debug, Clone, Default)]
 pub struct HelpOptions {
@@ -348,6 +375,27 @@ pub struct HelpOptions {
 
     /// Show full help (new + legacy)
     pub full: bool,
+}
+
+/// Query kind for the `query` command.
+#[derive(Debug, Clone)]
+pub enum QueryKind {
+    /// Find files that import a given file
+    WhoImports,
+    /// Find where a symbol is defined
+    WhereSymbol,
+    /// Show what component a file belongs to
+    ComponentOf,
+}
+
+/// Options for the `query` command.
+#[derive(Debug, Clone)]
+pub struct QueryOptions {
+    /// Query kind
+    pub kind: QueryKind,
+
+    /// Target (file path or symbol name)
+    pub target: String,
 }
 
 // ============================================================================
@@ -439,6 +487,8 @@ impl Command {
             Command::Report(_) => "report",
             Command::Help(_) => "help",
             Command::Version => "version",
+            Command::Query(_) => "query",
+            Command::Diff(_) => "diff",
         }
     }
 
@@ -459,6 +509,8 @@ impl Command {
             Command::Report(_) => "Generate HTML/JSON reports",
             Command::Help(_) => "Show help for commands",
             Command::Version => "Show version information",
+            Command::Query(_) => "Query snapshot data (who-imports, where-symbol, component-of)",
+            Command::Diff(_) => "Compare snapshots and show semantic delta",
         }
     }
 
@@ -477,6 +529,10 @@ impl Command {
             ("info", "Show snapshot metadata and project info"),
             ("lint", "Structural lint/policy checks"),
             ("report", "Generate HTML/JSON reports"),
+            (
+                "query <kind> <target>",
+                "Query snapshot (who-imports, where-symbol, component-of)",
+            ),
         ];
 
         let mut help = String::new();

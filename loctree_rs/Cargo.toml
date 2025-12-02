@@ -34,6 +34,7 @@ time = { version = "0.3", features = ["formatting"] }
 report-leptos = { version = "0.1.1", path = "../reports" }
 git2 = "0.20"
 toml = "0.8"
+urlencoding = "2.1"
 
 # AST Parsing (TypeScript/JavaScript) - OXC
 oxc_allocator = "0.100.0"

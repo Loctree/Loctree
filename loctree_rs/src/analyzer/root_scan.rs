@@ -39,6 +39,8 @@ pub struct ScanConfig<'a> {
     pub collect_edges: bool,
     /// Custom Tauri command macros from .loctree/config.toml
     pub custom_command_macros: &'a [String],
+    /// Command detection exclusions (DOM/invoke/invalid) from config
+    pub command_detection: crate::analyzer::ast_js::CommandDetectionConfig,
 }
 
 #[derive(Clone)]
@@ -57,6 +59,27 @@ pub struct RootContext {
     pub calls_with_generics: Vec<serde_json::Value>,
     pub renamed_handlers: Vec<serde_json::Value>,
     pub barrels: Vec<BarrelInfo>,
+}
+
+impl Default for RootContext {
+    fn default() -> Self {
+        Self {
+            root_path: PathBuf::new(),
+            options: Options::default(),
+            analyses: Vec::new(),
+            export_index: HashMap::new(),
+            dynamic_summary: Vec::new(),
+            cascades: Vec::new(),
+            filtered_ranked: Vec::new(),
+            graph_edges: Vec::new(),
+            loc_map: HashMap::new(),
+            languages: HashSet::new(),
+            tsconfig_summary: serde_json::json!({}),
+            calls_with_generics: Vec::new(),
+            renamed_handlers: Vec::new(),
+            barrels: Vec::new(),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -409,6 +432,7 @@ fn scan_single_root(
                         cfg.py_stdlib,
                         options.symbol.as_deref(),
                         cfg.custom_command_macros,
+                        &cfg.command_detection,
                     )?;
                     a.mtime = current_mtime;
                     a.size = current_size;
@@ -426,6 +450,7 @@ fn scan_single_root(
                     cfg.py_stdlib,
                     options.symbol.as_deref(),
                     cfg.custom_command_macros,
+                    &cfg.command_detection,
                 )?;
                 a.mtime = current_mtime;
                 a.size = current_size;
@@ -443,6 +468,7 @@ fn scan_single_root(
                 cfg.py_stdlib,
                 options.symbol.as_deref(),
                 cfg.custom_command_macros,
+                &cfg.command_detection,
             )?;
             a.mtime = current_mtime;
             a.size = current_size;

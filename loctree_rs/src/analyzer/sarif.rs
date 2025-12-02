@@ -75,7 +75,7 @@ fn build_sarif(inputs: SarifInputs) -> serde_json::Value {
 
     // Dead exports
     for dead in inputs.dead_exports {
-        results.push(json!({
+        let mut result = json!({
             "ruleId": "dead-export",
             "level": "warning",
             "message": {
@@ -87,7 +87,15 @@ fn build_sarif(inputs: SarifInputs) -> serde_json::Value {
                     "region": { "startLine": dead.line.unwrap_or(1) }
                 }
             }]
-        }));
+        });
+
+        if let Some(ref open_url) = dead.open_url {
+            result["properties"] = json!({
+                "openUrl": open_url
+            });
+        }
+
+        results.push(result);
     }
 
     // Circular imports
@@ -247,6 +255,7 @@ mod tests {
             symbol: symbol.to_string(),
             line,
             confidence: "high".to_string(),
+            open_url: None,
         }
     }
 
