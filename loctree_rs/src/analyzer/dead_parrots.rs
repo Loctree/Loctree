@@ -31,26 +31,36 @@ fn paths_match(a: &str, b: &str) -> bool {
     // Normalize separators to forward slashes
     let a_norm = a.replace('\\', "/");
     let b_norm = b.replace('\\', "/");
+    // Trim leading "./" to align relative specs with normalized paths
+    let a_clean = a_norm.trim_start_matches("./");
+    let b_clean = b_norm.trim_start_matches("./");
 
-    if a_norm == b_norm {
+    if a_clean == b_clean {
+        return true;
+    }
+
+    // Normalize to module ids (collapse extensions/index) and compare paths
+    let mod_a = normalize_module_id(a_clean);
+    let mod_b = normalize_module_id(b_clean);
+    if mod_a.path == mod_b.path || mod_a.as_key() == mod_b.as_key() {
         return true;
     }
 
     // Check if one is a suffix of the other at a path component boundary
     // This handles "src/App.tsx" vs "App.tsx" but prevents "foo.ts" matching "foo.test.ts"
-    if a_norm.len() > b_norm.len() {
+    if a_clean.len() > b_clean.len() {
         // Check if a ends with b at a component boundary
-        if let Some(suffix_start) = a_norm.rfind(&b_norm) {
+        if let Some(suffix_start) = a_clean.rfind(b_clean) {
             // Valid if b is at the start OR preceded by a separator
-            if suffix_start == 0 || a_norm.chars().nth(suffix_start - 1) == Some('/') {
+            if suffix_start == 0 || a_clean.chars().nth(suffix_start - 1) == Some('/') {
                 return true;
             }
         }
-    } else if b_norm.len() > a_norm.len() {
+    } else if b_clean.len() > a_clean.len() {
         // Check if b ends with a at a component boundary
-        if let Some(suffix_start) = b_norm.rfind(&a_norm) {
+        if let Some(suffix_start) = b_clean.rfind(a_clean) {
             // Valid if a is at the start OR preceded by a separator
-            if suffix_start == 0 || b_norm.chars().nth(suffix_start - 1) == Some('/') {
+            if suffix_start == 0 || b_clean.chars().nth(suffix_start - 1) == Some('/') {
                 return true;
             }
         }
@@ -707,6 +717,20 @@ mod tests {
     }
 
     #[test]
+    fn test_find_dead_exports_skips_dynamic_import_without_extension() {
+        let mut importer = mock_file("src/app.tsx");
+        importer.dynamic_imports = vec!["./utils".to_string()];
+
+        let exporter = mock_file_with_exports("src/utils/index.ts", vec!["foo"]);
+
+        let result = find_dead_exports(&[importer, exporter], false);
+        assert!(
+            result.is_empty(),
+            "dynamic import should mark module as used"
+        );
+    }
+
+    #[test]
     fn test_find_dead_exports_counts_default_import_usage() {
         let mut importer = mock_file("src/app.ts");
         importer.imports = vec![{
@@ -803,6 +827,13 @@ mod tests {
             "src\\components\\Button.tsx",
             "src/components/Button.tsx"
         ));
+    }
+
+    #[test]
+    fn test_paths_match_normalizes_index_and_extension() {
+        assert!(paths_match("src/utils/index.ts", "./utils"));
+        assert!(paths_match("src/components/Foo.tsx", "src/components/Foo"));
+        assert!(paths_match("components/Foo.tsx", "components/Foo.jsx"));
     }
 
     #[test]
