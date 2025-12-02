@@ -612,7 +612,7 @@ pub fn process_root_context(
         bridges_for_ai.push(cmd.clone());
     }
 
-    if matches!(options.output, OutputMode::Json | OutputMode::Jsonl) {
+    if matches!(parsed.output, OutputMode::Json | OutputMode::Jsonl) {
         if parsed.ai_mode {
             let top_limit = parsed.summary_limit;
             let mut event_alerts = Vec::new();
@@ -710,7 +710,7 @@ pub fn process_root_context(
                 }
             });
 
-            if matches!(options.output, OutputMode::Jsonl) {
+            if matches!(parsed.output, OutputMode::Jsonl) {
                 if let Ok(line) = serde_json::to_string(&ai_payload) {
                     println!("{}", line);
                 } else {
@@ -823,7 +823,7 @@ pub fn process_root_context(
                 "files": files_json,
             });
 
-            if matches!(options.output, OutputMode::Jsonl) {
+            if matches!(parsed.output, OutputMode::Jsonl) {
                 if let Ok(line) = serde_json::to_string(&payload) {
                     println!("{}", line);
                 } else {

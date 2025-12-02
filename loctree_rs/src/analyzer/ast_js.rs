@@ -513,21 +513,21 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                     } else {
                         // Payload casing drift: if command name looks snake_case and payload keys are camelCase
                         let mut casing_issues: Vec<CommandPayloadCasing> = Vec::new();
-                        if cmd_name.contains('_') {
-                            if let Some(Argument::ObjectExpression(obj)) = call.arguments.first() {
-                                for prop in &obj.properties {
-                                    if let ObjectPropertyKind::ObjectProperty(p) = prop {
-                                        if let PropertyKey::Identifier(id) = &p.key {
-                                            let key = id.name.to_string();
-                                            if key.chars().any(|c| c.is_uppercase()) {
-                                                casing_issues.push(CommandPayloadCasing {
-                                                    command: cmd_name.clone(),
-                                                    key,
-                                                    path: self.path.to_string_lossy().to_string(),
-                                                    line: self.get_line(p.span),
-                                                });
-                                            }
-                                        }
+                        if cmd_name.contains('_')
+                            && let Some(Argument::ObjectExpression(obj)) = call.arguments.first()
+                        {
+                            for prop in &obj.properties {
+                                if let ObjectPropertyKind::ObjectProperty(p) = prop
+                                    && let PropertyKey::Identifier(id) = &p.key
+                                {
+                                    let key = id.name.to_string();
+                                    if key.chars().any(|c| c.is_uppercase()) {
+                                        casing_issues.push(CommandPayloadCasing {
+                                            command: cmd_name.clone(),
+                                            key,
+                                            path: self.path.to_string_lossy().to_string(),
+                                            line: self.get_line(p.span),
+                                        });
                                     }
                                 }
                             }
