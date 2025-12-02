@@ -4,6 +4,7 @@
 /// Version string used across the landing page (single source of truth)
 pub const VERSION: &str = "v0.5.9-dev";
 
+mod blog;
 mod cli_reference;
 mod easter_eggs;
 mod features;
@@ -16,6 +17,7 @@ mod real_world;
 mod slice_demo;
 mod stack_detection;
 
+pub use blog::Blog;
 pub use cli_reference::CliReference;
 pub use easter_eggs::EasterEggs;
 pub use features::Features;

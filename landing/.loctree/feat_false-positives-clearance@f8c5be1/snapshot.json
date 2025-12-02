@@ -1,0 +1,1082 @@
+{
+  "metadata": {
+    "schema_version": "0.5.0-rc",
+    "generated_at": "2025-12-02T04:53:16.403748000Z",
+    "roots": [
+      "/Users/maciejgad/hosted/loctree/landing"
+    ],
+    "languages": [
+      "rs"
+    ],
+    "file_count": 14,
+    "total_loc": 1385,
+    "scan_duration_ms": 249,
+    "resolver_config": {
+      "ts_paths": {},
+      "ts_base_url": null,
+      "py_roots": [
+        "/Users/maciejgad/hosted/loctree/landing"
+      ],
+      "rust_crate_roots": []
+    },
+    "git_repo": "Loctree",
+    "git_branch": "feat/false-positives-clearance",
+    "git_commit": "f8c5be1",
+    "git_scan_id": "feat_false-positives-clearance@f8c5be1"
+  },
+  "files": [
+    {
+      "path": "src/main.rs",
+      "loc": 32,
+      "language": "rs",
+      "kind": "code",
+      "is_test": false,
+      "is_generated": false,
+      "imports": [
+        {
+          "source": "leptos::prelude::*",
+          "source_raw": "leptos::prelude::*",
+          "kind": "Static",
+          "resolved_path": null,
+          "is_bare": true,
+          "symbols": [],
+          "resolution": "Unknown",
+          "is_type_checking": false
+        },
+        {
+          "source": "sections::*",
+          "source_raw": "sections::*",
+          "kind": "Static",
+          "resolved_path": "src/sections/mod.rs",
+          "is_bare": true,
+          "symbols": [],
+          "resolution": "Unknown",
+          "is_type_checking": false
+        }
+      ],
+      "reexports": [],
+      "dynamic_imports": [],
+      "exports": [],
+      "command_calls": [],
+      "command_handlers": [],
+      "command_payload_casing": [],
+      "string_literals": [],
+      "event_emits": [],
+      "event_listens": [],
+      "event_consts": {},
+      "matches": [],
+      "entry_points": [
+        "main"
+      ],
+      "tauri_registered_handlers": [],
+      "mtime": 1764650969,
+      "size": 661,
+      "py_race_indicators": [],
+      "is_typed_package": false,
+      "is_namespace_package": false,
+      "local_uses": []
+    },
+    {
+      "path": "src/sections/blog.rs",
+      "loc": 95,
+      "language": "rs",
+      "kind": "code",
+      "is_test": false,
+      "is_generated": false,
+      "imports": [
+        {
+          "source": "leptos::prelude::*",
+          "source_raw": "leptos::prelude::*",
+          "kind": "Static",
+          "resolved_path": null,
+          "is_bare": true,
+          "symbols": [],
+          "resolution": "Unknown",
+          "is_type_checking": false
+        }
+      ],
+      "reexports": [],
+      "dynamic_imports": [],
+      "exports": [
+        {
+          "name": "Blog",
+          "kind": "decl",
+          "export_type": "named",
+          "line": 54
+        }
+      ],
+      "command_calls": [],
+      "command_handlers": [],
+      "command_payload_casing": [],
+      "string_literals": [],
+      "event_emits": [],
+      "event_listens": [],
+      "event_consts": {},
+      "matches": [],
+      "entry_points": [],
+      "tauri_registered_handlers": [],
+      "mtime": 1764650949,
+      "size": 4003,
+      "py_race_indicators": [],
+      "is_typed_package": false,
+      "is_namespace_package": false,
+      "local_uses": []
+    },
+    {
+      "path": "src/sections/cli_reference.rs",
+      "loc": 140,
+      "language": "rs",
+      "kind": "code",
+      "is_test": false,
+      "is_generated": false,
+      "imports": [
+        {
+          "source": "leptos::prelude::*",
+          "source_raw": "leptos::prelude::*",
+          "kind": "Static",
+          "resolved_path": null,
+          "is_bare": true,
+          "symbols": [],
+          "resolution": "Unknown",
+          "is_type_checking": false
+        }
+      ],
+      "reexports": [],
+      "dynamic_imports": [],
+      "exports": [
+        {
+          "name": "CliReference",
+          "kind": "decl",
+          "export_type": "named",
+          "line": 4
+        }
+      ],
+      "command_calls": [],
+      "command_handlers": [],
+      "command_payload_casing": [],
+      "string_literals": [],
+      "event_emits": [],
+      "event_listens": [],
+      "event_consts": {},
+      "matches": [],
+      "entry_points": [],
+      "tauri_registered_handlers": [],
+      "mtime": 1764645905,
+      "size": 7602,
+      "py_race_indicators": [],
+      "is_typed_package": false,
+      "is_namespace_package": false,
+      "local_uses": []
+    },
+    {
+      "path": "src/sections/easter_eggs.rs",
+      "loc": 220,
+      "language": "rs",
+      "kind": "code",
+      "is_test": false,
+      "is_generated": false,
+      "imports": [
+        {
+          "source": "super::VERSION",
+          "source_raw": "super::VERSION",
+          "kind": "Static",
+          "resolved_path": null,
+          "is_bare": true,
+          "symbols": [],
+          "resolution": "Unknown",
+          "is_type_checking": false
+        },
+        {
+          "source": "leptos::prelude::*",
+          "source_raw": "leptos::prelude::*",
+          "kind": "Static",
+          "resolved_path": null,
+          "is_bare": true,
+          "symbols": [],
+          "resolution": "Unknown",
+          "is_type_checking": false
+        },
+        {
+          "source": "wasm_bindgen::prelude::*",
+          "source_raw": "wasm_bindgen::prelude::*",
+          "kind": "Static",
+          "resolved_path": null,
+          "is_bare": true,
+          "symbols": [],
+          "resolution": "Unknown",
+          "is_type_checking": false
+        },
+        {
+          "source": "wasm_bindgen::closure::Closure",
+          "source_raw": "wasm_bindgen::closure::Closure",
+          "kind": "Static",
+          "resolved_path": null,
+          "is_bare": true,
+          "symbols": [],
+          "resolution": "Unknown",
+          "is_type_checking": false
+        }
+      ],
+      "reexports": [],
+      "dynamic_imports": [],
+      "exports": [
+        {
+          "name": "EasterEggs",
+          "kind": "decl",
+          "export_type": "named",
+          "line": 30
+        }
+      ],
+      "command_calls": [],
+      "command_handlers": [],
+      "command_payload_casing": [],
+      "string_literals": [],
+      "event_emits": [],
+      "event_listens": [],
+      "event_consts": {},
+      "matches": [],
+      "entry_points": [],
+      "tauri_registered_handlers": [],
+      "mtime": 1764646021,
+      "size": 6931,
+      "py_race_indicators": [],
+      "is_typed_package": false,
+      "is_namespace_package": false,
+      "local_uses": []
+    },
+    {
+      "path": "src/sections/features.rs",
+      "loc": 165,
+      "language": "rs",
+      "kind": "code",
+      "is_test": false,
+      "is_generated": false,
+      "imports": [
+        {
+          "source": "super::VERSION",
+          "source_raw": "super::VERSION",
+          "kind": "Static",
+          "resolved_path": null,
+          "is_bare": true,
+          "symbols": [],
+          "resolution": "Unknown",
+          "is_type_checking": false
+        },
+        {
+          "source": "leptos::prelude::*",
+          "source_raw": "leptos::prelude::*",
+          "kind": "Static",
+          "resolved_path": null,
+          "is_bare": true,
+          "symbols": [],
+          "resolution": "Unknown",
+          "is_type_checking": false
+        }
+      ],
+      "reexports": [],
+      "dynamic_imports": [],
+      "exports": [
+        {
+          "name": "Features",
+          "kind": "decl",
+          "export_type": "named",
+          "line": 5
+        }
+      ],
+      "command_calls": [],
+      "command_handlers": [],
+      "command_payload_casing": [],
+      "string_literals": [],
+      "event_emits": [],
+      "event_listens": [],
+      "event_consts": {},
+      "matches": [],
+      "entry_points": [],
+      "tauri_registered_handlers": [],
+      "mtime": 1764645915,
+      "size": 7886,
+      "py_race_indicators": [],
+      "is_typed_package": false,
+      "is_namespace_package": false,
+      "local_uses": []
+    },
+    {
+      "path": "src/sections/footer.rs",
+      "loc": 26,
+      "language": "rs",
+      "kind": "code",
+      "is_test": false,
+      "is_generated": false,
+      "imports": [
+        {
+          "source": "leptos::prelude::*",
+          "source_raw": "leptos::prelude::*",
+          "kind": "Static",
+          "resolved_path": null,
+          "is_bare": true,
+          "symbols": [],
+          "resolution": "Unknown",
+          "is_type_checking": false
+        }
+      ],
+      "reexports": [],
+      "dynamic_imports": [],
+      "exports": [
+        {
+          "name": "Footer",
+          "kind": "decl",
+          "export_type": "named",
+          "line": 4
+        }
+      ],
+      "command_calls": [],
+      "command_handlers": [],
+      "command_payload_casing": [],
+      "string_literals": [],
+      "event_emits": [],
+      "event_listens": [],
+      "event_consts": {},
+      "matches": [],
+      "entry_points": [],
+      "tauri_registered_handlers": [],
+      "mtime": 1764617425,
+      "size": 1152,
+      "py_race_indicators": [],
+      "is_typed_package": false,
+      "is_namespace_package": false,
+      "local_uses": []
+    },
+    {
+      "path": "src/sections/for_agents.rs",
+      "loc": 181,
+      "language": "rs",
+      "kind": "code",
+      "is_test": false,
+      "is_generated": false,
+      "imports": [
+        {
+          "source": "leptos::prelude::*",
+          "source_raw": "leptos::prelude::*",
+          "kind": "Static",
+          "resolved_path": null,
+          "is_bare": true,
+          "symbols": [],
+          "resolution": "Unknown",
+          "is_type_checking": false
+        }
+      ],
+      "reexports": [],
+      "dynamic_imports": [],
+      "exports": [
+        {
+          "name": "ForAgents",
+          "kind": "decl",
+          "export_type": "named",
+          "line": 4
+        }
+      ],
+      "command_calls": [],
+      "command_handlers": [],
+      "command_payload_casing": [],
+      "string_literals": [],
+      "event_emits": [],
+      "event_listens": [],
+      "event_consts": {},
+      "matches": [],
+      "entry_points": [],
+      "tauri_registered_handlers": [],
+      "mtime": 1764645928,
+      "size": 6882,
+      "py_race_indicators": [],
+      "is_typed_package": false,
+      "is_namespace_package": false,
+      "local_uses": []
+    },
+    {
+      "path": "src/sections/hero.rs",
+      "loc": 95,
+      "language": "rs",
+      "kind": "code",
+      "is_test": false,
+      "is_generated": false,
+      "imports": [
+        {
+          "source": "super::VERSION",
+          "source_raw": "super::VERSION",
+          "kind": "Static",
+          "resolved_path": null,
+          "is_bare": true,
+          "symbols": [],
+          "resolution": "Unknown",
+          "is_type_checking": false
+        },
+        {
+          "source": "leptos::prelude::*",
+          "source_raw": "leptos::prelude::*",
+          "kind": "Static",
+          "resolved_path": null,
+          "is_bare": true,
+          "symbols": [],
+          "resolution": "Unknown",
+          "is_type_checking": false
+        }
+      ],
+      "reexports": [],
+      "dynamic_imports": [],
+      "exports": [
+        {
+          "name": "Hero",
+          "kind": "decl",
+          "export_type": "named",
+          "line": 5
+        }
+      ],
+      "command_calls": [],
+      "command_handlers": [],
+      "command_payload_casing": [],
+      "string_literals": [],
+      "event_emits": [],
+      "event_listens": [],
+      "event_consts": {},
+      "matches": [],
+      "entry_points": [],
+      "tauri_registered_handlers": [],
+      "mtime": 1764625464,
+      "size": 4364,
+      "py_race_indicators": [],
+      "is_typed_package": false,
+      "is_namespace_package": false,
+      "local_uses": []
+    },
+    {
+      "path": "src/sections/install.rs",
+      "loc": 46,
+      "language": "rs",
+      "kind": "code",
+      "is_test": false,
+      "is_generated": false,
+      "imports": [
+        {
+          "source": "leptos::prelude::*",
+          "source_raw": "leptos::prelude::*",
+          "kind": "Static",
+          "resolved_path": null,
+          "is_bare": true,
+          "symbols": [],
+          "resolution": "Unknown",
+          "is_type_checking": false
+        }
+      ],
+      "reexports": [],
+      "dynamic_imports": [],
+      "exports": [
+        {
+          "name": "InstallSection",
+          "kind": "decl",
+          "export_type": "named",
+          "line": 4
+        }
+      ],
+      "command_calls": [],
+      "command_handlers": [],
+      "command_payload_casing": [],
+      "string_literals": [],
+      "event_emits": [],
+      "event_listens": [],
+      "event_consts": {},
+      "matches": [],
+      "entry_points": [],
+      "tauri_registered_handlers": [],
+      "mtime": 1764617840,
+      "size": 1900,
+      "py_race_indicators": [],
+      "is_typed_package": false,
+      "is_namespace_package": false,
+      "local_uses": []
+    },
+    {
+      "path": "src/sections/mod.rs",
+      "loc": 31,
+      "language": "rs",
+      "kind": "code",
+      "is_test": false,
+      "is_generated": false,
+      "imports": [
+        {
+          "source": "blog::Blog",
+          "source_raw": "blog::Blog",
+          "kind": "Static",
+          "resolved_path": null,
+          "is_bare": true,
+          "symbols": [],
+          "resolution": "Unknown",
+          "is_type_checking": false
+        },
+        {
+          "source": "cli_reference::CliReference",
+          "source_raw": "cli_reference::CliReference",
+          "kind": "Static",
+          "resolved_path": null,
+          "is_bare": true,
+          "symbols": [],
+          "resolution": "Unknown",
+          "is_type_checking": false
+        },
+        {
+          "source": "easter_eggs::EasterEggs",
+          "source_raw": "easter_eggs::EasterEggs",
+          "kind": "Static",
+          "resolved_path": null,
+          "is_bare": true,
+          "symbols": [],
+          "resolution": "Unknown",
+          "is_type_checking": false
+        },
+        {
+          "source": "features::Features",
+          "source_raw": "features::Features",
+          "kind": "Static",
+          "resolved_path": null,
+          "is_bare": true,
+          "symbols": [],
+          "resolution": "Unknown",
+          "is_type_checking": false
+        },
+        {
+          "source": "footer::Footer",
+          "source_raw": "footer::Footer",
+          "kind": "Static",
+          "resolved_path": null,
+          "is_bare": true,
+          "symbols": [],
+          "resolution": "Unknown",
+          "is_type_checking": false
+        },
+        {
+          "source": "for_agents::ForAgents",
+          "source_raw": "for_agents::ForAgents",
+          "kind": "Static",
+          "resolved_path": null,
+          "is_bare": true,
+          "symbols": [],
+          "resolution": "Unknown",
+          "is_type_checking": false
+        },
+        {
+          "source": "hero::Hero",
+          "source_raw": "hero::Hero",
+          "kind": "Static",
+          "resolved_path": null,
+          "is_bare": true,
+          "symbols": [],
+          "resolution": "Unknown",
+          "is_type_checking": false
+        },
+        {
+          "source": "install::InstallSection",
+          "source_raw": "install::InstallSection",
+          "kind": "Static",
+          "resolved_path": null,
+          "is_bare": true,
+          "symbols": [],
+          "resolution": "Unknown",
+          "is_type_checking": false
+        },
+        {
+          "source": "nav::Nav",
+          "source_raw": "nav::Nav",
+          "kind": "Static",
+          "resolved_path": null,
+          "is_bare": true,
+          "symbols": [],
+          "resolution": "Unknown",
+          "is_type_checking": false
+        },
+        {
+          "source": "real_world::RealWorldResults",
+          "source_raw": "real_world::RealWorldResults",
+          "kind": "Static",
+          "resolved_path": null,
+          "is_bare": true,
+          "symbols": [],
+          "resolution": "Unknown",
+          "is_type_checking": false
+        },
+        {
+          "source": "slice_demo::SliceDemo",
+          "source_raw": "slice_demo::SliceDemo",
+          "kind": "Static",
+          "resolved_path": null,
+          "is_bare": true,
+          "symbols": [],
+          "resolution": "Unknown",
+          "is_type_checking": false
+        },
+        {
+          "source": "stack_detection::StackDetection",
+          "source_raw": "stack_detection::StackDetection",
+          "kind": "Static",
+          "resolved_path": null,
+          "is_bare": true,
+          "symbols": [],
+          "resolution": "Unknown",
+          "is_type_checking": false
+        }
+      ],
+      "reexports": [
+        {
+          "source": "blog::Blog",
+          "kind": {
+            "Named": [
+              "Blog"
+            ]
+          },
+          "resolved": null
+        },
+        {
+          "source": "cli_reference::CliReference",
+          "kind": {
+            "Named": [
+              "CliReference"
+            ]
+          },
+          "resolved": null
+        },
+        {
+          "source": "easter_eggs::EasterEggs",
+          "kind": {
+            "Named": [
+              "EasterEggs"
+            ]
+          },
+          "resolved": null
+        },
+        {
+          "source": "features::Features",
+          "kind": {
+            "Named": [
+              "Features"
+            ]
+          },
+          "resolved": null
+        },
+        {
+          "source": "footer::Footer",
+          "kind": {
+            "Named": [
+              "Footer"
+            ]
+          },
+          "resolved": null
+        },
+        {
+          "source": "for_agents::ForAgents",
+          "kind": {
+            "Named": [
+              "ForAgents"
+            ]
+          },
+          "resolved": null
+        },
+        {
+          "source": "hero::Hero",
+          "kind": {
+            "Named": [
+              "Hero"
+            ]
+          },
+          "resolved": null
+        },
+        {
+          "source": "install::InstallSection",
+          "kind": {
+            "Named": [
+              "InstallSection"
+            ]
+          },
+          "resolved": null
+        },
+        {
+          "source": "nav::Nav",
+          "kind": {
+            "Named": [
+              "Nav"
+            ]
+          },
+          "resolved": null
+        },
+        {
+          "source": "real_world::RealWorldResults",
+          "kind": {
+            "Named": [
+              "RealWorldResults"
+            ]
+          },
+          "resolved": null
+        },
+        {
+          "source": "slice_demo::SliceDemo",
+          "kind": {
+            "Named": [
+              "SliceDemo"
+            ]
+          },
+          "resolved": null
+        },
+        {
+          "source": "stack_detection::StackDetection",
+          "kind": {
+            "Named": [
+              "StackDetection"
+            ]
+          },
+          "resolved": null
+        }
+      ],
+      "dynamic_imports": [],
+      "exports": [
+        {
+          "name": "Blog",
+          "kind": "reexport",
+          "export_type": "named",
+          "line": null
+        },
+        {
+          "name": "CliReference",
+          "kind": "reexport",
+          "export_type": "named",
+          "line": null
+        },
+        {
+          "name": "EasterEggs",
+          "kind": "reexport",
+          "export_type": "named",
+          "line": null
+        },
+        {
+          "name": "Features",
+          "kind": "reexport",
+          "export_type": "named",
+          "line": null
+        },
+        {
+          "name": "Footer",
+          "kind": "reexport",
+          "export_type": "named",
+          "line": null
+        },
+        {
+          "name": "ForAgents",
+          "kind": "reexport",
+          "export_type": "named",
+          "line": null
+        },
+        {
+          "name": "Hero",
+          "kind": "reexport",
+          "export_type": "named",
+          "line": null
+        },
+        {
+          "name": "InstallSection",
+          "kind": "reexport",
+          "export_type": "named",
+          "line": null
+        },
+        {
+          "name": "Nav",
+          "kind": "reexport",
+          "export_type": "named",
+          "line": null
+        },
+        {
+          "name": "RealWorldResults",
+          "kind": "reexport",
+          "export_type": "named",
+          "line": null
+        },
+        {
+          "name": "SliceDemo",
+          "kind": "reexport",
+          "export_type": "named",
+          "line": null
+        },
+        {
+          "name": "StackDetection",
+          "kind": "reexport",
+          "export_type": "named",
+          "line": null
+        },
+        {
+          "name": "VERSION",
+          "kind": "decl",
+          "export_type": "named",
+          "line": 5
+        }
+      ],
+      "command_calls": [],
+      "command_handlers": [],
+      "command_payload_casing": [],
+      "string_literals": [],
+      "event_emits": [],
+      "event_listens": [],
+      "event_consts": {
+        "VERSION": "v0.5.9-dev"
+      },
+      "matches": [],
+      "entry_points": [],
+      "tauri_registered_handlers": [],
+      "mtime": 1764650960,
+      "size": 719,
+      "py_race_indicators": [],
+      "is_typed_package": false,
+      "is_namespace_package": false,
+      "local_uses": []
+    },
+    {
+      "path": "src/sections/nav.rs",
+      "loc": 184,
+      "language": "rs",
+      "kind": "code",
+      "is_test": false,
+      "is_generated": false,
+      "imports": [
+        {
+          "source": "super::VERSION",
+          "source_raw": "super::VERSION",
+          "kind": "Static",
+          "resolved_path": null,
+          "is_bare": true,
+          "symbols": [],
+          "resolution": "Unknown",
+          "is_type_checking": false
+        },
+        {
+          "source": "leptos::prelude::*",
+          "source_raw": "leptos::prelude::*",
+          "kind": "Static",
+          "resolved_path": null,
+          "is_bare": true,
+          "symbols": [],
+          "resolution": "Unknown",
+          "is_type_checking": false
+        }
+      ],
+      "reexports": [],
+      "dynamic_imports": [],
+      "exports": [
+        {
+          "name": "Nav",
+          "kind": "decl",
+          "export_type": "named",
+          "line": 5
+        }
+      ],
+      "command_calls": [],
+      "command_handlers": [],
+      "command_payload_casing": [],
+      "string_literals": [],
+      "event_emits": [],
+      "event_listens": [],
+      "event_consts": {},
+      "matches": [],
+      "entry_points": [],
+      "tauri_registered_handlers": [],
+      "mtime": 1764651024,
+      "size": 8039,
+      "py_race_indicators": [],
+      "is_typed_package": false,
+      "is_namespace_package": false,
+      "local_uses": []
+    },
+    {
+      "path": "src/sections/real_world.rs",
+      "loc": 68,
+      "language": "rs",
+      "kind": "code",
+      "is_test": false,
+      "is_generated": false,
+      "imports": [
+        {
+          "source": "leptos::prelude::*",
+          "source_raw": "leptos::prelude::*",
+          "kind": "Static",
+          "resolved_path": null,
+          "is_bare": true,
+          "symbols": [],
+          "resolution": "Unknown",
+          "is_type_checking": false
+        }
+      ],
+      "reexports": [],
+      "dynamic_imports": [],
+      "exports": [
+        {
+          "name": "RealWorldResults",
+          "kind": "decl",
+          "export_type": "named",
+          "line": 4
+        }
+      ],
+      "command_calls": [],
+      "command_handlers": [],
+      "command_payload_casing": [],
+      "string_literals": [],
+      "event_emits": [],
+      "event_listens": [],
+      "event_consts": {},
+      "matches": [],
+      "entry_points": [],
+      "tauri_registered_handlers": [],
+      "mtime": 1764525321,
+      "size": 3533,
+      "py_race_indicators": [],
+      "is_typed_package": false,
+      "is_namespace_package": false,
+      "local_uses": []
+    },
+    {
+      "path": "src/sections/slice_demo.rs",
+      "loc": 60,
+      "language": "rs",
+      "kind": "code",
+      "is_test": false,
+      "is_generated": false,
+      "imports": [
+        {
+          "source": "leptos::prelude::*",
+          "source_raw": "leptos::prelude::*",
+          "kind": "Static",
+          "resolved_path": null,
+          "is_bare": true,
+          "symbols": [],
+          "resolution": "Unknown",
+          "is_type_checking": false
+        }
+      ],
+      "reexports": [],
+      "dynamic_imports": [],
+      "exports": [
+        {
+          "name": "SliceDemo",
+          "kind": "decl",
+          "export_type": "named",
+          "line": 4
+        }
+      ],
+      "command_calls": [],
+      "command_handlers": [],
+      "command_payload_casing": [],
+      "string_literals": [],
+      "event_emits": [],
+      "event_listens": [],
+      "event_consts": {},
+      "matches": [],
+      "entry_points": [],
+      "tauri_registered_handlers": [],
+      "mtime": 1764615772,
+      "size": 3170,
+      "py_race_indicators": [],
+      "is_typed_package": false,
+      "is_namespace_package": false,
+      "local_uses": []
+    },
+    {
+      "path": "src/sections/stack_detection.rs",
+      "loc": 42,
+      "language": "rs",
+      "kind": "code",
+      "is_test": false,
+      "is_generated": false,
+      "imports": [
+        {
+          "source": "leptos::prelude::*",
+          "source_raw": "leptos::prelude::*",
+          "kind": "Static",
+          "resolved_path": null,
+          "is_bare": true,
+          "symbols": [],
+          "resolution": "Unknown",
+          "is_type_checking": false
+        }
+      ],
+      "reexports": [],
+      "dynamic_imports": [],
+      "exports": [
+        {
+          "name": "StackDetection",
+          "kind": "decl",
+          "export_type": "named",
+          "line": 4
+        }
+      ],
+      "command_calls": [],
+      "command_handlers": [],
+      "command_payload_casing": [],
+      "string_literals": [],
+      "event_emits": [],
+      "event_listens": [],
+      "event_consts": {},
+      "matches": [],
+      "entry_points": [],
+      "tauri_registered_handlers": [],
+      "mtime": 1764525321,
+      "size": 1616,
+      "py_race_indicators": [],
+      "is_typed_package": false,
+      "is_namespace_package": false,
+      "local_uses": []
+    }
+  ],
+  "edges": [
+    {
+      "from": "src/main.rs",
+      "to": "src/sections/mod.rs",
+      "label": "import"
+    }
+  ],
+  "export_index": {
+    "Nav": [
+      "src/sections/nav.rs"
+    ],
+    "SliceDemo": [
+      "src/sections/slice_demo.rs"
+    ],
+    "VERSION": [
+      "src/sections/mod.rs"
+    ],
+    "StackDetection": [
+      "src/sections/stack_detection.rs"
+    ],
+    "Features": [
+      "src/sections/features.rs"
+    ],
+    "Blog": [
+      "src/sections/blog.rs"
+    ],
+    "ForAgents": [
+      "src/sections/for_agents.rs"
+    ],
+    "RealWorldResults": [
+      "src/sections/real_world.rs"
+    ],
+    "CliReference": [
+      "src/sections/cli_reference.rs"
+    ],
+    "EasterEggs": [
+      "src/sections/easter_eggs.rs"
+    ],
+    "Hero": [
+      "src/sections/hero.rs"
+    ],
+    "Footer": [
+      "src/sections/footer.rs"
+    ],
+    "InstallSection": [
+      "src/sections/install.rs"
+    ]
+  },
+  "command_bridges": [],
+  "event_bridges": [],
+  "barrels": []
+}

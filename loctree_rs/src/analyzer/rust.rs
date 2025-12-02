@@ -163,6 +163,108 @@ fn find_balanced_bracket(s: &str) -> usize {
     0
 }
 
+/// Strip `#[cfg(test)]` annotated modules from content to avoid false positive cycles.
+/// This removes test-only imports from dependency analysis.
+fn strip_cfg_test_modules(content: &str) -> String {
+    let mut result = String::new();
+    let mut chars = content.chars().peekable();
+    let mut in_cfg_test_attr = false;
+
+    while let Some(ch) = chars.next() {
+        // Look for #[cfg(test)]
+        if ch == '#' && chars.peek() == Some(&'[') {
+            let pos = result.len();
+            result.push(ch);
+
+            // Collect the attribute
+            let mut attr = String::from("#");
+            for next in chars.by_ref() {
+                attr.push(next);
+                if next == ']' {
+                    break;
+                }
+            }
+            result.push_str(&attr[1..]); // Skip the '#' we already added
+
+            // Check if it's #[cfg(test)] or #[cfg(all(..., test, ...))]
+            let attr_inner = attr.trim();
+            if attr_inner.starts_with("#[cfg(test)")
+                || attr_inner.starts_with("#[cfg(all(") && attr_inner.contains("test")
+            {
+                in_cfg_test_attr = true;
+                // Remove the attribute we just added
+                result.truncate(pos);
+            }
+            continue;
+        }
+
+        // If we're after #[cfg(test)], look for `mod` keyword and skip the block
+        if in_cfg_test_attr {
+            result.push(ch);
+
+            // Skip whitespace and look for `mod`
+            if ch.is_whitespace() {
+                continue;
+            }
+
+            // Check for 'mod' keyword
+            if ch == 'm' {
+                let mut keyword = String::from("m");
+                while let Some(&next) = chars.peek() {
+                    if next.is_alphabetic() || next == '_' {
+                        keyword.push(chars.next().unwrap());
+                    } else {
+                        break;
+                    }
+                }
+
+                if keyword == "mod" {
+                    // Skip until we find the opening brace
+                    let mut found_brace = false;
+                    for next in chars.by_ref() {
+                        if next == '{' {
+                            found_brace = true;
+                            break;
+                        }
+                    }
+
+                    if found_brace {
+                        // Skip the entire block (handle nested braces)
+                        let mut depth = 1;
+                        for next in chars.by_ref() {
+                            match next {
+                                '{' => depth += 1,
+                                '}' => {
+                                    depth -= 1;
+                                    if depth == 0 {
+                                        break;
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+
+                    // Remove 'mod' we just added to result
+                    result.truncate(result.len() - 1); // Remove the 'm'
+                    in_cfg_test_attr = false;
+                    continue;
+                } else {
+                    // Not a mod, push the keyword
+                    result.push_str(&keyword[1..]); // Skip 'm' we already added
+                    in_cfg_test_attr = false;
+                }
+            } else {
+                in_cfg_test_attr = false;
+            }
+            continue;
+        }
+
+        result.push(ch);
+    }
+    result
+}
+
 /// Strip `#[...]` attributes from a string (handles nested brackets).
 fn strip_cfg_attributes(s: &str) -> String {
     let mut result = String::new();
@@ -203,7 +305,11 @@ pub(crate) fn analyze_rust_file(
     let mut analysis = FileAnalysis::new(relative);
     let mut event_emits = Vec::new();
     let mut event_listens = Vec::new();
-    for caps in regex_rust_use().captures_iter(content) {
+
+    // Strip #[cfg(test)] modules to avoid false positive cycles from test-only imports
+    let production_content = strip_cfg_test_modules(content);
+
+    for caps in regex_rust_use().captures_iter(&production_content) {
         let source = caps.get(1).map(|m| m.as_str()).unwrap_or("").trim();
         if !source.is_empty() {
             analysis
@@ -674,6 +780,123 @@ pub fn double_annotated() {}
         assert_eq!(
             analysis.command_handlers[0].name, "double_annotated",
             "Handler name should match"
+        );
+    }
+
+    #[test]
+    fn strip_cfg_test_excludes_test_imports() {
+        // This is the exact pattern that caused false positive cycles
+        let content = r#"
+use serde::Serialize;
+
+pub struct MyType {
+    pub name: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::snapshot::CommandBridge;
+
+    #[test]
+    fn my_test() {
+        assert!(true);
+    }
+}
+"#;
+        let analysis = analyze_rust_file(content, "report.rs".to_string(), &[]);
+
+        // Should only have the serde import, not the test-only imports
+        assert_eq!(
+            analysis.imports.len(),
+            1,
+            "Should have 1 import, got {:?}",
+            analysis.imports
+        );
+        assert!(
+            analysis.imports[0].source.contains("serde"),
+            "Should import serde, got: {}",
+            analysis.imports[0].source
+        );
+        // Should NOT contain the test-only import
+        assert!(
+            !analysis
+                .imports
+                .iter()
+                .any(|i| i.source.contains("snapshot")),
+            "Should NOT contain test-only snapshot import"
+        );
+    }
+
+    #[test]
+    fn strip_cfg_test_handles_nested_blocks() {
+        let content = r#"
+use crate::types::FileAnalysis;
+
+pub fn production_fn() {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::helper;
+
+    fn nested_helper() {
+        let block = { "nested braces" };
+    }
+
+    #[test]
+    fn test_with_nested_braces() {
+        if true {
+            let x = { 1 };
+        }
+    }
+}
+
+pub fn another_production_fn() {}
+"#;
+        let analysis = analyze_rust_file(content, "module.rs".to_string(), &[]);
+
+        // Should only have production imports
+        assert_eq!(analysis.imports.len(), 1, "Should have 1 production import");
+        assert!(
+            analysis.imports[0].source.contains("types::FileAnalysis"),
+            "Should have FileAnalysis import"
+        );
+    }
+
+    #[test]
+    fn strip_cfg_test_preserves_non_test_cfg() {
+        let content = r#"
+use crate::production::Type;
+
+#[cfg(target_os = "macos")]
+mod platform {
+    use crate::platform_specific::MacType;
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::test_only::TestHelper;
+}
+"#;
+        let analysis = analyze_rust_file(content, "platform.rs".to_string(), &[]);
+
+        // Should have production import and platform-specific import
+        // but NOT the test-only import
+        let sources: Vec<&str> = analysis.imports.iter().map(|i| i.source.as_str()).collect();
+        assert!(
+            sources.iter().any(|s| s.contains("production::Type")),
+            "Should have production import"
+        );
+        assert!(
+            sources
+                .iter()
+                .any(|s| s.contains("platform_specific::MacType")),
+            "Should have platform-specific import (not #[cfg(test)])"
+        );
+        assert!(
+            !sources.iter().any(|s| s.contains("test_only")),
+            "Should NOT have test-only import"
         );
     }
 }

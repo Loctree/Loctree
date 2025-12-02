@@ -1,13 +1,13 @@
 {
   "name": "loctree",
-  "version": "0.5.6",
+  "version": "0.5.9-dev",
   "tagline": "Scan once, slice many.",
   "description": "AI-oriented codebase analyzer. Use BEFORE reading files manually.",
   "install": "curl -fsSL https://raw.githubusercontent.com/Loctree/Loctree/main/tools/install.sh | sh",
   "commands": {
     "scan": {
       "cmd": "loct",
-      "desc": "Scan project, create .loctree/snapshot.json"
+      "desc": "Scan project, save snapshot + reports to .loctree/"
     },
     "ai_overview": {
       "cmd": "loct --for-ai",
@@ -17,8 +17,24 @@
       "cmd": "loct slice <file> --consumers --json",
       "desc": "Extract file context with dependencies for AI"
     },
+    "query_who_imports": {
+      "cmd": "loct query who-imports <file>",
+      "desc": "Files that import target (fast, no full scan)"
+    },
+    "query_where_symbol": {
+      "cmd": "loct query where-symbol <name>",
+      "desc": "Find symbol definitions across codebase"
+    },
+    "query_component": {
+      "cmd": "loct query component-of <file>",
+      "desc": "Graph component containing file"
+    },
+    "diff": {
+      "cmd": "loct diff --since <ref>",
+      "desc": "Compare snapshots (e.g., --since main, --since HEAD~5)"
+    },
     "check_similar": {
-      "cmd": "loct find <Name>",
+      "cmd": "loct find --similar <Name>",
       "desc": "Find similar existing components before creating new"
     },
     "circular": {
@@ -27,29 +43,43 @@
     },
     "dead_code": {
       "cmd": "loct dead --confidence high",
-      "desc": "Find unused exports"
+      "desc": "Find unused exports (safe to remove)"
     },
     "impact": {
-      "cmd": "loct report --impact <file>",
+      "cmd": "loct find --impact <file>",
       "desc": "What breaks if file is removed"
     },
     "trace": {
       "cmd": "loct trace <handler>",
-      "desc": "Investigate Tauri handler FE↔BE usage"
+      "desc": "Investigate Tauri handler FE<>BE usage"
     },
-    "report_graph": {
-      "cmd": "loct report --graph --report out.html",
-      "desc": "Generate HTML/JSON reports with graphs"
+    "commands_missing": {
+      "cmd": "loct commands --missing",
+      "desc": "FE calls without BE handlers"
+    },
+    "commands_unused": {
+      "cmd": "loct commands --unused",
+      "desc": "BE handlers without FE calls"
+    },
+    "lint_ci": {
+      "cmd": "loct lint --fail --sarif",
+      "desc": "CI guardrails with SARIF output"
     }
   },
   "workflows": {
-    "before_new_component": ["check_similar"],
-    "before_refactor": ["slice", "impact", "circular"],
-    "debugging_tauri": ["trace", "scan"]
+    "before_new_component": ["check_similar", "query_where_symbol"],
+    "before_refactor": ["slice", "impact", "circular", "query_who_imports"],
+    "debugging_tauri": ["trace", "commands_missing", "commands_unused"],
+    "compare_branches": ["diff"]
+  },
+  "ide_integration": {
+    "url_scheme": "loctree://open?f=<file>&l=<line>",
+    "sarif_output": "loct lint --sarif > results.sarif"
   },
   "links": {
     "docs": "https://docs.rs/loctree",
     "github": "https://github.com/Loctree/Loctree",
-    "crates": "https://crates.io/crates/loctree"
+    "crates": "https://crates.io/crates/loctree",
+    "blog": "https://loctree.io/#blog"
   }
 }

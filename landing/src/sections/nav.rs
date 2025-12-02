@@ -17,13 +17,14 @@ pub fn Nav() -> impl IntoView {
 
 ### Key Commands
 - `loct` — scan repo, save snapshot + reports to .loctree/
-- `loct slice <file> --consumers --json` — 3-layer context for AI
+- `loct query who-imports <file>` — fast dependency check
+- `loct query where-symbol <name>` — find definitions
+- `loct slice <file> --consumers --json` — 3-layer context
+- `loct diff --since main` — compare branches
 - `loct find --similar <Name>` — avoid duplicates
-- `loct find --impact <file>` — blast radius before refactor
 - `loct dead --confidence high` — unused exports
 - `loct cycles` — circular imports
-- `loct commands --missing/--unused` — Tauri FE↔BE coverage
-- `loct events --json` — emits/listens/races
+- `loct commands --missing/--unused` — Tauri FE↔BE
 - `loct lint --fail --sarif` — CI guardrails"#;
 
     let agent_prompt_full = r#"## loct — AI Agent Quick Reference
@@ -36,10 +37,17 @@ curl -fsSL https://raw.githubusercontent.com/Loctree/Loctree/main/tools/install.
 loct          # snapshot + report.html + analysis.json
 ```
 
+### Quick Queries (no full scan)
+```bash
+loct query who-imports <file>     # files importing target
+loct query where-symbol <name>    # find definitions
+loct query component-of <file>    # graph component
+```
+
 ### Before creating
 ```bash
 loct find --similar <Name>   # find existing, avoid duplicates
-loct find --symbol <Name>    # defs + uses
+loct query where-symbol <Name>   # check if exists
 ```
 
 ### Before refactoring
@@ -49,17 +57,23 @@ loct find --impact <file>             # blast radius
 loct cycles                           # circular imports
 ```
 
+### Compare branches
+```bash
+loct diff --since main        # delta from main
+loct diff --since HEAD~5      # last 5 commits
+```
+
 ### Hygiene
 ```bash
 loct dead --confidence high   # unused exports
 loct commands --missing       # FE calls without handlers
 loct commands --unused        # handlers without FE calls
-loct events --json            # emits/listens/races
 ```
 
-### CI pipeline checks
+### CI + IDE
 ```bash
 loct lint --fail --sarif > results.sarif
+# loctree://open?f=<file>&l=<line> URLs in output
 ```"#;
 
     let copy_install = move |_| {
@@ -105,6 +119,7 @@ loct lint --fail --sarif > results.sarif
                     <a href="#features" class="nav-link">"Features"</a>
                     <a href="#slice" class="nav-link">"Slice"</a>
                     <a href="#cli" class="nav-link">"CLI"</a>
+                    <a href="#blog" class="nav-link">"Blog"</a>
                     <a href="https://docs.rs/loctree" target="_blank" class="nav-link">"Docs"</a>
                     <a href="https://github.com/Loctree/Loctree" target="_blank" class="nav-link">"GitHub"</a>
                     <button

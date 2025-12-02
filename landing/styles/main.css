@@ -1587,3 +1587,122 @@ body::after {
     font-size: 10px;
     color: var(--text-muted);
 }
+
+/* ============================================
+   Blog Section
+   Developed with 💀 (c)2025
+   ============================================ */
+
+.blog {
+    padding: var(--section-padding) 0;
+    background: var(--bg-dark);
+    border-top: 1px solid var(--border-subtle);
+}
+
+.blog-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 20px;
+    margin-top: 32px;
+}
+
+.blog-card {
+    background: var(--bg-black);
+    border: 1px solid var(--border-subtle);
+    padding: 24px;
+    text-decoration: none;
+    color: inherit;
+    display: flex;
+    flex-direction: column;
+    transition: all 0.2s;
+}
+
+.blog-card:hover {
+    border-color: var(--text-dim);
+    transform: translateY(-2px);
+}
+
+.blog-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+.blog-tag {
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    padding: 4px 8px;
+    border: 1px solid currentColor;
+}
+
+.tag-meta { color: #c084fc; }
+.tag-tauri { color: #60a5fa; }
+.tag-cycles { color: #f87171; }
+.tag-contracts { color: #4ade80; }
+
+.blog-meta {
+    font-size: 10px;
+    color: var(--text-muted);
+}
+
+.blog-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-bright);
+    margin-bottom: 8px;
+    line-height: 1.4;
+}
+
+.blog-subtitle {
+    font-size: 12px;
+    color: var(--text-dim);
+    line-height: 1.6;
+    flex: 1;
+    margin-bottom: 16px;
+}
+
+.blog-cta {
+    font-size: 11px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: color 0.2s;
+}
+
+.blog-card:hover .blog-cta {
+    color: var(--text-bright);
+}
+
+.blog-cta .arrow {
+    transition: transform 0.2s;
+}
+
+.blog-card:hover .blog-cta .arrow {
+    transform: translateX(4px);
+}
+
+.blog-footer {
+    margin-top: 32px;
+    text-align: center;
+}
+
+.blog-note {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.blog-note a {
+    color: var(--text-dim);
+    text-decoration: underline;
+    transition: color 0.2s;
+}
+
+.blog-note a:hover {
+    color: var(--text-bright);
+}
