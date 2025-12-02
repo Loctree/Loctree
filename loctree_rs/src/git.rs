@@ -402,7 +402,7 @@ impl GitRepo {
     pub fn blame_file(&self, file_path: &Path) -> Result<Vec<BlameEntry>, GitError> {
         let blame = self.repo.blame_file(file_path, None)?;
         let file_content =
-            std::fs::read_to_string(self.path.join(file_path)).map_err(|e| GitError::IoError(e))?;
+            std::fs::read_to_string(self.path.join(file_path)).map_err(GitError::IoError)?;
         let lines: Vec<&str> = file_content.lines().collect();
 
         let mut entries = Vec::new();
@@ -458,7 +458,7 @@ impl GitRepo {
         use regex::Regex;
 
         let file_content =
-            std::fs::read_to_string(self.path.join(file_path)).map_err(|e| GitError::IoError(e))?;
+            std::fs::read_to_string(self.path.join(file_path)).map_err(GitError::IoError)?;
 
         // Get blame for the file
         let blame_entries = self.blame_file(file_path)?;
@@ -518,66 +518,66 @@ impl GitRepo {
                             brace_stack -= 1;
                         }
                         // Symbol ends when braces are balanced
-                        if brace_stack == 0 {
-                            if let Some((name, kind, start_line)) = current_symbol.take() {
-                                // Find blame for this symbol
-                                let introduced_blame =
-                                    blame_entries.iter().find(|e| e.line == start_line);
+                        if brace_stack == 0
+                            && let Some((name, kind, start_line)) = current_symbol.take()
+                        {
+                            // Find blame for this symbol
+                            let introduced_blame =
+                                blame_entries.iter().find(|e| e.line == start_line);
 
-                                // Find last modification (latest timestamp in symbol range)
-                                let symbol_blames: Vec<_> = blame_entries
-                                    .iter()
-                                    .filter(|e| e.line >= start_line && e.line <= line_num)
-                                    .collect();
+                            // Find last modification (latest timestamp in symbol range)
+                            let symbol_blames: Vec<_> = blame_entries
+                                .iter()
+                                .filter(|e| e.line >= start_line && e.line <= line_num)
+                                .collect();
 
-                                // Get commit info for introduced_by
-                                let introduced_by = if let Some(blame) = introduced_blame {
-                                    self.get_commit_info(&blame.commit_hash)
-                                        .unwrap_or_else(|_| CommitInfo {
-                                            hash: blame.commit_hash.clone(),
-                                            short_hash: blame.short_hash.clone(),
-                                            author: blame.author.clone(),
-                                            author_email: String::new(),
-                                            date: blame.date.clone(),
-                                            timestamp: 0,
-                                            message: String::new(),
-                                            message_full: String::new(),
-                                        })
-                                } else {
-                                    CommitInfo {
-                                        hash: "unknown".to_string(),
-                                        short_hash: "unknown".to_string(),
-                                        author: "Unknown".to_string(),
+                            // Get commit info for introduced_by
+                            let introduced_by = if let Some(blame) = introduced_blame {
+                                self.get_commit_info(&blame.commit_hash)
+                                    .unwrap_or_else(|_| CommitInfo {
+                                        hash: blame.commit_hash.clone(),
+                                        short_hash: blame.short_hash.clone(),
+                                        author: blame.author.clone(),
                                         author_email: String::new(),
-                                        date: String::new(),
+                                        date: blame.date.clone(),
                                         timestamp: 0,
                                         message: String::new(),
                                         message_full: String::new(),
+                                    })
+                            } else {
+                                CommitInfo {
+                                    hash: "unknown".to_string(),
+                                    short_hash: "unknown".to_string(),
+                                    author: "Unknown".to_string(),
+                                    author_email: String::new(),
+                                    date: String::new(),
+                                    timestamp: 0,
+                                    message: String::new(),
+                                    message_full: String::new(),
+                                }
+                            };
+
+                            // Find last modified (most recent commit in symbol)
+                            // ISO 8601 dates can be compared lexicographically
+                            let last_modified_by = symbol_blames
+                                .iter()
+                                .max_by(|a, b| a.date.cmp(&b.date))
+                                .and_then(|b| {
+                                    if b.commit_hash != introduced_by.hash {
+                                        self.get_commit_info(&b.commit_hash).ok()
+                                    } else {
+                                        None
                                     }
-                                };
-
-                                // Find last modified (most recent commit in symbol)
-                                // ISO 8601 dates can be compared lexicographically
-                                let last_modified_by = symbol_blames
-                                    .iter()
-                                    .max_by(|a, b| a.date.cmp(&b.date))
-                                    .and_then(|b| {
-                                        if b.commit_hash != introduced_by.hash {
-                                            self.get_commit_info(&b.commit_hash).ok()
-                                        } else {
-                                            None
-                                        }
-                                    });
-
-                                symbols.push(SymbolBlame {
-                                    name,
-                                    kind,
-                                    start_line,
-                                    end_line: line_num,
-                                    introduced_by,
-                                    last_modified_by,
                                 });
-                            }
+
+                            symbols.push(SymbolBlame {
+                                name,
+                                kind,
+                                start_line,
+                                end_line: line_num,
+                                introduced_by,
+                                last_modified_by,
+                            });
                         }
                     }
                     _ => {}
@@ -586,30 +586,30 @@ impl GitRepo {
         }
 
         // Handle symbol without closing brace (e.g., mod declaration without body)
-        if let Some((name, kind, start_line)) = current_symbol {
-            if let Some(blame) = blame_entries.iter().find(|e| e.line == start_line) {
-                let introduced_by = self
-                    .get_commit_info(&blame.commit_hash)
-                    .unwrap_or_else(|_| CommitInfo {
-                        hash: blame.commit_hash.clone(),
-                        short_hash: blame.short_hash.clone(),
-                        author: blame.author.clone(),
-                        author_email: String::new(),
-                        date: blame.date.clone(),
-                        timestamp: 0,
-                        message: String::new(),
-                        message_full: String::new(),
-                    });
-
-                symbols.push(SymbolBlame {
-                    name,
-                    kind,
-                    start_line,
-                    end_line: lines.len(),
-                    introduced_by,
-                    last_modified_by: None,
+        if let Some((name, kind, start_line)) = current_symbol
+            && let Some(blame) = blame_entries.iter().find(|e| e.line == start_line)
+        {
+            let introduced_by = self
+                .get_commit_info(&blame.commit_hash)
+                .unwrap_or_else(|_| CommitInfo {
+                    hash: blame.commit_hash.clone(),
+                    short_hash: blame.short_hash.clone(),
+                    author: blame.author.clone(),
+                    author_email: String::new(),
+                    date: blame.date.clone(),
+                    timestamp: 0,
+                    message: String::new(),
+                    message_full: String::new(),
                 });
-            }
+
+            symbols.push(SymbolBlame {
+                name,
+                kind,
+                start_line,
+                end_line: lines.len(),
+                introduced_by,
+                last_modified_by: None,
+            });
         }
 
         Ok(FileSymbolBlame {

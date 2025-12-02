@@ -341,12 +341,12 @@ fn check_namespace_package(path: &Path, root: &Path) -> bool {
         current = dir.parent();
     }
     // True if we have .py files but no __init__.py found in hierarchy
-    path.parent().map_or(false, |p| {
-        p.read_dir().ok().map_or(false, |entries| {
+    path.parent().is_some_and(|p| {
+        p.read_dir().ok().is_some_and(|entries| {
             entries.flatten().any(|e| {
                 e.path()
                     .extension()
-                    .map_or(false, |ext| ext == "py" || ext == "pyi")
+                    .is_some_and(|ext| ext == "py" || ext == "pyi")
             })
         })
     })

@@ -759,8 +759,10 @@ fn write_auto_artifacts(
         CommandUsage, compute_command_gaps_with_confidence, compute_unregistered_handlers,
     };
     use crate::analyzer::cycles::find_cycles;
+    use crate::analyzer::dead_parrots::find_dead_exports;
     use crate::analyzer::output::{RootArtifacts, process_root_context, write_report};
     use crate::analyzer::pipelines::build_pipeline_summary;
+    use crate::analyzer::sarif::{SarifInputs, generate_sarif_string};
     use crate::analyzer::scan::opt_globset;
     use serde_json::json;
 
@@ -776,6 +778,7 @@ fn write_auto_artifacts(
 
     let report_path = loctree_dir.join("report.html");
     let analysis_json_path = loctree_dir.join("analysis.json");
+    let sarif_path = loctree_dir.join("report.sarif");
     let circular_json_path = loctree_dir.join("circular.json");
     let races_json_path = loctree_dir.join("py_races.json");
 
@@ -956,6 +959,32 @@ fn write_auto_artifacts(
         analysis_json_path
             .strip_prefix(snapshot_root)
             .unwrap_or(&analysis_json_path)
+            .display()
+            .to_string(),
+    );
+
+    // Generate SARIF report for CI integration
+    let all_ranked_dups: Vec<_> = scan_results
+        .contexts
+        .iter()
+        .flat_map(|ctx| ctx.filtered_ranked.clone())
+        .collect();
+    let high_confidence = parsed.dead_confidence.as_deref() == Some("high");
+    let dead_exports = find_dead_exports(&scan_results.global_analyses, high_confidence);
+
+    let sarif_content = generate_sarif_string(SarifInputs {
+        duplicate_exports: &all_ranked_dups,
+        missing_handlers: &global_missing_handlers,
+        unused_handlers: &global_unused_handlers,
+        dead_exports: &dead_exports,
+        circular_imports: &cycles,
+        pipeline_summary: &pipeline_summary,
+    });
+    fs::write(&sarif_path, sarif_content)?;
+    created.push(
+        sarif_path
+            .strip_prefix(snapshot_root)
+            .unwrap_or(&sarif_path)
             .display()
             .to_string(),
     );

@@ -14,7 +14,7 @@ pub struct SarifInputs<'a> {
     pub pipeline_summary: &'a serde_json::Value,
 }
 
-pub fn print_sarif(inputs: SarifInputs) {
+fn build_sarif(inputs: SarifInputs) -> serde_json::Value {
     let mut results = Vec::new();
 
     // Duplicate exports
@@ -185,19 +185,30 @@ pub fn print_sarif(inputs: SarifInputs) {
         }
     });
 
-    let sarif = json!({
+    json!({
         "version": "2.1.0",
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "runs": [{
             "tool": tool,
             "results": results
         }]
-    });
+    })
+}
 
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&sarif).expect("Failed to serialize SARIF report to JSON")
-    );
+/// Generate SARIF report as a JSON value (for file output or further processing)
+pub fn generate_sarif(inputs: SarifInputs) -> serde_json::Value {
+    build_sarif(inputs)
+}
+
+/// Generate SARIF report as a pretty-printed JSON string
+pub fn generate_sarif_string(inputs: SarifInputs) -> String {
+    serde_json::to_string_pretty(&build_sarif(inputs))
+        .expect("Failed to serialize SARIF report to JSON")
+}
+
+/// Print SARIF report to stdout
+pub fn print_sarif(inputs: SarifInputs) {
+    println!("{}", generate_sarif_string(inputs));
 }
 
 #[cfg(test)]

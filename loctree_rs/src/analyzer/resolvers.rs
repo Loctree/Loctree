@@ -351,10 +351,10 @@ fn is_namespace_package(dir: &Path) -> bool {
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_file() {
-            if let Some(ext) = path.extension() {
-                if ext == "py" || ext == "pyi" {
-                    return true;
-                }
+            if let Some(ext) = path.extension()
+                && (ext == "py" || ext == "pyi")
+            {
+                return true;
             }
         } else if path.is_dir() {
             // Check if subdirectory is a package (has __init__.py or is namespace)
