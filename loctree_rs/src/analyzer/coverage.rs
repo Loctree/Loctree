@@ -10,7 +10,9 @@ use crate::types::FileAnalysis;
 
 pub type CommandUsage = HashMap<String, Vec<(String, usize, String)>>;
 
-fn normalize_cmd_name(name: &str) -> String {
+/// Normalize a command name for comparison (snake_case, lowercase, alphanumeric only)
+/// Used to match FE calls (camelCase) with BE handlers (snake_case)
+pub fn normalize_cmd_name(name: &str) -> String {
     let mut buffered = String::new();
     for ch in name.chars() {
         if ch.is_alphanumeric() {

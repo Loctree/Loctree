@@ -49,14 +49,22 @@ impl GitIgnoreChecker {
     }
 }
 
-/// Load patterns from `.loctreeignore` file in root directory.
+/// Load patterns from `.loctignore` (preferred) or `.loctreeignore` (legacy) file in root directory.
 /// Supports gitignore-style syntax: one pattern per line, # comments, empty lines ignored.
 /// Returns empty vec if file doesn't exist.
 pub fn load_loctreeignore(root: &Path) -> Vec<String> {
-    let ignore_file = root.join(".loctreeignore");
-    if !ignore_file.exists() {
-        return Vec::new();
-    }
+    // Prefer .loctignore (short form, matches `loct` CLI)
+    let ignore_file = root.join(".loctignore");
+    let ignore_file = if ignore_file.exists() {
+        ignore_file
+    } else {
+        // Fallback to .loctreeignore for backward compatibility
+        let legacy = root.join(".loctreeignore");
+        if !legacy.exists() {
+            return Vec::new();
+        }
+        legacy
+    };
 
     let file = match File::open(&ignore_file) {
         Ok(f) => f,

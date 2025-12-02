@@ -127,7 +127,7 @@ git when-introduced --dead <sym>  Find when issue appeared (planned)\n\n\
 === COMMON OPTIONS ===\n\n  \
 -g, --gitignore           Respect .gitignore rules\n  \
 -I, --ignore <path>       Ignore path (repeatable)\n  \
-.loctreeignore            Auto-loaded gitignore-style patterns\n  \
+.loctignore               Auto-loaded gitignore-style patterns\n  \
 --full-scan               Ignore mtime cache, re-analyze all\n  \
 --scan-all                Include node_modules, target, .venv\n  \
 --verbose                 Detailed progress\n  \
@@ -189,7 +189,7 @@ fn main() -> std::io::Result<()> {
         if !loctreeignore_patterns.is_empty() {
             if parsed.verbose {
                 eprintln!(
-                    "[loctree] loaded {} patterns from .loctreeignore",
+                    "[loctree] loaded {} patterns from .loctignore",
                     loctreeignore_patterns.len()
                 );
             }
@@ -493,7 +493,13 @@ fn run_for_ai(root_list: &[PathBuf], parsed: &args::ParsedArgs) -> std::io::Resu
         .unwrap_or_else(|| ".".to_string());
 
     let report = generate_for_ai_report(&project_root, &report_sections, &global_analyses);
-    print_for_ai_json(&report);
+
+    // JSONL mode outputs one QuickWin per line for streaming agent consumption
+    if parsed.output == OutputMode::Jsonl {
+        analyzer::for_ai::print_agent_feed_jsonl(&report);
+    } else {
+        print_for_ai_json(&report);
+    }
 
     Ok(())
 }

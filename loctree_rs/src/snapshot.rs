@@ -491,7 +491,7 @@ impl Snapshot {
 
 /// Run the init command: scan the project and save snapshot
 pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
-    use crate::analyzer::coverage::compute_command_gaps;
+    use crate::analyzer::coverage::{compute_command_gaps, normalize_cmd_name};
     use crate::analyzer::root_scan::{ScanConfig, scan_roots};
     use crate::analyzer::runner::default_analyzer_exts;
     use crate::analyzer::scan::{opt_globset, python_stdlib};
@@ -628,41 +628,105 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
         }
     }
 
+    // Build registered handlers set to filter BE commands (same as in loct.rs/loctree.rs)
+    let registered_impls: HashSet<String> = scan_results
+        .global_analyses
+        .iter()
+        .flat_map(|a| a.tauri_registered_handlers.iter().cloned())
+        .collect();
+
+    // Filter BE commands to only include registered handlers (or all if no registration info)
+    let mut global_be_registered: HashMap<String, Vec<(String, usize, String)>> = HashMap::new();
+    for (name, locs) in &scan_results.global_be_commands {
+        for (path, line, impl_name) in locs {
+            if registered_impls.is_empty() || registered_impls.contains(impl_name) {
+                global_be_registered.entry(name.clone()).or_default().push((
+                    path.clone(),
+                    *line,
+                    impl_name.clone(),
+                ));
+            }
+        }
+    }
+
     // Build command bridges from global command data
+    // Use normalized names for matching (handles camelCase FE vs snake_case BE)
     let (_missing_handlers, _unused_handlers) = compute_command_gaps(
         &scan_results.global_fe_commands,
-        &scan_results.global_be_commands,
+        &global_be_registered,
         &focus_set,
         &exclude_set,
     );
 
-    // Create command bridges
-    let mut all_commands: HashSet<String> = HashSet::new();
+    // Build normalized lookup maps for cross-matching
+    // FE: normalized_name -> original_names (can have multiple originals mapping to same normalized)
+    let mut fe_by_norm: HashMap<String, Vec<String>> = HashMap::new();
     for name in scan_results.global_fe_commands.keys() {
-        all_commands.insert(name.clone());
-    }
-    for name in scan_results.global_be_commands.keys() {
-        all_commands.insert(name.clone());
+        fe_by_norm
+            .entry(normalize_cmd_name(name))
+            .or_default()
+            .push(name.clone());
     }
 
-    for cmd_name in all_commands {
-        let fe_calls: Vec<(String, usize)> = scan_results
-            .global_fe_commands
-            .get(&cmd_name)
-            .map(|v| v.iter().map(|(f, l, _)| (f.clone(), *l)).collect())
-            .unwrap_or_default();
+    // BE: normalized_name -> original_names (only registered handlers)
+    let mut be_by_norm: HashMap<String, Vec<String>> = HashMap::new();
+    for name in global_be_registered.keys() {
+        be_by_norm
+            .entry(normalize_cmd_name(name))
+            .or_default()
+            .push(name.clone());
+    }
 
-        let be_handler: Option<(String, usize)> = scan_results
-            .global_be_commands
-            .get(&cmd_name)
-            .and_then(|v| v.first())
-            .map(|(f, l, _)| (f.clone(), *l));
+    // Collect all unique normalized command names
+    let mut all_normalized: HashSet<String> = HashSet::new();
+    all_normalized.extend(fe_by_norm.keys().cloned());
+    all_normalized.extend(be_by_norm.keys().cloned());
+
+    // Create command bridges using normalized matching
+    for norm_name in all_normalized {
+        // Get all FE original names that normalize to this
+        let fe_originals = fe_by_norm.get(&norm_name).cloned().unwrap_or_default();
+        // Get all BE original names that normalize to this (registered only)
+        let be_originals = be_by_norm.get(&norm_name).cloned().unwrap_or_default();
+
+        // Collect all FE calls (from all original names that map here)
+        let fe_calls: Vec<(String, usize)> = fe_originals
+            .iter()
+            .flat_map(|orig| {
+                scan_results
+                    .global_fe_commands
+                    .get(orig)
+                    .map(|v| {
+                        v.iter()
+                            .map(|(f, l, _)| (f.clone(), *l))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default()
+            })
+            .collect();
+
+        // Get BE handler (prefer first BE original name found, registered only)
+        let (be_handler, canonical_name) = be_originals
+            .first()
+            .and_then(|orig| {
+                global_be_registered
+                    .get(orig)
+                    .and_then(|v| v.first())
+                    .map(|(f, l, _)| (Some((f.clone(), *l)), orig.clone()))
+            })
+            .unwrap_or_else(|| {
+                // No BE handler, use first FE name as canonical
+                (
+                    None,
+                    fe_originals.first().cloned().unwrap_or(norm_name.clone()),
+                )
+            });
 
         let has_handler = be_handler.is_some();
         let is_called = !fe_calls.is_empty();
 
         snapshot.command_bridges.push(CommandBridge {
-            name: cmd_name,
+            name: canonical_name,
             frontend_calls: fe_calls,
             backend_handler: be_handler,
             has_handler,

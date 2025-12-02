@@ -60,13 +60,21 @@ pub struct ForAiSectionRef {
 }
 
 /// Immediate actionable item
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct QuickWin {
     pub priority: u8, // 1=highest
+    /// Kind of issue: missing_handler, unused_handler, unregistered_handler, dead_export
+    pub kind: String,
     pub action: String,
     pub target: String,
     pub location: String,
     pub impact: String,
+    /// Why this is a problem
+    pub why: String,
+    /// Specific fix suggestion
+    pub fix_hint: String,
+    /// Estimated complexity: trivial, easy, medium
+    pub complexity: String,
     /// Command to investigate further
     pub trace_cmd: Option<String>,
     /// IDE integration URL (loctree://open?f={file}&l={line})
@@ -225,10 +233,17 @@ fn extract_quick_wins(sections: &[ReportSection]) -> Vec<QuickWin> {
 
             wins.push(QuickWin {
                 priority,
+                kind: "missing_handler".to_string(),
                 action: "Add missing backend handler".to_string(),
                 target: gap.name.clone(),
                 location,
                 impact: "Fixes runtime error when frontend calls invoke()".to_string(),
+                why: "Frontend calls invoke() but no #[tauri::command] handler exists".to_string(),
+                fix_hint: format!(
+                    "Add #[tauri::command] pub async fn {}(...) in src-tauri/src/commands/",
+                    gap.name
+                ),
+                complexity: "medium".to_string(),
                 trace_cmd: Some(format!("loct trace {}", gap.name)),
                 open_url,
             });
@@ -254,10 +269,18 @@ fn extract_quick_wins(sections: &[ReportSection]) -> Vec<QuickWin> {
 
             wins.push(QuickWin {
                 priority,
+                kind: "unregistered_handler".to_string(),
                 action: "Register handler in generate_handler![]".to_string(),
                 target: gap.name.clone(),
                 location,
                 impact: "Handler exists but isn't exposed to frontend".to_string(),
+                why: "Handler has #[tauri::command] but missing from generate_handler![] macro"
+                    .to_string(),
+                fix_hint: format!(
+                    "Add {} to generate_handler![...] in lib.rs or main.rs",
+                    gap.name
+                ),
+                complexity: "trivial".to_string(),
                 trace_cmd: Some(format!("loct trace {}", gap.name)),
                 open_url,
             });
@@ -287,10 +310,17 @@ fn extract_quick_wins(sections: &[ReportSection]) -> Vec<QuickWin> {
 
             wins.push(QuickWin {
                 priority,
+                kind: "unused_handler".to_string(),
                 action: "Remove unused handler".to_string(),
                 target: gap.name.clone(),
                 location,
                 impact: "Dead code - handler defined but never invoked".to_string(),
+                why: "No invoke() calls found in frontend for this handler".to_string(),
+                fix_hint: format!(
+                    "Delete the {} function and remove from generate_handler![]",
+                    gap.name
+                ),
+                complexity: "easy".to_string(),
                 trace_cmd: Some(format!("loct trace {}", gap.name)),
                 open_url,
             });
@@ -299,6 +329,14 @@ fn extract_quick_wins(sections: &[ReportSection]) -> Vec<QuickWin> {
     }
 
     wins
+}
+
+/// Print quick wins as JSONL (one JSON object per line) for agent consumption
+pub fn print_agent_feed_jsonl(report: &ForAiReport) {
+    for win in &report.quick_wins {
+        let json = serde_json::to_string(win).expect("serialize QuickWin");
+        println!("{}", json);
+    }
 }
 
 fn find_hub_files(analyses: &[FileAnalysis]) -> Vec<HubFile> {

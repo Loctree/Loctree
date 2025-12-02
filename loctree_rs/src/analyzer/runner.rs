@@ -185,11 +185,18 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         parsed.editor_cmd.clone(),
     );
 
+    // Default report path for --serve or auto outputs: .loctree/<scan_id>/report.html
+    let auto_report_path = parsed.report_path.clone().or_else(|| {
+        root_list
+            .first()
+            .map(|root| Snapshot::artifacts_dir(root).join("report.html"))
+    });
+
     if parsed.serve {
         if let Some((base, handle)) = start_open_server(
             root_list.to_vec(),
             editor_cfg.clone(),
-            parsed.report_path.clone(),
+            auto_report_path.clone(),
             parsed.serve_port,
         ) {
             server_handle = Some(handle);
@@ -541,7 +548,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         }
     }
 
-    if let Some(report_path) = parsed.report_path.as_ref() {
+    if let Some(report_path) = auto_report_path.as_ref() {
         write_report(report_path, &report_sections, parsed.verbose)?;
         open_in_browser(report_path);
     }

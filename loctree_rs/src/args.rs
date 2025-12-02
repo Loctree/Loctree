@@ -829,6 +829,11 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
                 parsed.output = OutputMode::Json;
                 i += 1;
             }
+            "--for-agent-feed" => {
+                parsed.mode = Mode::ForAi;
+                parsed.output = OutputMode::Jsonl;
+                i += 1;
+            }
             "--confidence" => {
                 let next = args
                     .get(i + 1)
@@ -1059,8 +1064,9 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
     validate_globs(&parsed.exclude_report_patterns, "--exclude-report")?;
     detect_glob_conflicts(&parsed.focus_patterns, &parsed.exclude_report_patterns)?;
 
-    if parsed.serve && parsed.report_path.is_none() {
-        return Err("--serve requires --html-report to be set".to_string());
+    if parsed.serve {
+        // --serve implies full analysis + HTML report generation
+        parsed.mode = Mode::AnalyzeImports;
     }
 
     for extra in &parsed.py_roots {
