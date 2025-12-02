@@ -1,6 +1,8 @@
-# loct — AI Agent Quick Reference (v0.5.7)
+# loct — AI Agent Quick Reference (v0.5.8)
 
-Static analysis for AI agents: scan once, slice many. Default `loct` now saves both `.loctree/snapshot.json` **and** a full bundle (`report.html`, `analysis.json`, `circular.json`, `py_races.json`) so you can operate without extra commands.
+Static analysis for AI agents: scan once, slice many. Default `loct` saves `.loctree/snapshot.json` **and** a full agent bundle (`report.html`, `analysis.json`, `report.sarif`, `circular.json`, `py_races.json`).
+
+> **Full documentation:** [AI Agent's Manual](docs/tutorials/ai-agents-manual.md)
 
 ## Core Flow
 
@@ -33,7 +35,7 @@ loct lint --fail --sarif > results.sarif
 
 ```bash
 cargo install loctree
-loct --version   # expect 0.5.7
+loct --version   # expect 0.5.8+
 ```
 
 ## Auto-Detect Stack
@@ -59,7 +61,8 @@ loct --version   # expect 0.5.7
 ## Tips
 
 - `loct` caches analyses; use `--full-scan` to force a rescan.
-- Artifacts live in `.loctree/` (snapshot + reports) after each scan.
+- Artifacts live in `.loctree/` after each scan: `snapshot.json`, `analysis.json`, `report.sarif`, `report.html`.
+- SARIF file integrates with GitHub/GitLab code scanning and IDEs.
 - Respect `.gitignore` by default; add `--scan-all` to include node_modules/target/.venv.
 
 ## Philosophy
