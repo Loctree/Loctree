@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::PathBuf;
+use std::sync::Mutex;
+use std::thread;
 
 use globset::GlobSet;
 use serde_json::json;
@@ -76,7 +78,104 @@ pub struct ScanResults {
     pub global_analyses: Vec<FileAnalysis>,
 }
 
+/// Result from scanning a single root (used for parallel processing)
+struct SingleRootResult {
+    context: RootContext,
+    fe_commands: CommandUsage,
+    be_commands: CommandUsage,
+    fe_payloads: PayloadMap,
+    be_payloads: PayloadMap,
+    analyses: Vec<FileAnalysis>,
+}
+
+/// Maximum number of roots to scan in parallel (bounded parallelism)
+const MAX_PARALLEL_ROOTS: usize = 4;
+
 pub fn scan_roots(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
+    // For single root, skip parallelization overhead
+    if cfg.roots.len() <= 1 {
+        return scan_roots_sequential(cfg);
+    }
+
+    // Parallel scanning with bounded concurrency
+    let results: Mutex<Vec<SingleRootResult>> = Mutex::new(Vec::new());
+    let errors: Mutex<Vec<(PathBuf, io::Error)>> = Mutex::new(Vec::new());
+
+    thread::scope(|s| {
+        // Process roots in chunks for bounded parallelism
+        for chunk in cfg.roots.chunks(MAX_PARALLEL_ROOTS) {
+            let handles: Vec<_> = chunk
+                .iter()
+                .map(|root_path| s.spawn(|| scan_single_root(root_path, &cfg)))
+                .collect();
+
+            for (handle, root_path) in handles.into_iter().zip(chunk.iter()) {
+                match handle.join() {
+                    Ok(Ok(result)) => {
+                        results.lock().unwrap().push(result);
+                    }
+                    Ok(Err(e)) => {
+                        errors.lock().unwrap().push((root_path.clone(), e));
+                    }
+                    Err(_) => {
+                        errors
+                            .lock()
+                            .unwrap()
+                            .push((root_path.clone(), io::Error::other("thread panic")));
+                    }
+                }
+            }
+        }
+    });
+
+    // Check for errors
+    let errors = errors.into_inner().unwrap();
+    if !errors.is_empty() {
+        let first_err = errors.into_iter().next().unwrap();
+        return Err(io::Error::new(
+            first_err.1.kind(),
+            format!("Error scanning {}: {}", first_err.0.display(), first_err.1),
+        ));
+    }
+
+    // Merge results from all roots
+    let all_results = results.into_inner().unwrap();
+    let mut contexts: Vec<RootContext> = Vec::new();
+    let mut global_fe_commands: CommandUsage = HashMap::new();
+    let mut global_be_commands: CommandUsage = HashMap::new();
+    let mut global_fe_payloads: PayloadMap = HashMap::new();
+    let mut global_be_payloads: PayloadMap = HashMap::new();
+    let mut global_analyses: Vec<FileAnalysis> = Vec::new();
+
+    for result in all_results {
+        contexts.push(result.context);
+        for (name, entries) in result.fe_commands {
+            global_fe_commands.entry(name).or_default().extend(entries);
+        }
+        for (name, entries) in result.be_commands {
+            global_be_commands.entry(name).or_default().extend(entries);
+        }
+        for (name, entries) in result.fe_payloads {
+            global_fe_payloads.entry(name).or_default().extend(entries);
+        }
+        for (name, entries) in result.be_payloads {
+            global_be_payloads.entry(name).or_default().extend(entries);
+        }
+        global_analyses.extend(result.analyses);
+    }
+
+    Ok(ScanResults {
+        contexts,
+        global_fe_commands,
+        global_be_commands,
+        global_fe_payloads,
+        global_be_payloads,
+        global_analyses,
+    })
+}
+
+/// Sequential scanning (original implementation, used for single root)
+fn scan_roots_sequential(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
     let mut contexts: Vec<RootContext> = Vec::new();
     let mut global_fe_commands: CommandUsage = HashMap::new();
     let mut global_be_commands: CommandUsage = HashMap::new();
@@ -85,155 +184,177 @@ pub fn scan_roots(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
     let mut global_analyses: Vec<FileAnalysis> = Vec::new();
 
     for root_path in cfg.roots.iter() {
-        let ignore_paths = normalise_ignore_patterns(&cfg.parsed.ignore_patterns, root_path);
-        let root_canon = root_path
-            .canonicalize()
-            .unwrap_or_else(|_| root_path.clone());
+        let result = scan_single_root(root_path, &cfg)?;
 
-        let options = Options {
-            extensions: cfg.extensions.clone(),
-            ignore_paths,
-            use_gitignore: cfg.parsed.use_gitignore,
-            max_depth: cfg.parsed.max_depth,
-            color: cfg.parsed.color,
-            output: cfg.parsed.output,
-            summary: cfg.parsed.summary,
-            summary_limit: cfg.parsed.summary_limit,
-            show_hidden: cfg.parsed.show_hidden,
-            show_ignored: false, // Only used in tree mode
-            loc_threshold: cfg.parsed.loc_threshold,
-            analyze_limit: cfg.parsed.analyze_limit,
-            report_path: cfg.parsed.report_path.clone(),
-            serve: cfg.parsed.serve,
-            editor_cmd: cfg.parsed.editor_cmd.clone(),
-            max_graph_nodes: cfg.parsed.max_graph_nodes,
-            max_graph_edges: cfg.parsed.max_graph_edges,
-            verbose: cfg.parsed.verbose,
-            scan_all: cfg.parsed.scan_all,
-            symbol: cfg.parsed.symbol.clone(),
-            impact: cfg.parsed.impact.clone(),
-            find_artifacts: false, // Only used in tree mode
-        };
-
-        if options.verbose {
-            eprintln!("[loctree][debug] analyzing root {}", root_path.display());
+        contexts.push(result.context);
+        for (name, entries) in result.fe_commands {
+            global_fe_commands.entry(name).or_default().extend(entries);
         }
+        for (name, entries) in result.be_commands {
+            global_be_commands.entry(name).or_default().extend(entries);
+        }
+        for (name, entries) in result.fe_payloads {
+            global_fe_payloads.entry(name).or_default().extend(entries);
+        }
+        for (name, entries) in result.be_payloads {
+            global_be_payloads.entry(name).or_default().extend(entries);
+        }
+        global_analyses.extend(result.analyses);
+    }
 
-        let git_checker = if options.use_gitignore {
-            GitIgnoreChecker::new(root_path)
+    Ok(ScanResults {
+        contexts,
+        global_fe_commands,
+        global_be_commands,
+        global_fe_payloads,
+        global_be_payloads,
+        global_analyses,
+    })
+}
+
+/// Scan a single root directory and return results
+fn scan_single_root(
+    root_path: &std::path::Path,
+    cfg: &ScanConfig<'_>,
+) -> io::Result<SingleRootResult> {
+    let ignore_paths = normalise_ignore_patterns(&cfg.parsed.ignore_patterns, root_path);
+    let root_canon = root_path
+        .canonicalize()
+        .unwrap_or_else(|_| root_path.to_path_buf());
+
+    let options = Options {
+        extensions: cfg.extensions.clone(),
+        ignore_paths,
+        use_gitignore: cfg.parsed.use_gitignore,
+        max_depth: cfg.parsed.max_depth,
+        color: cfg.parsed.color,
+        output: cfg.parsed.output,
+        summary: cfg.parsed.summary,
+        summary_limit: cfg.parsed.summary_limit,
+        show_hidden: cfg.parsed.show_hidden,
+        show_ignored: false, // Only used in tree mode
+        loc_threshold: cfg.parsed.loc_threshold,
+        analyze_limit: cfg.parsed.analyze_limit,
+        report_path: cfg.parsed.report_path.clone(),
+        serve: cfg.parsed.serve,
+        editor_cmd: cfg.parsed.editor_cmd.clone(),
+        max_graph_nodes: cfg.parsed.max_graph_nodes,
+        max_graph_edges: cfg.parsed.max_graph_edges,
+        verbose: cfg.parsed.verbose,
+        scan_all: cfg.parsed.scan_all,
+        symbol: cfg.parsed.symbol.clone(),
+        impact: cfg.parsed.impact.clone(),
+        find_artifacts: false, // Only used in tree mode
+    };
+
+    if options.verbose {
+        eprintln!("[loctree][debug] analyzing root {}", root_path.display());
+    }
+
+    let git_checker = if options.use_gitignore {
+        GitIgnoreChecker::new(root_path)
+    } else {
+        None
+    };
+
+    let ts_resolver = TsPathResolver::from_tsconfig(&root_canon);
+    let mut py_roots: Vec<PathBuf> = vec![root_canon.clone()];
+    for extra in &cfg.parsed.py_roots {
+        let candidate = if extra.is_absolute() {
+            extra.clone()
         } else {
-            None
+            root_canon.join(extra)
         };
-
-        let ts_resolver = TsPathResolver::from_tsconfig(&root_canon);
-        let mut py_roots: Vec<PathBuf> = vec![root_canon.clone()];
-        for extra in &cfg.parsed.py_roots {
-            let candidate = if extra.is_absolute() {
-                extra.clone()
-            } else {
-                root_canon.join(extra)
-            };
-            if candidate.exists() {
-                py_roots.push(candidate.canonicalize().unwrap_or(candidate));
-            } else {
-                eprintln!(
-                    "[loctree][warn] --py-root '{}' not found under {}; skipping",
-                    extra.display(),
-                    root_canon.display()
-                );
-            }
+        if candidate.exists() {
+            py_roots.push(candidate.canonicalize().unwrap_or(candidate));
+        } else {
+            eprintln!(
+                "[loctree][warn] --py-root '{}' not found under {}; skipping",
+                extra.display(),
+                root_canon.display()
+            );
         }
+    }
 
-        let mut files = Vec::new();
-        let mut visited = HashSet::new();
-        gather_files(
-            root_path,
-            &options,
-            0,
-            git_checker.as_ref(),
-            &mut visited,
-            &mut files,
-        )?;
+    let mut files = Vec::new();
+    let mut visited = HashSet::new();
+    gather_files(
+        root_path,
+        &options,
+        0,
+        git_checker.as_ref(),
+        &mut visited,
+        &mut files,
+    )?;
 
-        if let (Some(focus), Some(exclude)) = (cfg.focus_set, cfg.exclude_set) {
-            let mut overlapping = Vec::new();
-            for path in &files {
-                let canon = path.canonicalize().unwrap_or_else(|_| path.clone());
-                if focus.is_match(&canon) && exclude.is_match(&canon) {
-                    overlapping.push(canon.display().to_string());
-                    if overlapping.len() >= 5 {
-                        break;
-                    }
+    if let (Some(focus), Some(exclude)) = (cfg.focus_set, cfg.exclude_set) {
+        let mut overlapping = Vec::new();
+        for path in &files {
+            let canon = path.canonicalize().unwrap_or_else(|_| path.clone());
+            if focus.is_match(&canon) && exclude.is_match(&canon) {
+                overlapping.push(canon.display().to_string());
+                if overlapping.len() >= 5 {
+                    break;
                 }
             }
-            if !overlapping.is_empty() {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!(
-                        "--focus and --exclude-report overlap on: {}",
-                        overlapping.join(", ")
-                    ),
-                ));
-            }
         }
+        if !overlapping.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "--focus and --exclude-report overlap on: {}",
+                    overlapping.join(", ")
+                ),
+            ));
+        }
+    }
 
-        let mut analyses = Vec::new();
-        let mut export_index: ExportIndex = HashMap::new();
-        let mut reexport_edges: Vec<(String, Option<String>)> = Vec::new();
-        let mut dynamic_summary: Vec<(String, Vec<String>)> = Vec::new();
-        let mut fe_commands: CommandUsage = HashMap::new();
-        let mut be_commands: CommandUsage = HashMap::new();
-        let mut fe_payloads: PayloadMap = HashMap::new();
-        let mut be_payloads: PayloadMap = HashMap::new();
-        let mut graph_edges: Vec<(String, String, String)> = Vec::new();
-        let mut loc_map: HashMap<String, usize> = HashMap::new();
-        let mut languages: HashSet<String> = HashSet::new();
-        let mut barrels: Vec<BarrelInfo> = Vec::new();
+    let mut analyses = Vec::new();
+    let mut export_index: ExportIndex = HashMap::new();
+    let mut reexport_edges: Vec<(String, Option<String>)> = Vec::new();
+    let mut dynamic_summary: Vec<(String, Vec<String>)> = Vec::new();
+    let mut fe_commands: CommandUsage = HashMap::new();
+    let mut be_commands: CommandUsage = HashMap::new();
+    let mut fe_payloads: PayloadMap = HashMap::new();
+    let mut be_payloads: PayloadMap = HashMap::new();
+    let mut graph_edges: Vec<(String, String, String)> = Vec::new();
+    let mut loc_map: HashMap<String, usize> = HashMap::new();
+    let mut languages: HashSet<String> = HashSet::new();
+    let mut barrels: Vec<BarrelInfo> = Vec::new();
 
-        let mut cached_hits = 0usize;
-        let mut fresh_scans = 0usize;
+    let mut cached_hits = 0usize;
+    let mut fresh_scans = 0usize;
 
-        for file in files {
-            // Get current file mtime for incremental scanning
-            let current_mtime = std::fs::metadata(&file)
-                .and_then(|m| m.modified())
-                .ok()
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
+    for file in files {
+        // Get current file mtime and size for incremental scanning
+        // Using both mtime + size avoids FP on fast edits (sub-second granularity)
+        let metadata = std::fs::metadata(&file).ok();
+        let current_mtime = metadata
+            .as_ref()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let current_size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
 
-            // Compute relative path for cache lookup
-            let rel_path = file
-                .strip_prefix(&root_canon)
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|_| file.to_string_lossy().to_string())
-                .replace('\\', "/");
+        // Compute relative path for cache lookup
+        let rel_path = file
+            .strip_prefix(&root_canon)
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| file.to_string_lossy().to_string())
+            .replace('\\', "/");
 
-            // Check if we can use cached analysis
-            let analysis = if let Some(cache) = cfg.cached_analyses {
-                if let Some(cached) = cache.get(&rel_path) {
-                    if cached.mtime > 0 && cached.mtime == current_mtime {
-                        // File unchanged - reuse cached analysis
-                        cached_hits += 1;
-                        cached.clone()
-                    } else {
-                        // File changed - re-analyze
-                        fresh_scans += 1;
-                        let mut a = analyze_file(
-                            &file,
-                            &root_canon,
-                            options.extensions.as_ref(),
-                            ts_resolver.as_ref(),
-                            &py_roots,
-                            cfg.py_stdlib,
-                            options.symbol.as_deref(),
-                            cfg.custom_command_macros,
-                        )?;
-                        a.mtime = current_mtime;
-                        a
-                    }
+        // Check if we can use cached analysis (mtime + size must both match)
+        let analysis = if let Some(cache) = cfg.cached_analyses {
+            if let Some(cached) = cache.get(&rel_path) {
+                let mtime_matches = cached.mtime > 0 && cached.mtime == current_mtime;
+                let size_matches = cached.size == current_size;
+                if mtime_matches && size_matches {
+                    // File unchanged - reuse cached analysis
+                    cached_hits += 1;
+                    cached.clone()
                 } else {
-                    // New file - analyze
+                    // File changed - re-analyze
                     fresh_scans += 1;
                     let mut a = analyze_file(
                         &file,
@@ -246,10 +367,11 @@ pub fn scan_roots(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
                         cfg.custom_command_macros,
                     )?;
                     a.mtime = current_mtime;
+                    a.size = current_size;
                     a
                 }
             } else {
-                // No cache - fresh scan
+                // New file - analyze
                 fresh_scans += 1;
                 let mut a = analyze_file(
                     &file,
@@ -262,402 +384,394 @@ pub fn scan_roots(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
                     cfg.custom_command_macros,
                 )?;
                 a.mtime = current_mtime;
+                a.size = current_size;
                 a
-            };
-            let abs_for_match = root_canon.join(&analysis.path);
-            let is_excluded_for_commands = cfg
-                .exclude_set
-                .as_ref()
-                .map(|set| {
-                    let canon = abs_for_match
-                        .canonicalize()
-                        .unwrap_or_else(|_| abs_for_match.clone());
-                    set.is_match(&canon)
-                })
-                .unwrap_or(false);
+            }
+        } else {
+            // No cache - fresh scan
+            fresh_scans += 1;
+            let mut a = analyze_file(
+                &file,
+                &root_canon,
+                options.extensions.as_ref(),
+                ts_resolver.as_ref(),
+                &py_roots,
+                cfg.py_stdlib,
+                options.symbol.as_deref(),
+                cfg.custom_command_macros,
+            )?;
+            a.mtime = current_mtime;
+            a.size = current_size;
+            a
+        };
+        let abs_for_match = root_canon.join(&analysis.path);
+        let is_excluded_for_commands = cfg
+            .exclude_set
+            .as_ref()
+            .map(|set| {
+                let canon = abs_for_match
+                    .canonicalize()
+                    .unwrap_or_else(|_| abs_for_match.clone());
+                set.is_match(&canon)
+            })
+            .unwrap_or(false);
 
-            loc_map.insert(analysis.path.clone(), analysis.loc);
-            for exp in &analysis.exports {
-                if exp.kind == "reexport" {
-                    continue;
-                }
-                if exp.export_type == "default" {
-                    continue;
-                }
-                let name_lc = exp.name.to_lowercase();
-                let is_decl = [".d.ts", ".d.tsx", ".d.mts", ".d.cts"]
-                    .iter()
-                    .any(|ext| analysis.path.ends_with(ext));
-                if is_decl && name_lc == "default" {
-                    continue;
-                }
-                let ignored = cfg.ignore_exact.contains(&name_lc)
-                    || cfg.ignore_prefixes.iter().any(|p| name_lc.starts_with(p));
-                if ignored {
-                    continue;
-                }
-                export_index
-                    .entry(exp.name.clone())
-                    .or_default()
-                    .push(analysis.path.clone());
+        loc_map.insert(analysis.path.clone(), analysis.loc);
+        for exp in &analysis.exports {
+            if exp.kind == "reexport" {
+                continue;
             }
-            for re in &analysis.reexports {
-                reexport_edges.push((analysis.path.clone(), re.resolved.clone()));
-                let collect_edges = cfg.collect_edges
-                    || (cfg.parsed.graph && options.report_path.is_some())
-                    || options.impact.is_some();
-                if collect_edges && let Some(target) = &re.resolved {
-                    graph_edges.push((
-                        analysis.path.clone(),
-                        target.clone(),
-                        "reexport".to_string(),
-                    ));
-                }
+            if exp.export_type == "default" {
+                continue;
             }
-            if !analysis.dynamic_imports.is_empty() {
-                dynamic_summary.push((analysis.path.clone(), analysis.dynamic_imports.clone()));
+            let name_lc = exp.name.to_lowercase();
+            let is_decl = [".d.ts", ".d.tsx", ".d.mts", ".d.cts"]
+                .iter()
+                .any(|ext| analysis.path.ends_with(ext));
+            if is_decl && name_lc == "default" {
+                continue;
             }
-            let should_collect_edges = cfg.collect_edges
+            let ignored = cfg.ignore_exact.contains(&name_lc)
+                || cfg.ignore_prefixes.iter().any(|p| name_lc.starts_with(p));
+            if ignored {
+                continue;
+            }
+            export_index
+                .entry(exp.name.clone())
+                .or_default()
+                .push(analysis.path.clone());
+        }
+        for re in &analysis.reexports {
+            reexport_edges.push((analysis.path.clone(), re.resolved.clone()));
+            let collect_edges = cfg.collect_edges
                 || (cfg.parsed.graph && options.report_path.is_some())
                 || options.impact.is_some();
-            if should_collect_edges {
-                let ext = file
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .map(|s| s.to_lowercase())
-                    .unwrap_or_default();
-                for imp in &analysis.imports {
-                    let resolved = imp.resolved_path.clone().or_else(|| match ext.as_str() {
-                        "py" => {
-                            if imp.source.starts_with('.') {
-                                resolve_python_relative(
-                                    &imp.source,
-                                    &file,
-                                    root_path,
-                                    options.extensions.as_ref(),
-                                )
-                            } else {
-                                resolve_python_absolute(
-                                    &imp.source,
-                                    &py_roots,
-                                    root_path,
-                                    options.extensions.as_ref(),
-                                )
-                            }
+            if collect_edges && let Some(target) = &re.resolved {
+                graph_edges.push((
+                    analysis.path.clone(),
+                    target.clone(),
+                    "reexport".to_string(),
+                ));
+            }
+        }
+        if !analysis.dynamic_imports.is_empty() {
+            dynamic_summary.push((analysis.path.clone(), analysis.dynamic_imports.clone()));
+        }
+        let should_collect_edges = cfg.collect_edges
+            || (cfg.parsed.graph && options.report_path.is_some())
+            || options.impact.is_some();
+        if should_collect_edges {
+            let ext = file
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|s| s.to_lowercase())
+                .unwrap_or_default();
+            for imp in &analysis.imports {
+                let resolved = imp.resolved_path.clone().or_else(|| match ext.as_str() {
+                    "py" => {
+                        if imp.source.starts_with('.') {
+                            resolve_python_relative(
+                                &imp.source,
+                                &file,
+                                root_path,
+                                options.extensions.as_ref(),
+                            )
+                        } else {
+                            resolve_python_absolute(
+                                &imp.source,
+                                &py_roots,
+                                root_path,
+                                options.extensions.as_ref(),
+                            )
                         }
-                        "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "css" => {
-                            if imp.source.starts_with('.') {
-                                resolve_js_relative(
-                                    &file,
-                                    root_path,
-                                    &imp.source,
-                                    options.extensions.as_ref(),
-                                )
-                            } else {
-                                ts_resolver.as_ref().and_then(|r| {
-                                    r.resolve(&imp.source, options.extensions.as_ref())
-                                })
-                            }
+                    }
+                    "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "css" => {
+                        if imp.source.starts_with('.') {
+                            resolve_js_relative(
+                                &file,
+                                root_path,
+                                &imp.source,
+                                options.extensions.as_ref(),
+                            )
+                        } else {
+                            ts_resolver
+                                .as_ref()
+                                .and_then(|r| r.resolve(&imp.source, options.extensions.as_ref()))
                         }
-                        _ => None,
-                    });
-                    if let Some(target) = resolved {
-                        // Use full paths for edges (slice module needs exact paths)
-                        // Note: normalize_module_id strips /index suffix which breaks slice lookups
-                        graph_edges.push((
-                            analysis.path.clone(),
-                            target,
-                            match imp.kind {
-                                ImportKind::Static | ImportKind::SideEffect => "import".to_string(),
-                                ImportKind::Dynamic => "dynamic_import".to_string(),
-                            },
-                        ));
                     }
-                }
-            }
-            if !is_excluded_for_commands {
-                for call in &analysis.command_calls {
-                    let mut key = call.name.clone();
-                    if let Some(stripped) = key.strip_suffix("_command") {
-                        key = stripped.to_string();
-                    } else if let Some(stripped) = key.strip_suffix("_cmd") {
-                        key = stripped.to_string();
-                    }
-                    fe_commands.entry(key.clone()).or_default().push((
+                    _ => None,
+                });
+                if let Some(target) = resolved {
+                    // Use full paths for edges (slice module needs exact paths)
+                    // Note: normalize_module_id strips /index suffix which breaks slice lookups
+                    graph_edges.push((
                         analysis.path.clone(),
-                        call.line,
-                        call.name.clone(),
-                    ));
-                    fe_payloads.entry(key).or_default().push((
-                        analysis.path.clone(),
-                        call.line,
-                        call.payload.clone(),
-                    ));
-                }
-                for handler in &analysis.command_handlers {
-                    let mut key = handler
-                        .exposed_name
-                        .as_ref()
-                        .unwrap_or(&handler.name)
-                        .clone();
-                    if let Some(stripped) = key.strip_suffix("_command") {
-                        key = stripped.to_string();
-                    } else if let Some(stripped) = key.strip_suffix("_cmd") {
-                        key = stripped.to_string();
-                    }
-                    be_payloads.entry(key.clone()).or_default().push((
-                        analysis.path.clone(),
-                        handler.line,
-                        handler.payload.clone(),
-                    ));
-                    be_commands.entry(key).or_default().push((
-                        analysis.path.clone(),
-                        handler.line,
-                        handler.name.clone(),
+                        target,
+                        match imp.kind {
+                            ImportKind::Static | ImportKind::SideEffect => "import".to_string(),
+                            ImportKind::Dynamic => "dynamic_import".to_string(),
+                        },
                     ));
                 }
             }
-            languages.insert(analysis.language.clone());
-            analyses.push(analysis);
         }
-
-        let mut barrel_map: HashMap<String, BarrelInfo> = HashMap::new();
-        for analysis in &analyses {
-            if analysis.reexports.is_empty() {
-                continue;
+        if !is_excluded_for_commands {
+            for call in &analysis.command_calls {
+                let mut key = call.name.clone();
+                if let Some(stripped) = key.strip_suffix("_command") {
+                    key = stripped.to_string();
+                } else if let Some(stripped) = key.strip_suffix("_cmd") {
+                    key = stripped.to_string();
+                }
+                fe_commands.entry(key.clone()).or_default().push((
+                    analysis.path.clone(),
+                    call.line,
+                    call.name.clone(),
+                ));
+                fe_payloads.entry(key).or_default().push((
+                    analysis.path.clone(),
+                    call.line,
+                    call.payload.clone(),
+                ));
             }
-            if !is_index_like(&analysis.path) {
-                continue;
+            for handler in &analysis.command_handlers {
+                let mut key = handler
+                    .exposed_name
+                    .as_ref()
+                    .unwrap_or(&handler.name)
+                    .clone();
+                if let Some(stripped) = key.strip_suffix("_command") {
+                    key = stripped.to_string();
+                } else if let Some(stripped) = key.strip_suffix("_cmd") {
+                    key = stripped.to_string();
+                }
+                be_payloads.entry(key.clone()).or_default().push((
+                    analysis.path.clone(),
+                    handler.line,
+                    handler.payload.clone(),
+                ));
+                be_commands.entry(key).or_default().push((
+                    analysis.path.clone(),
+                    handler.line,
+                    handler.name.clone(),
+                ));
             }
+        }
+        languages.insert(analysis.language.clone());
+        analyses.push(analysis);
+    }
 
-            let mut targets: Vec<String> = analysis
-                .reexports
-                .iter()
-                .filter_map(|r| r.resolved.clone().or_else(|| Some(r.source.clone())))
-                .map(|t| normalize_module_id(&t).as_key())
-                .collect();
-            targets.sort();
-            targets.dedup();
+    let mut barrel_map: HashMap<String, BarrelInfo> = HashMap::new();
+    for analysis in &analyses {
+        if analysis.reexports.is_empty() {
+            continue;
+        }
+        if !is_index_like(&analysis.path) {
+            continue;
+        }
 
-            let module_id = normalize_module_id(&analysis.path).as_key();
-            let entry = barrel_map.entry(module_id.clone()).or_insert(BarrelInfo {
-                path: analysis.path.clone(),
-                module_id,
-                reexport_count: 0,
-                target_count: 0,
-                mixed: false,
-                targets: Vec::new(),
-            });
-
-            entry.reexport_count += analysis.reexports.len();
-            let has_own_defs = analysis.exports.iter().any(|e| e.kind != "reexport");
-            entry.mixed |= has_own_defs;
-            entry.targets.extend(targets);
-        }
-        for (_, mut info) in barrel_map {
-            info.targets.sort();
-            info.targets.dedup();
-            info.target_count = info.targets.len();
-            barrels.push(info);
-        }
-        barrels.sort_by(|a, b| a.path.cmp(&b.path));
-
-        for (name, entries) in &fe_commands {
-            global_fe_commands
-                .entry(name.clone())
-                .or_default()
-                .extend(entries.clone());
-        }
-        for (name, entries) in &be_commands {
-            global_be_commands
-                .entry(name.clone())
-                .or_default()
-                .extend(entries.clone());
-        }
-        for (name, entries) in &fe_payloads {
-            global_fe_payloads
-                .entry(name.clone())
-                .or_default()
-                .extend(entries.clone());
-        }
-        for (name, entries) in &be_payloads {
-            global_be_payloads
-                .entry(name.clone())
-                .or_default()
-                .extend(entries.clone());
-        }
-        global_analyses.extend(analyses.iter().cloned());
-        let duplicate_exports: Vec<_> = export_index
+        let mut targets: Vec<String> = analysis
+            .reexports
             .iter()
-            .filter(|(_, files)| files.len() > 1)
-            .map(|(name, files)| (name.clone(), files.clone()))
+            .filter_map(|r| r.resolved.clone().or_else(|| Some(r.source.clone())))
+            .map(|t| normalize_module_id(&t).as_key())
             .collect();
+        targets.sort();
+        targets.dedup();
 
-        let reexport_files: HashSet<String> = analyses
-            .iter()
-            .filter(|a| !a.reexports.is_empty())
-            .map(|a| a.path.clone())
-            .collect();
+        let module_id = normalize_module_id(&analysis.path).as_key();
+        let entry = barrel_map.entry(module_id.clone()).or_insert(BarrelInfo {
+            path: analysis.path.clone(),
+            module_id,
+            reexport_count: 0,
+            target_count: 0,
+            mixed: false,
+            targets: Vec::new(),
+        });
 
-        resolve_event_constants_across_files(&mut analyses);
+        entry.reexport_count += analysis.reexports.len();
+        let has_own_defs = analysis.exports.iter().any(|e| e.kind != "reexport");
+        entry.mixed |= has_own_defs;
+        entry.targets.extend(targets);
+    }
+    for (_, mut info) in barrel_map {
+        info.targets.sort();
+        info.targets.dedup();
+        info.target_count = info.targets.len();
+        barrels.push(info);
+    }
+    barrels.sort_by(|a, b| a.path.cmp(&b.path));
 
-        let mut cascades = Vec::new();
-        for (from, resolved) in &reexport_edges {
-            if let Some(target) = resolved
-                && reexport_files.contains(target)
-            {
-                cascades.push((from.clone(), target.clone()));
-            }
+    let duplicate_exports: Vec<_> = export_index
+        .iter()
+        .filter(|(_, files)| files.len() > 1)
+        .map(|(name, files)| (name.clone(), files.clone()))
+        .collect();
+
+    let reexport_files: HashSet<String> = analyses
+        .iter()
+        .filter(|a| !a.reexports.is_empty())
+        .map(|a| a.path.clone())
+        .collect();
+
+    resolve_event_constants_across_files(&mut analyses);
+
+    let mut cascades = Vec::new();
+    for (from, resolved) in &reexport_edges {
+        if let Some(target) = resolved
+            && reexport_files.contains(target)
+        {
+            cascades.push((from.clone(), target.clone()));
         }
+    }
 
-        let mut ranked_dups: Vec<RankedDup> = Vec::new();
-        for (name, files) in &duplicate_exports {
-            let all_rs = files.iter().all(|f| f.ends_with(".rs"));
-            let all_d_ts = files.iter().all(|f| {
-                f.ends_with(".d.ts")
-                    || f.ends_with(".d.tsx")
-                    || f.ends_with(".d.mts")
-                    || f.ends_with(".d.cts")
-            });
-            if (name == "new" && all_rs) || (name == "default" && all_d_ts) {
-                continue;
-            }
-            let dev_count = files.iter().filter(|f| is_dev_file(f)).count();
-            let prod_count = files.len().saturating_sub(dev_count);
-            let score = prod_count * 2 + dev_count;
-            let canonical = files
+    let mut ranked_dups: Vec<RankedDup> = Vec::new();
+    for (name, files) in &duplicate_exports {
+        let all_rs = files.iter().all(|f| f.ends_with(".rs"));
+        let all_d_ts = files.iter().all(|f| {
+            f.ends_with(".d.ts")
+                || f.ends_with(".d.tsx")
+                || f.ends_with(".d.mts")
+                || f.ends_with(".d.cts")
+        });
+        if (name == "new" && all_rs) || (name == "default" && all_d_ts) {
+            continue;
+        }
+        let dev_count = files.iter().filter(|f| is_dev_file(f)).count();
+        let prod_count = files.len().saturating_sub(dev_count);
+        let score = prod_count * 2 + dev_count;
+        let canonical = files
+            .iter()
+            .find(|f| !is_dev_file(f))
+            .cloned()
+            .unwrap_or_else(|| files[0].clone());
+        let mut refactors: Vec<String> =
+            files.iter().filter(|f| *f != &canonical).cloned().collect();
+        refactors.sort();
+        ranked_dups.push(RankedDup {
+            name: name.clone(),
+            files: files.clone(),
+            score,
+            prod_count,
+            dev_count,
+            canonical,
+            refactors,
+        });
+    }
+    ranked_dups.sort_by(|a, b| {
+        b.score
+            .cmp(&a.score)
+            .then(b.files.len().cmp(&a.files.len()))
+    });
+
+    let mut filtered_ranked: Vec<RankedDup> = Vec::new();
+    for dup in ranked_dups.into_iter() {
+        let kept_files = strip_excluded(&dup.files, cfg.exclude_set);
+        if kept_files.len() <= 1 {
+            continue;
+        }
+        if !matches_focus(&kept_files, cfg.focus_set) {
+            continue;
+        }
+        let canonical = if kept_files.contains(&dup.canonical) {
+            dup.canonical.clone()
+        } else {
+            kept_files
                 .iter()
                 .find(|f| !is_dev_file(f))
                 .cloned()
-                .unwrap_or_else(|| files[0].clone());
-            let mut refactors: Vec<String> =
-                files.iter().filter(|f| *f != &canonical).cloned().collect();
-            refactors.sort();
-            ranked_dups.push(RankedDup {
-                name: name.clone(),
-                files: files.clone(),
-                score,
-                prod_count,
-                dev_count,
-                canonical,
-                refactors,
-            });
-        }
-        ranked_dups.sort_by(|a, b| {
-            b.score
-                .cmp(&a.score)
-                .then(b.files.len().cmp(&a.files.len()))
-        });
-
-        let mut filtered_ranked: Vec<RankedDup> = Vec::new();
-        for dup in ranked_dups.into_iter() {
-            let kept_files = strip_excluded(&dup.files, cfg.exclude_set);
-            if kept_files.len() <= 1 {
-                continue;
-            }
-            if !matches_focus(&kept_files, cfg.focus_set) {
-                continue;
-            }
-            let canonical = if kept_files.contains(&dup.canonical) {
-                dup.canonical.clone()
-            } else {
-                kept_files
-                    .iter()
-                    .find(|f| !is_dev_file(f))
-                    .cloned()
-                    .unwrap_or_else(|| kept_files[0].clone())
-            };
-            let dev_count = kept_files.iter().filter(|f| is_dev_file(f)).count();
-            let prod_count = kept_files.len().saturating_sub(dev_count);
-            let score = prod_count * 2 + dev_count;
-            let mut refactors: Vec<String> = kept_files
-                .iter()
-                .filter(|f| *f != &canonical)
-                .cloned()
-                .collect();
-            refactors.sort();
-            filtered_ranked.push(RankedDup {
-                name: dup.name,
-                files: kept_files,
-                score,
-                prod_count,
-                dev_count,
-                canonical,
-                refactors,
-            });
-        }
-        filtered_ranked.sort_by(|a, b| {
-            b.score
-                .cmp(&a.score)
-                .then(b.files.len().cmp(&a.files.len()))
-        });
-
-        let tsconfig_summary = super::tsconfig::summarize_tsconfig(root_path, &analyses);
-
-        // Log incremental scan stats if verbose
-        if options.verbose && cfg.cached_analyses.is_some() {
-            let total = cached_hits + fresh_scans;
-            eprintln!(
-                "[loctree][incremental] {} cached, {} fresh ({} total files)",
-                cached_hits, fresh_scans, total
-            );
-        }
-
-        let mut calls_with_generics = Vec::new();
-        for analysis in &analyses {
-            for call in &analysis.command_calls {
-                if let Some(gt) = &call.generic_type {
-                    calls_with_generics.push(json!({
-                        "name": call.name,
-                        "path": analysis.path,
-                        "line": call.line,
-                        "genericType": gt,
-                    }));
-                }
-            }
-        }
-
-        let mut renamed_handlers = Vec::new();
-        for analysis in &analyses {
-            for handler in &analysis.command_handlers {
-                if let Some(exposed) = &handler.exposed_name
-                    && exposed != &handler.name
-                {
-                    renamed_handlers.push(json!({
-                        "path": analysis.path,
-                        "line": handler.line,
-                        "name": handler.name,
-                        "exposedName": exposed,
-                    }));
-                }
-            }
-        }
-
-        contexts.push(RootContext {
-            root_path: root_path.clone(),
-            options,
-            analyses,
-            export_index,
-            dynamic_summary,
-            cascades,
-            filtered_ranked,
-            graph_edges,
-            loc_map,
-            languages,
-            tsconfig_summary,
-            calls_with_generics,
-            renamed_handlers,
-            barrels,
+                .unwrap_or_else(|| kept_files[0].clone())
+        };
+        let dev_count = kept_files.iter().filter(|f| is_dev_file(f)).count();
+        let prod_count = kept_files.len().saturating_sub(dev_count);
+        let score = prod_count * 2 + dev_count;
+        let mut refactors: Vec<String> = kept_files
+            .iter()
+            .filter(|f| *f != &canonical)
+            .cloned()
+            .collect();
+        refactors.sort();
+        filtered_ranked.push(RankedDup {
+            name: dup.name,
+            files: kept_files,
+            score,
+            prod_count,
+            dev_count,
+            canonical,
+            refactors,
         });
     }
+    filtered_ranked.sort_by(|a, b| {
+        b.score
+            .cmp(&a.score)
+            .then(b.files.len().cmp(&a.files.len()))
+    });
 
-    Ok(ScanResults {
-        contexts,
-        global_fe_commands,
-        global_be_commands,
-        global_fe_payloads,
-        global_be_payloads,
-        global_analyses,
+    let tsconfig_summary = super::tsconfig::summarize_tsconfig(root_path, &analyses);
+
+    // Log incremental scan stats if verbose
+    if options.verbose && cfg.cached_analyses.is_some() {
+        let total = cached_hits + fresh_scans;
+        eprintln!(
+            "[loctree][incremental] {} cached, {} fresh ({} total files)",
+            cached_hits, fresh_scans, total
+        );
+    }
+
+    let mut calls_with_generics = Vec::new();
+    for analysis in &analyses {
+        for call in &analysis.command_calls {
+            if let Some(gt) = &call.generic_type {
+                calls_with_generics.push(json!({
+                    "name": call.name,
+                    "path": analysis.path,
+                    "line": call.line,
+                    "genericType": gt,
+                }));
+            }
+        }
+    }
+
+    let mut renamed_handlers = Vec::new();
+    for analysis in &analyses {
+        for handler in &analysis.command_handlers {
+            if let Some(exposed) = &handler.exposed_name
+                && exposed != &handler.name
+            {
+                renamed_handlers.push(json!({
+                    "path": analysis.path,
+                    "line": handler.line,
+                    "name": handler.name,
+                    "exposedName": exposed,
+                }));
+            }
+        }
+    }
+
+    let context = RootContext {
+        root_path: root_path.to_path_buf(),
+        options,
+        analyses: analyses.clone(),
+        export_index,
+        dynamic_summary,
+        cascades,
+        filtered_ranked,
+        graph_edges,
+        loc_map,
+        languages,
+        tsconfig_summary,
+        calls_with_generics,
+        renamed_handlers,
+        barrels,
+    };
+
+    Ok(SingleRootResult {
+        context,
+        fe_commands,
+        be_commands,
+        fe_payloads,
+        be_payloads,
+        analyses,
     })
 }
 

@@ -268,6 +268,9 @@ pub struct FileAnalysis {
     /// File modification time (Unix timestamp) for incremental scanning
     #[serde(default)]
     pub mtime: u64,
+    /// File size in bytes for incremental scanning (combined with mtime for accuracy)
+    #[serde(default)]
+    pub size: u64,
     /// Python concurrency race indicators (threading/asyncio/multiprocessing patterns)
     #[serde(default)]
     pub py_race_indicators: Vec<PyRaceIndicator>,
@@ -323,6 +326,7 @@ impl FileAnalysis {
             tauri_registered_handlers: Vec::new(),
             py_race_indicators: Vec::new(),
             mtime: 0,
+            size: 0,
         }
     }
 }
