@@ -57,6 +57,10 @@ pub const REPORT_CSS: &str = r#"
     --theme-hover: rgba(0, 0, 0, 0.04);
     --theme-hover-strong: rgba(0, 0, 0, 0.08);
 
+    /* Scrollbar (Light) */
+    --theme-scrollbar: rgba(0, 0, 0, 0.15);
+    --theme-scrollbar-hover: rgba(0, 0, 0, 0.25);
+
     /* Gradients (Light) */
     --gradient-nav: linear-gradient(135deg, rgba(255,255,255,0.98) 0%, rgba(245,247,250,0.95) 100%);
     --gradient-sidebar: linear-gradient(180deg, rgba(250,251,252,0.98) 0%, rgba(245,247,250,0.95) 100%);
@@ -97,6 +101,10 @@ html.dark {
     
     --theme-hover: rgba(255, 255, 255, 0.03);
     --theme-hover-strong: rgba(255, 255, 255, 0.06);
+
+    /* Scrollbar (Dark) */
+    --theme-scrollbar: rgba(255, 255, 255, 0.15);
+    --theme-scrollbar-hover: rgba(255, 255, 255, 0.25);
 
     /* Gradients (Dark) */
     --gradient-nav: linear-gradient(135deg, rgba(10,10,14,0.95) 0%, rgba(32,36,44,0.85) 40%, rgba(120,132,144,0.15) 100%);
@@ -550,11 +558,17 @@ code {
 
 #cy { width: 100%; height: 100%; }
 
-/* Scrollbar */
+/* Scrollbar - theme-aware */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(114, 124, 139, 0.2); border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(114, 124, 139, 0.4); }
+::-webkit-scrollbar-thumb { background: var(--theme-scrollbar, rgba(114, 124, 139, 0.2)); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--theme-scrollbar-hover, rgba(114, 124, 139, 0.4)); }
+
+/* Firefox scrollbar */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--theme-scrollbar, rgba(114, 124, 139, 0.2)) transparent;
+}
 
 /* Footer */
 .app-footer {

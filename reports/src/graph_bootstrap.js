@@ -659,12 +659,16 @@
       if (copyBtn)
         copyBtn.addEventListener("click", () => navigator.clipboard.writeText(path));
       const rect = container.getBoundingClientRect();
-      const scrollX = window.scrollX || document.documentElement.scrollLeft || 0;
-      const scrollY = window.scrollY || document.documentElement.scrollTop || 0;
-      let left = rect.left + evt.renderedPosition.x + 12 + scrollX;
-      let top = rect.top + evt.renderedPosition.y + 12 + scrollY;
-      const maxLeft = scrollX + window.innerWidth - 220;
+      // Fixed positioning is relative to viewport, no scroll offset needed
+      let left = rect.left + evt.renderedPosition.x + 12;
+      let top = rect.top + evt.renderedPosition.y + 12;
+      // Ensure tooltip stays within viewport bounds
+      const tooltipWidth = 220;
+      const tooltipHeight = 120;
+      const maxLeft = window.innerWidth - tooltipWidth - 10;
+      const maxTop = window.innerHeight - tooltipHeight - 10;
       if (left > maxLeft) left = maxLeft;
+      if (top > maxTop) top = Math.max(10, top - tooltipHeight - 24);
       tooltip.style.left = left + "px";
       tooltip.style.top = top + "px";
       tooltip.style.display = "block";
