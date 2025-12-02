@@ -702,6 +702,23 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
         });
     }
 
+    // Store resolver configuration from scan results for caching
+    if scan_results.ts_resolver_config.is_some() || !scan_results.py_roots.is_empty() {
+        snapshot.metadata.resolver_config = Some(ResolverConfig {
+            ts_paths: scan_results
+                .ts_resolver_config
+                .as_ref()
+                .map(|c| c.ts_paths.clone())
+                .unwrap_or_default(),
+            ts_base_url: scan_results
+                .ts_resolver_config
+                .as_ref()
+                .and_then(|c| c.ts_base_url.clone()),
+            py_roots: scan_results.py_roots.clone(),
+            rust_crate_roots: vec![], // TODO: populate from Cargo.toml scanning
+        });
+    }
+
     // Finalize metadata
     let duration_ms = start_time.elapsed().as_millis() as u64;
     snapshot.finalize_metadata(duration_ms);

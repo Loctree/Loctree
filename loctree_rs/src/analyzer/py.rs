@@ -10,7 +10,7 @@ use crate::types::{
 use super::regexes::{
     regex_py_all, regex_py_class, regex_py_def, regex_py_dynamic_dunder, regex_py_dynamic_importlib,
 };
-use super::resolvers::{resolve_python_absolute, resolve_python_relative};
+use super::resolvers::{has_py_typed_marker, resolve_python_absolute, resolve_python_relative};
 
 pub(crate) fn python_stdlib_set() -> &'static HashSet<String> {
     static STDLIB: OnceLock<HashSet<String>> = OnceLock::new();
@@ -276,6 +276,82 @@ fn resolve_python_import(
     (None, ImportResolutionKind::Unknown)
 }
 
+/// Detect if a Python file is a test file based on path and content patterns
+fn is_python_test_file(path: &Path, content: &str) -> bool {
+    let path_str = path.to_string_lossy().to_lowercase();
+
+    // Path-based detection
+    if path_str.contains("/tests/")
+        || path_str.contains("/test/")
+        || path_str.contains("/__tests__/")
+        || path_str.ends_with("_test.py")
+        || path_str.ends_with("_tests.py")
+        || path_str.ends_with("test_.py")
+        || path_str.contains("/test_")
+        || path_str.contains("conftest.py")
+        || path_str.contains("pytest_")
+    {
+        return true;
+    }
+
+    // Content-based detection: pytest imports or unittest usage
+    if content.contains("import pytest")
+        || content.contains("from pytest")
+        || content.contains("import unittest")
+        || content.contains("from unittest")
+        || content.contains("@pytest.fixture")
+        || content.contains("@pytest.mark")
+        || content.contains("class Test")
+        || content.contains("def test_")
+    {
+        return true;
+    }
+
+    false
+}
+
+/// Check if the file is part of a typed package (has py.typed marker upstream)
+fn check_typed_package(path: &Path, root: &Path) -> bool {
+    let mut current = path.parent();
+    while let Some(dir) = current {
+        if has_py_typed_marker(dir) {
+            return true;
+        }
+        // Stop at root or if we've gone above root
+        if dir == root || !dir.starts_with(root) {
+            break;
+        }
+        current = dir.parent();
+    }
+    false
+}
+
+/// Check if the file is part of a namespace package (no __init__.py upstream before root)
+fn check_namespace_package(path: &Path, root: &Path) -> bool {
+    let mut current = path.parent();
+    while let Some(dir) = current {
+        // If there's an __init__.py, it's a traditional package
+        if dir.join("__init__.py").exists() || dir.join("__init__.pyi").exists() {
+            return false;
+        }
+        // If we reach root without finding __init__.py, check if it's a valid namespace
+        if dir == root {
+            break;
+        }
+        current = dir.parent();
+    }
+    // True if we have .py files but no __init__.py found in hierarchy
+    path.parent().map_or(false, |p| {
+        p.read_dir().ok().map_or(false, |entries| {
+            entries.flatten().any(|e| {
+                e.path()
+                    .extension()
+                    .map_or(false, |ext| ext == "py" || ext == "pyi")
+            })
+        })
+    })
+}
+
 pub(crate) fn analyze_py_file(
     content: &str,
     path: &Path,
@@ -287,6 +363,11 @@ pub(crate) fn analyze_py_file(
 ) -> FileAnalysis {
     let mut analysis = FileAnalysis::new(relative);
     let mut type_check_stack: Vec<usize> = Vec::new();
+
+    // Set Python-specific metadata
+    analysis.is_test = is_python_test_file(path, content);
+    analysis.is_typed_package = check_typed_package(path, root);
+    analysis.is_namespace_package = check_namespace_package(path, root);
 
     for line in content.lines() {
         let without_comment = line.split('#').next().unwrap_or("").trim_end();
@@ -811,5 +892,146 @@ if __name__ == "__main__":
         );
 
         assert!(analysis.entry_points.contains(&"script".to_string()));
+    }
+
+    #[test]
+    fn detects_test_file_by_path() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("tests")).expect("mkdir");
+        std::fs::write(root.join("tests/test_utils.py"), "def test_foo(): pass")
+            .expect("write test file");
+
+        let content = "def test_foo(): pass";
+        let analysis = analyze_py_file(
+            content,
+            &root.join("tests/test_utils.py"),
+            root,
+            Some(&py_exts()),
+            "tests/test_utils.py".to_string(),
+            &[root.to_path_buf()],
+            &HashSet::new(),
+        );
+
+        assert!(analysis.is_test);
+    }
+
+    #[test]
+    fn detects_test_file_by_content() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path();
+
+        let content = r#"
+import pytest
+
+@pytest.fixture
+def sample_fixture():
+    return 42
+
+def test_something(sample_fixture):
+    assert sample_fixture == 42
+"#;
+
+        let analysis = analyze_py_file(
+            content,
+            &root.join("my_tests.py"),
+            root,
+            Some(&py_exts()),
+            "my_tests.py".to_string(),
+            &[root.to_path_buf()],
+            &HashSet::new(),
+        );
+
+        assert!(analysis.is_test);
+    }
+
+    #[test]
+    fn detects_typed_package() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("mypackage")).expect("mkdir");
+        std::fs::write(root.join("mypackage/__init__.py"), "").expect("write __init__");
+        std::fs::write(root.join("mypackage/py.typed"), "").expect("write py.typed");
+        std::fs::write(root.join("mypackage/utils.py"), "def foo(): pass").expect("write utils");
+
+        let content = "def foo(): pass";
+        let analysis = analyze_py_file(
+            content,
+            &root.join("mypackage/utils.py"),
+            root,
+            Some(&py_exts()),
+            "mypackage/utils.py".to_string(),
+            &[root.to_path_buf()],
+            &HashSet::new(),
+        );
+
+        assert!(analysis.is_typed_package);
+    }
+
+    #[test]
+    fn detects_non_typed_package() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("mypackage")).expect("mkdir");
+        std::fs::write(root.join("mypackage/__init__.py"), "").expect("write __init__");
+        // No py.typed marker
+        std::fs::write(root.join("mypackage/utils.py"), "def foo(): pass").expect("write utils");
+
+        let content = "def foo(): pass";
+        let analysis = analyze_py_file(
+            content,
+            &root.join("mypackage/utils.py"),
+            root,
+            Some(&py_exts()),
+            "mypackage/utils.py".to_string(),
+            &[root.to_path_buf()],
+            &HashSet::new(),
+        );
+
+        assert!(!analysis.is_typed_package);
+    }
+
+    #[test]
+    fn detects_namespace_package() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path();
+        // Create namespace package (no __init__.py)
+        std::fs::create_dir_all(root.join("namespace_pkg")).expect("mkdir");
+        std::fs::write(root.join("namespace_pkg/module.py"), "VALUE = 1").expect("write module");
+
+        let content = "VALUE = 1";
+        let analysis = analyze_py_file(
+            content,
+            &root.join("namespace_pkg/module.py"),
+            root,
+            Some(&py_exts()),
+            "namespace_pkg/module.py".to_string(),
+            &[root.to_path_buf()],
+            &HashSet::new(),
+        );
+
+        assert!(analysis.is_namespace_package);
+    }
+
+    #[test]
+    fn traditional_package_not_namespace() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("pkg")).expect("mkdir");
+        std::fs::write(root.join("pkg/__init__.py"), "").expect("write __init__");
+        std::fs::write(root.join("pkg/module.py"), "VALUE = 1").expect("write module");
+
+        let content = "VALUE = 1";
+        let analysis = analyze_py_file(
+            content,
+            &root.join("pkg/module.py"),
+            root,
+            Some(&py_exts()),
+            "pkg/module.py".to_string(),
+            &[root.to_path_buf()],
+            &HashSet::new(),
+        );
+
+        assert!(!analysis.is_namespace_package);
     }
 }

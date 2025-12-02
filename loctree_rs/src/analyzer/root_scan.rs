@@ -16,7 +16,8 @@ use crate::types::{
 
 use super::classify::is_dev_file;
 use super::resolvers::{
-    TsPathResolver, resolve_js_relative, resolve_python_absolute, resolve_python_relative,
+    ExtractedResolverConfig, TsPathResolver, resolve_js_relative, resolve_python_absolute,
+    resolve_python_relative,
 };
 use super::scan::{
     analyze_file, matches_focus, resolve_event_constants_across_files, strip_excluded,
@@ -76,6 +77,10 @@ pub struct ScanResults {
     pub global_fe_payloads: PayloadMap,
     pub global_be_payloads: PayloadMap,
     pub global_analyses: Vec<FileAnalysis>,
+    /// Extracted TypeScript resolver configuration for caching in snapshot
+    pub ts_resolver_config: Option<ExtractedResolverConfig>,
+    /// Python root paths for caching in snapshot
+    pub py_roots: Vec<String>,
 }
 
 /// Result from scanning a single root (used for parallel processing)
@@ -86,6 +91,10 @@ struct SingleRootResult {
     fe_payloads: PayloadMap,
     be_payloads: PayloadMap,
     analyses: Vec<FileAnalysis>,
+    /// Extracted TS resolver config (if tsconfig found in this root)
+    ts_resolver_config: Option<ExtractedResolverConfig>,
+    /// Python roots used for this root scan
+    py_roots: Vec<String>,
 }
 
 /// Maximum number of roots to scan in parallel (bounded parallelism)
@@ -146,6 +155,8 @@ pub fn scan_roots(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
     let mut global_fe_payloads: PayloadMap = HashMap::new();
     let mut global_be_payloads: PayloadMap = HashMap::new();
     let mut global_analyses: Vec<FileAnalysis> = Vec::new();
+    let mut ts_resolver_config: Option<ExtractedResolverConfig> = None;
+    let mut all_py_roots: Vec<String> = Vec::new();
 
     for result in all_results {
         contexts.push(result.context);
@@ -162,7 +173,17 @@ pub fn scan_roots(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
             global_be_payloads.entry(name).or_default().extend(entries);
         }
         global_analyses.extend(result.analyses);
+
+        // Use first non-None ts_resolver_config (typically from project root)
+        if ts_resolver_config.is_none() && result.ts_resolver_config.is_some() {
+            ts_resolver_config = result.ts_resolver_config;
+        }
+        all_py_roots.extend(result.py_roots);
     }
+
+    // Deduplicate py_roots
+    all_py_roots.sort();
+    all_py_roots.dedup();
 
     Ok(ScanResults {
         contexts,
@@ -171,6 +192,8 @@ pub fn scan_roots(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
         global_fe_payloads,
         global_be_payloads,
         global_analyses,
+        ts_resolver_config,
+        py_roots: all_py_roots,
     })
 }
 
@@ -182,6 +205,8 @@ fn scan_roots_sequential(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
     let mut global_fe_payloads: PayloadMap = HashMap::new();
     let mut global_be_payloads: PayloadMap = HashMap::new();
     let mut global_analyses: Vec<FileAnalysis> = Vec::new();
+    let mut ts_resolver_config: Option<ExtractedResolverConfig> = None;
+    let mut all_py_roots: Vec<String> = Vec::new();
 
     for root_path in cfg.roots.iter() {
         let result = scan_single_root(root_path, &cfg)?;
@@ -200,7 +225,17 @@ fn scan_roots_sequential(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
             global_be_payloads.entry(name).or_default().extend(entries);
         }
         global_analyses.extend(result.analyses);
+
+        // Use first non-None ts_resolver_config (typically from project root)
+        if ts_resolver_config.is_none() && result.ts_resolver_config.is_some() {
+            ts_resolver_config = result.ts_resolver_config;
+        }
+        all_py_roots.extend(result.py_roots);
     }
+
+    // Deduplicate py_roots
+    all_py_roots.sort();
+    all_py_roots.dedup();
 
     Ok(ScanResults {
         contexts,
@@ -209,6 +244,8 @@ fn scan_roots_sequential(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
         global_fe_payloads,
         global_be_payloads,
         global_analyses,
+        ts_resolver_config,
+        py_roots: all_py_roots,
     })
 }
 
@@ -275,6 +312,13 @@ fn scan_single_root(
             );
         }
     }
+
+    // Extract resolver config for caching in snapshot
+    let extracted_ts_config = ts_resolver.as_ref().map(|r| r.extract_config());
+    let py_roots_strings: Vec<String> = py_roots
+        .iter()
+        .map(|p| p.to_string_lossy().to_string())
+        .collect();
 
     let mut files = Vec::new();
     let mut visited = HashSet::new();
@@ -794,6 +838,8 @@ fn scan_single_root(
         fe_payloads,
         be_payloads,
         analyses,
+        ts_resolver_config: extracted_ts_config,
+        py_roots: py_roots_strings,
     })
 }
 
@@ -1060,6 +1106,24 @@ pub fn scan_results_from_snapshot(snapshot: &Snapshot) -> ScanResults {
         });
     }
 
+    // Extract cached resolver config from snapshot metadata
+    let ts_resolver_config =
+        snapshot
+            .metadata
+            .resolver_config
+            .as_ref()
+            .map(|rc| ExtractedResolverConfig {
+                ts_paths: rc.ts_paths.clone(),
+                ts_base_url: rc.ts_base_url.clone(),
+            });
+
+    let py_roots = snapshot
+        .metadata
+        .resolver_config
+        .as_ref()
+        .map(|rc| rc.py_roots.clone())
+        .unwrap_or_default();
+
     ScanResults {
         contexts,
         global_fe_commands,
@@ -1067,6 +1131,8 @@ pub fn scan_results_from_snapshot(snapshot: &Snapshot) -> ScanResults {
         global_fe_payloads,
         global_be_payloads,
         global_analyses: snapshot.files.clone(),
+        ts_resolver_config,
+        py_roots,
     }
 }
 

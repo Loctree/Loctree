@@ -3,7 +3,7 @@ use std::path::Path;
 
 use oxc_allocator::Allocator;
 use oxc_ast::ast::*;
-use oxc_ast::visit::Visit;
+use oxc_ast_visit::Visit;
 use oxc_parser::Parser;
 use oxc_span::SourceType;
 
@@ -181,6 +181,7 @@ impl<'a> JsVisitor<'a> {
                     q.right.name
                 )
             }
+            TSTypeName::ThisExpression(_) => "This".to_string(),
         }
     }
 }
@@ -442,12 +443,19 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
             if !self.analysis.dynamic_imports.contains(&source) {
                 self.analysis.dynamic_imports.push(source.clone());
             }
+            // Try to resolve (handles tsconfig aliases / relative) so dead-code and cycle checks
+            // can match against real files instead of raw alias strings.
+            if let Some(resolved) = self.resolve_path(&source)
+                && !self.analysis.dynamic_imports.contains(&resolved)
+            {
+                self.analysis.dynamic_imports.push(resolved);
+            }
         }
 
-        // Continue visiting arguments (if any)
+        // Continue visiting children
         self.visit_expression(&expr.source);
-        for arg in &expr.arguments {
-            self.visit_expression(arg);
+        if let Some(opts) = &expr.options {
+            self.visit_expression(opts);
         }
     }
 
@@ -503,7 +511,7 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                     if INVALID_COMMAND_NAMES.contains(&cmd_name.as_str()) {
                         // Skip - not a real Tauri command
                     } else {
-                        let generic = call.type_parameters.as_ref().and_then(|params| {
+                        let generic = call.type_arguments.as_ref().and_then(|params| {
                             params.params.first().map(JsVisitor::type_to_string)
                         });
 

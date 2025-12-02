@@ -274,6 +274,12 @@ pub struct FileAnalysis {
     /// Python concurrency race indicators (threading/asyncio/multiprocessing patterns)
     #[serde(default)]
     pub py_race_indicators: Vec<PyRaceIndicator>,
+    /// Python: True if package has py.typed marker (PEP 561)
+    #[serde(default)]
+    pub is_typed_package: bool,
+    /// Python: True if this is part of a namespace package (PEP 420)
+    #[serde(default)]
+    pub is_namespace_package: bool,
 }
 
 impl ImportEntry {
@@ -327,6 +333,8 @@ impl FileAnalysis {
             py_race_indicators: Vec::new(),
             mtime: 0,
             size: 0,
+            is_typed_package: false,
+            is_namespace_package: false,
         }
     }
 }

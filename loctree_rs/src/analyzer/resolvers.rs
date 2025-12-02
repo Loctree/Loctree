@@ -24,6 +24,15 @@ struct AliasMapping {
     wildcard_count: usize,
 }
 
+/// Extracted resolver configuration for caching in snapshots
+#[derive(Debug, Clone, Default)]
+pub struct ExtractedResolverConfig {
+    /// TypeScript path aliases
+    pub ts_paths: HashMap<String, Vec<String>>,
+    /// Base URL for resolution
+    pub ts_base_url: Option<String>,
+}
+
 impl TsPathResolver {
     pub(crate) fn from_tsconfig(root: &Path) -> Option<Self> {
         let ts_path = find_tsconfig(root)?;
@@ -75,6 +84,27 @@ impl TsPathResolver {
             cache: Mutex::new(HashMap::new()),
             package_exports,
         })
+    }
+
+    /// Extract the resolver configuration for caching in snapshots
+    pub(crate) fn extract_config(&self) -> ExtractedResolverConfig {
+        let ts_paths: HashMap<String, Vec<String>> = self
+            .mappings
+            .iter()
+            .map(|m| (m.pattern.clone(), m.targets.clone()))
+            .collect();
+
+        let ts_base_url = self
+            .base_dir
+            .strip_prefix(&self.root)
+            .ok()
+            .map(|p| p.to_string_lossy().to_string())
+            .or_else(|| Some(self.base_dir.to_string_lossy().to_string()));
+
+        ExtractedResolverConfig {
+            ts_paths,
+            ts_base_url,
+        }
     }
 
     pub(crate) fn resolve(&self, spec: &str, exts: Option<&HashSet<String>>) -> Option<String> {
@@ -285,6 +315,7 @@ pub(crate) fn resolve_python_candidate(
     exts: Option<&HashSet<String>>,
 ) -> Option<String> {
     if candidate.is_dir() {
+        // Traditional packages: check for __init__.py variants
         let init_candidates = [
             candidate.join("__init__.py"),
             candidate.join("__init__.pyi"),
@@ -295,9 +326,51 @@ pub(crate) fn resolve_python_candidate(
                 return canonical_rel(&init, root).or_else(|| canonical_abs(&init));
             }
         }
+
+        // PEP 420: Namespace packages - directories without __init__.py
+        // A directory is a valid namespace package if it contains any .py files
+        // or has subdirectories that are packages
+        if is_namespace_package(&candidate) {
+            // Return the directory path itself as the package resolution
+            return canonical_rel(&candidate, root).or_else(|| canonical_abs(&candidate));
+        }
     }
 
     resolve_with_extensions(candidate, root, exts)
+}
+
+/// Check if a directory is a valid PEP 420 namespace package
+/// A namespace package is a directory that:
+/// - Has no __init__.py (already checked by caller)
+/// - Contains at least one .py file or valid subpackage
+fn is_namespace_package(dir: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file() {
+            if let Some(ext) = path.extension() {
+                if ext == "py" || ext == "pyi" {
+                    return true;
+                }
+            }
+        } else if path.is_dir() {
+            // Check if subdirectory is a package (has __init__.py or is namespace)
+            let subdir_init = path.join("__init__.py");
+            if subdir_init.exists() || is_namespace_package(&path) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Check if a Python package has py.typed marker (PEP 561)
+/// indicating it provides type information
+pub(crate) fn has_py_typed_marker(package_dir: &Path) -> bool {
+    package_dir.join("py.typed").exists()
 }
 
 pub(crate) fn resolve_python_absolute(

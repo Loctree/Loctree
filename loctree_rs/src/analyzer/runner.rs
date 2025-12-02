@@ -307,6 +307,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         global_fe_payloads,
         global_be_payloads,
         global_analyses,
+        ..
     } = scan_results;
 
     if let Some(sym) = &parsed.symbol {
