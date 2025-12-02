@@ -178,7 +178,7 @@ Find problems before they become tech debt:
 
 ```bash
 # Check if similar component exists before creating
-loct find --similar ChatSurface
+loct find ChatSurface
 # Found: ChatPanel (distance: 2), ChatWindow (distance: 3)
 
 # Find potentially unused exports
@@ -188,10 +188,10 @@ loct dead --confidence high
 loct cycles
 
 # Analyze impact of changing a file
-loct find --impact src/utils/api.ts
+loct impact src/utils/api.ts
 
 # Find a symbol across the codebase
-loct find --symbol useAuth
+loct find useAuth
 
 # List entry points
 loct lint --entrypoints

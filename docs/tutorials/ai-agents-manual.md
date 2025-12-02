@@ -25,8 +25,8 @@ Loctree is a static analysis tool designed for AI agents. It solves the fundamen
 
 | Problem | Without Loctree | With Loctree |
 |---------|-----------------|--------------|
-| Finding existing code | Grep/search, hope for the best | `loct find --similar Button` |
-| Understanding dependencies | Read imports manually | `loct slice src/Component.tsx --deps` |
+| Finding existing code | Grep/search, hope for the best | `loct find Button` |
+| Understanding dependencies | Read imports manually | `loct slice src/Component.tsx --consumers` (deps included) |
 | Knowing what uses a file | Search for import statements | `loct slice src/utils.ts --consumers` |
 | Dead code detection | Guesswork | `loct dead --confidence high` |
 | Circular import detection | Runtime errors | `loct cycles` |
@@ -76,7 +76,8 @@ A snapshot is a cached representation of your codebase's structure:
 
 **Creating a snapshot:**
 ```bash
-loct              # Auto-detect stack, create snapshot + all artifacts
+loct              # Auto-detect stack, write snapshot.json (fast)
+loct -A           # Full analysis bundle (analysis.json, report.html, sarif)
 loct --full-scan  # Force rescan (ignore cached mtime)
 ```
 
@@ -86,13 +87,13 @@ Slicing extracts relevant context for a specific file or task:
 
 ```bash
 # Get file's dependencies (what it imports)
-loct slice src/api/client.ts --deps
+loct slice src/api/client.ts
 
 # Get file's consumers (what imports it)
 loct slice src/utils/format.ts --consumers
 
 # Full context (deps + consumers + file analysis)
-loct slice src/Component.tsx --deps --consumers --json
+loct slice src/Component.tsx --consumers --json
 ```
 
 ### Graph
@@ -132,8 +133,7 @@ Extract context for a file.
 loct slice <file> [options]
 
 Options:
-  --deps        Include dependencies (files this imports)
-  --consumers   Include consumers (files that import this)
+  --consumers   Include consumers (files that import this) – deps included by default
   --json        Output as JSON (for piping to AI)
   --depth N     Limit dependency depth (default: 3)
 ```
@@ -141,10 +141,10 @@ Options:
 **Examples:**
 ```bash
 # Context for AI task
-loct slice src/ChatPanel.tsx --deps --consumers --json | claude
+loct slice src/ChatPanel.tsx --consumers --json | claude
 
-# Just the imports
-loct slice src/utils.ts --deps
+# Just the imports (deps are default)
+loct slice src/utils.ts
 
 # What depends on this?
 loct slice src/api/types.ts --consumers
@@ -155,21 +155,21 @@ loct slice src/api/types.ts --consumers
 Search for code patterns and relationships.
 
 ```bash
-loct find --symbol <name>     # Find symbol definitions and uses
-loct find --similar <name>    # Find similar names (avoid duplicates)
-loct find --impact <file>     # Show blast radius of changes
+loct find <name>     # Find symbol definitions and uses
+loct find <name>     # Fuzzy find similar names (avoid duplicates)
+loct impact <file>     # Show blast radius of changes
 ```
 
 **Examples:**
 ```bash
 # Before creating Button, check if it exists
-loct find --similar Button
+loct find Button
 
 # Find all uses of useAuth hook
-loct find --symbol useAuth
+loct find useAuth
 
 # What breaks if I change api.ts?
-loct find --impact src/utils/api.ts
+loct impact src/utils/api.ts
 ```
 
 ### `loct dead`
@@ -348,20 +348,20 @@ SARIF results include `loctree://open?f=<file>&l=<line>` URLs in `properties.ope
 loct
 
 # 2. Find relevant context
-loct find --similar FeatureName    # Check for existing code
-loct slice src/related.ts --consumers --deps --json
+loct find FeatureName    # Check for existing code
+loct slice src/related.ts --consumers --json
 
 # 3. Understand impact
-loct find --impact src/file-to-modify.ts
+loct impact src/file-to-modify.ts
 ```
 
 ### Before Creating a New Component
 
 ```bash
 # Check if similar exists
-loct find --similar Button
-loct find --similar ButtonComponent
-loct find --symbol useButton
+loct find Button
+loct find ButtonComponent
+loct find useButton
 
 # If creating, check where to place it
 loct slice src/components/index.ts --consumers
@@ -374,7 +374,7 @@ loct slice src/components/index.ts --consumers
 loct cycles
 
 # Check what imports what
-loct slice problematic-file.ts --deps --consumers
+loct slice problematic-file.ts --consumers
 ```
 
 ### Cleaning Up Dead Code
@@ -384,7 +384,7 @@ loct slice problematic-file.ts --deps --consumers
 loct dead --confidence high --json
 
 # Verify each before deletion
-loct find --symbol suspectedDead
+loct find suspectedDead
 loct slice file-with-dead-code.ts --consumers
 ```
 
@@ -432,7 +432,7 @@ loct events --ghosts      # Emits going nowhere
 
 ```bash
 # Full context for a task
-loct slice src/ChatPanel.tsx --deps --consumers --json | claude "refactor this"
+loct slice src/ChatPanel.tsx --consumers --json | claude "refactor this"
 
 # Analysis summary
 cat .loctree/analysis.json | claude "what should I clean up?"
@@ -494,7 +494,7 @@ loct src lib
 loct dead --confidence high
 
 # Check if it's used dynamically
-loct find --symbol suspectedDead
+loct find suspectedDead
 ```
 
 ### Slow Initial Scan
@@ -523,10 +523,10 @@ loct cycles --json | jq '.[] | select(.files | length > 2)'
 |------|---------|
 | Scan project | `loct` |
 | Force rescan | `loct --full-scan` |
-| File context | `loct slice <file> --deps --consumers --json` |
-| Find similar | `loct find --similar <name>` |
-| Find symbol | `loct find --symbol <name>` |
-| Impact analysis | `loct find --impact <file>` |
+| File context | `loct slice <file> --consumers --json` (deps included by default) |
+| Find similar | `loct find <name>` |
+| Find symbol | `loct find <name>` |
+| Impact analysis | `loct impact <file>` |
 | Dead code | `loct dead --confidence high` |
 | Circular imports | `loct cycles` |
 | FE↔BE gaps | `loct commands --missing` |

@@ -1,6 +1,6 @@
 # loct — AI Agent Quick Reference (v0.5.9)
 
-Static analysis for AI agents: scan once, slice many. Default `loct` saves `.loctree/snapshot.json` **and** a full agent bundle (`report.html`, `analysis.json`, `report.sarif`, `circular.json`, `py_races.json`).
+Static analysis for AI agents: scan once, slice many. Default `loct` writes `.loctree/snapshot.json`; run `loct -A` or `loct lint --sarif` if you need full artifacts (`analysis.json`, `report.html`, `report.sarif`, etc.).
 
 > **Full documentation:** [AI Agent's Manual](docs/tutorials/ai-agents-manual.md)
 
@@ -13,10 +13,10 @@ loct
 # 2) Extract context for a task (3 layers: core, deps, consumers)
 loct slice src/components/ChatPanel.tsx --consumers --json | claude
 
-# 3) Find before you create
-loct find --similar ChatPanel        # avoid duplicates
-loct find --symbol useAuth           # definitions & uses
-loct find --impact src/utils/api.ts  # what breaks if changed
+# 3) Find before you create (fuzzy + defs/uses in one)
+loct find ChatPanel                  # avoid duplicates
+loct find useAuth                    # definitions & uses
+loct find src/utils/api.ts           # quick impact-ish lookup
 
 # 4) Quick queries (new!)
 loct query who-imports src/utils.ts    # what files import this
@@ -58,10 +58,10 @@ loct --version   # expect 0.5.9+
 
 ## What to Run (by goal)
 
-- **Context for AI**: `loct slice <file> --consumers --json`
-- **Find duplicates/usage**: `loct find --similar <Name>`, `loct find --symbol <sym>`
+- **Context for AI**: `loct slice <file> --consumers --json` (deps always included)
+- **Find duplicates/usage**: `loct find <pattern>` (fuzzy + defs/uses)
 - **Quick queries**: `loct query who-imports <file>`, `loct query where-symbol <sym>`
-- **Impact**: `loct find --impact <file>`
+- **Impact**: `loct impact <file>`
 - **Dead code**: `loct dead --confidence high`
 - **Circular imports**: `loct cycles`
 - **Tauri FE↔BE**: `loct commands --missing`, `loct commands --unused`, `loct events --json`
