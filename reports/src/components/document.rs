@@ -113,9 +113,20 @@ fn GraphScripts(js_assets: JsAssets) -> impl IntoView {
     }
 }
 
-/// Application logic (Navigation, Tabs, Resize, Theme Toggle)
+/// Application logic (Navigation, Tabs, Resize, Theme Toggle, Copy)
 const APP_SCRIPT: &str = r#"
 (() => {
+  // -1. Copy Button Handler
+  document.querySelectorAll('.copy-btn[data-copy]').forEach(btn => {
+      btn.addEventListener('click', () => {
+          const text = btn.dataset.copy;
+          navigator.clipboard.writeText(text).then(() => {
+              const orig = btn.textContent;
+              btn.textContent = '✓';
+              setTimeout(() => btn.textContent = orig, 1500);
+          });
+      });
+  });
   // 0. Theme Initialization & Toggle
   const initTheme = () => {
       const stored = localStorage.getItem('loctree-theme');

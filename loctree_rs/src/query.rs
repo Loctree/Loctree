@@ -77,6 +77,21 @@ pub fn query_where_symbol(snapshot: &Snapshot, symbol: &str) -> QueryResult {
         }
     }
 
+    // Fallback: if no matches found, look at exports directly
+    if results.is_empty() {
+        for file in &snapshot.files {
+            for exp in &file.exports {
+                if exp.name == symbol {
+                    results.push(QueryMatch {
+                        file: file.path.clone(),
+                        line: exp.line,
+                        context: Some(format!("export {}", exp.kind)),
+                    });
+                }
+            }
+        }
+    }
+
     QueryResult {
         kind: "where-symbol".to_string(),
         target: symbol.to_string(),
@@ -90,7 +105,11 @@ pub fn query_component_of(snapshot: &Snapshot, file: &str) -> QueryResult {
 
     // Look for barrel files (index.ts) that re-export this file
     for barrel in &snapshot.barrels {
-        if barrel.targets.iter().any(|t| t.contains(file)) {
+        if barrel
+            .targets
+            .iter()
+            .any(|t| t == file || t.ends_with(file))
+        {
             results.push(QueryMatch {
                 file: barrel.path.clone(),
                 line: None,
@@ -101,7 +120,7 @@ pub fn query_component_of(snapshot: &Snapshot, file: &str) -> QueryResult {
 
     // Also check edges to find parent directories
     for edge in &snapshot.edges {
-        if edge.to.contains(file) {
+        if edge.to == file || edge.to.ends_with(file) {
             // Parent module that imports this file
             results.push(QueryMatch {
                 file: edge.from.clone(),

@@ -90,7 +90,12 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
 
         Command::Find(opts) => {
             parsed.mode = Mode::Search;
-            parsed.search_query = opts.query.clone();
+            parsed.search_query = opts
+                .query
+                .clone()
+                .or_else(|| opts.symbol.clone())
+                .or_else(|| opts.similar.clone())
+                .or_else(|| opts.impact.clone());
             parsed.symbol = opts.symbol.clone();
             parsed.impact = opts.impact.clone();
             parsed.check_sim = opts.similar.clone();

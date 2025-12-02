@@ -4,7 +4,7 @@
 
 use super::{
     AiInsightsPanel, AnalysisSummary, CascadesList, DuplicateExportsTable, DynamicImportsTable,
-    GraphContainer, TabContent, TauriCommandCoverage,
+    GraphContainer, QuickCommandsPanel, TabContent, TauriCommandCoverage,
 };
 use crate::types::ReportSection;
 use leptos::prelude::*;
@@ -51,6 +51,11 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
     let duplicate_exports_count = section.ranked_dups.len();
     let reexport_files_count = section.reexport_files_count;
     let dynamic_imports_count = section.dynamic_imports_count;
+
+    // QuickCommands panel flags (computed before view! to avoid move issues)
+    let has_duplicates = duplicate_exports_count > 0;
+    let has_command_issues =
+        !section.missing_handlers.is_empty() || !section.unused_handlers.is_empty();
 
     let short_path = shorten_path(&section.root);
     let git_label = match (section.git_branch.clone(), section.git_commit.clone()) {
@@ -102,6 +107,11 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
                             dynamic_imports=dynamic_imports_count
                         />
                         <AiInsightsPanel insights=section.insights.clone() />
+                        <QuickCommandsPanel
+                            root=section.root.clone()
+                            has_duplicates=has_duplicates
+                            has_command_issues=has_command_issues
+                        />
                     </div>
                 </TabContent>
 
