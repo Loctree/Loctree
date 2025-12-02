@@ -2,7 +2,7 @@
 // Developed with 💀 by The Loctree Team (c)2025
 
 /// Version string used across the landing page (single source of truth)
-pub const VERSION: &str = "v0.5.8-dev";
+pub const VERSION: &str = "v0.5.9-dev";
 
 mod cli_reference;
 mod easter_eggs;

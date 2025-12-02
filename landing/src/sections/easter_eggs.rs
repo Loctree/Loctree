@@ -65,6 +65,13 @@ fn print_console_art() {
             &JsValue::from_str("color: #00ccff;"),
         );
 
+        web_sys::console::log_2(
+            &JsValue::from_str(
+                "%c(◕‿◕) [new] `loct query who-imports <file>` for quick dependency checks",
+            ),
+            &JsValue::from_str("color: #ff88ff;"),
+        );
+
         web_sys::console::log_1(&JsValue::from_str(""));
 
         web_sys::console::log_2(

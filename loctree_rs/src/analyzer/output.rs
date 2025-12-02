@@ -1026,10 +1026,16 @@ pub fn write_report(
         std::fs::create_dir_all(dir)?;
     }
     render_html_report(report_path, sections)?;
+    // Show relative path for cleaner output (with ./ prefix for consistency)
+    let display_path = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| report_path.strip_prefix(&cwd).ok())
+        .map(|p| format!("./{}", p.display()))
+        .unwrap_or_else(|| report_path.display().to_string());
     if verbose {
-        eprintln!("[loctree][debug] wrote HTML to {}", report_path.display());
+        eprintln!("[loctree][debug] wrote HTML to {}", display_path);
     } else {
-        eprintln!("[loctree] HTML report written to {}", report_path.display());
+        eprintln!("[loctree] HTML report written to {}", display_path);
     }
     Ok(())
 }

@@ -171,11 +171,13 @@ pub(crate) fn regex_py_all() -> &'static Regex {
     RE.get_or_init(|| regex(r#"(?s)__all__\s*=\s*\[([^\]]*)\]"#))
 }
 
+#[allow(dead_code)]
 pub(crate) fn regex_py_def() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| regex(r#"(?m)^\s*def\s+([A-Za-z_][A-Za-z0-9_]*)"#))
 }
 
+#[allow(dead_code)]
 pub(crate) fn regex_py_class() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| regex(r#"(?m)^\s*class\s+([A-Za-z_][A-Za-z0-9_]*)"#))

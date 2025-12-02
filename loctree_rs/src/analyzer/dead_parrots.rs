@@ -412,6 +412,8 @@ pub fn find_dead_exports(
             continue;
         }
 
+        let local_uses: HashSet<_> = analysis.local_uses.iter().cloned().collect();
+
         for exp in &analysis.exports {
             if exp.kind == "reexport" {
                 // Skip barrel bindings to avoid double-reporting re-exported symbols
@@ -433,8 +435,9 @@ pub fn find_dead_exports(
             let is_used = used_exports.contains(&(path_norm.clone(), exp.name.clone()));
             // Also check if "*" was imported from this file
             let star_used = used_exports.contains(&(path_norm.clone(), "*".to_string()));
+            let locally_used = local_uses.contains(&exp.name);
 
-            if !is_used && !star_used {
+            if !is_used && !star_used && !locally_used {
                 let open_url = super::build_open_url(&analysis.path, exp.line, open_base);
                 dead_candidates.push(DeadExport {
                     file: analysis.path.clone(),
@@ -586,6 +589,37 @@ mod tests {
         let result = search_symbol("foo", &analyses);
         assert!(result.found);
         assert_eq!(result.files.len(), 1);
+    }
+
+    #[test]
+    fn test_find_dead_exports_respects_from_imports() {
+        let exporter = mock_file_with_exports("pkg/module.py", vec!["Foo"]);
+        let mut importer = mock_file("main.py");
+        let mut imp = ImportEntry::new("pkg.module".to_string(), ImportKind::Static);
+        imp.resolved_path = Some("pkg/module.py".to_string());
+        imp.symbols.push(ImportSymbol {
+            name: "Foo".to_string(),
+            alias: None,
+            is_default: false,
+        });
+        importer.imports.push(imp);
+
+        let result = find_dead_exports(&[importer, exporter], false, None);
+        assert!(
+            result.is_empty(),
+            "export imported with explicit symbol should not be dead"
+        );
+    }
+
+    #[test]
+    fn test_find_dead_exports_respects_local_usage() {
+        let mut file = mock_file_with_exports("app.py", vec!["refresh"]);
+        file.local_uses.push("refresh".to_string());
+        let result = find_dead_exports(&[file], false, None);
+        assert!(
+            result.is_empty(),
+            "locally referenced export should not be marked dead"
+        );
     }
 
     #[test]

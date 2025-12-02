@@ -886,13 +886,13 @@ fn write_auto_artifacts(
     }
 
     write_report(&report_path, &report_sections, parsed.verbose)?;
-    created.push(
+    created.push(format!(
+        "./{}",
         report_path
             .strip_prefix(snapshot_root)
             .unwrap_or(&report_path)
             .display()
-            .to_string(),
-    );
+    ));
 
     let all_graph_edges: Vec<_> = scan_results
         .contexts
@@ -905,13 +905,13 @@ fn write_auto_artifacts(
         serde_json::to_string_pretty(&json!({ "circularImports": cycles }))
             .map_err(io::Error::other)?,
     )?;
-    created.push(
+    created.push(format!(
+        "./{}",
         circular_json_path
             .strip_prefix(snapshot_root)
             .unwrap_or(&circular_json_path)
             .display()
-            .to_string(),
-    );
+    ));
 
     let race_items: Vec<_> = scan_results
         .global_analyses
@@ -933,13 +933,13 @@ fn write_auto_artifacts(
         &races_json_path,
         serde_json::to_string_pretty(&race_items).map_err(io::Error::other)?,
     )?;
-    created.push(
+    created.push(format!(
+        "./{}",
         races_json_path
             .strip_prefix(snapshot_root)
             .unwrap_or(&races_json_path)
             .display()
-            .to_string(),
-    );
+    ));
 
     let bundle = json!({
         "schema": { "name": SCHEMA_NAME, "version": SCHEMA_VERSION },
@@ -961,13 +961,13 @@ fn write_auto_artifacts(
         &analysis_json_path,
         serde_json::to_string_pretty(&bundle).map_err(io::Error::other)?,
     )?;
-    created.push(
+    created.push(format!(
+        "./{}",
         analysis_json_path
             .strip_prefix(snapshot_root)
             .unwrap_or(&analysis_json_path)
             .display()
-            .to_string(),
-    );
+    ));
 
     // Generate SARIF report for CI integration
     let all_ranked_dups: Vec<_> = scan_results
@@ -987,13 +987,13 @@ fn write_auto_artifacts(
         pipeline_summary: &pipeline_summary,
     });
     fs::write(&sarif_path, sarif_content)?;
-    created.push(
+    created.push(format!(
+        "./{}",
         sarif_path
             .strip_prefix(snapshot_root)
             .unwrap_or(&sarif_path)
             .display()
-            .to_string(),
-    );
+    ));
 
     Ok(created)
 }

@@ -329,6 +329,9 @@ pub struct FileAnalysis {
     /// Python: True if this is part of a namespace package (PEP 420)
     #[serde(default)]
     pub is_namespace_package: bool,
+    /// Locally-referenced symbols within the same file (used for dead-code suppression)
+    #[serde(default)]
+    pub local_uses: Vec<String>,
 }
 
 impl ImportEntry {
@@ -386,6 +389,7 @@ impl FileAnalysis {
             size: 0,
             is_typed_package: false,
             is_namespace_package: false,
+            local_uses: Vec::new(),
         }
     }
 }

@@ -3,13 +3,11 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use crate::types::{
-    ExportSymbol, FileAnalysis, ImportEntry, ImportKind, ImportResolutionKind, PyRaceIndicator,
-    ReexportEntry, ReexportKind,
+    ExportSymbol, FileAnalysis, ImportEntry, ImportKind, ImportResolutionKind, ImportSymbol,
+    PyRaceIndicator, ReexportEntry, ReexportKind,
 };
 
-use super::regexes::{
-    regex_py_all, regex_py_class, regex_py_def, regex_py_dynamic_dunder, regex_py_dynamic_importlib,
-};
+use super::regexes::{regex_py_all, regex_py_dynamic_dunder, regex_py_dynamic_importlib};
 use super::resolvers::{has_py_typed_marker, resolve_python_absolute, resolve_python_relative};
 
 pub(crate) fn python_stdlib_set() -> &'static HashSet<String> {
@@ -363,13 +361,15 @@ pub(crate) fn analyze_py_file(
 ) -> FileAnalysis {
     let mut analysis = FileAnalysis::new(relative);
     let mut type_check_stack: Vec<usize> = Vec::new();
+    let mut pending_callback_decorator = false;
 
     // Set Python-specific metadata
     analysis.is_test = is_python_test_file(path, content);
     analysis.is_typed_package = check_typed_package(path, root);
     analysis.is_namespace_package = check_namespace_package(path, root);
 
-    for line in content.lines() {
+    for (idx, line) in content.lines().enumerate() {
+        let line_num = idx + 1;
         let without_comment = line.split('#').next().unwrap_or("").trim_end();
         let indent = without_comment
             .chars()
@@ -397,6 +397,14 @@ pub(crate) fn analyze_py_file(
         }
 
         let in_type_checking = !type_check_stack.is_empty();
+        if trimmed.starts_with('@') {
+            // Track decorators that register callbacks (e.g., @rumps.clicked)
+            if trimmed.contains("clicked") || trimmed.contains("rumps.") {
+                pending_callback_decorator = true;
+            }
+            continue;
+        }
+
         if let Some(rest) = trimmed.strip_prefix("import ") {
             for part in rest.split(',') {
                 let mut name = part.trim();
@@ -426,6 +434,26 @@ pub(crate) fn analyze_py_file(
                 entry.resolution = resolution;
                 entry.resolved_path = resolved.clone();
                 entry.is_type_checking = in_type_checking;
+                entry.source_raw = format!("from {} import {}", module, names_clean);
+
+                if names_clean != "*" {
+                    for sym in names_clean.split(',') {
+                        let sym = sym.trim();
+                        if sym.is_empty() {
+                            continue;
+                        }
+                        let (name, alias) = if let Some((lhs, rhs)) = sym.split_once(" as ") {
+                            (lhs.trim(), Some(rhs.trim().to_string()))
+                        } else {
+                            (sym, None)
+                        };
+                        entry.symbols.push(ImportSymbol {
+                            name: name.to_string(),
+                            alias,
+                            is_default: false,
+                        });
+                    }
+                }
                 analysis.imports.push(entry);
             }
             if names_clean == "*" {
@@ -449,6 +477,77 @@ pub(crate) fn analyze_py_file(
                 }
                 analysis.reexports.push(entry);
             }
+        } else {
+            // Detect callback assignment patterns (callback=self.refresh or callback=refresh)
+            if let Some(pos) = trimmed.find("callback")
+                && let Some(eq_pos) = trimmed[pos..].find('=')
+            {
+                let after_eq = trimmed[pos + eq_pos + 1..].trim();
+                let target = after_eq
+                    .trim_start_matches("self.")
+                    .trim_start_matches("cls.")
+                    .trim_start_matches('&')
+                    .trim_start_matches('*');
+                let ident = target
+                    .split(|c: char| !c.is_alphanumeric() && c != '_')
+                    .next()
+                    .unwrap_or("")
+                    .trim();
+                if !ident.is_empty() {
+                    analysis.local_uses.push(ident.to_string());
+                }
+            }
+
+            // Track class bases and top-level exports
+            if let Some(rest) = trimmed.strip_prefix("class ") {
+                let (name_part, _) = rest.split_once(':').unwrap_or((rest, ""));
+                let (name, bases_part) = if let Some((n, bases)) = name_part.split_once('(') {
+                    (n.trim(), Some(bases.trim_end_matches(')').trim()))
+                } else {
+                    (name_part.trim(), None)
+                };
+
+                if indent == 0 && !name.starts_with('_') && !name.is_empty() {
+                    analysis.exports.push(ExportSymbol::new(
+                        name.to_string(),
+                        "class",
+                        "named",
+                        Some(line_num),
+                    ));
+                }
+
+                if let Some(bases) = bases_part {
+                    for base in bases.split(',') {
+                        let base = base
+                            .trim_start_matches("self.")
+                            .trim_start_matches("cls.")
+                            .trim();
+                        if !base.is_empty() {
+                            analysis.local_uses.push(base.to_string());
+                        }
+                    }
+                }
+            } else if let Some(rest) = trimmed.strip_prefix("def ") {
+                let name = rest
+                    .split('(')
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .trim_matches(':');
+                if indent == 0 && !name.starts_with('_') && !name.is_empty() {
+                    analysis.exports.push(ExportSymbol::new(
+                        name.to_string(),
+                        "def",
+                        "named",
+                        Some(line_num),
+                    ));
+                }
+
+                if pending_callback_decorator && !name.is_empty() {
+                    analysis.local_uses.push(name.to_string());
+                }
+                pending_callback_decorator = false;
+            }
         }
     }
 
@@ -467,27 +566,6 @@ pub(crate) fn analyze_py_file(
         analysis
             .exports
             .push(ExportSymbol::new(name, "__all__", "named", None));
-    }
-
-    for caps in regex_py_def().captures_iter(content) {
-        if let Some(name) = caps.get(1) {
-            let n = name.as_str();
-            if !n.starts_with('_') {
-                analysis
-                    .exports
-                    .push(ExportSymbol::new(n.to_string(), "def", "named", None));
-            }
-        }
-    }
-    for caps in regex_py_class().captures_iter(content) {
-        if let Some(name) = caps.get(1) {
-            let n = name.as_str();
-            if !n.starts_with('_') {
-                analysis
-                    .exports
-                    .push(ExportSymbol::new(n.to_string(), "class", "named", None));
-            }
-        }
     }
 
     // Detect Python entry points
@@ -558,6 +636,34 @@ import sys
         assert!(!sys.is_type_checking);
         assert_eq!(sys.resolution, ImportResolutionKind::Stdlib);
         assert!(sys.resolved_path.is_none());
+    }
+
+    #[test]
+    fn tracks_from_import_symbols_and_aliases() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("utils")).expect("mkdir utils");
+        std::fs::write(
+            root.join("utils/helpers.py"),
+            "class Foo: pass\nclass Baz: pass",
+        )
+        .expect("write helpers");
+        let content = "from utils.helpers import Foo as Bar, Baz";
+        let path = root.join("main.py");
+        let analysis = analyze_py_file(
+            content,
+            &path,
+            root,
+            Some(&py_exts()),
+            "main.py".to_string(),
+            &[root.to_path_buf()],
+            python_stdlib_set(),
+        );
+        let imp = analysis.imports.first().expect("import entry");
+        assert_eq!(imp.symbols.len(), 2);
+        assert_eq!(imp.symbols[0].name, "Foo");
+        assert_eq!(imp.symbols[0].alias.as_deref(), Some("Bar"));
+        assert_eq!(imp.symbols[1].name, "Baz");
     }
 
     #[test]
@@ -1033,5 +1139,39 @@ def test_something(sample_fixture):
         );
 
         assert!(!analysis.is_namespace_package);
+    }
+
+    #[test]
+    fn top_level_exports_have_lines_and_methods_not_exported() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path();
+        let content = "\
+class Base:\n    pass\n\nclass Child(Base):\n    def method(self):\n        pass\n\ndef top():\n    return True\n\nmenu = MenuItem(callback=top)\n";
+        let analysis = analyze_py_file(
+            content,
+            &root.join("app.py"),
+            root,
+            Some(&py_exts()),
+            "app.py".to_string(),
+            &[root.to_path_buf()],
+            &HashSet::new(),
+        );
+
+        let names: Vec<_> = analysis.exports.iter().map(|e| e.name.as_str()).collect();
+        assert!(names.contains(&"Base"));
+        assert!(names.contains(&"Child"));
+        assert!(names.contains(&"top"));
+        assert!(!names.contains(&"method"));
+
+        let top_line = analysis
+            .exports
+            .iter()
+            .find(|e| e.name == "top")
+            .and_then(|e| e.line)
+            .unwrap();
+        assert_eq!(top_line, 8);
+
+        assert!(analysis.local_uses.contains(&"top".to_string()));
+        assert!(analysis.local_uses.contains(&"Base".to_string()));
     }
 }

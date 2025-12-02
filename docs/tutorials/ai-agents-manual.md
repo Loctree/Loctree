@@ -244,6 +244,43 @@ loct git blame src/lib.rs           # Symbol-level blame (Rust)
 loct git history --symbol foo       # Track symbol evolution
 ```
 
+### `loct diff`
+
+Compare snapshots to see what changed.
+
+```bash
+loct diff --since <snapshot_id>     # Compare current vs old snapshot
+loct diff --since main              # Compare against main branch snapshot
+```
+
+**Output includes:**
+- Files added, removed, modified
+- New/resolved circular imports
+- New/removed dead exports
+- Changed graph edges
+
+### `loct query`
+
+Quick graph queries without full analysis.
+
+```bash
+loct query who-imports <file>       # Files that import target
+loct query where-symbol <name>      # Where symbol is defined/used
+loct query component-of <file>      # Graph component containing file
+```
+
+**Examples:**
+```bash
+# What imports my utils?
+loct query who-imports src/utils/helpers.ts
+
+# Where is useAuth defined?
+loct query where-symbol useAuth
+
+# Is this file isolated or connected?
+loct query component-of src/orphan.ts
+```
+
 ---
 
 ## Agent Bundle for CI
@@ -292,6 +329,13 @@ The `report.sarif` includes:
 - `circular-import` - Circular dependency chain
 - `ghost-event` - Event emitted but never listened
 - `orphan-listener` - Listener for non-existent event
+
+### IDE Integration URLs
+
+SARIF results include `loctree://open?f=<file>&l=<line>` URLs in `properties.openUrl` for direct IDE navigation. Compatible with:
+- VS Code (via URL handler extension)
+- JetBrains IDEs (built-in URL handling)
+- Custom editor integrations
 
 ---
 
@@ -486,6 +530,9 @@ loct cycles --json | jq '.[] | select(.files | length > 2)'
 | Dead code | `loct dead --confidence high` |
 | Circular imports | `loct cycles` |
 | FE↔BE gaps | `loct commands --missing` |
+| Who imports file | `loct query who-imports <file>` |
+| Where is symbol | `loct query where-symbol <name>` |
+| Delta since snapshot | `loct diff --since <id>` |
 | CI lint | `loct lint --fail --sarif` |
 | Git blame | `loct git blame <file>` |
 

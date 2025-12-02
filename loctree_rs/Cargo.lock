@@ -1118,7 +1118,7 @@ dependencies = [
 
 [[package]]
 name = "loctree"
-version = "0.5.8-dev"
+version = "0.5.9-dev"
 dependencies = [
  "assert_cmd",
  "git2",

@@ -240,6 +240,8 @@ Modes:
   tree                      Directory tree with LOC counts
   report --graph            HTML report with graph
   lint --fail --sarif       CI guardrails / SARIF output
+  diff --since <id>         Compare snapshots, show delta
+  query <kind> <target>     Quick queries (who-imports, where-symbol, component-of)
   --for-ai                  AI-optimized hierarchical JSON (legacy flag)
 
 Find options:
@@ -250,6 +252,11 @@ Find options:
 Slice options:
   --consumers               Include files that import the target
   --json                    JSON output for piping to AI
+
+Query kinds:
+  who-imports <file>        Files that import target
+  where-symbol <name>       Where symbol is defined/used
+  component-of <file>       Which graph component contains file
 
 Tree options:
   --find-artifacts          Find build dirs (node_modules, target, etc.)

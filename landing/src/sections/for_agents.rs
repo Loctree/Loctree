@@ -12,11 +12,13 @@ pub fn ForAgents() -> impl IntoView {
 ```bash
 loct find --similar <Name>     # find similar existing
 loct find --symbol <Name>      # find definitions & usage
+loct query where-symbol <Name> # quick symbol lookup
 ```
 
 ### Before refactoring
 ```bash
 loct slice <file> --consumers --json  # what depends on it
+loct query who-imports <file>         # quick: who imports this
 loct find --impact <file>             # what breaks if removed
 loct cycles                           # detect import cycles
 ```
@@ -32,6 +34,7 @@ loct commands --unused         # investigate unused handlers
 loct dead                      # unused exports
 loct lint --fail               # CI check
 loct lint --sarif > results.sarif  # GitHub/GitLab integration
+loct diff --since main         # what changed since main
 ```"#;
 
     let copy_prompt = move |_| {

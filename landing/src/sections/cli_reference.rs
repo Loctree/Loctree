@@ -40,6 +40,14 @@ pub fn CliReference() -> impl IntoView {
                             <code class="cli-cmd">"loct events"</code>
                             <span class="cli-desc">"Emit/listen/races summary"</span>
                         </div>
+                        <div class="cli-item">
+                            <code class="cli-cmd">"loct query <kind> <target>"</code>
+                            <span class="cli-desc">"Quick queries (who-imports, where-symbol)"</span>
+                        </div>
+                        <div class="cli-item">
+                            <code class="cli-cmd">"loct diff --since <id>"</code>
+                            <span class="cli-desc">"Compare snapshots, show delta"</span>
+                        </div>
                     </div>
 
                     <div class="cli-group">
@@ -67,6 +75,14 @@ pub fn CliReference() -> impl IntoView {
                         <div class="cli-item">
                             <code class="cli-cmd">"loct find --impact <file>"</code>
                             <span class="cli-desc">"Show what imports target"</span>
+                        </div>
+                        <div class="cli-item">
+                            <code class="cli-cmd">"loct query who-imports <file>"</code>
+                            <span class="cli-desc">"Quick: files that import target"</span>
+                        </div>
+                        <div class="cli-item">
+                            <code class="cli-cmd">"loct query where-symbol <name>"</code>
+                            <span class="cli-desc">"Quick: where symbol is defined"</span>
                         </div>
                         <div class="cli-item">
                             <code class="cli-cmd">"loct dead --confidence high"</code>
