@@ -44,7 +44,7 @@ pub fn process_root_context(
     let mut json_items = Vec::new();
     let RootContext {
         root_path,
-        options,
+        options: _options,
         mut analyses,
         export_index,
         dynamic_summary,
@@ -91,8 +91,8 @@ pub fn process_root_context(
             &loc_map,
             fe_commands,
             be_commands,
-            options.max_graph_nodes.unwrap_or(MAX_GRAPH_NODES),
-            options.max_graph_edges.unwrap_or(MAX_GRAPH_EDGES),
+            parsed.max_graph_nodes.unwrap_or(MAX_GRAPH_NODES),
+            parsed.max_graph_edges.unwrap_or(MAX_GRAPH_EDGES),
         )
     } else {
         (None, None)
@@ -993,7 +993,7 @@ Top duplicate exports (showing up to {}):",
             ranked_dups: filtered_ranked.clone(),
             cascades: cascades.clone(),
             dynamic: sorted_dyn,
-            analyze_limit: options.analyze_limit,
+            analyze_limit: parsed.analyze_limit,
             missing_handlers: missing_sorted,
             unregistered_handlers: unregistered_sorted,
             unused_handlers: unused_sorted,
