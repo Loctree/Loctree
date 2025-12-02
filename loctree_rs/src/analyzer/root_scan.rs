@@ -442,11 +442,33 @@ fn scan_single_root(
                 .push(analysis.path.clone());
         }
         for re in &analysis.reexports {
-            reexport_edges.push((analysis.path.clone(), re.resolved.clone()));
+            // Re-export edges are useful for cycle detection and barrel awareness.
+            // If the parser didn't resolve the target, try to resolve it here using the same
+            // resolution logic as imports (relative or tsconfig alias).
+            let mut resolved_target = re.resolved.clone();
+            if resolved_target.is_none() {
+                let spec = &re.source;
+                let ext = file
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|s| s.to_lowercase())
+                    .unwrap_or_default();
+                resolved_target = if spec.starts_with('.') {
+                    resolve_js_relative(&file, root_path, spec, options.extensions.as_ref())
+                } else if matches!(ext.as_str(), "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs") {
+                    ts_resolver
+                        .as_ref()
+                        .and_then(|r| r.resolve(spec, options.extensions.as_ref()))
+                } else {
+                    None
+                };
+            }
+
+            reexport_edges.push((analysis.path.clone(), resolved_target.clone()));
             let collect_edges = cfg.collect_edges
                 || (cfg.parsed.graph && options.report_path.is_some())
                 || options.impact.is_some();
-            if collect_edges && let Some(target) = &re.resolved {
+            if collect_edges && let Some(target) = &resolved_target {
                 graph_edges.push((
                     analysis.path.clone(),
                     target.clone(),
