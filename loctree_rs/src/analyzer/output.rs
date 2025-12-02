@@ -108,6 +108,7 @@ pub fn process_root_context(
 
     let mut imports_targeted: HashSet<String> = HashSet::new();
     let mut files_json: Vec<_> = Vec::new();
+    let mut dead_symbols_total = 0usize;
     for path in &sorted_paths {
         if let Some(a) = analysis_by_path.get(path) {
             let mut imports = a.imports.clone();
@@ -141,7 +142,14 @@ pub fn process_root_context(
                 if let Some(resolved) = &re.resolved {
                     imports_targeted.insert(resolved.clone());
                     imports_targeted.insert(normalize_module_id(resolved).as_key());
+                } else {
+                    imports_targeted.insert(normalize_module_id(&re.source).as_key());
+                    imports_targeted.insert(re.source.clone());
                 }
+            }
+            for dyn_imp in &a.dynamic_imports {
+                imports_targeted.insert(dyn_imp.clone());
+                imports_targeted.insert(normalize_module_id(dyn_imp).as_key());
             }
 
             files_json.push(json!({
@@ -528,6 +536,7 @@ pub fn process_root_context(
             let b_name = b["name"].as_str().unwrap_or("");
             a_name.cmp(b_name)
         });
+        dead_symbols_total = dead_symbols.len();
         dead_symbols.truncate(parsed.top_dead_symbols);
     }
 
@@ -823,6 +832,17 @@ pub fn process_root_context(
         println!("  Duplicate exports: {}", filtered_ranked.len());
         println!("  Files with re-exports: {}", reexport_files.len());
         println!("  Dynamic imports: {}", dynamic_summary.len());
+        if dead_symbols_total > 0 {
+            println!(
+                "  Dead exports (high confidence): {}{}",
+                dead_symbols_total,
+                if dead_symbols_total > parsed.top_dead_symbols {
+                    format!(" (showing top {})", parsed.top_dead_symbols)
+                } else {
+                    String::new()
+                }
+            );
+        }
 
         if !duplicate_exports.is_empty() {
             println!(
