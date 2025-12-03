@@ -124,6 +124,9 @@ fn print_py_race_indicators(analyses: &[crate::types::FileAnalysis], json: bool)
 }
 
 pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
+    use std::time::Instant;
+
+    let scan_started = Instant::now();
     let mut json_results = Vec::new();
     let mut report_sections: Vec<ReportSection> = Vec::new();
     let mut server_handle = None;
@@ -185,14 +188,21 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         parsed.editor_cmd.clone(),
     );
 
-    // Default report path for --serve or auto outputs: .loctree/<scan_id>/report.html
-    let auto_report_path = parsed.report_path.clone().or_else(|| {
-        root_list
-            .first()
-            .map(|root| Snapshot::artifacts_dir(root).join("report.html"))
-    });
+    // Only generate HTML when explicitly requested or serving; avoid auto-opening during tests/builds.
+    let auto_report_path = if parsed.serve || parsed.report_path.is_some() {
+        parsed.report_path.clone().or_else(|| {
+            root_list
+                .first()
+                .map(|root| Snapshot::artifacts_dir(root).join("report.html"))
+        })
+    } else {
+        None
+    };
 
     if parsed.serve {
+        eprintln!(
+            "[loctree][warn] `--serve` will move to `loct report --serve`; please prefer the report subcommand (backwards compatible for now)"
+        );
         if let Some((base, handle)) = start_open_server(
             root_list.to_vec(),
             editor_cfg.clone(),
@@ -548,7 +558,9 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         }
     }
 
-    if let Some(report_path) = auto_report_path.as_ref() {
+    if (parsed.serve || parsed.report_path.is_some())
+        && let Some(report_path) = auto_report_path.as_ref()
+    {
         write_report(report_path, &report_sections, parsed.verbose)?;
         open_in_browser(report_path);
     }
@@ -654,6 +666,25 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             "Pipeline check failed: {}",
             fail_reasons.join("; ")
         )));
+    }
+
+    // Human-friendly summary for the default scan (avoid empty output).
+    if matches!(parsed.output, OutputMode::Human) && !parsed.sarif {
+        let elapsed = scan_started.elapsed();
+        let mut langs: HashSet<String> = HashSet::new();
+        for fa in &global_analyses {
+            if !fa.language.is_empty() {
+                langs.insert(fa.language.clone());
+            }
+        }
+        eprintln!(
+            "[loctree] Summary: files {}, missing handlers {}, unused handlers {}, languages [{}], elapsed {:.2?}",
+            global_analyses.len(),
+            global_missing_handlers.len(),
+            global_unused_handlers.len(),
+            langs.iter().cloned().collect::<Vec<_>>().join(","),
+            elapsed
+        );
     }
 
     Ok(())

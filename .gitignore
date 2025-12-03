@@ -35,3 +35,4 @@ loctree-*.min.js
 /loctree_rs/.fastembed_cache
 *.txt
 /assets/Icon Exports
+/loctree_rs/tests/fixtures/tauri_app/src/.loctree

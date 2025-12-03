@@ -9,6 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::Instant;
 
 use crate::args::ParsedArgs;
@@ -345,6 +346,29 @@ impl Snapshot {
 
     /// Save snapshot to disk
     pub fn save(&self, root: &Path) -> io::Result<()> {
+        // If a snapshot already exists for the same branch/commit, skip rewriting.
+        if let (Some(commit), Some(branch), Ok(existing)) = (
+            self.metadata.git_commit.as_ref(),
+            self.metadata.git_branch.as_ref(),
+            Self::load(root),
+        ) && existing.metadata.git_commit.as_ref() == Some(commit)
+            && existing.metadata.git_branch.as_ref() == Some(branch)
+        {
+            let dirty = is_git_dirty(root).unwrap_or(false);
+            if dirty {
+                eprintln!(
+                    "[loctree] snapshot for {}@{} exists; worktree dirty → commit changes to refresh snapshot",
+                    branch, commit
+                );
+            } else {
+                eprintln!(
+                    "[loctree] snapshot for {}@{} already exists; skipping write (no changes detected)",
+                    branch, commit
+                );
+            }
+            return Ok(());
+        }
+
         let snapshot_path = Self::snapshot_path(root);
         if let Some(dir) = snapshot_path.parent() {
             fs::create_dir_all(dir)?;
@@ -491,6 +515,17 @@ impl Snapshot {
         println!("  loct commands                # Show Tauri FE↔BE command bridges");
         println!("  loct slice <file> --json     # Extract context for AI agent");
     }
+}
+
+/// Best-effort check for uncommitted changes in the working tree
+fn is_git_dirty(root: &Path) -> Option<bool> {
+    let output = Command::new("git")
+        .arg("status")
+        .arg("--porcelain")
+        .current_dir(root)
+        .output()
+        .ok()?;
+    Some(!String::from_utf8_lossy(&output.stdout).trim().is_empty())
 }
 
 /// Run the init command: scan the project and save snapshot
