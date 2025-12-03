@@ -4,7 +4,7 @@
 
 use super::{
     AiInsightsPanel, AnalysisSummary, CascadesList, DuplicateExportsTable, DynamicImportsTable,
-    GraphContainer, QuickCommandsPanel, TabContent, TauriCommandCoverage,
+    GraphContainer, QuickCommandsPanel, TabContent, TauriCommandCoverage, TreeView,
 };
 use crate::types::ReportSection;
 use leptos::prelude::*;
@@ -37,6 +37,15 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
         .collect::<String>();
+    let root_id_value = root_id.clone();
+    let root_id_overview = root_id_value.clone();
+    let root_id_dups = root_id_value.clone();
+    let root_id_dynamic = root_id_value.clone();
+    let root_id_commands = root_id_value.clone();
+    let root_id_graph = root_id_value.clone();
+    let root_id_graph_tab = root_id_graph.clone();
+    let root_id_graph_container = root_id_graph.clone();
+    let root_id_tree = root_id_value.clone();
 
     let section_clone = section.clone();
     let view_class = if active {
@@ -94,7 +103,7 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
 
             <div class="app-content">
                 <TabContent
-                    root_id=root_id.clone()
+                    root_id=root_id_overview
                     tab_name="overview"
                     active=true
                 >
@@ -116,7 +125,7 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
                 </TabContent>
 
                 <TabContent
-                    root_id=root_id.clone()
+                    root_id=root_id_dups
                     tab_name="dups"
                     active=false
                 >
@@ -129,7 +138,7 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
                 </TabContent>
 
                 <TabContent
-                    root_id=root_id.clone()
+                    root_id=root_id_dynamic
                     tab_name="dynamic"
                     active=false
                 >
@@ -141,7 +150,7 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
                 </TabContent>
 
                 <TabContent
-                    root_id=root_id.clone()
+                    root_id=root_id_commands
                     tab_name="commands"
                     active=false
                 >
@@ -157,15 +166,28 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
                 </TabContent>
 
                 <TabContent
-                    root_id=root_id.clone()
+                    root_id=root_id_graph_tab
                     tab_name="graph"
                     active=false
                 >
                     // Graph takes full width/height, so no content-container
                     <GraphContainer
                         section=section_clone
-                        root_id=root_id
+                        root_id=root_id_graph_container
                     />
+                </TabContent>
+
+                <TabContent
+                    root_id=root_id_tree
+                    tab_name="tree"
+                    active=false
+                >
+                    <div class="content-container">
+                        <TreeView
+                            root_id=root_id_value
+                            tree=section.tree.clone().unwrap_or_default()
+                        />
+                    </div>
                 </TabContent>
             </div>
         </div>

@@ -61,6 +61,10 @@ pub fn ReportDocument(sections: Vec<ReportSection>, js_assets: JsAssets) -> impl
                                 <Icon path=ICON_GRAPH class="icon-sm" />
                                 "Graph"
                             </button>
+                            <button class="nav-item" data-tab="tree">
+                                <Icon path=ICON_SQUARES_FOUR class="icon-sm" />
+                                "Tree"
+                            </button>
                         </nav>
 
                         <div class="app-footer">

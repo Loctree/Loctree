@@ -53,6 +53,7 @@ mod insights;
 mod quick_commands;
 mod section;
 mod tabs;
+mod tree;
 
 pub use cascades::CascadesList;
 pub use commands::TauriCommandCoverage;
@@ -66,3 +67,4 @@ pub use insights::{AiInsightsPanel, AnalysisSummary};
 pub use quick_commands::QuickCommandsPanel;
 pub use section::ReportSectionView;
 pub use tabs::TabContent;
+pub use tree::TreeView;

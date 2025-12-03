@@ -1,3 +1,26 @@
+//! Static analysis engine for loctree.
+//!
+//! This module contains language-specific analyzers and cross-cutting analysis features:
+//!
+//! ## Language Analyzers
+//! - [`ast_js`] / [`js`] - TypeScript/JavaScript AST analysis
+//! - [`py`] - Python import/export analysis
+//! - [`rust`] - Rust analysis (Tauri commands, mod statements)
+//! - [`css`] - CSS/SCSS dependency tracking
+//!
+//! ## Analysis Features
+//! - [`cycles`] - Circular import detection (Tarjan's SCC algorithm)
+//! - [`dead_parrots`] - Dead/unused export detection
+//! - [`coverage`] - Tauri command coverage (FE→BE matching)
+//! - [`trace`] - Handler tracing through the call graph
+//! - [`pipelines`] - Data flow pipeline analysis
+//!
+//! ## Output Formats
+//! - [`for_ai`] - AI-optimized JSON with quick wins
+//! - [`html`] - Interactive HTML reports
+//! - [`sarif`] - SARIF 2.1.0 for CI integration
+//! - [`report`] - Report data structures
+
 pub mod assets;
 pub mod ast_js;
 pub mod classify;

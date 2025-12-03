@@ -24,12 +24,18 @@ pub const SNAPSHOT_DIR: &str = ".loctree";
 /// Default snapshot file name
 pub const SNAPSHOT_FILE: &str = "snapshot.json";
 
-/// Context about the current git workspace (used for metadata and artifact layout)
+/// Git workspace context for artifact isolation.
+///
+/// Used to store snapshots per branch@commit (e.g., `.loctree/main@abc123/snapshot.json`).
 #[derive(Clone, Debug)]
 pub struct GitContext {
+    /// Repository name (extracted from remote origin).
     pub repo: Option<String>,
+    /// Current branch name.
     pub branch: Option<String>,
+    /// Short commit hash.
     pub commit: Option<String>,
+    /// Combined identifier: `branch@commit` (sanitized for filesystem).
     pub scan_id: Option<String>,
 }
 

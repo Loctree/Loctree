@@ -1,3 +1,8 @@
+//! Circular import detection using Tarjan's SCC algorithm.
+//!
+//! Finds strongly connected components (cycles) in the import graph.
+//! Normalizes module paths to collapse barrels and extensions before detection.
+
 use std::cmp::min;
 use std::collections::{HashMap, HashSet};
 

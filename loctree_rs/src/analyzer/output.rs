@@ -18,12 +18,127 @@ use super::html::render_html_report;
 use super::insights::collect_ai_insights;
 use super::open_server::current_open_base;
 use super::report::CommandBridge;
+use super::report::TreeNode;
 use super::root_scan::{RootContext, normalize_module_id};
 use super::scan::resolve_event_constants_across_files;
+
+fn build_tree(analyses: &[FileAnalysis], root_path: &std::path::Path) -> Vec<TreeNode> {
+    #[derive(Default)]
+    struct TmpNode {
+        loc: usize,
+        children: std::collections::BTreeMap<String, TmpNode>,
+    }
+
+    let mut root = TmpNode::default();
+    let mut paths: Vec<(Vec<String>, usize)> = analyses
+        .iter()
+        .map(|a| {
+            let rel = std::path::Path::new(&a.path)
+                .strip_prefix(root_path)
+                .unwrap_or_else(|_| std::path::Path::new(&a.path))
+                .iter()
+                .map(|p| p.to_string_lossy().to_string())
+                .collect::<Vec<_>>();
+            (rel, a.loc)
+        })
+        .collect();
+    paths.sort_by(|a, b| a.0.cmp(&b.0));
+
+    for (parts, loc) in paths {
+        let mut cursor = &mut root;
+        for part in parts {
+            let entry = cursor.children.entry(part).or_default();
+            cursor = entry;
+        }
+        cursor.loc = loc;
+    }
+
+    fn finalize(name: Option<String>, node: &TmpNode) -> TreeNode {
+        let mut loc_sum = node.loc;
+        let mut children: Vec<TreeNode> = node
+            .children
+            .iter()
+            .map(|(k, v)| finalize(Some(k.clone()), v))
+            .collect();
+        for c in &children {
+            loc_sum += c.loc;
+        }
+        children.sort_by(|a, b| a.path.cmp(&b.path));
+        TreeNode {
+            path: name.unwrap_or_default(),
+            loc: loc_sum,
+            children,
+        }
+    }
+
+    root.children
+        .iter()
+        .map(|(k, v)| finalize(Some(k.clone()), v))
+        .collect()
+}
 
 pub struct RootArtifacts {
     pub json_items: Vec<serde_json::Value>,
     pub report_section: Option<ReportSection>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_tree;
+    use crate::types::FileAnalysis;
+    use std::path::Path;
+
+    #[test]
+    fn build_tree_aggregates_loc_and_hierarchy() {
+        let analyses = vec![
+            FileAnalysis {
+                path: "src/a.ts".into(),
+                loc: 10,
+                ..Default::default()
+            },
+            FileAnalysis {
+                path: "src/nested/b.ts".into(),
+                loc: 20,
+                ..Default::default()
+            },
+            FileAnalysis {
+                path: "src/nested/deeper/c.ts".into(),
+                loc: 30,
+                ..Default::default()
+            },
+        ];
+        let tree = build_tree(&analyses, Path::new("src"));
+        // Expect top-level nodes include a.ts and nested/
+        let a = tree.iter().find(|n| n.path == "a.ts").unwrap();
+        assert_eq!(a.loc, 10);
+        assert!(a.children.is_empty());
+
+        let nested = tree.iter().find(|n| n.path == "nested").unwrap();
+        assert_eq!(nested.loc, 50); // 20 + 30
+        let b = nested.children.iter().find(|c| c.path == "b.ts").unwrap();
+        assert_eq!(b.loc, 20);
+        let deeper = nested.children.iter().find(|c| c.path == "deeper").unwrap();
+        assert_eq!(deeper.path, "deeper");
+        assert_eq!(deeper.loc, 30);
+        assert_eq!(deeper.children.len(), 1);
+        let leaf = &deeper.children[0];
+        assert_eq!(leaf.path, "c.ts");
+        assert_eq!(leaf.loc, 30);
+    }
+
+    #[test]
+    fn build_tree_handles_root_prefix_mismatch() {
+        let analyses = vec![FileAnalysis {
+            path: "other/file.ts".into(),
+            loc: 5,
+            ..Default::default()
+        }];
+        // If strip_prefix fails, it should fall back to the full path parts.
+        let tree = build_tree(&analyses, Path::new("src"));
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree[0].path, "other");
+        assert_eq!(tree[0].loc, 5);
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -983,6 +1098,8 @@ Top duplicate exports (showing up to {}):",
         // Calculate total LOC
         let total_loc: usize = analyses.iter().map(|a| a.loc).sum();
 
+        let tree = build_tree(&analyses, &root_path);
+
         report_section = Some(ReportSection {
             insights,
             root: root_path.display().to_string(),
@@ -1004,6 +1121,7 @@ Top duplicate exports (showing up to {}):",
             } else {
                 None
             },
+            tree: Some(tree),
             graph: graph_data.clone(),
             graph_warning: graph_warning.clone(),
             git_branch: git.and_then(|g| g.branch.clone()),

@@ -1,3 +1,9 @@
+//! Tauri command coverage analysis.
+//!
+//! Matches frontend `invoke()` calls with backend `#[tauri::command]` handlers.
+//! Identifies missing handlers (FE calls without BE impl) and unused handlers
+//! (BE impl without FE calls).
+
 use std::collections::{HashMap, HashSet};
 
 use globset::GlobSet;

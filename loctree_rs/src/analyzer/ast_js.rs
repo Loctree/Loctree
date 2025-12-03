@@ -5,6 +5,7 @@ use oxc_allocator::Allocator;
 use oxc_ast::ast::*;
 use oxc_ast_visit::{Visit, walk::walk_expression};
 use oxc_parser::Parser;
+use oxc_semantic::SemanticBuilder;
 use oxc_span::{SourceType, Span};
 
 use crate::types::{
@@ -172,6 +173,33 @@ pub(crate) fn analyze_js_file_ast(
     };
 
     visitor.visit_program(&ret.program);
+
+    // Use oxc_semantic to track local symbol references
+    // This helps detect when exported symbols are used internally (not dead)
+    let semantic_ret = SemanticBuilder::new().build(&ret.program);
+    if semantic_ret.errors.is_empty() {
+        let semantic = semantic_ret.semantic;
+
+        // Build set of exported symbol names for quick lookup
+        let exported_names: HashSet<&str> = visitor
+            .analysis
+            .exports
+            .iter()
+            .map(|e| e.name.as_str())
+            .collect();
+
+        // Check each symbol - if it's exported AND has references, it's used locally
+        for symbol_id in semantic.scoping().symbol_ids() {
+            let name = semantic.scoping().symbol_name(symbol_id);
+            if exported_names.contains(name) {
+                // Check if this symbol has any references (beyond its declaration)
+                let ref_ids = semantic.scoping().get_resolved_reference_ids(symbol_id);
+                if !ref_ids.is_empty() {
+                    visitor.analysis.local_uses.push(name.to_string());
+                }
+            }
+        }
+    }
 
     visitor.analysis
 }

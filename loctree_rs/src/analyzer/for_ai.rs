@@ -435,6 +435,7 @@ mod tests {
             command_counts: (0, 0),
             command_bridges: vec![],
             open_base: None,
+            tree: None,
             insights: vec![],
             graph: None,
             graph_warning: None,

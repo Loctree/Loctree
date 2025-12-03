@@ -902,3 +902,46 @@ mod tests {
         assert!(!paths_match("Button.tsx", "src/BigButton.tsx"));
     }
 }
+
+#[cfg(test)]
+mod integration_tests {
+    use super::*;
+    use crate::types::{ExportSymbol, ImportEntry, ImportKind, ImportSymbol};
+
+    #[test]
+    fn test_recommendations_pdf_not_dead() {
+        let mut importer = FileAnalysis {
+            path: "src/services/recommendationsExportService.ts".to_string(),
+            ..Default::default()
+        };
+        let mut imp = ImportEntry::new(
+            "../components/pdf/RecommendationsPDFTemplate".to_string(),
+            ImportKind::Static,
+        );
+        imp.resolved_path = Some("src/components/pdf/RecommendationsPDFTemplate.tsx".to_string());
+        imp.symbols.push(ImportSymbol {
+            name: "RecommendationsPDFTemplate".to_string(),
+            alias: None,
+            is_default: false,
+        });
+        importer.imports.push(imp);
+
+        let exporter = FileAnalysis {
+            path: "src/components/pdf/RecommendationsPDFTemplate.tsx".to_string(),
+            exports: vec![ExportSymbol {
+                name: "RecommendationsPDFTemplate".to_string(),
+                kind: "function".to_string(),
+                export_type: "named".to_string(),
+                line: Some(25),
+            }],
+            ..Default::default()
+        };
+
+        let result = find_dead_exports(&[importer, exporter], false, None);
+        assert!(
+            result.is_empty(),
+            "RecommendationsPDFTemplate should NOT be dead. Found: {:?}",
+            result
+        );
+    }
+}

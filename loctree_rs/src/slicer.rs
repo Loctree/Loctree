@@ -67,16 +67,24 @@ pub struct HolographicSlice {
     pub stats: SliceStats,
 }
 
-/// Statistics about the slice
+/// Statistics about the slice.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SliceStats {
+    /// Number of core files (usually 1).
     pub core_files: usize,
+    /// Total LOC in core layer.
     pub core_loc: usize,
+    /// Number of dependency files.
     pub deps_files: usize,
+    /// Total LOC in deps layer.
     pub deps_loc: usize,
+    /// Number of consumer files.
     pub consumers_files: usize,
+    /// Total LOC in consumers layer.
     pub consumers_loc: usize,
+    /// Total files across all layers.
     pub total_files: usize,
+    /// Total LOC across all layers.
     pub total_loc: usize,
 }
 

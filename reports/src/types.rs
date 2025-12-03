@@ -101,6 +101,18 @@ pub struct CommandBridge {
     pub language: String,
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct TreeNode {
+    /// Directory or file node used by the report tree view.
+    /// Relative path of this file/directory
+    pub path: String,
+    /// Lines of code aggregated for this node (file LOC + children)
+    pub loc: usize,
+    /// Child nodes
+    #[serde(default)]
+    pub children: Vec<TreeNode>,
+}
+
 /// A gap between frontend command invocations and backend handlers.
 ///
 /// Used for Tauri applications to track:
@@ -541,6 +553,9 @@ pub struct ReportSection {
     pub command_bridges: Vec<CommandBridge>,
     /// Base URL for opening files in editor
     pub open_base: Option<String>,
+    /// Directory tree with LOC per node
+    #[serde(default)]
+    pub tree: Option<Vec<TreeNode>>,
     /// Dependency graph data (if generated)
     pub graph: Option<GraphData>,
     /// Warning if graph was skipped (too large, etc.)
