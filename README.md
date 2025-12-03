@@ -26,6 +26,9 @@ curl -fsSL https://raw.githubusercontent.com/Loctree/Loctree/main/tools/install.
 cd your-project
 loct
 
+# View interactive report (HTML + graph)
+loct report --serve
+
 # Extract context for AI agents
 loct slice src/components/ChatPanel.tsx --consumers --json
 

@@ -1,6 +1,6 @@
-# loct — AI Agent Quick Reference (v0.5.9)
+# loct — AI Agent Quick Reference (v0.5.10)
 
-Static analysis for AI agents: scan once, slice many. Default `loct` writes `.loctree/snapshot.json`; run `loct -A` or `loct lint --sarif` if you need full artifacts (`analysis.json`, `report.html`, `report.sarif`, etc.).
+Static analysis for AI agents: scan once, slice many. Default `loct` writes `.loctree/<branch@sha>/snapshot.json`; use `loct report --serve` (or `loct lint --sarif`) when you need full artifacts (`analysis.json`, `report.html`, `report.sarif`, etc.).
 
 > **Full documentation:** [AI Agent's Manual](docs/tutorials/ai-agents-manual.md)
 
@@ -71,7 +71,7 @@ loct --version   # expect 0.5.9+
 ## Tips
 
 - `loct` caches analyses; use `--full-scan` to force a rescan.
-- Artifacts live in `.loctree/` after each scan: `snapshot.json`, `analysis.json`, `report.sarif`, `report.html`.
+- Artifacts live in `.loctree/<branch@sha>/`: `snapshot.json` is always written; `analysis.json`/`report.html`/`report.sarif` are produced via `loct report` or `loct lint --sarif`.
 - SARIF file integrates with GitHub/GitLab code scanning and IDEs.
 - SARIF includes `loctree://open?f=<file>&l=<line>` URLs for IDE integration.
 - Respect `.gitignore` by default; add `--scan-all` to include node_modules/target/.venv.

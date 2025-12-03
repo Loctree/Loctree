@@ -14,7 +14,7 @@ pub fn CliReference() -> impl IntoView {
                         <h3 class="cli-group-title">"Modes"</h3>
                         <div class="cli-item">
                             <code class="cli-cmd">"loct"</code>
-                            <span class="cli-desc">"Auto scan + snapshot + reports (default)"</span>
+                            <span class="cli-desc">"Auto scan + snapshot (use `loct report --serve` for HTML)"</span>
                         </div>
                         <div class="cli-item">
                             <code class="cli-cmd">"loct slice <file>"</code>
@@ -65,16 +65,8 @@ pub fn CliReference() -> impl IntoView {
                     <div class="cli-group">
                         <h3 class="cli-group-title">"Find / Analyze"</h3>
                         <div class="cli-item">
-                            <code class="cli-cmd">"loct find --similar <Name>"</code>
-                            <span class="cli-desc">"Find similar components"</span>
-                        </div>
-                        <div class="cli-item">
-                            <code class="cli-cmd">"loct find --symbol <name>"</code>
-                            <span class="cli-desc">"Search for symbol definitions/usages"</span>
-                        </div>
-                        <div class="cli-item">
-                            <code class="cli-cmd">"loct find --impact <file>"</code>
-                            <span class="cli-desc">"Show what imports target"</span>
+                            <code class="cli-cmd">"loct find <query>"</code>
+                            <span class="cli-desc">"One command: fuzzy match + defs/uses + dead status"</span>
                         </div>
                         <div class="cli-item">
                             <code class="cli-cmd">"loct query who-imports <file>"</code>
@@ -89,8 +81,8 @@ pub fn CliReference() -> impl IntoView {
                             <span class="cli-desc">"Unused exports with stricter filter"</span>
                         </div>
                         <div class="cli-item">
-                            <code class="cli-cmd">"loct report --graph"</code>
-                            <span class="cli-desc">"HTML with embedded dependency graph"</span>
+                            <code class="cli-cmd">"loct report --serve"</code>
+                            <span class="cli-desc">"HTML with embedded dependency graph + local server"</span>
                         </div>
                         <div class="cli-item">
                             <code class="cli-cmd">"loct lint --sarif"</code>
