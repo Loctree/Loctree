@@ -579,12 +579,63 @@ pub(crate) fn analyze_py_file(
         && !analysis.entry_points.contains(&"script".to_string())
     {
         analysis.entry_points.push("script".to_string());
+        // Also mark 'main' as locally used if it's called in the __main__ block
+        if content.contains("main()") && !analysis.local_uses.contains(&"main".to_string()) {
+            analysis.local_uses.push("main".to_string());
+        }
     }
+
+    // Detect bare function calls in Python (similar to Rust detection)
+    // This catches local function calls like `helper_func(...)` within the same file
+    extract_python_function_calls(content, &mut analysis.local_uses);
 
     // Detect Python concurrency race indicators
     analysis.py_race_indicators = detect_py_race_indicators(content);
 
     analysis
+}
+
+/// Extract function calls from Python code to detect local usage.
+/// This catches patterns like `func_name(...)` which indicate the function is used.
+fn extract_python_function_calls(content: &str, local_uses: &mut Vec<String>) {
+    let bytes = content.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+
+    // Python keywords that look like function calls but aren't
+    const KEYWORDS: &[&str] = &[
+        "if", "else", "elif", "while", "for", "try", "except", "finally", "with", "as", "def",
+        "class", "return", "yield", "raise", "import", "from", "pass", "break", "continue",
+        "lambda", "and", "or", "not", "in", "is", "True", "False", "None", "assert", "del", "exec",
+        "print", "global", "nonlocal", "async", "await",
+    ];
+
+    while i < len {
+        // Look for identifier followed by `(`
+        if bytes[i].is_ascii_alphabetic() || bytes[i] == b'_' {
+            let start = i;
+            while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                i += 1;
+            }
+            let ident = &content[start..i];
+
+            // Skip whitespace
+            while i < len && bytes[i].is_ascii_whitespace() {
+                i += 1;
+            }
+
+            // Check if followed by `(`
+            if i < len
+                && bytes[i] == b'('
+                && !KEYWORDS.contains(&ident)
+                && !local_uses.contains(&ident.to_string())
+            {
+                local_uses.push(ident.to_string());
+            }
+        } else {
+            i += 1;
+        }
+    }
 }
 
 #[cfg(test)]
