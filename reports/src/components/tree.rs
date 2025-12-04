@@ -11,7 +11,7 @@ fn node_matches(node: &TreeNode, f: &str) -> bool {
 
 fn render_node(node: &TreeNode, depth: usize, f: &str) -> AnyView {
     if !node_matches(node, f) {
-        return view! {}.into_any();
+        return ().into_any();
     }
     let indent = format!("{}{}", "• ".repeat(depth), node.path.clone());
     let loc_text = format!("{} LOC", node.loc);
