@@ -42,3 +42,4 @@ loctree-*.min.js
 .gemini/
 gha-creds-*.json
 GEMINI.md
+**/.loctree/**/report.html

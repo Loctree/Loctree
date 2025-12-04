@@ -1,4 +1,4 @@
-# loct — AI Agent Quick Reference (v0.5.10)
+# loct — AI Agent Quick Reference (v0.5.12)
 
 Static analysis for AI agents: scan once, slice many. Default `loct` writes `.loctree/<branch@sha>/snapshot.json`; use `loct report --serve` (or `loct lint --sarif`) when you need full artifacts (`analysis.json`, `report.html`, `report.sarif`, etc.).
 

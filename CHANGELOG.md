@@ -6,6 +6,17 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Released]
 
+## [0.5.12] - 2025-12-08
+
+### Added
+- Atomic writes for snapshot artifacts (report/SARIF/JSON) to prevent partial files on crash or interrupt.
+- Alias-aware dynamic import reachability (handles `@core/*` prefixes and Windows casing) with new tests.
+
+### Changed
+- Unified install docs and prompts to `cargo install loctree`.
+- Quick-win JSONL and SARIF generation now return/log errors instead of panicking.
+- Tooltip layer helper to avoid z-index clashes in reports.
+
 ## [0.5.10] - 2025-12-03
 
 ### Added
