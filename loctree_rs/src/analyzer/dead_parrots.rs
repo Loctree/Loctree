@@ -10,6 +10,7 @@
 //! - Dead exports detection (`--dead`)
 
 use std::collections::HashSet;
+use std::fs;
 
 use serde_json::json;
 
@@ -722,8 +723,32 @@ pub fn find_dead_exports(
         let local_uses: HashSet<_> = analysis.local_uses.iter().cloned().collect();
 
         for exp in &analysis.exports {
+            let is_rust_file = analysis.path.ends_with(".rs");
             if exp.kind == "reexport" {
                 // Skip barrel bindings to avoid double-reporting re-exported symbols
+                continue;
+            }
+
+            // Rust-specific heuristics: skip common macro-derived public types and CLI args
+            let rust_macro_marked = is_rust_file
+                && rust_has_known_derives(
+                    &analysis.path,
+                    &[
+                        "serialize",
+                        "deserialize",
+                        "parser",
+                        "args",
+                        "valueenum",
+                        "subcommand",
+                        "fromargmatches",
+                    ],
+                );
+            let rust_cli_pattern = is_rust_file
+                && (exp.name.ends_with("Args")
+                    || exp.name.ends_with("Command")
+                    || exp.name.ends_with("Response")
+                    || exp.name.ends_with("Request"));
+            if rust_macro_marked || rust_cli_pattern {
                 continue;
             }
 
@@ -763,7 +788,6 @@ pub fn find_dead_exports(
                 && !is_rust_path_qualified
             {
                 let open_url = super::build_open_url(&analysis.path, exp.line, open_base);
-                let is_rust_file = analysis.path.ends_with(".rs");
 
                 // Build human-readable reason
                 let reason = if is_rust_file {
@@ -797,6 +821,14 @@ pub fn find_dead_exports(
     }
 
     dead_candidates
+}
+
+fn rust_has_known_derives(path: &str, keywords: &[&str]) -> bool {
+    let Ok(content) = fs::read_to_string(path) else {
+        return false;
+    };
+    let lower = content.to_lowercase();
+    lower.contains("derive(") && keywords.iter().any(|kw| lower.contains(kw))
 }
 
 /// Print dead exports results to stdout
