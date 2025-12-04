@@ -121,6 +121,7 @@ mod tests {
             command_counts: (0, 0),
             command_bridges: Vec::new(),
             open_base: None,
+            tree: None,
             graph: None,
             graph_warning: None,
             insights: vec![AiInsight {
@@ -166,6 +167,7 @@ mod tests {
             command_counts: (0, 0),
             command_bridges: Vec::new(),
             open_base: None,
+            tree: None,
             graph: None,
             graph_warning: None,
             insights: Vec::new(),

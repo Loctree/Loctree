@@ -1,8 +1,8 @@
 use serde_json::json;
 
-use super::dead_parrots::DeadExport;
-use super::report::{CommandGap, RankedDup};
-use crate::snapshot::Snapshot;
+use crate::analyzer::RankedDup;
+use crate::analyzer::dead_parrots::DeadExport;
+use crate::analyzer::report::CommandGap;
 
 pub struct SarifInputs<'a> {
     pub duplicate_exports: &'a [RankedDup],
@@ -12,40 +12,6 @@ pub struct SarifInputs<'a> {
     /// Circular imports: each cycle is a Vec of file paths
     pub circular_imports: &'a [Vec<String>],
     pub pipeline_summary: &'a serde_json::Value,
-    /// Snapshot for enrichment metadata (blast radius, consumer count, etc.)
-    pub snapshot: Option<&'a Snapshot>,
-}
-
-/// Calculate blast radius: how many files depend on this file
-fn compute_blast_radius(snapshot: &Snapshot, file_path: &str) -> usize {
-    snapshot
-        .edges
-        .iter()
-        .filter(|edge| edge.from == file_path)
-        .count()
-}
-
-/// Calculate consumer count: how many files import this specific file
-fn compute_consumer_count(snapshot: &Snapshot, file_path: &str) -> usize {
-    snapshot
-        .edges
-        .iter()
-        .filter(|edge| {
-            edge.to == file_path
-                || edge.to.ends_with(&format!("/{}", file_path))
-                || (file_path.contains('/') && edge.to.contains(file_path))
-        })
-        .count()
-}
-
-/// Map loctree confidence to SARIF-compatible confidence level
-fn map_confidence_level(confidence: &str) -> &'static str {
-    match confidence.to_lowercase().as_str() {
-        "certain" => "CERTAIN",
-        "high" => "HIGH",
-        "medium" | "low" => "SMELL",
-        _ => "SMELL",
-    }
 }
 
 fn build_sarif(inputs: SarifInputs) -> serde_json::Value {
@@ -123,33 +89,10 @@ fn build_sarif(inputs: SarifInputs) -> serde_json::Value {
             }]
         });
 
-        // Build properties object with enrichment data
-        let mut properties = serde_json::Map::new();
-
-        // Add open_url if present (existing functionality)
         if let Some(ref open_url) = dead.open_url {
-            properties.insert("openUrl".to_string(), json!(open_url));
-        }
-
-        // Add loctree enrichment fields if snapshot is available
-        if let Some(snapshot) = inputs.snapshot {
-            let blast_radius = compute_blast_radius(snapshot, &dead.file);
-            let consumer_count = compute_consumer_count(snapshot, &dead.file);
-            let confidence_level = map_confidence_level(&dead.confidence);
-
-            properties.insert(
-                "loctree".to_string(),
-                json!({
-                    "blast_radius": blast_radius,
-                    "is_dead_code": true,
-                    "consumer_count": consumer_count,
-                    "confidence_level": confidence_level
-                }),
-            );
-        }
-
-        if !properties.is_empty() {
-            result["properties"] = json!(properties);
+            result["properties"] = json!({
+                "openUrl": open_url
+            });
         }
 
         results.push(result);
@@ -266,312 +209,14 @@ pub fn generate_sarif(inputs: SarifInputs) -> serde_json::Value {
 }
 
 /// Generate SARIF report as a pretty-printed JSON string
-pub fn generate_sarif_string(inputs: SarifInputs) -> Result<String, serde_json::Error> {
+pub fn generate_sarif_string(inputs: SarifInputs) -> String {
     serde_json::to_string_pretty(&build_sarif(inputs))
+        .expect("Failed to serialize SARIF report to JSON")
 }
 
 /// Print SARIF report to stdout
-pub fn print_sarif(inputs: SarifInputs) -> Result<(), serde_json::Error> {
-    match generate_sarif_string(inputs) {
-        Ok(json) => {
-            println!("{}", json);
-            Ok(())
-        }
-        Err(err) => Err(err),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::analyzer::report::{Confidence, DupSeverity};
-
-    fn mock_dup(name: &str, files: Vec<&str>) -> RankedDup {
-        RankedDup {
-            name: name.to_string(),
-            canonical: name.to_lowercase(),
-            files: files.into_iter().map(|s| s.to_string()).collect(),
-            locations: vec![],
-            score: 1,
-            prod_count: 0,
-            dev_count: 0,
-            canonical_line: None,
-            refactors: vec![],
-            severity: DupSeverity::SamePackage,
-            is_cross_lang: false,
-            packages: vec![],
-            reason: String::new(),
-        }
-    }
-
-    fn mock_gap(name: &str, locations: Vec<(&str, usize)>) -> CommandGap {
-        CommandGap {
-            name: name.to_string(),
-            confidence: Some(Confidence::High),
-            locations: locations
-                .into_iter()
-                .map(|(f, l)| (f.to_string(), l))
-                .collect(),
-            implementation_name: None,
-            string_literal_matches: vec![],
-        }
-    }
-
-    fn mock_dead(file: &str, symbol: &str, line: Option<usize>) -> DeadExport {
-        DeadExport {
-            file: file.to_string(),
-            symbol: symbol.to_string(),
-            line,
-            confidence: "high".to_string(),
-            reason: format!(
-                "No imports found for '{}'. Checked: resolved imports (0 matches), star re-exports (none), local references (none)",
-                symbol
-            ),
-            open_url: None,
-            is_test: false,
-        }
-    }
-
-    #[test]
-    fn test_print_sarif_empty() {
-        let inputs = SarifInputs {
-            duplicate_exports: &[],
-            missing_handlers: &[],
-            unused_handlers: &[],
-            dead_exports: &[],
-            circular_imports: &[],
-            pipeline_summary: &json!({}),
-            snapshot: None,
-        };
-        assert!(print_sarif(inputs).is_ok());
-    }
-
-    #[test]
-    fn test_print_sarif_with_duplicates() {
-        let dups = vec![mock_dup("Button", vec!["src/a.ts", "src/b.ts"])];
-        let inputs = SarifInputs {
-            duplicate_exports: &dups,
-            missing_handlers: &[],
-            unused_handlers: &[],
-            dead_exports: &[],
-            circular_imports: &[],
-            pipeline_summary: &json!({}),
-            snapshot: None,
-        };
-        assert!(print_sarif(inputs).is_ok());
-    }
-
-    #[test]
-    fn test_print_sarif_with_missing_handlers() {
-        let missing = vec![mock_gap("get_user", vec![("src/api.ts", 10)])];
-        let inputs = SarifInputs {
-            duplicate_exports: &[],
-            missing_handlers: &missing,
-            unused_handlers: &[],
-            dead_exports: &[],
-            circular_imports: &[],
-            pipeline_summary: &json!({}),
-            snapshot: None,
-        };
-        assert!(print_sarif(inputs).is_ok());
-    }
-
-    #[test]
-    fn test_print_sarif_with_unused_handlers() {
-        let unused = vec![mock_gap("old_handler", vec![("src-tauri/src/lib.rs", 50)])];
-        let inputs = SarifInputs {
-            duplicate_exports: &[],
-            missing_handlers: &[],
-            unused_handlers: &unused,
-            dead_exports: &[],
-            circular_imports: &[],
-            pipeline_summary: &json!({}),
-            snapshot: None,
-        };
-        assert!(print_sarif(inputs).is_ok());
-    }
-
-    #[test]
-    fn test_print_sarif_with_dead_exports() {
-        let dead = vec![
-            mock_dead("src/utils.ts", "unusedHelper", Some(10)),
-            mock_dead("src/helpers.ts", "oldFunction", None),
-        ];
-        let inputs = SarifInputs {
-            duplicate_exports: &[],
-            missing_handlers: &[],
-            unused_handlers: &[],
-            dead_exports: &dead,
-            circular_imports: &[],
-            pipeline_summary: &json!({}),
-            snapshot: None,
-        };
-        assert!(print_sarif(inputs).is_ok());
-    }
-
-    #[test]
-    fn test_print_sarif_with_circular_imports() {
-        let cycles = vec![vec![
-            "src/a.ts".to_string(),
-            "src/b.ts".to_string(),
-            "src/a.ts".to_string(),
-        ]];
-        let inputs = SarifInputs {
-            duplicate_exports: &[],
-            missing_handlers: &[],
-            unused_handlers: &[],
-            dead_exports: &[],
-            circular_imports: &cycles,
-            pipeline_summary: &json!({}),
-            snapshot: None,
-        };
-        assert!(print_sarif(inputs).is_ok());
-    }
-
-    #[test]
-    fn test_print_sarif_with_ghost_events() {
-        let summary = json!({
-            "events": {
-                "ghostEmits": [
-                    {"name": "user-updated", "path": "src/user.ts", "line": 20, "confidence": "high"}
-                ]
-            }
-        });
-        let inputs = SarifInputs {
-            duplicate_exports: &[],
-            missing_handlers: &[],
-            unused_handlers: &[],
-            dead_exports: &[],
-            circular_imports: &[],
-            pipeline_summary: &summary,
-            snapshot: None,
-        };
-        assert!(print_sarif(inputs).is_ok());
-    }
-
-    #[test]
-    fn test_print_sarif_with_orphan_listeners() {
-        let summary = json!({
-            "events": {
-                "orphanListeners": [
-                    {"name": "deleted-event", "path": "src/listener.ts", "line": 15}
-                ]
-            }
-        });
-        let inputs = SarifInputs {
-            duplicate_exports: &[],
-            missing_handlers: &[],
-            unused_handlers: &[],
-            dead_exports: &[],
-            circular_imports: &[],
-            pipeline_summary: &summary,
-            snapshot: None,
-        };
-        assert!(print_sarif(inputs).is_ok());
-    }
-
-    #[test]
-    fn test_print_sarif_full() {
-        let dups = vec![mock_dup("Component", vec!["src/a.tsx", "src/b.tsx"])];
-        let missing = vec![mock_gap("api_call", vec![("src/api.ts", 5)])];
-        let unused = vec![mock_gap("legacy_fn", vec![("src-tauri/src/main.rs", 100)])];
-        let dead = vec![mock_dead("src/old.ts", "deprecated", Some(1))];
-        let cycles = vec![vec!["src/x.ts".to_string(), "src/y.ts".to_string()]];
-        let summary = json!({
-            "events": {
-                "ghostEmits": [{"name": "evt", "path": "a.ts", "line": 1, "confidence": "low"}],
-                "orphanListeners": [{"name": "old-evt", "path": "b.ts", "line": 2}]
-            }
-        });
-
-        let inputs = SarifInputs {
-            duplicate_exports: &dups,
-            missing_handlers: &missing,
-            unused_handlers: &unused,
-            dead_exports: &dead,
-            circular_imports: &cycles,
-            pipeline_summary: &summary,
-            snapshot: None,
-        };
-        assert!(print_sarif(inputs).is_ok());
-    }
-
-    #[test]
-    fn test_print_sarif_multiple_locations() {
-        let missing = vec![mock_gap(
-            "shared_command",
-            vec![
-                ("src/page1.ts", 10),
-                ("src/page2.ts", 20),
-                ("src/page3.ts", 30),
-            ],
-        )];
-        let inputs = SarifInputs {
-            duplicate_exports: &[],
-            missing_handlers: &missing,
-            unused_handlers: &[],
-            dead_exports: &[],
-            circular_imports: &[],
-            pipeline_summary: &json!({}),
-            snapshot: None,
-        };
-        assert!(print_sarif(inputs).is_ok());
-    }
-
-    #[test]
-    fn test_print_sarif_with_enrichment() {
-        use crate::snapshot::{GraphEdge, Snapshot, SnapshotMetadata};
-
-        // Create a simple test snapshot with edges
-        let snapshot = Snapshot {
-            metadata: SnapshotMetadata::default(),
-            files: vec![],
-            edges: vec![
-                GraphEdge {
-                    from: "src/utils.ts".to_string(),
-                    to: "src/component.ts".to_string(),
-                    label: "import".to_string(),
-                },
-                GraphEdge {
-                    from: "src/other.ts".to_string(),
-                    to: "src/utils.ts".to_string(),
-                    label: "import".to_string(),
-                },
-            ],
-            export_index: Default::default(),
-            command_bridges: vec![],
-            event_bridges: vec![],
-            barrels: vec![],
-        };
-
-        let dead = vec![mock_dead("src/utils.ts", "unusedHelper", Some(10))];
-        let inputs = SarifInputs {
-            duplicate_exports: &[],
-            missing_handlers: &[],
-            unused_handlers: &[],
-            dead_exports: &dead,
-            circular_imports: &[],
-            pipeline_summary: &json!({}),
-            snapshot: Some(&snapshot),
-        };
-
-        let result = generate_sarif(inputs);
-
-        // Verify the result contains loctree enrichment fields
-        let results = result["runs"][0]["results"].as_array().unwrap();
-        assert_eq!(results.len(), 1);
-
-        let props = &results[0]["properties"];
-        assert!(props.get("loctree").is_some());
-
-        let loctree = &props["loctree"];
-        assert_eq!(loctree["is_dead_code"], true);
-        assert_eq!(loctree["confidence_level"], "HIGH");
-        // blast_radius: 1 (utils.ts imports component.ts)
-        assert_eq!(loctree["blast_radius"], 1);
-        // consumer_count: 1 (other.ts imports utils.ts)
-        assert_eq!(loctree["consumer_count"], 1);
-    }
+pub fn print_sarif(inputs: SarifInputs) {
+    println!("{}", generate_sarif_string(inputs));
 }
 
 #[cfg(test)]
@@ -610,6 +255,11 @@ mod tests {
             symbol: symbol.to_string(),
             line,
             confidence: "high".to_string(),
+            reason: format!(
+                "No imports found for '{}'. Checked: resolved imports (0 matches), star re-exports (none), local references (none)",
+                symbol
+            ),
+            open_url: None,
         }
     }
 
@@ -620,6 +270,7 @@ mod tests {
             missing_handlers: &[],
             unused_handlers: &[],
             dead_exports: &[],
+            circular_imports: &[],
             pipeline_summary: &json!({}),
         };
         // Should not panic
@@ -634,6 +285,7 @@ mod tests {
             missing_handlers: &[],
             unused_handlers: &[],
             dead_exports: &[],
+            circular_imports: &[],
             pipeline_summary: &json!({}),
         };
         print_sarif(inputs);
@@ -647,6 +299,7 @@ mod tests {
             missing_handlers: &missing,
             unused_handlers: &[],
             dead_exports: &[],
+            circular_imports: &[],
             pipeline_summary: &json!({}),
         };
         print_sarif(inputs);
@@ -660,6 +313,7 @@ mod tests {
             missing_handlers: &[],
             unused_handlers: &unused,
             dead_exports: &[],
+            circular_imports: &[],
             pipeline_summary: &json!({}),
         };
         print_sarif(inputs);
@@ -676,6 +330,25 @@ mod tests {
             missing_handlers: &[],
             unused_handlers: &[],
             dead_exports: &dead,
+            circular_imports: &[],
+            pipeline_summary: &json!({}),
+        };
+        print_sarif(inputs);
+    }
+
+    #[test]
+    fn test_print_sarif_with_circular_imports() {
+        let cycles = vec![vec![
+            "src/a.ts".to_string(),
+            "src/b.ts".to_string(),
+            "src/a.ts".to_string(),
+        ]];
+        let inputs = SarifInputs {
+            duplicate_exports: &[],
+            missing_handlers: &[],
+            unused_handlers: &[],
+            dead_exports: &[],
+            circular_imports: &cycles,
             pipeline_summary: &json!({}),
         };
         print_sarif(inputs);
@@ -695,6 +368,7 @@ mod tests {
             missing_handlers: &[],
             unused_handlers: &[],
             dead_exports: &[],
+            circular_imports: &[],
             pipeline_summary: &summary,
         };
         print_sarif(inputs);
@@ -714,6 +388,7 @@ mod tests {
             missing_handlers: &[],
             unused_handlers: &[],
             dead_exports: &[],
+            circular_imports: &[],
             pipeline_summary: &summary,
         };
         print_sarif(inputs);
@@ -725,6 +400,7 @@ mod tests {
         let missing = vec![mock_gap("api_call", vec![("src/api.ts", 5)])];
         let unused = vec![mock_gap("legacy_fn", vec![("src-tauri/src/main.rs", 100)])];
         let dead = vec![mock_dead("src/old.ts", "deprecated", Some(1))];
+        let cycles = vec![vec!["src/x.ts".to_string(), "src/y.ts".to_string()]];
         let summary = json!({
             "events": {
                 "ghostEmits": [{"name": "evt", "path": "a.ts", "line": 1, "confidence": "low"}],
@@ -737,6 +413,7 @@ mod tests {
             missing_handlers: &missing,
             unused_handlers: &unused,
             dead_exports: &dead,
+            circular_imports: &cycles,
             pipeline_summary: &summary,
         };
         print_sarif(inputs);
@@ -757,6 +434,7 @@ mod tests {
             missing_handlers: &missing,
             unused_handlers: &[],
             dead_exports: &[],
+            circular_imports: &[],
             pipeline_summary: &json!({}),
         };
         print_sarif(inputs);

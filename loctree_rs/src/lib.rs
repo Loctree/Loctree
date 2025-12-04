@@ -55,7 +55,7 @@
 //!
 //! See the [README](https://github.com/Loctree/Loctree) for full documentation.
 
-#![doc(html_root_url = "https://docs.rs/loctree/0.5.7")]
+#![doc(html_root_url = "https://docs.rs/loctree/0.5.11")]
 #![doc(
     html_favicon_url = "https://raw.githubusercontent.com/Loctree/Loctree/main/assets/loctree-logo.svg"
 )]
@@ -238,6 +238,25 @@ pub mod git;
 /// - [`DeadCodeDiff`](diff::DeadCodeDiff) - Dead code changes
 /// - [`ImpactAnalysis`](diff::ImpactAnalysis) - Change impact assessment
 pub mod diff;
+
+/// Query API for fast lookups against the cached snapshot.
+///
+/// Provides interactive queries without re-scanning:
+/// - `who-imports <file>` - Find all files that import a given file
+/// - `where-symbol <symbol>` - Find where a symbol is defined
+/// - `component-of <file>` - Show what component/module a file belongs to
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use loctree::{query, snapshot};
+/// use std::path::Path;
+///
+/// let snapshot = snapshot::Snapshot::load(Path::new(".")).unwrap();
+/// let result = query::query_who_imports(&snapshot, "src/utils.ts");
+/// println!("Found {} importers", result.results.len());
+/// ```
+pub mod query;
 
 // ============================================================================
 // Re-exports for convenience

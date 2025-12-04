@@ -17,8 +17,6 @@ if [ -n "$STAGED_RS" ]; then
   (cd loctree_rs && cargo fmt)
   (cd reports && cargo fmt)
   (cd landing && cargo fmt)
-  (cd loctree-mcp && cargo fmt)
-  (cd loctree_lsp && cargo fmt)
 
   # Re-add formatted files
   echo "$STAGED_RS" | xargs -I {} git add "{}" 2>/dev/null || true
@@ -62,20 +60,6 @@ if [ -n "$STAGED_RS" ]; then
   if echo "$STAGED_RS" | grep -q "^landing/"; then
     (cd landing && cargo check --quiet) || {
       echo "❌ landing compilation errors. Fix before committing."
-      exit 1
-    }
-  fi
-
-  if echo "$STAGED_RS" | grep -q "^loctree-mcp/"; then
-    (cd loctree-mcp && cargo check --quiet) || {
-      echo "❌ loctree-mcp compilation errors. Fix before committing."
-      exit 1
-    }
-  fi
-
-  if echo "$STAGED_RS" | grep -q "^loctree_lsp/"; then
-    (cd loctree_lsp && cargo check --quiet) || {
-      echo "❌ loctree_lsp compilation errors. Fix before committing."
       exit 1
     }
   fi

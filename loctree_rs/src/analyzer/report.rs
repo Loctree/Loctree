@@ -120,6 +120,14 @@ pub struct CommandBridge {
     pub language: String,
 }
 
+#[derive(Clone, Default, Serialize)]
+pub struct TreeNode {
+    pub path: String,
+    pub loc: usize,
+    #[serde(default)]
+    pub children: Vec<TreeNode>,
+}
+
 #[derive(Serialize)]
 pub struct ReportSection {
     pub root: String,
@@ -140,6 +148,8 @@ pub struct ReportSection {
     /// Full command bridges for FE↔BE comparison table
     pub command_bridges: Vec<CommandBridge>,
     pub open_base: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tree: Option<Vec<TreeNode>>,
     pub graph: Option<GraphData>,
     pub graph_warning: Option<String>,
     pub insights: Vec<AiInsight>,

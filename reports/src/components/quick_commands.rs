@@ -128,7 +128,7 @@ fn CommandItem(#[prop(into)] cmd: String, #[prop(into)] desc: String) -> impl In
                 data-copy=cmd_for_copy
                 title="Copy to clipboard"
             >
-                "Copy"
+                "📋"
             </button>
         </div>
     }

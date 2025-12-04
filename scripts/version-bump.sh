@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Flexible version bump script with scoped targets.
-# Usage: ./scripts/version-bump.sh [--patch|--minor|--major] [--all|--loctree|--report|--landing]
-# Defaults: --patch --all
+# Usage: ./scripts/version-bump.sh [--patch|--minor|--major] [--all|--loctree|--report|--landing] [--dev] [--dry-run]
+# Defaults: --patch --all (unless --dev with no bump flag → keep version, add -dev)
 # Rules:
 #   - --all / --loctree update UI occurrences (reports footer, landing easter egg/version) via sync-version
 #   - --report / --landing do NOT touch UI occurrences
@@ -13,16 +13,28 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 bump_type="patch"
+bump_flag_set=false
 scope="all"
+dev_suffix=false
+dry_run=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --patch|--minor|--major)
       bump_type="${1#--}"
+      bump_flag_set=true
       shift
       ;;
     --all|--loctree|--report|--landing)
       scope="${1#--}"
+      shift
+      ;;
+    --dev)
+      dev_suffix=true
+      shift
+      ;;
+    --dry-run)
+      dry_run=true
       shift
       ;;
     *)
@@ -31,6 +43,11 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+# If --dev is set without an explicit bump flag, keep current numeric version and just add -dev
+if $dev_suffix && ! $bump_flag_set; then
+  bump_type="none"
+fi
 
 include_loctree=false
 include_report=false
@@ -59,6 +76,11 @@ fi
 
 bump_version() {
   local current="$1" kind="$2"
+  current="${current%-dev}" # strip existing -dev if present
+  if [[ "$kind" == "none" ]]; then
+    echo "$current"
+    return
+  fi
   IFS='.' read -r major minor patch <<<"$current"
   case "$kind" in
     patch) patch=$((patch + 1)) ;;
@@ -105,6 +127,15 @@ fi
 echo "Bump type: $bump_type"
 echo "Scope: $scope"
 echo "Versions -> loctree: $new_loctree_ver | report: $new_report_ver | landing: $new_landing_ver"
+if $dev_suffix; then
+  new_loctree_ver="${new_loctree_ver%-dev}-dev"
+  new_report_ver="${new_report_ver%-dev}-dev"
+  new_landing_ver="${new_landing_ver%-dev}-dev"
+  echo "Applying -dev suffix"
+fi
+if $dry_run; then
+  echo "Dry-run: will skip publish/commit"
+fi
 
 # Update loctree + UI (only when loctree/all)
 if $include_loctree; then
@@ -143,14 +174,95 @@ if $include_loctree; then
   if [[ -z "${CARGO_REGISTRY_TOKEN:-}" ]]; then
     echo "CARGO_REGISTRY_TOKEN not set; skipping publish" >&2
   else
-    echo "==> Publish crate loctree v$new_loctree_ver"
-    cargo publish --manifest-path "$ROOT_DIR/loctree_rs/Cargo.toml" --locked
+  echo "==> Publish crate loctree v$new_loctree_ver"
+    if $dry_run; then
+      echo "Dry-run: skipping publish"
+    else
+      cargo publish --manifest-path "$ROOT_DIR/loctree_rs/Cargo.toml" --locked
+    fi
   fi
 fi
 
-echo "==> Git commit (no push)"
-git -C "$ROOT_DIR" add -A
-git -C "$ROOT_DIR" commit -m "Bump versions: loctree=$new_loctree_ver report=$new_report_ver landing=$new_landing_ver"
+if $dry_run; then
+  echo "==> Dry-run: skipping git commit"
+else
+  echo "==> Git commit (no push)"
+  git -C "$ROOT_DIR" add -A
+  git -C "$ROOT_DIR" commit -m "Bump versions: loctree=$new_loctree_ver report=$new_report_ver landing=$new_landing_ver"
+fi
+
+# Generate changelog entry from conventional commits
+generate_changelog_entry() {
+  local version="$1"
+  local date=$(date +%Y-%m-%d)
+  local last_tag=$(git -C "$ROOT_DIR" describe --tags --abbrev=0 2>/dev/null || echo "")
+  local range="${last_tag:+$last_tag..HEAD}"
+
+  echo "## [$version] - $date"
+  echo ""
+
+  local added=""
+  local changed=""
+  local fixed=""
+  local removed=""
+
+  # Parse conventional commits
+  while IFS= read -r commit; do
+    [[ -z "$commit" ]] && continue
+    local subject="${commit#* }"
+
+    case "$subject" in
+      feat:*|feat\(*\):*)
+        local msg="${subject#feat:}"
+        msg="${msg#feat(*):}"
+        msg="${msg# }"
+        added+="- ${msg}\n"
+        ;;
+      fix:*|fix\(*\):*)
+        local msg="${subject#fix:}"
+        msg="${msg#fix(*):}"
+        msg="${msg# }"
+        fixed+="- ${msg}\n"
+        ;;
+      refactor:*|perf:*|chore:*)
+        local msg="${subject#*:}"
+        msg="${msg# }"
+        changed+="- ${msg}\n"
+        ;;
+      *BREAKING*|*breaking*)
+        changed+="- **BREAKING**: ${subject}\n"
+        ;;
+    esac
+  done < <(git -C "$ROOT_DIR" log --oneline $range 2>/dev/null)
+
+  [[ -n "$added" ]] && echo "### Added" && echo -e "$added"
+  [[ -n "$changed" ]] && echo "### Changed" && echo -e "$changed"
+  [[ -n "$fixed" ]] && echo "### Fixed" && echo -e "$fixed"
+  [[ -n "$removed" ]] && echo "### Removed" && echo -e "$removed"
+}
+
+# Insert changelog entry after ## [Released] line
+if $include_loctree && [[ -f "$ROOT_DIR/CHANGELOG.md" ]]; then
+  echo "==> Generating changelog entry"
+  changelog_entry=$(generate_changelog_entry "$new_loctree_ver")
+
+  if [[ -n "$changelog_entry" ]]; then
+    # Create temp file with new entry inserted after ## [Released]
+    awk -v entry="$changelog_entry" '
+      /^## \[Released\]/ {
+        print
+        print ""
+        print entry
+        next
+      }
+      { print }
+    ' "$ROOT_DIR/CHANGELOG.md" > "$ROOT_DIR/CHANGELOG.md.tmp"
+    mv "$ROOT_DIR/CHANGELOG.md.tmp" "$ROOT_DIR/CHANGELOG.md"
+    echo "  Updated: CHANGELOG.md"
+  else
+    echo "  No conventional commits found since last tag"
+  fi
+fi
 
 echo ""
 echo "Done. Remember to push and tag if desired:"

@@ -6,19 +6,77 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 use crate::args::ParsedArgs;
+use crate::snapshot::GitContext;
 use crate::types::{FileAnalysis, ImportKind, ImportResolutionKind, OutputMode, ReexportKind};
 
 use super::CommandGap;
 use super::RankedDup;
 use super::ReportSection;
 use super::classify::language_from_path;
+use super::dead_parrots::find_dead_exports;
 use super::graph::{MAX_GRAPH_EDGES, MAX_GRAPH_NODES, build_graph_data};
 use super::html::render_html_report;
 use super::insights::collect_ai_insights;
 use super::open_server::current_open_base;
 use super::report::CommandBridge;
+use super::report::TreeNode;
 use super::root_scan::{RootContext, normalize_module_id};
 use super::scan::resolve_event_constants_across_files;
+
+fn build_tree(analyses: &[FileAnalysis], root_path: &std::path::Path) -> Vec<TreeNode> {
+    #[derive(Default)]
+    struct TmpNode {
+        loc: usize,
+        children: std::collections::BTreeMap<String, TmpNode>,
+    }
+
+    let mut root = TmpNode::default();
+    let mut paths: Vec<(Vec<String>, usize)> = analyses
+        .iter()
+        .map(|a| {
+            let rel = std::path::Path::new(&a.path)
+                .strip_prefix(root_path)
+                .unwrap_or_else(|_| std::path::Path::new(&a.path))
+                .iter()
+                .map(|p| p.to_string_lossy().to_string())
+                .collect::<Vec<_>>();
+            (rel, a.loc)
+        })
+        .collect();
+    paths.sort_by(|a, b| a.0.cmp(&b.0));
+
+    for (parts, loc) in paths {
+        let mut cursor = &mut root;
+        for part in parts {
+            let entry = cursor.children.entry(part).or_default();
+            cursor = entry;
+        }
+        cursor.loc = loc;
+    }
+
+    fn finalize(name: Option<String>, node: &TmpNode) -> TreeNode {
+        let mut loc_sum = node.loc;
+        let mut children: Vec<TreeNode> = node
+            .children
+            .iter()
+            .map(|(k, v)| finalize(Some(k.clone()), v))
+            .collect();
+        for c in &children {
+            loc_sum += c.loc;
+        }
+        children.sort_by(|a, b| a.path.cmp(&b.path));
+        TreeNode {
+            path: name.unwrap_or_default(),
+            loc: loc_sum,
+            children,
+        }
+    }
+
+    root.children
+        .iter()
+        .map(|(k, v)| finalize(Some(k.clone()), v))
+        .collect()
+}
 
 pub struct RootArtifacts {
     pub json_items: Vec<serde_json::Value>,
@@ -36,13 +94,15 @@ pub fn process_root_context(
     global_unregistered_handlers: &[CommandGap],
     global_unused_handlers: &[CommandGap],
     pipeline_summary: &serde_json::Value,
+    git: Option<&GitContext>,
     schema_name: &str,
     schema_version: &str,
+    global_analyses: &[FileAnalysis],
 ) -> RootArtifacts {
     let mut json_items = Vec::new();
     let RootContext {
         root_path,
-        options,
+        options: _options,
         mut analyses,
         export_index,
         dynamic_summary,
@@ -89,8 +149,8 @@ pub fn process_root_context(
             &loc_map,
             fe_commands,
             be_commands,
-            options.max_graph_nodes.unwrap_or(MAX_GRAPH_NODES),
-            options.max_graph_edges.unwrap_or(MAX_GRAPH_EDGES),
+            parsed.max_graph_nodes.unwrap_or(MAX_GRAPH_NODES),
+            parsed.max_graph_edges.unwrap_or(MAX_GRAPH_EDGES),
         )
     } else {
         (None, None)
@@ -106,6 +166,8 @@ pub fn process_root_context(
 
     let mut imports_targeted: HashSet<String> = HashSet::new();
     let mut files_json: Vec<_> = Vec::new();
+    let mut casing_issues: Vec<serde_json::Value> = Vec::new();
+    let mut dead_symbols_total = 0usize;
     for path in &sorted_paths {
         if let Some(a) = analysis_by_path.get(path) {
             let mut imports = a.imports.clone();
@@ -139,7 +201,23 @@ pub fn process_root_context(
                 if let Some(resolved) = &re.resolved {
                     imports_targeted.insert(resolved.clone());
                     imports_targeted.insert(normalize_module_id(resolved).as_key());
+                } else {
+                    imports_targeted.insert(normalize_module_id(&re.source).as_key());
+                    imports_targeted.insert(re.source.clone());
                 }
+            }
+            for dyn_imp in &a.dynamic_imports {
+                imports_targeted.insert(dyn_imp.clone());
+                imports_targeted.insert(normalize_module_id(dyn_imp).as_key());
+            }
+
+            for issue in &a.command_payload_casing {
+                casing_issues.push(json!({
+                    "command": issue.command,
+                    "key": issue.key,
+                    "path": issue.path,
+                    "line": issue.line,
+                }));
             }
 
             files_json.push(json!({
@@ -153,7 +231,12 @@ pub fn process_root_context(
                 "imports": imports.iter().map(|i| json!({
                     "source": i.source,
                     "sourceRaw": i.source_raw,
-                    "kind": match i.kind { ImportKind::Static => "static", ImportKind::SideEffect => "side-effect", ImportKind::Dynamic => "dynamic" },
+                    "kind": match i.kind {
+                        ImportKind::Static => "static",
+                        ImportKind::Type => "type",
+                        ImportKind::SideEffect => "side-effect",
+                        ImportKind::Dynamic => "dynamic",
+                    },
                     "resolvedPath": i.resolved_path,
                     "isBareModule": i.is_bare,
                     "resolutionKind": match i.resolution {
@@ -502,30 +585,44 @@ pub fn process_root_context(
         a_path.cmp(b_path)
     });
 
+    // Use the canonical find_dead_exports() which includes:
+    // - Transitive reachability from dynamic imports (React.lazy, Next.js dynamic)
+    // - imported_by_name fallback for $lib/, @scope/ aliases
+    // - Skip patterns for framework entry points, .d.ts, configs, tests
     let mut dead_symbols = Vec::new();
     if !parsed.skip_dead_symbols {
-        for (name, occs) in &symbol_occurrences {
-            if occs.iter().all(|(path, _, _, _, norm)| {
-                !imports_targeted.contains(path) && !imports_targeted.contains(norm)
-            }) {
-                let mut paths: Vec<_> = occs.iter().map(|(p, _, _, _, _)| p.clone()).collect();
-                paths.sort();
-                paths.dedup();
-                let public_surface = paths.iter().any(|p| {
-                    p.ends_with("index.ts")
-                        || p.ends_with("index.tsx")
-                        || p.ends_with("mod.rs")
-                        || p.ends_with("lib.rs")
-                });
-                dead_symbols
-                    .push(json!({"name": name, "paths": paths, "publicSurface": public_surface}));
-            }
+        let open_base = current_open_base();
+        let dead_exports = find_dead_exports(global_analyses, true, open_base.as_deref());
+
+        // Convert DeadExport results to the JSON format expected by -A mode
+        // Group by symbol name since old algorithm grouped by name
+        let mut by_name: HashMap<String, Vec<String>> = HashMap::new();
+        for de in &dead_exports {
+            by_name
+                .entry(de.symbol.clone())
+                .or_default()
+                .push(de.file.clone());
         }
+
+        for (name, mut paths) in by_name {
+            paths.sort();
+            paths.dedup();
+            let public_surface = paths.iter().any(|p| {
+                p.ends_with("index.ts")
+                    || p.ends_with("index.tsx")
+                    || p.ends_with("mod.rs")
+                    || p.ends_with("lib.rs")
+            });
+            dead_symbols
+                .push(json!({"name": name, "paths": paths, "publicSurface": public_surface}));
+        }
+
         dead_symbols.sort_by(|a, b| {
             let a_name = a["name"].as_str().unwrap_or("");
             let b_name = b["name"].as_str().unwrap_or("");
             a_name.cmp(b_name)
         });
+        dead_symbols_total = dead_symbols.len();
         dead_symbols.truncate(parsed.top_dead_symbols);
     }
 
@@ -591,7 +688,7 @@ pub fn process_root_context(
         bridges_for_ai.push(cmd.clone());
     }
 
-    if matches!(options.output, OutputMode::Json | OutputMode::Jsonl) {
+    if matches!(parsed.output, OutputMode::Json | OutputMode::Jsonl) {
         if parsed.ai_mode {
             let top_limit = parsed.summary_limit;
             let mut event_alerts = Vec::new();
@@ -618,18 +715,24 @@ pub fn process_root_context(
                 "schemaVersion": schema_version,
                 "generatedAt": generated_at,
                 "rootDir": root_path,
+                "git": {
+                    "repo": git.and_then(|g| g.repo.clone()),
+                    "branch": git.and_then(|g| g.branch.clone()),
+                    "commit": git.and_then(|g| g.commit.clone()),
+                    "scanId": git.and_then(|g| g.scan_id.clone()),
+                },
                 "languages": languages_vec,
                 "filesAnalyzed": analyses.len(),
                 "summary": {
                     "duplicateExports": filtered_ranked.len(),
                     "reexportFiles": reexport_files.len(),
                     "dynamicImports": dynamic_summary.len(),
-                    "commands": {
-                        "frontendCalls": fe_commands.len(),
-                        "backendHandlers": be_commands.len(),
-                        "missingHandlers": missing_handlers.len(),
-                        "unusedHandlers": unused_handlers.len(),
-                    },
+                "commands": {
+                    "frontendCalls": fe_commands.len(),
+                    "backendHandlers": be_commands.len(),
+                    "missingHandlers": missing_handlers.len(),
+                    "unusedHandlers": unused_handlers.len(),
+                },
                     "events": {
                         "ghost": ghost_events.len(),
                         "orphan": orphan_listeners.len(),
@@ -683,7 +786,7 @@ pub fn process_root_context(
                 }
             });
 
-            if matches!(options.output, OutputMode::Jsonl) {
+            if matches!(parsed.output, OutputMode::Jsonl) {
                 if let Ok(line) = serde_json::to_string(&ai_payload) {
                     println!("{}", line);
                 } else {
@@ -699,6 +802,12 @@ pub fn process_root_context(
                 "generatedAt": generated_at,
                 "rootDir": root_path,
                 "root": root_path,
+                "git": {
+                    "repo": git.and_then(|g| g.repo.clone()),
+                    "branch": git.and_then(|g| g.branch.clone()),
+                    "commit": git.and_then(|g| g.commit.clone()),
+                    "scanId": git.and_then(|g| g.scan_id.clone()),
+                },
                 "languages": languages_vec,
                 "filesAnalyzed": analyses.len(),
                 "duplicateExports": filtered_ranked
@@ -739,6 +848,7 @@ pub fn process_root_context(
                         }
                         obj
                     }).collect::<Vec<_>>(),
+                    "payloadCasing": casing_issues,
                 },
                 "commands2": commands2,
                 "tauri_analysis": {
@@ -789,7 +899,7 @@ pub fn process_root_context(
                 "files": files_json,
             });
 
-            if matches!(options.output, OutputMode::Jsonl) {
+            if matches!(parsed.output, OutputMode::Jsonl) {
                 if let Ok(line) = serde_json::to_string(&payload) {
                     println!("{}", line);
                 } else {
@@ -809,6 +919,17 @@ pub fn process_root_context(
         println!("  Duplicate exports: {}", filtered_ranked.len());
         println!("  Files with re-exports: {}", reexport_files.len());
         println!("  Dynamic imports: {}", dynamic_summary.len());
+        if dead_symbols_total > 0 {
+            println!(
+                "  Dead exports (high confidence): {}{}",
+                dead_symbols_total,
+                if dead_symbols_total > parsed.top_dead_symbols {
+                    format!(" (showing top {})", parsed.top_dead_symbols)
+                } else {
+                    String::new()
+                }
+            );
+        }
 
         if !duplicate_exports.is_empty() {
             println!(
@@ -938,6 +1059,8 @@ Top duplicate exports (showing up to {}):",
         // Calculate total LOC
         let total_loc: usize = analyses.iter().map(|a| a.loc).sum();
 
+        let tree = build_tree(&analyses, &root_path);
+
         report_section = Some(ReportSection {
             insights,
             root: root_path.display().to_string(),
@@ -948,7 +1071,7 @@ Top duplicate exports (showing up to {}):",
             ranked_dups: filtered_ranked.clone(),
             cascades: cascades.clone(),
             dynamic: sorted_dyn,
-            analyze_limit: options.analyze_limit,
+            analyze_limit: parsed.analyze_limit,
             missing_handlers: missing_sorted,
             unregistered_handlers: unregistered_sorted,
             unused_handlers: unused_sorted,
@@ -959,10 +1082,11 @@ Top duplicate exports (showing up to {}):",
             } else {
                 None
             },
+            tree: Some(tree),
             graph: graph_data.clone(),
             graph_warning: graph_warning.clone(),
-            git_branch: None,
-            git_commit: None,
+            git_branch: git.and_then(|g| g.branch.clone()),
+            git_commit: git.and_then(|g| g.commit.clone()),
         });
     }
 
@@ -981,10 +1105,75 @@ pub fn write_report(
         std::fs::create_dir_all(dir)?;
     }
     render_html_report(report_path, sections)?;
+    // Show relative path for cleaner output (with ./ prefix for consistency)
+    let display_path = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| report_path.strip_prefix(&cwd).ok())
+        .map(|p| format!("./{}", p.display()))
+        .unwrap_or_else(|| report_path.display().to_string());
     if verbose {
-        eprintln!("[loctree][debug] wrote HTML to {}", report_path.display());
+        eprintln!("[loctree][debug] wrote HTML to {}", display_path);
     } else {
-        eprintln!("[loctree] HTML report written to {}", report_path.display());
+        eprintln!("[loctree] HTML report written to {}", display_path);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_tree;
+    use crate::types::FileAnalysis;
+    use std::path::Path;
+
+    #[test]
+    fn build_tree_aggregates_loc_and_hierarchy() {
+        let analyses = vec![
+            FileAnalysis {
+                path: "src/a.ts".into(),
+                loc: 10,
+                ..Default::default()
+            },
+            FileAnalysis {
+                path: "src/nested/b.ts".into(),
+                loc: 20,
+                ..Default::default()
+            },
+            FileAnalysis {
+                path: "src/nested/deeper/c.ts".into(),
+                loc: 30,
+                ..Default::default()
+            },
+        ];
+        let tree = build_tree(&analyses, Path::new("src"));
+        // Expect top-level nodes include a.ts and nested/
+        let a = tree.iter().find(|n| n.path == "a.ts").unwrap();
+        assert_eq!(a.loc, 10);
+        assert!(a.children.is_empty());
+
+        let nested = tree.iter().find(|n| n.path == "nested").unwrap();
+        assert_eq!(nested.loc, 50); // 20 + 30
+        let b = nested.children.iter().find(|c| c.path == "b.ts").unwrap();
+        assert_eq!(b.loc, 20);
+        let deeper = nested.children.iter().find(|c| c.path == "deeper").unwrap();
+        assert_eq!(deeper.path, "deeper");
+        assert_eq!(deeper.loc, 30);
+        assert_eq!(deeper.children.len(), 1);
+        let leaf = &deeper.children[0];
+        assert_eq!(leaf.path, "c.ts");
+        assert_eq!(leaf.loc, 30);
+    }
+
+    #[test]
+    fn build_tree_handles_root_prefix_mismatch() {
+        let analyses = vec![FileAnalysis {
+            path: "other/file.ts".into(),
+            loc: 5,
+            ..Default::default()
+        }];
+        // If strip_prefix fails, it should fall back to the full path parts.
+        let tree = build_tree(&analyses, Path::new("src"));
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree[0].path, "other");
+        assert_eq!(tree[0].loc, 5);
+    }
 }

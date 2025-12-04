@@ -1,7 +1,14 @@
+//! Circular import detection using Tarjan's SCC algorithm.
+//!
+//! Finds strongly connected components (cycles) in the import graph.
+//! Normalizes module paths to collapse barrels and extensions before detection.
+
 use std::cmp::min;
 use std::collections::{HashMap, HashSet};
 
 use serde_json::json;
+
+use super::root_scan::normalize_module_id;
 
 struct TarjanData {
     index: usize,
@@ -13,10 +20,43 @@ struct TarjanData {
 }
 
 pub fn find_cycles(edges: &[(String, String, String)]) -> Vec<Vec<String>> {
+    // Normalize modules to collapse barrels (index files) and JS/TS extensions.
+    // Keep a canonical display path for each normalized module id so output remains readable.
+    let mut canonical: HashMap<String, String> = HashMap::new();
+    let mut normalized_edges: Vec<(String, String)> = Vec::new();
+
+    for (from, to, _) in edges {
+        let norm_from = normalize_module_id(from).as_key();
+        let norm_to = normalize_module_id(to).as_key();
+        canonical
+            .entry(norm_from.clone())
+            .or_insert_with(|| from.clone());
+        canonical
+            .entry(norm_to.clone())
+            .or_insert_with(|| to.clone());
+        normalized_edges.push((norm_from, norm_to));
+    }
+
+    // Run Tarjan on normalized module ids
+    let cycles_norm = find_cycles_normalized(&normalized_edges);
+
+    // Map back to canonical display paths
+    cycles_norm
+        .into_iter()
+        .map(|cycle| {
+            cycle
+                .into_iter()
+                .map(|id| canonical.get(&id).cloned().unwrap_or(id))
+                .collect()
+        })
+        .collect()
+}
+
+fn find_cycles_normalized(edges: &[(String, String)]) -> Vec<Vec<String>> {
     let mut adj: HashMap<String, Vec<String>> = HashMap::new();
     let mut all_nodes = HashSet::new();
 
-    for (from, to, _) in edges {
+    for (from, to) in edges {
         adj.entry(from.clone()).or_default().push(to.clone());
         all_nodes.insert(from.clone());
         all_nodes.insert(to.clone());
@@ -265,5 +305,53 @@ mod tests {
         ];
         // Should not panic
         print_cycles(&cycles, false);
+    }
+
+    #[test]
+    fn detects_cycle_with_index_collapse() {
+        // Barrel (index.ts) re-export + consumer importing the barrel should still form a cycle
+        // after normalizing /index and TS/JS extensions.
+        let edges = vec![
+            (
+                "src/features/ai-suite/index.ts".to_string(),
+                "src/features/ai-suite/hooks/useFoo.ts".to_string(),
+                "reexport".to_string(),
+            ),
+            (
+                "src/features/ai-suite/hooks/useFoo.tsx".to_string(),
+                "src/features/ai-suite/index.tsx".to_string(),
+                "import".to_string(),
+            ),
+        ];
+        let cycles = find_cycles(&edges);
+        assert_eq!(cycles.len(), 1);
+        let cycle = &cycles[0];
+        assert_eq!(cycle.len(), 2);
+        assert!(cycle.iter().any(|p| p.contains("ai-suite/index")));
+        assert!(cycle.iter().any(|p| p.contains("hooks/useFoo")));
+    }
+
+    #[test]
+    fn collapses_ts_js_family_into_cycles() {
+        // Cross-extension imports (ts/js) should normalize to the same module id
+        // so cycles are detectable even when files are split by extension.
+        let edges = vec![
+            (
+                "src/utils/a.ts".to_string(),
+                "src/utils/b.ts".to_string(),
+                "import".to_string(),
+            ),
+            (
+                "src/utils/b.js".to_string(),
+                "src/utils/a.js".to_string(),
+                "import".to_string(),
+            ),
+        ];
+        let cycles = find_cycles(&edges);
+        assert_eq!(cycles.len(), 1);
+        let cycle = &cycles[0];
+        assert_eq!(cycle.len(), 2);
+        assert!(cycle.iter().any(|p| p.contains("utils/a")));
+        assert!(cycle.iter().any(|p| p.contains("utils/b")));
     }
 }
