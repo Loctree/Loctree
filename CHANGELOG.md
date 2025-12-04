@@ -6,6 +6,24 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Released]
 
+## [0.5.13] - 2025-12-09
+
+### Added
+- Circular-import quick wins now use real cycle data from `cycles::find_cycles`, surfaced in QuickWin output and tests.
+- Atomic snapshot writes (via `write_atomic`) for report/SARIF/analysis/dead/handlers/circular/races artifacts to avoid partial files and corruption.
+- Alias-aware dynamic import reachability (`@core/*`, Windows case-insensitive) with new fixtures/tests.
+
+### Changed
+- Unified CLI help paths: `--help-full` is handled consistently in both binaries; `search` hints now use `loctree …` wording everywhere.
+- Install/docs/CI instructions standardized on `cargo install loctree`; removed `curl | sh` mentions.
+- Tooltip layer helper (`.tooltip-floating` z-index 9999) and scrollbar CSS now ship with fallbacks.
+- Landing/AI README/changelog bumped to 0.5.12+ alignment for release metadata.
+
+### Fixed
+- Removed panics in QuickWin/SARIF/snapshot paths; errors now bubble as `Result` or log warnings instead of crashing.
+- Mutex poison recovery in `root_scan` avoids thread panics; dead export matching handles Windows casing correctly.
+- Ignored and removed generated `**/.loctree/**/report.html` fixture artifacts from the repo.
+
 ## [0.5.12] - 2025-12-08
 
 ### Added
