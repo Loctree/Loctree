@@ -68,7 +68,7 @@ pub fn ReportDocument(sections: Vec<ReportSection>, js_assets: JsAssets) -> impl
                         </nav>
 
                         <div class="app-footer">
-                            "loctree v0.5.10-dev"
+                            "loctree v0.5.11"
                             <br />
                             <span style="color:var(--theme-text-tertiary)">"Snapshot"</span>
                         </div>
