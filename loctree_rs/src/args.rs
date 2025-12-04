@@ -86,6 +86,10 @@ pub struct ParsedArgs {
     pub commands_missing_only: bool,
     /// Only commands unused on frontend
     pub commands_unused_only: bool,
+    /// Include tests in dead-export analysis
+    pub with_tests: bool,
+    /// Include helper/docs/scripts in dead-export analysis
+    pub with_helpers: bool,
 }
 
 impl Default for ParsedArgs {
@@ -160,6 +164,8 @@ impl Default for ParsedArgs {
             commands_name_filter: None,
             commands_missing_only: false,
             commands_unused_only: false,
+            with_tests: false,
+            with_helpers: false,
         }
     }
 }

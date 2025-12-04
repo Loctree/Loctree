@@ -168,6 +168,9 @@ fn main() -> std::io::Result<()> {
     install_broken_pipe_handler();
 
     // Get raw args for the new parser
+    // nosemgrep: rust.lang.security.args.args
+    // SECURITY: args() is used only for CLI flag parsing (paths, --json, etc.),
+    // not for security decisions. The executable path (args[0]) is skipped.
     let raw_args: Vec<String> = std::env::args().skip(1).collect();
 
     // Try new subcommand parser first

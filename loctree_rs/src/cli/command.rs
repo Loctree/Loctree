@@ -153,6 +153,9 @@ pub struct AutoOptions {
 
     /// Include normally-ignored directories (node_modules, target, .venv)
     pub scan_all: bool,
+
+    /// Generate AI agent feed report (ForAi mode)
+    pub for_agent_feed: bool,
 }
 
 /// Options for the `scan` command.
@@ -256,6 +259,12 @@ pub struct DeadOptions {
 
     /// Filter by file path pattern (regex)
     pub path_filter: Option<String>,
+
+    /// Include tests in dead-export detection (default: false)
+    pub with_tests: bool,
+
+    /// Include helper/scripts/docs files (default: false)
+    pub with_helpers: bool,
 }
 
 /// Options for the `cycles` command.

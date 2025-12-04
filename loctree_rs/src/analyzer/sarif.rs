@@ -229,9 +229,11 @@ mod tests {
             name: name.to_string(),
             canonical: name.to_lowercase(),
             files: files.into_iter().map(|s| s.to_string()).collect(),
+            locations: vec![],
             score: 1,
             prod_count: 0,
             dev_count: 0,
+            canonical_line: None,
             refactors: vec![],
         }
     }

@@ -122,6 +122,15 @@ pub struct DeadExport {
     pub open_url: Option<String>,
 }
 
+/// Controls which files are considered during dead-export detection.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DeadFilterConfig {
+    /// Include tests and fixtures (default: false)
+    pub include_tests: bool,
+    /// Include helper/scripts/docs files (default: false)
+    pub include_helpers: bool,
+}
+
 /// Search for symbol occurrences across analyzed files
 /// Note: The actual symbol search is performed during file scanning (in `analyze_file`).
 /// This function only collects the pre-computed matches from analyses.
@@ -345,11 +354,11 @@ pub fn print_similarity_results(
 /// Check if a file should be skipped from dead export detection.
 /// These are files whose exports are consumed by external tools/frameworks,
 /// not by regular imports in the codebase.
-fn should_skip_dead_export_check(analysis: &FileAnalysis) -> bool {
+fn should_skip_dead_export_check(analysis: &FileAnalysis, config: DeadFilterConfig) -> bool {
     let path = &analysis.path;
 
     // Test files and fixtures
-    if analysis.is_test {
+    if analysis.is_test && !config.include_tests {
         return true;
     }
 
@@ -366,7 +375,7 @@ fn should_skip_dead_export_check(analysis: &FileAnalysis) -> bool {
         "/tests/",
         "/spec/",
     ];
-    if TEST_DIRS.iter().any(|d| path.contains(d)) {
+    if TEST_DIRS.iter().any(|d| path.contains(d)) && !config.include_tests {
         return true;
     }
 
@@ -378,6 +387,18 @@ fn should_skip_dead_export_check(analysis: &FileAnalysis) -> bool {
     // Config files loaded dynamically by build tools (Vite, Jest, Cypress, etc.)
     if path.contains(".config.") || path.ends_with(".config.ts") || path.ends_with(".config.js") {
         return true;
+    }
+
+    if !config.include_helpers {
+        const HELPER_DIRS: &[&str] = &["/scripts/", "/script/", "/tools/", "/docs/"];
+        if HELPER_DIRS.iter().any(|d| path.contains(d))
+            || path.starts_with("scripts/")
+            || path.starts_with("script/")
+            || path.starts_with("tools/")
+            || path.starts_with("docs/")
+        {
+            return true;
+        }
     }
 
     // Framework routing/entry point conventions
@@ -574,6 +595,7 @@ pub fn find_dead_exports(
     analyses: &[FileAnalysis],
     high_confidence: bool,
     open_base: Option<&str>,
+    config: DeadFilterConfig,
 ) -> Vec<DeadExport> {
     // Build usage set: (resolved_path, symbol_name)
     let mut used_exports: HashSet<(String, String)> = HashSet::new();
@@ -697,7 +719,7 @@ pub fn find_dead_exports(
 
     for analysis in analyses {
         // Skip files that should be excluded from dead export detection
-        if should_skip_dead_export_check(analysis) {
+        if should_skip_dead_export_check(analysis, config) {
             continue;
         }
 
@@ -996,7 +1018,12 @@ mod tests {
         });
         importer.imports.push(imp);
 
-        let result = find_dead_exports(&[importer, exporter], false, None);
+        let result = find_dead_exports(
+            &[importer, exporter],
+            false,
+            None,
+            DeadFilterConfig::default(),
+        );
         assert!(
             result.is_empty(),
             "export imported with explicit symbol should not be dead"
@@ -1007,7 +1034,7 @@ mod tests {
     fn test_find_dead_exports_respects_local_usage() {
         let mut file = mock_file_with_exports("app.py", vec!["refresh"]);
         file.local_uses.push("refresh".to_string());
-        let result = find_dead_exports(&[file], false, None);
+        let result = find_dead_exports(&[file], false, None, DeadFilterConfig::default());
         assert!(
             result.is_empty(),
             "locally referenced export should not be marked dead"
@@ -1027,7 +1054,12 @@ mod tests {
         });
         importer.imports.push(imp);
 
-        let result = find_dead_exports(&[importer, exporter], true, None);
+        let result = find_dead_exports(
+            &[importer, exporter],
+            true,
+            None,
+            DeadFilterConfig::default(),
+        );
         assert!(
             result.is_empty(),
             "type-only import should count as usage for dead export detection"
@@ -1047,7 +1079,12 @@ mod tests {
         });
         importer.imports.push(imp);
 
-        let result = find_dead_exports(&[importer, exporter], false, None);
+        let result = find_dead_exports(
+            &[importer, exporter],
+            false,
+            None,
+            DeadFilterConfig::default(),
+        );
         assert!(
             result.is_empty(),
             "imports across JS/TSX extensions should prevent dead export marking"
@@ -1134,7 +1171,7 @@ mod tests {
     #[test]
     fn test_find_dead_exports_empty() {
         let analyses: Vec<FileAnalysis> = vec![];
-        let result = find_dead_exports(&analyses, false, None);
+        let result = find_dead_exports(&analyses, false, None, DeadFilterConfig::default());
         assert!(result.is_empty());
     }
 
@@ -1155,7 +1192,7 @@ mod tests {
         let exporter = mock_file_with_exports("src/utils.ts", vec!["helper"]);
 
         let analyses = vec![importer, exporter];
-        let result = find_dead_exports(&analyses, false, None);
+        let result = find_dead_exports(&analyses, false, None, DeadFilterConfig::default());
         assert!(result.is_empty());
     }
 
@@ -1165,7 +1202,7 @@ mod tests {
             mock_file("src/app.ts"),
             mock_file_with_exports("src/utils.ts", vec!["unusedHelper"]),
         ];
-        let result = find_dead_exports(&analyses, false, None);
+        let result = find_dead_exports(&analyses, false, None, DeadFilterConfig::default());
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].symbol, "unusedHelper");
     }
@@ -1177,8 +1214,36 @@ mod tests {
         test_file.is_test = true;
 
         let analyses = vec![mock_file("src/app.ts"), test_file];
-        let result = find_dead_exports(&analyses, false, None);
+        let result = find_dead_exports(&analyses, false, None, DeadFilterConfig::default());
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_find_dead_exports_includes_tests_when_requested() {
+        let mut test_file =
+            mock_file_with_exports("src/__tests__/utils.test.ts", vec!["testHelper"]);
+        test_file.is_test = true;
+
+        let analyses = vec![mock_file("src/app.ts"), test_file];
+        let result = find_dead_exports(
+            &analyses,
+            false,
+            None,
+            DeadFilterConfig {
+                include_tests: true,
+                include_helpers: false,
+            },
+        );
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].symbol, "testHelper");
+    }
+
+    #[test]
+    fn test_find_dead_exports_skips_helpers_by_default() {
+        let helper = mock_file_with_exports("scripts/cleanup.py", vec!["orphan"]);
+        let analyses = vec![mock_file("src/app.ts"), helper];
+        let result = find_dead_exports(&analyses, false, None, DeadFilterConfig::default());
+        assert!(result.is_empty(), "helper scripts should be skipped");
     }
 
     #[test]
@@ -1187,7 +1252,7 @@ mod tests {
             mock_file("src/app.ts"),
             mock_file_with_exports("src/utils.ts", vec!["default", "helper"]),
         ];
-        let result = find_dead_exports(&analyses, true, None);
+        let result = find_dead_exports(&analyses, true, None, DeadFilterConfig::default());
         assert!(!result.iter().any(|d| d.symbol == "default"));
     }
 
@@ -1198,7 +1263,12 @@ mod tests {
 
         let exporter = mock_file_with_exports("src/utils/index.ts", vec!["foo"]);
 
-        let result = find_dead_exports(&[importer, exporter], false, None);
+        let result = find_dead_exports(
+            &[importer, exporter],
+            false,
+            None,
+            DeadFilterConfig::default(),
+        );
         assert!(
             result.is_empty(),
             "dynamic import should mark module as used"
@@ -1223,7 +1293,12 @@ mod tests {
         exporter.exports[0].kind = "default".to_string();
         exporter.exports[0].export_type = "default".to_string();
 
-        let result = find_dead_exports(&[importer, exporter], false, None);
+        let result = find_dead_exports(
+            &[importer, exporter],
+            false,
+            None,
+            DeadFilterConfig::default(),
+        );
         assert!(
             result.is_empty(),
             "default import should mark export as used"
@@ -1242,7 +1317,7 @@ mod tests {
             resolved: Some("src/foo.ts".to_string()),
         });
 
-        let result = find_dead_exports(&[barrel], false, None);
+        let result = find_dead_exports(&[barrel], false, None, DeadFilterConfig::default());
         assert!(
             result.is_empty(),
             "reexport-only barrels should not be reported as dead exports"
@@ -1372,7 +1447,12 @@ mod integration_tests {
             ..Default::default()
         };
 
-        let result = find_dead_exports(&[importer, exporter], false, None);
+        let result = find_dead_exports(
+            &[importer, exporter],
+            false,
+            None,
+            DeadFilterConfig::default(),
+        );
         assert!(
             result.is_empty(),
             "RecommendationsPDFTemplate should NOT be dead. Found: {:?}",

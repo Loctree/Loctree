@@ -93,14 +93,28 @@ pub struct GraphData {
     pub truncation_reason: Option<String>,
 }
 
+/// Location of a duplicate export with line number
+#[derive(Clone, Serialize)]
+pub struct DupLocation {
+    pub file: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<usize>,
+}
+
 #[derive(Clone, Serialize)]
 pub struct RankedDup {
     pub name: String,
     pub files: Vec<String>,
+    /// Locations with line numbers (file, line)
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub locations: Vec<DupLocation>,
     pub score: usize,
     pub prod_count: usize,
     pub dev_count: usize,
     pub canonical: String,
+    /// Line number in canonical file
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub canonical_line: Option<usize>,
     pub refactors: Vec<String>,
 }
 

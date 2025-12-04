@@ -1086,7 +1086,12 @@ fn write_auto_artifacts(
         .flat_map(|ctx| ctx.filtered_ranked.clone())
         .collect();
     let high_confidence = parsed.dead_confidence.as_deref() == Some("high");
-    let dead_exports = find_dead_exports(&scan_results.global_analyses, high_confidence, None);
+    let dead_exports = find_dead_exports(
+        &scan_results.global_analyses,
+        high_confidence,
+        None,
+        crate::analyzer::dead_parrots::DeadFilterConfig::default(),
+    );
 
     let sarif_content = generate_sarif_string(SarifInputs {
         duplicate_exports: &all_ranked_dups,

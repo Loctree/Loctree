@@ -98,10 +98,12 @@ mod tests {
         let dup = RankedDup {
             name: "Foo".into(),
             files: vec!["a.ts".into(), "b.ts".into()],
+            locations: vec![],
             score: 2,
             prod_count: 2,
             dev_count: 0,
             canonical: "a.ts".into(),
+            canonical_line: None,
             refactors: vec!["b.ts".into()],
         };
 

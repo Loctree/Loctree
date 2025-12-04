@@ -32,7 +32,14 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
         Command::Auto(opts) => {
             // Auto mode: full scan with stack detection, save to .loctree/
             // Maps to Mode::Init (which does scan + snapshot)
-            parsed.mode = Mode::Init;
+            // Unless --for-agent-feed is set, then use Mode::ForAi
+            if opts.for_agent_feed {
+                parsed.mode = Mode::ForAi;
+                parsed.output = OutputMode::Json;
+            } else {
+                parsed.mode = Mode::Init;
+                parsed.auto_outputs = true;
+            }
             parsed.root_list = if opts.roots.is_empty() {
                 vec![PathBuf::from(".")]
             } else {
@@ -41,7 +48,6 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
             parsed.full_scan = opts.full_scan;
             parsed.scan_all = opts.scan_all;
             parsed.use_gitignore = true; // Auto mode respects gitignore by default
-            parsed.auto_outputs = true;
         }
 
         Command::Scan(opts) => {
@@ -119,6 +125,8 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
                 parsed.top_dead_symbols = top;
             }
             parsed.use_gitignore = true;
+            parsed.with_tests = opts.with_tests;
+            parsed.with_helpers = opts.with_helpers;
         }
 
         Command::Cycles(opts) => {
@@ -401,7 +409,19 @@ fn handle_diff_command(opts: &DiffOptions, global: &GlobalOptions) -> DispatchRe
         &changed_files,
     );
 
-    // Output results
+    // If problems_only flag is set, compute NEW problems only
+    if opts.problems_only {
+        return handle_problems_only_diff(
+            &from_snapshot,
+            &to_snapshot,
+            &diff,
+            since_path,
+            opts,
+            global,
+        );
+    }
+
+    // Output results (full diff)
     if global.json || opts.jsonl {
         // JSON/JSONL output
         if opts.jsonl {
@@ -491,6 +511,207 @@ fn handle_diff_command(opts: &DiffOptions, global: &GlobalOptions) -> DispatchRe
     DispatchResult::Exit(0)
 }
 
+/// Handle problems-only diff output: show only NEW problems
+fn handle_problems_only_diff(
+    from_snapshot: &crate::snapshot::Snapshot,
+    to_snapshot: &crate::snapshot::Snapshot,
+    _diff: &crate::diff::SnapshotDiff,
+    since_path: &str,
+    opts: &DiffOptions,
+    global: &GlobalOptions,
+) -> DispatchResult {
+    use crate::analyzer::cycles::find_cycles;
+    use crate::analyzer::dead_parrots::{DeadFilterConfig, find_dead_exports};
+    use serde_json::json;
+    use std::collections::HashSet;
+
+    // 1. Find dead exports in both snapshots
+    let dead_config = DeadFilterConfig::default();
+    let from_dead = find_dead_exports(&from_snapshot.files, true, None, dead_config);
+    let to_dead = find_dead_exports(&to_snapshot.files, true, None, dead_config);
+
+    // Build sets for comparison (use symbol, not name)
+    let from_dead_set: HashSet<(&str, &str)> = from_dead
+        .iter()
+        .map(|d| (d.file.as_str(), d.symbol.as_str()))
+        .collect();
+
+    let new_dead_exports: Vec<_> = to_dead
+        .iter()
+        .filter(|d| !from_dead_set.contains(&(d.file.as_str(), d.symbol.as_str())))
+        .collect();
+
+    // 2. Find circular imports (cycles) in both snapshots
+    // Extract edges from snapshots
+    let from_edges: Vec<(String, String, String)> = from_snapshot
+        .edges
+        .iter()
+        .map(|e| (e.from.clone(), e.to.clone(), e.label.clone()))
+        .collect();
+    let to_edges: Vec<(String, String, String)> = to_snapshot
+        .edges
+        .iter()
+        .map(|e| (e.from.clone(), e.to.clone(), e.label.clone()))
+        .collect();
+
+    let from_cycles = find_cycles(&from_edges);
+    let to_cycles = find_cycles(&to_edges);
+
+    // Build cycle signature sets for comparison
+    let from_cycle_sigs: HashSet<String> = from_cycles
+        .iter()
+        .map(|cycle| {
+            let mut sorted = cycle.clone();
+            sorted.sort();
+            sorted.join("|")
+        })
+        .collect();
+
+    let new_cycles: Vec<_> = to_cycles
+        .iter()
+        .filter(|cycle| {
+            let mut sorted = (*cycle).clone();
+            sorted.sort();
+            let sig = sorted.join("|");
+            !from_cycle_sigs.contains(&sig)
+        })
+        .collect();
+
+    // 3. Find missing handlers in both snapshots
+    let from_missing: HashSet<String> = from_snapshot
+        .command_bridges
+        .iter()
+        .filter(|b| !b.has_handler && b.is_called)
+        .map(|b| b.name.clone())
+        .collect();
+
+    let new_missing_handlers: Vec<_> = to_snapshot
+        .command_bridges
+        .iter()
+        .filter(|b| !b.has_handler && b.is_called && !from_missing.contains(&b.name))
+        .collect();
+
+    // Output results
+    if global.json || opts.jsonl {
+        let problems = json!({
+            "from": since_path,
+            "to": opts.to.as_deref().unwrap_or("(current)"),
+            "new_problems": {
+                "dead_exports": new_dead_exports.iter().map(|d| json!({
+                    "file": d.file,
+                    "symbol": d.symbol,
+                    "confidence": d.confidence,
+                    "line": d.line,
+                    "reason": d.reason,
+                })).collect::<Vec<_>>(),
+                "circular_imports": new_cycles.iter().map(|cycle| json!({
+                    "path": cycle,
+                    "length": cycle.len(),
+                })).collect::<Vec<_>>(),
+                "missing_handlers": new_missing_handlers.iter().map(|b| json!({
+                    "name": b.name,
+                    "frontend_calls": b.frontend_calls,
+                })).collect::<Vec<_>>(),
+            },
+            "summary": {
+                "new_dead_exports": new_dead_exports.len(),
+                "new_circular_imports": new_cycles.len(),
+                "new_missing_handlers": new_missing_handlers.len(),
+            }
+        });
+
+        if opts.jsonl {
+            match serde_json::to_string(&problems) {
+                Ok(json) => println!("{}", json),
+                Err(e) => {
+                    eprintln!("[loct][error] Failed to serialize problems: {}", e);
+                    return DispatchResult::Exit(1);
+                }
+            }
+        } else {
+            match serde_json::to_string_pretty(&problems) {
+                Ok(json) => println!("{}", json),
+                Err(e) => {
+                    eprintln!("[loct][error] Failed to serialize problems: {}", e);
+                    return DispatchResult::Exit(1);
+                }
+            }
+        }
+    } else {
+        // Human-readable output
+        println!("New Problems Since Last Snapshot:");
+        println!("  From: {}", since_path);
+        if let Some(ref to_path) = opts.to {
+            println!("  To:   {}", to_path);
+        } else {
+            println!("  To:   (current)");
+        }
+        println!();
+
+        let total_problems = new_dead_exports.len() + new_cycles.len() + new_missing_handlers.len();
+
+        if total_problems == 0 {
+            println!("✓ No new problems detected!");
+        } else {
+            if !new_dead_exports.is_empty() {
+                println!("New Dead Exports ({}):", new_dead_exports.len());
+                for export in &new_dead_exports {
+                    let confidence_indicator = match export.confidence.as_str() {
+                        "high" => "🔴",
+                        "medium" => "🟡",
+                        _ => "⚪",
+                    };
+                    let line_info = export.line.map(|l| format!(":{}", l)).unwrap_or_default();
+                    println!(
+                        "  {} {} in {}{} [{}]",
+                        confidence_indicator,
+                        export.symbol,
+                        export.file,
+                        line_info,
+                        export.confidence
+                    );
+                }
+                println!();
+            }
+
+            if !new_cycles.is_empty() {
+                println!("New Circular Imports ({}):", new_cycles.len());
+                for cycle in &new_cycles {
+                    println!("  Cycle of {} files:", cycle.len());
+                    for (i, file) in cycle.iter().enumerate() {
+                        if i == cycle.len() - 1 {
+                            println!("    {} → (back to {})", file, cycle[0]);
+                        } else {
+                            println!("    {}", file);
+                        }
+                    }
+                }
+                println!();
+            }
+
+            if !new_missing_handlers.is_empty() {
+                println!("New Missing Handlers ({}):", new_missing_handlers.len());
+                for bridge in &new_missing_handlers {
+                    println!("  Command: {}", bridge.name);
+                    println!("    Frontend calls ({}):", bridge.frontend_calls.len());
+                    for (file, line) in &bridge.frontend_calls {
+                        println!("      {}:{}", file, line);
+                    }
+                }
+                println!();
+            }
+
+            println!("Summary: {} new problem(s) detected", total_problems);
+        }
+
+        return DispatchResult::Exit(if total_problems > 0 { 1 } else { 0 });
+    }
+
+    // For JSON output, exit with non-zero if problems found
+    let total_problems = new_dead_exports.len() + new_cycles.len() + new_missing_handlers.len();
+    DispatchResult::Exit(if total_problems > 0 { 1 } else { 0 })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -501,6 +722,7 @@ mod tests {
             roots: vec![PathBuf::from(".")],
             full_scan: true,
             scan_all: false,
+            for_agent_feed: false,
         });
         let global = GlobalOptions::default();
         let parsed = command_to_parsed_args(&cmd, &global);
@@ -517,6 +739,8 @@ mod tests {
             confidence: Some("high".into()),
             top: Some(10),
             path_filter: None,
+            with_tests: false,
+            with_helpers: false,
         });
         let global = GlobalOptions {
             json: true,
@@ -528,6 +752,8 @@ mod tests {
         assert!(parsed.dead_exports);
         assert_eq!(parsed.dead_confidence, Some("high".into()));
         assert_eq!(parsed.top_dead_symbols, 10);
+        assert!(!parsed.with_tests);
+        assert!(!parsed.with_helpers);
         assert!(matches!(parsed.output, OutputMode::Json));
     }
 
