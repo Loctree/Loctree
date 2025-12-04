@@ -511,6 +511,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             Some(&git_ctx),
             SCHEMA_NAME,
             SCHEMA_VERSION,
+            &global_analyses,
         );
         json_results.extend(json_items);
         if let Some(section) = report_section {

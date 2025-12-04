@@ -987,6 +987,7 @@ fn write_auto_artifacts(
             Some(&git_ctx),
             SCHEMA_NAME,
             SCHEMA_VERSION,
+            &scan_results.global_analyses,
         );
         json_results.extend(json_items);
         if let Some(section) = report_section {

@@ -625,7 +625,120 @@ pub(crate) fn analyze_rust_file(
         analysis.entry_points.push("async_main".to_string());
     }
 
+    // Detect path-qualified calls like `module::function()` or `Type::method()`
+    // These are function calls via module path without explicit `use` import.
+    // Pattern: `::<identifier>(` or `::<Identifier>{` or `::<Identifier><`
+    // This catches: command::branch::handle(), OutputChannel::new(), etc.
+    extract_path_qualified_calls(&production_content, &mut analysis.local_uses);
+
+    // Detect bare function calls like `func_name(...)` in the same file
+    // This catches local function calls without path qualification
+    extract_bare_function_calls(&production_content, &mut analysis.local_uses);
+
     analysis
+}
+
+/// Extract identifiers that are followed by `(` indicating a function call.
+/// This catches bare function calls like `my_func(arg)` within the same file.
+fn extract_bare_function_calls(content: &str, local_uses: &mut Vec<String>) {
+    let bytes = content.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+
+    while i < len {
+        // Look for identifier followed by `(`
+        if bytes[i].is_ascii_alphabetic() || bytes[i] == b'_' {
+            let start = i;
+            while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                i += 1;
+            }
+            let ident = &content[start..i];
+
+            // Skip whitespace
+            while i < len && bytes[i].is_ascii_whitespace() {
+                i += 1;
+            }
+
+            // Check if followed by `(` (function call) or `!` (macro call)
+            if i < len && (bytes[i] == b'(' || bytes[i] == b'!') {
+                // Skip Rust keywords that aren't function calls
+                const KEYWORDS: &[&str] = &[
+                    "if", "else", "while", "for", "loop", "match", "return", "break", "continue",
+                    "fn", "let", "const", "static", "pub", "use", "mod", "struct", "enum", "impl",
+                    "trait", "type", "where", "unsafe", "async", "await", "move", "ref", "mut",
+                    "self", "super", "crate", "dyn", "as", "in", "true", "false",
+                ];
+                if !KEYWORDS.contains(&ident) && !local_uses.contains(&ident.to_string()) {
+                    local_uses.push(ident.to_string());
+                }
+            }
+        } else {
+            i += 1;
+        }
+    }
+}
+
+/// Extract identifiers from path-qualified calls like `foo::bar::func()` or `Type::new()`
+/// These are usages that don't require a `use` import.
+/// For `Foo::bar::baz()`, we record ALL segments: Foo, bar, baz (each might be a pub export)
+fn extract_path_qualified_calls(content: &str, local_uses: &mut Vec<String>) {
+    let bytes = content.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+
+    // Helper to add identifier if not already present
+    fn add_ident(ident: &str, uses: &mut Vec<String>) {
+        if !ident.is_empty() && !uses.contains(&ident.to_string()) {
+            uses.push(ident.to_string());
+        }
+    }
+
+    while i < len {
+        // Look for identifier followed by `::`
+        if bytes[i].is_ascii_alphabetic() || bytes[i] == b'_' {
+            let start = i;
+            while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                i += 1;
+            }
+            let ident = &content[start..i];
+
+            // Skip whitespace
+            while i < len && bytes[i].is_ascii_whitespace() {
+                i += 1;
+            }
+
+            // Check if followed by `::`
+            if i + 1 < len && bytes[i] == b':' && bytes[i + 1] == b':' {
+                // This is a path-qualified usage (Type::method or module::func)
+                // Record the first identifier (it's a type or module being used)
+                add_ident(ident, local_uses);
+
+                // Now scan the rest of the path, recording all segments
+                while i + 1 < len && bytes[i] == b':' && bytes[i + 1] == b':' {
+                    i += 2;
+                    // Skip whitespace
+                    while i < len && bytes[i].is_ascii_whitespace() {
+                        i += 1;
+                    }
+                    // Read next identifier
+                    let seg_start = i;
+                    while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                        i += 1;
+                    }
+                    if i > seg_start {
+                        let seg = &content[seg_start..i];
+                        add_ident(seg, local_uses);
+                    }
+                    // Skip whitespace
+                    while i < len && bytes[i].is_ascii_whitespace() {
+                        i += 1;
+                    }
+                }
+            }
+        } else {
+            i += 1;
+        }
+    }
 }
 
 #[cfg(test)]

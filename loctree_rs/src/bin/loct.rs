@@ -517,6 +517,7 @@ fn run_for_ai(root_list: &[PathBuf], parsed: &args::ParsedArgs) -> std::io::Resu
             Some(&git_ctx),
             "loctree-json",
             "1.2.0",
+            &global_analyses,
         );
         if let Some(section) = artifacts.report_section {
             report_sections.push(section);
