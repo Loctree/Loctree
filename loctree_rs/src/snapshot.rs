@@ -1105,6 +1105,80 @@ fn write_auto_artifacts(
             .display()
     ));
 
+    // Save dead exports to standalone JSON for easy access
+    let dead_json_path = loctree_dir.join("dead.json");
+    let dead_json = json!({
+        "deadExports": dead_exports.iter().map(|d| {
+            json!({
+                "file": d.file,
+                "symbol": d.symbol,
+                "line": d.line,
+                "confidence": format!("{:?}", d.confidence),
+                "reason": d.reason,
+            })
+        }).collect::<Vec<_>>(),
+        "count": dead_exports.len(),
+    });
+    fs::write(
+        &dead_json_path,
+        serde_json::to_string_pretty(&dead_json).map_err(io::Error::other)?,
+    )?;
+    created.push(format!(
+        "./{}",
+        dead_json_path
+            .strip_prefix(snapshot_root)
+            .unwrap_or(&dead_json_path)
+            .display()
+    ));
+
+    // Save command handlers coverage to standalone JSON
+    let handlers_json_path = loctree_dir.join("handlers.json");
+    let handlers_json = json!({
+        "missingHandlers": global_missing_handlers.iter().map(|gap| {
+            json!({
+                "command": gap.name,
+                "locations": gap.locations.iter().map(|(path, line)| {
+                    json!({ "path": path, "line": line })
+                }).collect::<Vec<_>>(),
+            })
+        }).collect::<Vec<_>>(),
+        "unusedHandlers": global_unused_handlers.iter().map(|gap| {
+            json!({
+                "command": gap.name,
+                "implementationName": gap.implementation_name,
+                "locations": gap.locations.iter().map(|(path, line)| {
+                    json!({ "path": path, "line": line })
+                }).collect::<Vec<_>>(),
+                "confidence": gap.confidence.as_ref().map(|c| format!("{:?}", c)),
+            })
+        }).collect::<Vec<_>>(),
+        "unregisteredHandlers": global_unregistered_handlers.iter().map(|gap| {
+            json!({
+                "handler": gap.name,
+                "implementationName": gap.implementation_name,
+                "locations": gap.locations.iter().map(|(path, line)| {
+                    json!({ "path": path, "line": line })
+                }).collect::<Vec<_>>(),
+            })
+        }).collect::<Vec<_>>(),
+        "summary": {
+            "missing": global_missing_handlers.len(),
+            "unused": global_unused_handlers.len(),
+            "unregistered": global_unregistered_handlers.len(),
+        },
+    });
+    fs::write(
+        &handlers_json_path,
+        serde_json::to_string_pretty(&handlers_json).map_err(io::Error::other)?,
+    )?;
+    created.push(format!(
+        "./{}",
+        handlers_json_path
+            .strip_prefix(snapshot_root)
+            .unwrap_or(&handlers_json_path)
+            .display()
+    ));
+
     Ok(created)
 }
 
