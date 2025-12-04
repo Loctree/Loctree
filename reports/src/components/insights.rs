@@ -1,8 +1,8 @@
 //! AI insights panel component
 
-use leptos::prelude::*;
+use crate::components::{Icon, ICON_ROBOT, ICON_SQUARES_FOUR, ICON_WARNING_CIRCLE};
 use crate::types::AiInsight;
-use crate::components::{Icon, ICON_WARNING_CIRCLE, ICON_ROBOT, ICON_SQUARES_FOUR};
+use leptos::prelude::*;
 
 /// Summary statistics panel
 #[component]
@@ -57,6 +57,7 @@ fn format_loc(loc: usize) -> String {
 
 /// Panel displaying AI-generated insights
 #[component]
+#[allow(clippy::unit_arg, clippy::unused_unit)]
 pub fn AiInsightsPanel(insights: Vec<AiInsight>) -> impl IntoView {
     if insights.is_empty() {
         return view! {}.into_any();
@@ -89,5 +90,6 @@ pub fn AiInsightsPanel(insights: Vec<AiInsight>) -> impl IntoView {
                 }
             }).collect::<Vec<_>>()}
         </ul>
-    }.into_any()
+    }
+    .into_any()
 }

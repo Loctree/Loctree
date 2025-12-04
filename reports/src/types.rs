@@ -101,6 +101,20 @@ pub struct CommandBridge {
     pub language: String,
 }
 
+/// Directory or file node used by the report tree view.
+///
+/// Contains relative path, aggregated LOC, and children.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct TreeNode {
+    /// Relative path of this file/directory.
+    pub path: String,
+    /// Lines of code aggregated for this node (file LOC + children).
+    pub loc: usize,
+    /// Child nodes.
+    #[serde(default)]
+    pub children: Vec<TreeNode>,
+}
+
 /// A gap between frontend command invocations and backend handlers.
 ///
 /// Used for Tauri applications to track:
@@ -120,6 +134,7 @@ pub struct CommandBridge {
 ///         ("src/api.ts".into(), 42),
 ///         ("src/components/Profile.tsx".into(), 15),
 ///     ],
+///     ..Default::default()
 /// };
 /// ```
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -239,7 +254,7 @@ pub struct GraphComponent {
 /// Complete graph data for visualization.
 ///
 /// Contains all nodes, edges, and component metadata needed
-/// to render an interactive dependency graph with Cytoscape.js.
+/// to render an interactive dependency graph with Cytoscape.js or DOT/graphviz.
 ///
 /// # Example
 ///
@@ -265,6 +280,10 @@ pub struct GraphComponent {
 ///     components: vec![],
 ///     main_component_id: 0,
 /// };
+///
+/// // Convert to DOT format for graphviz/dot_ix
+/// let dot = graph.to_dot();
+/// assert!(dot.contains("digraph"));
 /// ```
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct GraphData {
@@ -276,6 +295,161 @@ pub struct GraphData {
     pub components: Vec<GraphComponent>,
     /// ID of the main (largest) component
     pub main_component_id: usize,
+}
+
+impl GraphData {
+    /// Convert graph data to DOT format for graphviz/dot_ix rendering.
+    ///
+    /// Generates a DOT language representation with:
+    /// - Node styling based on LOC (size), component (color), detached status
+    /// - Edge styling based on kind (import vs reexport)
+    /// - Subgraph clusters for connected components
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use report_leptos::types::GraphData;
+    ///
+    /// let graph = GraphData::default();
+    /// let dot = graph.to_dot();
+    /// assert!(dot.starts_with("digraph loctree"));
+    /// ```
+    pub fn to_dot(&self) -> String {
+        let mut dot = String::with_capacity(self.nodes.len() * 100 + self.edges.len() * 50);
+
+        dot.push_str("digraph loctree {\n");
+        dot.push_str("  // Graph attributes\n");
+        dot.push_str(
+            "  graph [rankdir=TB, splines=true, overlap=false, nodesep=0.5, ranksep=0.8];\n",
+        );
+        dot.push_str(
+            "  node [shape=box, style=\"rounded,filled\", fontname=\"sans-serif\", fontsize=10];\n",
+        );
+        dot.push_str("  edge [arrowsize=0.7, fontsize=8];\n\n");
+
+        // Group nodes by component for subgraph clustering
+        let mut component_nodes: std::collections::HashMap<usize, Vec<&GraphNode>> =
+            std::collections::HashMap::new();
+        for node in &self.nodes {
+            component_nodes
+                .entry(node.component)
+                .or_default()
+                .push(node);
+        }
+
+        // Render each component as a subgraph cluster
+        for (comp_id, nodes) in &component_nodes {
+            let is_main = *comp_id == self.main_component_id;
+            let cluster_style = if is_main {
+                "style=invis" // Main component: no visible cluster border
+            } else {
+                "style=dashed, color=\"#888888\"" // Other components: dashed border
+            };
+
+            dot.push_str(&format!("  subgraph cluster_{} {{\n", comp_id));
+            dot.push_str(&format!("    {};\n", cluster_style));
+            dot.push_str(&format!("    label=\"Component {}\";\n", comp_id));
+
+            for node in nodes {
+                let escaped_id = escape_dot_string(&node.id);
+                let escaped_label = escape_dot_string(&node.label);
+
+                // Node color based on status
+                let fill_color = if node.detached {
+                    "#d1830f" // Orange for detached
+                } else if *comp_id == self.main_component_id {
+                    "#4f81e1" // Blue for main component
+                } else {
+                    "#6c757d" // Gray for other components
+                };
+
+                // Node size based on LOC (min 0.3, max 1.5)
+                let size = 0.3 + (node.loc as f32 / 500.0).min(1.2);
+
+                dot.push_str(&format!(
+                    "    \"{}\" [label=\"{}\\n({} LOC)\", fillcolor=\"{}\", width={:.2}, height={:.2}];\n",
+                    escaped_id, escaped_label, node.loc, fill_color, size, size * 0.6
+                ));
+            }
+
+            dot.push_str("  }\n\n");
+        }
+
+        // Render edges
+        dot.push_str("  // Edges\n");
+        for (from, to, kind) in &self.edges {
+            let escaped_from = escape_dot_string(from);
+            let escaped_to = escape_dot_string(to);
+
+            let edge_style = match kind.as_str() {
+                "reexport" => "color=\"#e67e22\", style=bold",
+                _ => "color=\"#888888\"",
+            };
+
+            dot.push_str(&format!(
+                "  \"{}\" -> \"{}\" [{}];\n",
+                escaped_from, escaped_to, edge_style
+            ));
+        }
+
+        dot.push_str("}\n");
+        dot
+    }
+
+    /// Convert graph data to DOT format with dark theme colors.
+    pub fn to_dot_dark(&self) -> String {
+        // Same structure but with dark-theme-appropriate colors
+        let mut dot = String::with_capacity(self.nodes.len() * 100 + self.edges.len() * 50);
+
+        dot.push_str("digraph loctree {\n");
+        dot.push_str("  graph [rankdir=TB, splines=true, overlap=false, nodesep=0.5, ranksep=0.8, bgcolor=\"#0f1115\"];\n");
+        dot.push_str("  node [shape=box, style=\"rounded,filled\", fontname=\"sans-serif\", fontsize=10, fontcolor=\"#eef2ff\"];\n");
+        dot.push_str("  edge [arrowsize=0.7, fontsize=8, fontcolor=\"#aaa\"];\n\n");
+
+        // Simplified rendering for dark theme (same structure, different colors)
+        for node in &self.nodes {
+            let escaped_id = escape_dot_string(&node.id);
+            let escaped_label = escape_dot_string(&node.label);
+
+            let fill_color = if node.detached {
+                "#d1830f"
+            } else if node.component == self.main_component_id {
+                "#4f81e1"
+            } else {
+                "#4a5568"
+            };
+
+            dot.push_str(&format!(
+                "  \"{}\" [label=\"{}\\n({} LOC)\", fillcolor=\"{}\"];\n",
+                escaped_id, escaped_label, node.loc, fill_color
+            ));
+        }
+
+        for (from, to, kind) in &self.edges {
+            let escaped_from = escape_dot_string(from);
+            let escaped_to = escape_dot_string(to);
+
+            let edge_style = match kind.as_str() {
+                "reexport" => "color=\"#e67e22\"",
+                _ => "color=\"#666666\"",
+            };
+
+            dot.push_str(&format!(
+                "  \"{}\" -> \"{}\" [{}];\n",
+                escaped_from, escaped_to, edge_style
+            ));
+        }
+
+        dot.push_str("}\n");
+        dot
+    }
+}
+
+/// Escape special characters for DOT string literals.
+fn escape_dot_string(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
 }
 
 /// A duplicate export found across multiple files.
@@ -364,6 +538,9 @@ pub struct ReportSection {
     pub ranked_dups: Vec<RankedDup>,
     /// Cascade import pairs (source, target)
     pub cascades: Vec<(String, String)>,
+    /// Circular import components
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub circular_imports: Vec<Vec<String>>,
     /// Dynamic imports per file
     pub dynamic: Vec<(String, Vec<String>)>,
     /// Maximum files to analyze (0 = unlimited)
@@ -381,10 +558,17 @@ pub struct ReportSection {
     pub command_bridges: Vec<CommandBridge>,
     /// Base URL for opening files in editor
     pub open_base: Option<String>,
+    /// Directory tree with LOC per node
+    #[serde(default)]
+    pub tree: Option<Vec<TreeNode>>,
     /// Dependency graph data (if generated)
     pub graph: Option<GraphData>,
     /// Warning if graph was skipped (too large, etc.)
     pub graph_warning: Option<String>,
     /// AI-generated insights
     pub insights: Vec<AiInsight>,
+    /// Git branch name (if available)
+    pub git_branch: Option<String>,
+    /// Git commit hash (if available)
+    pub git_commit: Option<String>,
 }

@@ -1,3 +1,9 @@
+//! Tauri command coverage analysis.
+//!
+//! Matches frontend `invoke()` calls with backend `#[tauri::command]` handlers.
+//! Identifies missing handlers (FE calls without BE impl) and unused handlers
+//! (BE impl without FE calls).
+
 use std::collections::{HashMap, HashSet};
 
 use globset::GlobSet;
@@ -10,7 +16,9 @@ use crate::types::FileAnalysis;
 
 pub type CommandUsage = HashMap<String, Vec<(String, usize, String)>>;
 
-fn normalize_cmd_name(name: &str) -> String {
+/// Normalize a command name for comparison (snake_case, lowercase, alphanumeric only)
+/// Used to match FE calls (camelCase) with BE handlers (snake_case)
+pub fn normalize_cmd_name(name: &str) -> String {
     let mut buffered = String::new();
     for ch in name.chars() {
         if ch.is_alphanumeric() {
@@ -121,6 +129,22 @@ pub fn find_string_literal_matches(
                     file: analysis.path.clone(),
                     line: 0, // Line not available from event_consts
                     context: format!("const {} = '{}'", const_name, const_val),
+                });
+            }
+        }
+
+        // Check string literals (registry-style arrays/objects)
+        for lit in &analysis.string_literals {
+            let val_normalized = normalize_cmd_name(&lit.value);
+            if variations.contains(&val_normalized)
+                || variations
+                    .iter()
+                    .any(|v| lit.value.contains(v) || val_normalized.contains(v))
+            {
+                matches.push(StringLiteralMatch {
+                    file: analysis.path.clone(),
+                    line: lit.line,
+                    context: format!("string \"{}\"", lit.value),
                 });
             }
         }
@@ -449,5 +473,249 @@ mod tests {
         // get_pin_status should have LOW confidence (string literal match found)
         assert_eq!(pin_status.confidence, Some(Confidence::Low));
         assert!(!pin_status.string_literal_matches.is_empty());
+    }
+
+    #[test]
+    fn test_normalize_cmd_name() {
+        // Basic snake_case normalization
+        assert_eq!(normalize_cmd_name("get_user"), "getuser");
+        assert_eq!(normalize_cmd_name("getUser"), "getuser");
+        assert_eq!(normalize_cmd_name("GetUser"), "getuser");
+
+        // With special characters
+        assert_eq!(normalize_cmd_name("get-user"), "getuser");
+        assert_eq!(normalize_cmd_name("get.user"), "getuser");
+        assert_eq!(normalize_cmd_name("get::user"), "getuser");
+
+        // Numbers preserved
+        assert_eq!(normalize_cmd_name("get_user_v2"), "getuserv2");
+        assert_eq!(normalize_cmd_name("http2_request"), "http2request");
+    }
+
+    #[test]
+    fn test_strip_excluded_paths_with_focus() {
+        let paths = vec![
+            ("src/api.ts".to_string(), 10, "api".to_string()),
+            ("lib/utils.ts".to_string(), 20, "utils".to_string()),
+            ("test/mock.ts".to_string(), 30, "mock".to_string()),
+        ];
+
+        // Focus on src only
+        let mut builder = GlobSetBuilder::new();
+        builder.add(Glob::new("src/**").expect("valid glob"));
+        let focus = Some(builder.build().expect("build globset"));
+
+        let result = strip_excluded_paths(&paths, &focus, &None);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].0, "src/api.ts");
+    }
+
+    #[test]
+    fn test_strip_excluded_paths_with_exclude() {
+        let paths = vec![
+            ("src/api.ts".to_string(), 10, "api".to_string()),
+            (
+                "node_modules/pkg/index.ts".to_string(),
+                20,
+                "pkg".to_string(),
+            ),
+            ("src/main.ts".to_string(), 30, "main".to_string()),
+        ];
+
+        // Exclude node_modules
+        let mut builder = GlobSetBuilder::new();
+        builder.add(Glob::new("node_modules/**").expect("valid glob"));
+        let exclude = Some(builder.build().expect("build globset"));
+
+        let result = strip_excluded_paths(&paths, &None, &exclude);
+        assert_eq!(result.len(), 2);
+        assert!(result.iter().all(|(p, _)| !p.contains("node_modules")));
+    }
+
+    #[test]
+    fn test_strip_excluded_paths_both() {
+        let paths = vec![
+            ("src/api.ts".to_string(), 10, "api".to_string()),
+            ("src/test/mock.ts".to_string(), 20, "mock".to_string()),
+            ("lib/utils.ts".to_string(), 30, "utils".to_string()),
+        ];
+
+        // Focus on src, exclude test
+        let mut focus_builder = GlobSetBuilder::new();
+        focus_builder.add(Glob::new("src/**").expect("valid glob"));
+        let focus = Some(focus_builder.build().expect("build globset"));
+
+        let mut exclude_builder = GlobSetBuilder::new();
+        exclude_builder.add(Glob::new("**/test/**").expect("valid glob"));
+        let exclude = Some(exclude_builder.build().expect("build globset"));
+
+        let result = strip_excluded_paths(&paths, &focus, &exclude);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].0, "src/api.ts");
+    }
+
+    #[test]
+    fn test_find_string_literal_matches_event_consts() {
+        use crate::types::FileAnalysis;
+
+        let mut analysis = FileAnalysis::new("src/events.ts".into());
+        analysis
+            .event_consts
+            .insert("FETCH_USER_EVENT".to_string(), "fetch_user".to_string());
+
+        let matches = find_string_literal_matches("fetch_user", &[analysis]);
+        assert_eq!(matches.len(), 1);
+        assert!(matches[0].context.contains("FETCH_USER_EVENT"));
+    }
+
+    #[test]
+    fn test_find_string_literal_matches_skips_rust() {
+        use crate::types::{ExportSymbol, FileAnalysis};
+
+        let mut rust_analysis = FileAnalysis::new("src-tauri/src/handlers.rs".into());
+        rust_analysis.exports.push(ExportSymbol::new(
+            "get_user".into(),
+            "fn",
+            "named",
+            Some(10),
+        ));
+
+        let matches = find_string_literal_matches("get_user", &[rust_analysis]);
+        assert!(matches.is_empty()); // Should skip .rs files
+    }
+
+    #[test]
+    fn test_find_string_literal_matches_with_command_suffix() {
+        use crate::types::{ExportSymbol, FileAnalysis};
+
+        let mut analysis = FileAnalysis::new("src/commands.ts".into());
+        analysis.exports.push(ExportSymbol::new(
+            "save_config_command".into(),
+            "const",
+            "named",
+            Some(5),
+        ));
+
+        // Search with _command suffix - should find match
+        let matches = find_string_literal_matches("save_config_command", &[analysis.clone()]);
+        assert!(!matches.is_empty());
+
+        // Search without _command suffix - should also find (due to variation generation)
+        let matches2 = find_string_literal_matches("save_config", &[analysis]);
+        // The export "save_config_command" contains "save_config"
+        assert!(!matches2.is_empty());
+    }
+
+    #[test]
+    fn test_compute_unregistered_handlers_basic() {
+        let mut be: CommandUsage = HashMap::new();
+        be.insert(
+            "registered_handler".into(),
+            vec![("src-tauri/cmd.rs".into(), 10, "registered_handler".into())],
+        );
+        be.insert(
+            "unregistered_handler".into(),
+            vec![("src-tauri/cmd.rs".into(), 20, "unregistered_handler".into())],
+        );
+
+        let registered: HashSet<String> = ["registered_handler".to_string()].into_iter().collect();
+
+        let unregistered = compute_unregistered_handlers(&be, &registered, &None, &None);
+        assert_eq!(unregistered.len(), 1);
+        assert_eq!(unregistered[0].name, "unregistered_handler");
+    }
+
+    #[test]
+    fn test_compute_unregistered_handlers_all_registered() {
+        let mut be: CommandUsage = HashMap::new();
+        be.insert(
+            "handler_a".into(),
+            vec![("src-tauri/cmd.rs".into(), 10, "handler_a".into())],
+        );
+        be.insert(
+            "handler_b".into(),
+            vec![("src-tauri/cmd.rs".into(), 20, "handler_b".into())],
+        );
+
+        let registered: HashSet<String> = ["handler_a".to_string(), "handler_b".to_string()]
+            .into_iter()
+            .collect();
+
+        let unregistered = compute_unregistered_handlers(&be, &registered, &None, &None);
+        assert!(unregistered.is_empty());
+    }
+
+    #[test]
+    fn test_compute_unregistered_handlers_with_exclude() {
+        let mut be: CommandUsage = HashMap::new();
+        be.insert(
+            "test_handler".into(),
+            vec![("test/mock.rs".into(), 10, "test_handler".into())],
+        );
+
+        let registered: HashSet<String> = HashSet::new();
+
+        let mut exclude_builder = GlobSetBuilder::new();
+        exclude_builder.add(Glob::new("test/**").expect("valid glob"));
+        let exclude = Some(exclude_builder.build().expect("build globset"));
+
+        let unregistered = compute_unregistered_handlers(&be, &registered, &None, &exclude);
+        assert!(unregistered.is_empty()); // Excluded by path
+    }
+
+    #[test]
+    fn test_compute_command_gaps_missing_handler() {
+        let mut fe: CommandUsage = HashMap::new();
+        fe.insert(
+            "missing_handler".into(),
+            vec![("src/app.ts".into(), 10, "missing_handler".into())],
+        );
+
+        let be: CommandUsage = HashMap::new(); // No backend handlers
+
+        let (missing, unused) = compute_command_gaps(&fe, &be, &None, &None);
+        assert_eq!(missing.len(), 1);
+        assert_eq!(missing[0].name, "missing_handler");
+        assert!(unused.is_empty());
+    }
+
+    #[test]
+    fn test_compute_command_gaps_unused_handler() {
+        let fe: CommandUsage = HashMap::new(); // No frontend usage
+
+        let mut be: CommandUsage = HashMap::new();
+        be.insert(
+            "unused_handler".into(),
+            vec![("src-tauri/cmd.rs".into(), 10, "unused_handler".into())],
+        );
+
+        let (missing, unused) = compute_command_gaps(&fe, &be, &None, &None);
+        assert!(missing.is_empty());
+        assert_eq!(unused.len(), 1);
+        assert_eq!(unused[0].name, "unused_handler");
+    }
+
+    #[test]
+    fn test_scan_content_for_handler_literals() {
+        let content = r#"
+            const handler = 'get_user';
+            invoke('get_user');
+            const other = "different";
+        "#;
+
+        let matches = scan_content_for_handler_literals("get_user", content, "src/test.ts");
+        assert_eq!(matches.len(), 2); // Two occurrences of 'get_user'
+        assert!(matches.iter().all(|m| m.file == "src/test.ts"));
+    }
+
+    #[test]
+    fn test_scan_content_no_matches() {
+        let content = r#"
+            const handler = 'other_handler';
+            invoke('different_command');
+        "#;
+
+        let matches = scan_content_for_handler_literals("get_user", content, "src/test.ts");
+        assert!(matches.is_empty());
     }
 }

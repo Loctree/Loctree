@@ -6,6 +6,113 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Released]
 
+## [0.5.13] - 2025-12-09
+
+### Added
+- Circular-import quick wins now use real cycle data from `cycles::find_cycles`, surfaced in QuickWin output and tests.
+- Atomic snapshot writes (via `write_atomic`) for report/SARIF/analysis/dead/handlers/circular/races artifacts to avoid partial files and corruption.
+- Alias-aware dynamic import reachability (`@core/*`, Windows case-insensitive) with new fixtures/tests.
+
+### Changed
+- Unified CLI help paths: `--help-full` is handled consistently in both binaries; `search` hints now use `loctree …` wording everywhere.
+- Install/docs/CI instructions standardized on `cargo install loctree`; removed `curl | sh` mentions.
+- Tooltip layer helper (`.tooltip-floating` z-index 9999) and scrollbar CSS now ship with fallbacks.
+- Landing/AI README/changelog bumped to 0.5.12+ alignment for release metadata.
+
+### Fixed
+- Removed panics in QuickWin/SARIF/snapshot paths; errors now bubble as `Result` or log warnings instead of crashing.
+- Mutex poison recovery in `root_scan` avoids thread panics; dead export matching handles Windows casing correctly.
+- Ignored and removed generated `**/.loctree/**/report.html` fixture artifacts from the repo.
+
+## [0.5.12] - 2025-12-08
+
+### Added
+- Atomic writes for snapshot artifacts (report/SARIF/JSON) to prevent partial files on crash or interrupt.
+- Alias-aware dynamic import reachability (handles `@core/*` prefixes and Windows casing) with new tests.
+
+### Changed
+- Unified install docs and prompts to `cargo install loctree`.
+- Quick-win JSONL and SARIF generation now return/log errors instead of panicking.
+- Tooltip layer helper to avoid z-index clashes in reports.
+
+## [0.5.10] - 2025-12-03
+
+### Added
+- Snapshot artifacts now live under `.loctree/<branch@commit>/` and `save()` skips rewrites for the same commit/branch (with a hint when the worktree is dirty).
+- Base scans print a concise human summary (files, handlers, languages, elapsed); `--serve` binds 0.0.0.0:5075 with loopback/random fallback and warns about the upcoming `loct report --serve` migration.
+
+### Fixed
+- Python analyzer: dead-export FP reduction (imported symbols, mixin inheritance, callbacks), line numbers in dead output, faster scan path; `who-imports` query now reports Python imports correctly.
+- Report WASM: removed deprecated-init console warning from `report_wasm.js`.
+- HTML/auto-artifacts no longer auto-open during tests/builds; analysis artifacts key off parsed output mode (JSON/SARIF now written reliably).
+
+### Changed
+- HTML reports are generated only when explicitly requested (`loct report --serve` or `--report`); global `--serve` remains as a backwards-compatible alias with a warning.
+- Snapshot writing warns and reuses the existing snapshot when nothing changed for the current commit/branch.
+
+## [0.5.7] - 2025-12-01
+
+### Added
+- **One-shot artifact bundle**: Bare `loct`/`loctree` now saves the full analyzer output to `.loctree/` alongside `snapshot.json` — `report.html` (with graph), `analysis.json`, `circular.json`, and `py_races.json`, so you don't need to run extra commands after a scan.
+
+### Changed
+- **Rebrand alignment**: Updated repository/org references to `Loctree/Loctree` and refreshed version strings to v0.5.7 across crates and docs.
+- **Release hygiene**: Rust formatting/clippy cleanups applied for the 0.5.7 publish pipeline.
+
+## [0.5.6] - 2025-12-01
+
+### Fixed
+- **AST Parser JSX Fix**: Disabled JSX parsing for `.ts` files (only enabled for `.tsx`/`.jsx`). Previously, TypeScript generics like `<T>` were incorrectly parsed as JSX tags, causing entire files like `api.ts` to fail parsing.
+- **Template Literal Support**: Added detection of Tauri `invoke` calls using backticks (`` `cmd` ``). Commands like `` safeInvoke(`create_user`) `` are now correctly identified.
+- **False Positive Reduction**: Added exclusion lists to prevent non-Tauri functions from being detected as commands:
+  - `NON_INVOKE_EXCLUSIONS`: ~35 patterns like `useVoiceCommands`, `runGitCommand`, `executeCommand`
+  - `INVALID_COMMAND_NAMES`: CLI tools like `node`, `cargo`, `pnpm`, `git`
+- **Payload Requirement**: `CommandRef` is now only created when a valid command name payload exists, eliminating false positives where function names were mistaken for commands.
+
+### Added
+- **Git Context in Reports**: Added `git_branch` and `git_commit` fields to `ReportSection` for future Scan ID system integration.
+- **Parser Debug Logging**: Added error logging when OXC parser encounters issues (visible with `--verbose`).
+
+### Changed
+- **Vista Project Results**: Improved detection accuracy:
+  - Frontend commands: 170 → 254 (+49%)
+  - Missing handlers: 18 → 5 (72% reduction in false positives)
+  - Unused handlers: 137 → 57 (58% reduction in false positives)
+
+## [0.5.5] - 2025-11-30
+
+### Fixed
+- **AI Context Safety**: Limited verbosity of `slice` and `circular` commands to prevent context flooding in LLMs:
+  - `slice`: Truncates Deps/Consumers lists > 25 items (showing "... and N more").
+  - `circular`: Compresses dependency cycles longer than 12 steps into `head -> ... (N intermediate) ... -> tail` format.
+
+## [0.5.4] - 2025-11-30
+
+### Added
+- **Loctree CI workflow**: Separate GitHub Actions workflow that runs loctree self-analysis on all inner crates (loctree_rs, reports, landing) with HTML report artifacts.
+- **Version sync script**: `scripts/sync-version.sh` automatically synchronizes version across all crates and hardcoded strings during releases.
+- **`loct` CLI alias**: Short alias for `loctree` command for faster typing.
+
+### Changed
+- **Binary structure refactored**: Moved CLI entry points from `src/main.rs` to `src/bin/loctree.rs` and `src/bin/loct.rs` to eliminate "multiple build targets" warning.
+- **CI matrix**: Loctree CI now runs on both Ubuntu and macOS.
+
+### Fixed
+- **Version sync**: All version references (reports footer, lib.rs doc URL, landing easter eggs) now properly synced to 0.5.4.
+
+## [0.5.3] - 2025-11-29
+
+### Added
+- **COSE-Bilkent graph layout**: Added force-directed layout algorithm for better dependency graph visualization in HTML reports.
+- **`report-leptos` library crate**: Extracted HTML report generation into a standalone crate (v0.1.1) for reuse and cleaner architecture.
+
+### Changed
+- **Report UI redesign**: New dark/light theme with improved visual hierarchy and accessibility.
+- **Shared JS assets**: Moved graph visualization libraries (Cytoscape, Dagre, COSE-Bilkent) to the library crate.
+
+### Fixed
+- **Nested conditions refactored**: Improved `root_scan` and `detect` modules using Rust 2024 if-let chains.
+
 ## [0.5.2] - 2025-11-28
 
 ### Changed
@@ -318,19 +425,19 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 ## [0.2.0] - 2025-11-21
 
 ### Added
-- Unified CLI features and JSON output across all runtimes (Node.js, Python, Rust): extension filters, ignore patterns, gitignore support, max depth, color modes, JSON output, and summary reporting (commit [`8962e39`](https://github.com/LibraxisAI/loctree/commit/8962e39)).
-- Installation scripts for fast setup: `install.sh`, `install_node.sh`, and `install_py.sh` (commit [`b6824f4`](https://github.com/LibraxisAI/loctree/commit/b6824f4)).
-- `--show-hidden` (`-H`) option to include dotfiles and other hidden entries in output in Rust and Python CLIs (commit [`12310b4`](https://github.com/LibraxisAI/loctree/commit/12310b4)).
+- Unified CLI features and JSON output across all runtimes (Node.js, Python, Rust): extension filters, ignore patterns, gitignore support, max depth, color modes, JSON output, and summary reporting (commit [`8962e39`](https://github.com/Loctree/Loctree/commit/8962e39)).
+- Installation scripts for fast setup: `install.sh`, `install_node.sh`, and `install_py.sh` (commit [`b6824f4`](https://github.com/Loctree/Loctree/commit/b6824f4)).
+- `--show-hidden` (`-H`) option to include dotfiles and other hidden entries in output in Rust and Python CLIs (commit [`12310b4`](https://github.com/Loctree/Loctree/commit/12310b4)).
 
 ### Changed
-- Standardized the project name from `loc-tree` to `loctree` across runtimes, binaries, installers, and documentation; improved CLI UX and argument parsing, and enhanced error messages (commit [`e31d3a4`](https://github.com/LibraxisAI/loctree/commit/e31d3a4)).
-- Usage/help output refined and examples clarified across Rust, Node, and Python CLIs (commit [`b6824f4`](https://github.com/LibraxisAI/loctree/commit/b6824f4) and [`8962e39`](https://github.com/LibraxisAI/loctree/commit/8962e39)).
+- Standardized the project name from `loc-tree` to `loctree` across runtimes, binaries, installers, and documentation; improved CLI UX and argument parsing, and enhanced error messages (commit [`e31d3a4`](https://github.com/Loctree/Loctree/commit/e31d3a4)).
+- Usage/help output refined and examples clarified across Rust, Node, and Python CLIs (commit [`b6824f4`](https://github.com/Loctree/Loctree/commit/b6824f4) and [`8962e39`](https://github.com/Loctree/Loctree/commit/8962e39)).
 
 ### Documentation
-- Expanded and clarified README with installation instructions, usage details, examples, and project structure overview (commits [`e31d3a4`](https://github.com/LibraxisAI/loctree/commit/e31d3a4), [`b6824f4`](https://github.com/LibraxisAI/loctree/commit/b6824f4), [`8962e39`](https://github.com/LibraxisAI/loctree/commit/8962e39)).
+- Expanded and clarified README with installation instructions, usage details, examples, and project structure overview (commits [`e31d3a4`](https://github.com/Loctree/Loctree/commit/e31d3a4), [`b6824f4`](https://github.com/Loctree/Loctree/commit/b6824f4), [`8962e39`](https://github.com/Loctree/Loctree/commit/8962e39)).
 
 ### Other
-- Initial project setup (commit [`2031f80`](https://github.com/LibraxisAI/loctree/commit/2031f80)).
+- Initial project setup (commit [`2031f80`](https://github.com/Loctree/Loctree/commit/2031f80)).
 
 ---
 

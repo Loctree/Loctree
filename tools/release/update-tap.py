@@ -3,7 +3,7 @@
 
 This is a lightweight helper that prints the curlable formula body. It does not push.
 Intended workflow: run build-and-publish.sh; then copy the printed formula into the tap repo
-(LibraxisAI/homebrew-loctree) or wire a GitHub Action to commit it.
+(Loctree/homebrew-loctree) or wire a GitHub Action to commit it.
 """
 from __future__ import annotations
 

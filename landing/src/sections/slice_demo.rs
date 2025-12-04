@@ -14,7 +14,7 @@ pub fn SliceDemo() -> impl IntoView {
                             "and everything that consumes it. No more, no less."
                         </p>
                         <div class="hero-actions" style="margin-top: 24px;">
-                            <a href="https://github.com/LibraxisAI/loctree#holographic-slice-slice-command" target="_blank" class="btn btn-secondary">
+                            <a href="https://github.com/Loctree/Loctree#holographic-slice-slice-command" target="_blank" class="btn btn-secondary">
                                 "Read the docs"
                             </a>
                         </div>

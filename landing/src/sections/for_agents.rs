@@ -4,34 +4,37 @@ use leptos::prelude::*;
 pub fn ForAgents() -> impl IntoView {
     let (prompt_copied, set_prompt_copied) = signal(false);
 
-    let agent_prompt = r#"## loctree Quick Reference
+    let agent_prompt = r#"## loct Quick Reference
 
-**Install:** `curl -fsSL https://loctree.io/install.sh | sh`
+**Install:** `cargo install loctree`
 
 ### Before creating components
 ```bash
-loctree -A --check <Name>      # find similar existing
-loctree -A --symbol <Name>     # find definitions & usage
+loct find --similar <Name>     # find similar existing
+loct find --symbol <Name>      # find definitions & usage
+loct query where-symbol <Name> # quick symbol lookup
 ```
 
 ### Before refactoring
 ```bash
-loctree slice <file> --consumers --json  # what depends on it
-loctree -A --impact <file>               # what breaks if removed
-loctree -A --circular                    # detect import cycles
+loct slice <file> --consumers --json  # what depends on it
+loct query who-imports <file>         # quick: who imports this
+loct find --impact <file>             # what breaks if removed
+loct cycles                           # detect import cycles
 ```
 
 ### Tauri FE<>BE analysis
 ```bash
-loctree -A --preset-tauri src src-tauri/src
-loctree trace <handler> ./src            # investigate unused handler
+loct commands                  # show all command bridges
+loct commands --unused         # investigate unused handlers
 ```
 
 ### Dead code & CI
 ```bash
-loctree -A --dead                        # unused exports
-loctree -A --fail-on-missing-handlers    # CI check
-loctree -A --sarif > results.sarif       # GitHub/GitLab integration
+loct dead                      # unused exports
+loct lint --fail               # CI check
+loct lint --sarif > results.sarif  # GitHub/GitLab integration
+loct diff --since main         # what changed since main
 ```"#;
 
     let copy_prompt = move |_| {
@@ -65,27 +68,27 @@ loctree -A --sarif > results.sarif       # GitHub/GitLab integration
                         <div class="mistake-list">
                             <MistakeRow
                                 wrong="grep -r \"import\" src | wc -l"
-                                right="loctree -A --circular"
+                                right="loct cycles"
                                 label="Finding circular imports"
                             />
                             <MistakeRow
                                 wrong="grep -r \"EVENT\" | grep const"
-                                right="loctree -A --json | jq .pipeline"
+                                right="loct events --json"
                                 label="Finding ghost events"
                             />
                             <MistakeRow
                                 wrong="find . -name \"*.ts\" -exec grep ..."
-                                right="loctree -A --dead"
+                                right="loct dead"
                                 label="Finding unused code"
                             />
                             <MistakeRow
                                 wrong="Manual file-by-file reading"
-                                right="loctree slice <file> --consumers"
+                                right="loct slice <file> --consumers"
                                 label="Understanding dependencies"
                             />
                             <MistakeRow
                                 wrong="grep invoke | grep -v \"#\""
-                                right="loctree trace <handler>"
+                                right="loct commands --unused"
                                 label="Investigating handlers"
                             />
                         </div>
@@ -109,19 +112,19 @@ loctree -A --sarif > results.sarif       # GitHub/GitLab integration
                     <div class="examples-grid">
                         <ExampleCard
                             task="AI context for a file"
-                            cmd="loctree slice src/App.tsx --consumers --json | claude"
+                            cmd="loct slice src/App.tsx --consumers --json | claude"
                         />
                         <ExampleCard
                             task="Check before creating component"
-                            cmd="loctree -A --check ChatPanel"
+                            cmd="loct find --similar ChatPanel"
                         />
                         <ExampleCard
                             task="Tauri handler investigation"
-                            cmd="loctree trace toggle_assistant ./src ./src-tauri"
+                            cmd="loct commands --unused"
                         />
                         <ExampleCard
                             task="CI pipeline check"
-                            cmd="loctree -A --fail-on-missing-handlers --sarif"
+                            cmd="loct lint --fail --sarif"
                         />
                     </div>
                 </div>
@@ -131,11 +134,7 @@ loctree -A --sarif > results.sarif       # GitHub/GitLab integration
 }
 
 #[component]
-fn MistakeRow(
-    wrong: &'static str,
-    right: &'static str,
-    label: &'static str,
-) -> impl IntoView {
+fn MistakeRow(wrong: &'static str, right: &'static str, label: &'static str) -> impl IntoView {
     view! {
         <div class="mistake-row">
             <div class="mistake-label">{label}</div>
@@ -152,10 +151,7 @@ fn MistakeRow(
 }
 
 #[component]
-fn ExampleCard(
-    task: &'static str,
-    cmd: &'static str,
-) -> impl IntoView {
+fn ExampleCard(task: &'static str, cmd: &'static str) -> impl IntoView {
     let (copied, set_copied) = signal(false);
     let cmd_str = cmd;
 

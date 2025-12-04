@@ -1,5 +1,5 @@
-use leptos::prelude::*;
 use super::VERSION;
+use leptos::prelude::*;
 
 #[component]
 pub fn Hero() -> impl IntoView {
@@ -14,19 +14,19 @@ pub fn Hero() -> impl IntoView {
                             {badge_text}
                         </div>
                         <h1 class="hero-title">
-                            <span class="hero-title-accent">"Scan once,"</span>
+                            <span class="hero-title-accent">"The project map"</span>
                             <br />
-                            "slice many."
+                            "built for AI, not humans."
                         </h1>
                         <p class="hero-description">
-                            "Static analysis tool designed for AI agents. Extract focused context for any file, "
-                            "detect circular imports, find dead exports. One scan, infinite slices."
+                            "Dead code dies here. Static code analysis for agentic codebase context management. "
+                            "Real structure, not file listings. A foundation for autonomous development tools."
                         </p>
                         <div class="hero-actions">
                             <a href="#install" class="btn btn-primary">
                                 "Get Started"
                             </a>
-                            <a href="https://github.com/LibraxisAI/loctree" target="_blank" class="btn btn-secondary">
+                            <a href="https://github.com/Loctree/Loctree" target="_blank" class="btn btn-secondary">
                                 "View on GitHub →"
                             </a>
                         </div>
@@ -52,16 +52,20 @@ fn Terminal() -> impl IntoView {
                 // First command
                 <div class="terminal-line">
                     <span class="terminal-prompt">"$"</span>
-                    <span class="terminal-command">"loctree"</span>
+                    <span class="terminal-command">"loct"</span>
                 </div>
-                <div class="terminal-output muted">"[loctree][detect] Detected: Tauri + Vite"</div>
-                <div class="terminal-output muted">"[loctree][progress] 47 cached, 3 fresh"</div>
-                <div class="terminal-output success">"✓ Snapshot saved to .loctree/snapshot.json"</div>
+                <div class="terminal-output muted">"[loctree] Scan mode: incremental (mtime-based)"</div>
+                <div class="terminal-output muted">"Scanned 142 files in 1.44s"</div>
+                <div class="terminal-output muted">"Graph saved to ./.loctree/snapshot.json"</div>
+                <div class="terminal-output muted">"Languages: ts, css, py, js, rs"</div>
+                <div class="terminal-output muted">"Commands: 11 handlers, 2 missing, 5 unused"</div>
+                <div class="terminal-output muted">"Events: 39 tracked"</div>
+                <div class="terminal-output success">"Status: OK"</div>
 
                 // Second command
                 <div class="terminal-line" style="margin-top: 16px;">
                     <span class="terminal-prompt">"$"</span>
-                    <span class="terminal-command">"loctree slice src/App.tsx --consumers"</span>
+                    <span class="terminal-command">"loct slice src/App.tsx --consumers"</span>
                 </div>
 
                 <div class="terminal-output highlight" style="margin-top: 8px;">

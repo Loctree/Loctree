@@ -1,7 +1,5 @@
 (function () {
   const graphs = window.__LOCTREE_GRAPHS || [];
-  const escapeHtml = (value = "") =>
-    String(value).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] || c));
   const formatNum = (n) => (typeof n === "number" && n.toLocaleString ? n.toLocaleString() : n || 0);
   const cyInstances = new Set();
   const darkToggles = new Set();
@@ -81,6 +79,7 @@
     // Component filter toolbar
     const componentBar = document.createElement("div");
     componentBar.className = "graph-toolbar component-toolbar";
+    // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method -- SAFETY: static HTML template with no user input
     componentBar.innerHTML = `
       <label>Component filter:
         <select data-role="component-filter">
@@ -105,6 +104,7 @@
 
     const componentPanel = document.createElement("div");
     componentPanel.className = "component-panel";
+    // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method -- SAFETY: static HTML template with no user input
     componentPanel.innerHTML = `
       <div class="component-panel-header">
         <div><strong>Disconnected components</strong> <span class="muted" data-role="component-summary"></span></div>
@@ -133,6 +133,7 @@
     // Graph controls toolbar
     const toolbar = document.createElement("div");
     toolbar.className = "graph-toolbar";
+    // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method -- SAFETY: static HTML template with no user input
     toolbar.innerHTML = `
       <label>filter:
         <input type="text" size="18" placeholder="path substring or /regex/" data-role="filter-text" title="Filter by path. Use plain text for substring match, or /pattern/ for regex." />
@@ -621,53 +622,82 @@
       const filterInput = toolbar.querySelector('[data-role="filter-text"]');
       const filterText = (filterInput?.value || "").toLowerCase().trim();
 
-      // Highlight filter match in path
-      let pathHtml;
-      if (filterText && path.toLowerCase().includes(filterText)) {
-        // Case-insensitive highlight
-        const idx = path.toLowerCase().indexOf(filterText);
-        const before = escapeHtml(path.slice(0, idx));
-        const match = escapeHtml(path.slice(idx, idx + filterText.length));
-        const after = escapeHtml(path.slice(idx + filterText.length));
-        pathHtml = `${before}<mark style="background:#ffd700;color:#000;padding:0 2px;border-radius:2px">${match}</mark>${after}`;
-      } else {
-        pathHtml = escapeHtml(path);
-      }
-
-      // Build "open in editor" link if openBase available
-      const openLink = openBase
-        ? `<a href="${openBase}/open?f=${encodeURIComponent(path)}&l=1" style="color:#6af;text-decoration:underline;font-size:10px">open in editor</a>`
-        : "";
-
       // Get incoming/outgoing edges for context
       const incomingEdges = cy.edges().filter(e => e.data("target") === data.id);
       const outgoingEdges = cy.edges().filter(e => e.data("source") === data.id);
-      const edgeInfo = `imports: ${outgoingEdges.length} | imported by: ${incomingEdges.length}`;
 
-      // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method -- SAFETY: path escaped via escapeHtml(); other values are numbers or safe
-      tooltip.innerHTML = `
-        <div style="margin-bottom:4px"><strong>${pathHtml}</strong></div>
-        <div>LOC: ${data.loc || 0} | degree: ${data.degree || 0}</div>
-        <div>${edgeInfo}</div>
-        <div>component: ${compLabel}</div>
-        <div style="margin-top:4px;display:flex;gap:8px;align-items:center">
-          <button data-role="copy-path" style="font-size:10px;cursor:pointer">copy path</button>
-          ${openLink}
-        </div>
-      `;
-      const copyBtn = tooltip.querySelector('[data-role="copy-path"]');
-      if (copyBtn)
-        copyBtn.addEventListener("click", () => navigator.clipboard.writeText(path));
+      // Build tooltip using safe DOM APIs (no innerHTML with user data)
+      tooltip.textContent = ""; // Clear previous content
+
+      // Row 1: Path with optional highlight
+      const pathRow = document.createElement("div");
+      pathRow.style.marginBottom = "4px";
+      const pathStrong = document.createElement("strong");
+      if (filterText && path.toLowerCase().includes(filterText)) {
+        // Case-insensitive highlight using DOM nodes
+        const idx = path.toLowerCase().indexOf(filterText);
+        pathStrong.appendChild(document.createTextNode(path.slice(0, idx)));
+        const mark = document.createElement("mark");
+        mark.style.cssText = "background:#ffd700;color:#000;padding:0 2px;border-radius:2px";
+        mark.textContent = path.slice(idx, idx + filterText.length);
+        pathStrong.appendChild(mark);
+        pathStrong.appendChild(document.createTextNode(path.slice(idx + filterText.length)));
+      } else {
+        pathStrong.textContent = path;
+      }
+      pathRow.appendChild(pathStrong);
+      tooltip.appendChild(pathRow);
+
+      // Row 2: LOC and degree
+      const statsRow = document.createElement("div");
+      statsRow.textContent = `LOC: ${data.loc || 0} | degree: ${data.degree || 0}`;
+      tooltip.appendChild(statsRow);
+
+      // Row 3: Edge info
+      const edgeRow = document.createElement("div");
+      edgeRow.textContent = `imports: ${outgoingEdges.length} | imported by: ${incomingEdges.length}`;
+      tooltip.appendChild(edgeRow);
+
+      // Row 4: Component info
+      const compRow = document.createElement("div");
+      compRow.textContent = `component: ${compLabel}`;
+      tooltip.appendChild(compRow);
+
+      // Row 5: Actions (copy button + open link)
+      const actionsRow = document.createElement("div");
+      actionsRow.style.cssText = "margin-top:4px;display:flex;gap:8px;align-items:center";
+
+      const copyBtn = document.createElement("button");
+      copyBtn.textContent = "copy path";
+      copyBtn.style.cssText = "font-size:10px;cursor:pointer";
+      copyBtn.addEventListener("click", () => navigator.clipboard.writeText(path));
+      actionsRow.appendChild(copyBtn);
+
+      if (openBase) {
+        const openLink = document.createElement("a");
+        openLink.href = `${openBase}/open?f=${encodeURIComponent(path)}&l=1`;
+        openLink.textContent = "open in editor";
+        openLink.style.cssText = "color:#6af;text-decoration:underline;font-size:10px";
+        actionsRow.appendChild(openLink);
+      }
+      tooltip.appendChild(actionsRow);
       const rect = container.getBoundingClientRect();
-      const scrollX = window.scrollX || document.documentElement.scrollLeft || 0;
-      const scrollY = window.scrollY || document.documentElement.scrollTop || 0;
-      let left = rect.left + evt.renderedPosition.x + 12 + scrollX;
-      let top = rect.top + evt.renderedPosition.y + 12 + scrollY;
-      const maxLeft = scrollX + window.innerWidth - 220;
+      // Fixed positioning is relative to viewport, no scroll offset needed
+      let left = rect.left + evt.renderedPosition.x + 12;
+      let top = rect.top + evt.renderedPosition.y + 12;
+      // Ensure tooltip stays within viewport bounds (measure after content)
+      tooltip.style.visibility = "hidden";
+      tooltip.style.display = "block";
+      const bounds = tooltip.getBoundingClientRect();
+      const tooltipWidth = bounds.width || 220;
+      const tooltipHeight = bounds.height || 120;
+      const maxLeft = window.innerWidth - tooltipWidth - 10;
+      const maxTop = window.innerHeight - tooltipHeight - 10;
       if (left > maxLeft) left = maxLeft;
+      if (top > maxTop) top = Math.max(10, top - tooltipHeight - 24);
       tooltip.style.left = left + "px";
       tooltip.style.top = top + "px";
-      tooltip.style.display = "block";
+      tooltip.style.visibility = "visible";
       nodeHover = true;
     };
 
@@ -734,16 +764,64 @@
       syncSize(limit);
       const rows = [...components].sort((a, b) => a.size - b.size || a.id - b.id);
       const filtered = rows.filter((c) => c.size <= limit);
-      tableBody.innerHTML = "";
+      tableBody.textContent = ""; // Clear using safe DOM API
       filtered.forEach((comp) => {
         const sample = comp.sample || (comp.nodes && comp.nodes[0]) || "";
         const sampleHref = openBase ? `${openBase}/open?f=${encodeURIComponent(sample)}&l=1` : null;
-        const sampleCell = sampleHref ? `<a href="${sampleHref}">${escapeHtml(sample)}</a>` : `<code>${escapeHtml(sample)}</code>`;
         const warn = comp.detached ? " ⚠️" : "";
-        const tr = document.createElement("tr");
         const edgeCount = comp.edges !== undefined ? comp.edges : comp.edge_count;
-        // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method -- SAFETY: all values are numbers or escaped via escapeHtml()
-        tr.innerHTML = `<td>C${comp.id}${warn}</td><td>${comp.size}</td><td>${sampleCell}</td><td>${comp.isolated_count}</td><td>${edgeCount || 0}</td><td>${formatNum(comp.loc_sum)}</td><td><button data-role="component-focus" data-comp="${comp.id}">Highlight</button></td>`;
+
+        // Build table row using safe DOM APIs (no innerHTML with user data)
+        const tr = document.createElement("tr");
+
+        // Cell 1: Component ID with warning
+        const td1 = document.createElement("td");
+        td1.textContent = `C${comp.id}${warn}`;
+        tr.appendChild(td1);
+
+        // Cell 2: Size
+        const td2 = document.createElement("td");
+        td2.textContent = comp.size;
+        tr.appendChild(td2);
+
+        // Cell 3: Sample file (link or code)
+        const td3 = document.createElement("td");
+        if (sampleHref) {
+          const link = document.createElement("a");
+          link.href = sampleHref;
+          link.textContent = sample;
+          td3.appendChild(link);
+        } else {
+          const code = document.createElement("code");
+          code.textContent = sample;
+          td3.appendChild(code);
+        }
+        tr.appendChild(td3);
+
+        // Cell 4: Isolated count
+        const td4 = document.createElement("td");
+        td4.textContent = comp.isolated_count;
+        tr.appendChild(td4);
+
+        // Cell 5: Edge count
+        const td5 = document.createElement("td");
+        td5.textContent = edgeCount || 0;
+        tr.appendChild(td5);
+
+        // Cell 6: LOC sum
+        const td6 = document.createElement("td");
+        td6.textContent = formatNum(comp.loc_sum);
+        tr.appendChild(td6);
+
+        // Cell 7: Highlight button
+        const td7 = document.createElement("td");
+        const btn = document.createElement("button");
+        btn.setAttribute("data-role", "component-focus");
+        btn.setAttribute("data-comp", comp.id);
+        btn.textContent = "Highlight";
+        td7.appendChild(btn);
+        tr.appendChild(td7);
+
         tableBody.appendChild(tr);
       });
       summaryEl.textContent = `${filtered.length} / ${components.length} components ≤ ${limit} nodes • detached: ${detachedSet.size} • isolates: ${

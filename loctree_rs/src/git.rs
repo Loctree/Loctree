@@ -352,6 +352,274 @@ impl ChangedFile {
     }
 }
 
+/// A single line of blame information
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BlameEntry {
+    /// Line number (1-indexed)
+    pub line: usize,
+    /// Commit hash that introduced this line
+    pub commit_hash: String,
+    /// Short commit hash
+    pub short_hash: String,
+    /// Author name
+    pub author: String,
+    /// Commit timestamp (ISO 8601)
+    pub date: String,
+    /// The line content
+    pub content: String,
+}
+
+/// Symbol blame information (Rust MVP: fn, struct, enum, impl, trait)
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SymbolBlame {
+    /// Symbol name
+    pub name: String,
+    /// Symbol type: "fn", "struct", "enum", "impl", "trait", "mod", "const", "static"
+    pub kind: String,
+    /// Start line (1-indexed)
+    pub start_line: usize,
+    /// End line (1-indexed, inclusive)
+    pub end_line: usize,
+    /// Commit that introduced this symbol (based on first line)
+    pub introduced_by: CommitInfo,
+    /// Last modification commit (based on any line in symbol)
+    pub last_modified_by: Option<CommitInfo>,
+}
+
+/// Result of symbol blame analysis for a file
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FileSymbolBlame {
+    /// File path
+    pub path: String,
+    /// Language (e.g., "rust")
+    pub language: String,
+    /// Symbols with blame information
+    pub symbols: Vec<SymbolBlame>,
+}
+
+impl GitRepo {
+    /// Get blame information for a file
+    pub fn blame_file(&self, file_path: &Path) -> Result<Vec<BlameEntry>, GitError> {
+        let blame = self.repo.blame_file(file_path, None)?;
+        let file_content =
+            std::fs::read_to_string(self.path.join(file_path)).map_err(GitError::IoError)?;
+        let lines: Vec<&str> = file_content.lines().collect();
+
+        let mut entries = Vec::new();
+
+        // Iterate over hunks and expand each to individual line entries
+        for hunk in blame.iter() {
+            let oid = hunk.final_commit_id();
+            let sig = hunk.final_signature();
+
+            // Format timestamp
+            let timestamp = sig.when().seconds();
+            let datetime = OffsetDateTime::from_unix_timestamp(timestamp)
+                .unwrap_or(OffsetDateTime::UNIX_EPOCH);
+            let format =
+                format_description::parse("[year]-[month]-[day]T[hour]:[minute]:[second]Z")
+                    .unwrap_or_default();
+            let date = datetime.format(&format).unwrap_or_default();
+
+            let author = sig.name().unwrap_or("Unknown").to_string();
+            let commit_hash = oid.to_string();
+            let short_hash: String = commit_hash.chars().take(7).collect();
+
+            // Each hunk covers lines from final_start_line to final_start_line + lines_in_hunk - 1
+            let start_line = hunk.final_start_line(); // 1-based
+            let num_lines = hunk.lines_in_hunk();
+
+            for offset in 0..num_lines {
+                let line_num = start_line + offset;
+                let line_idx = line_num.saturating_sub(1); // Convert to 0-based index
+                if line_idx >= lines.len() {
+                    break;
+                }
+
+                entries.push(BlameEntry {
+                    line: line_num,
+                    commit_hash: commit_hash.clone(),
+                    short_hash: short_hash.clone(),
+                    author: author.clone(),
+                    date: date.clone(),
+                    content: lines.get(line_idx).unwrap_or(&"").to_string(),
+                });
+            }
+        }
+
+        // Sort by line number to ensure consistent ordering
+        entries.sort_by_key(|e| e.line);
+        Ok(entries)
+    }
+
+    /// Get symbol-level blame for a Rust file (MVP)
+    /// Extracts fn, struct, enum, impl, trait, mod, const, static and maps them to commits
+    pub fn symbol_blame_rust(&self, file_path: &Path) -> Result<FileSymbolBlame, GitError> {
+        use regex::Regex;
+
+        let file_content =
+            std::fs::read_to_string(self.path.join(file_path)).map_err(GitError::IoError)?;
+
+        // Get blame for the file
+        let blame_entries = self.blame_file(file_path)?;
+
+        // Rust symbol patterns (MVP: simple regex, not full parser)
+        // These patterns match the start of a symbol definition
+        let symbol_patterns = [
+            (r"^\s*(?:pub\s+)?(?:async\s+)?fn\s+(\w+)", "fn"),
+            (r"^\s*(?:pub\s+)?struct\s+(\w+)", "struct"),
+            (r"^\s*(?:pub\s+)?enum\s+(\w+)", "enum"),
+            (
+                r"^\s*impl(?:<[^>]+>)?\s+(?:(\w+)|(?:\w+\s+for\s+(\w+)))",
+                "impl",
+            ),
+            (r"^\s*(?:pub\s+)?trait\s+(\w+)", "trait"),
+            (r"^\s*(?:pub\s+)?mod\s+(\w+)", "mod"),
+            (r"^\s*(?:pub\s+)?const\s+(\w+)", "const"),
+            (r"^\s*(?:pub\s+)?static\s+(\w+)", "static"),
+        ];
+
+        let compiled_patterns: Vec<(Regex, &str)> = symbol_patterns
+            .iter()
+            .filter_map(|(pattern, kind)| Regex::new(pattern).ok().map(|re| (re, *kind)))
+            .collect();
+
+        let lines: Vec<&str> = file_content.lines().collect();
+        let mut symbols = Vec::new();
+        let mut brace_stack = 0;
+        let mut current_symbol: Option<(String, String, usize)> = None; // (name, kind, start_line)
+
+        for (line_idx, line) in lines.iter().enumerate() {
+            let line_num = line_idx + 1;
+
+            // Check for new symbol definition (only when not inside another symbol)
+            if brace_stack == 0 {
+                for (re, kind) in &compiled_patterns {
+                    if let Some(captures) = re.captures(line) {
+                        // Get the first non-None capture group (symbol name)
+                        let name = captures
+                            .iter()
+                            .skip(1)
+                            .find_map(|m| m.map(|m| m.as_str().to_string()))
+                            .unwrap_or_else(|| format!("anonymous_{}", line_num));
+
+                        current_symbol = Some((name, kind.to_string(), line_num));
+                        break;
+                    }
+                }
+            }
+
+            // Track brace nesting
+            for ch in line.chars() {
+                match ch {
+                    '{' => brace_stack += 1,
+                    '}' => {
+                        if brace_stack > 0 {
+                            brace_stack -= 1;
+                        }
+                        // Symbol ends when braces are balanced
+                        if brace_stack == 0
+                            && let Some((name, kind, start_line)) = current_symbol.take()
+                        {
+                            // Find blame for this symbol
+                            let introduced_blame =
+                                blame_entries.iter().find(|e| e.line == start_line);
+
+                            // Find last modification (latest timestamp in symbol range)
+                            let symbol_blames: Vec<_> = blame_entries
+                                .iter()
+                                .filter(|e| e.line >= start_line && e.line <= line_num)
+                                .collect();
+
+                            // Get commit info for introduced_by
+                            let introduced_by = if let Some(blame) = introduced_blame {
+                                self.get_commit_info(&blame.commit_hash)
+                                    .unwrap_or_else(|_| CommitInfo {
+                                        hash: blame.commit_hash.clone(),
+                                        short_hash: blame.short_hash.clone(),
+                                        author: blame.author.clone(),
+                                        author_email: String::new(),
+                                        date: blame.date.clone(),
+                                        timestamp: 0,
+                                        message: String::new(),
+                                        message_full: String::new(),
+                                    })
+                            } else {
+                                CommitInfo {
+                                    hash: "unknown".to_string(),
+                                    short_hash: "unknown".to_string(),
+                                    author: "Unknown".to_string(),
+                                    author_email: String::new(),
+                                    date: String::new(),
+                                    timestamp: 0,
+                                    message: String::new(),
+                                    message_full: String::new(),
+                                }
+                            };
+
+                            // Find last modified (most recent commit in symbol)
+                            // ISO 8601 dates can be compared lexicographically
+                            let last_modified_by = symbol_blames
+                                .iter()
+                                .max_by(|a, b| a.date.cmp(&b.date))
+                                .and_then(|b| {
+                                    if b.commit_hash != introduced_by.hash {
+                                        self.get_commit_info(&b.commit_hash).ok()
+                                    } else {
+                                        None
+                                    }
+                                });
+
+                            symbols.push(SymbolBlame {
+                                name,
+                                kind,
+                                start_line,
+                                end_line: line_num,
+                                introduced_by,
+                                last_modified_by,
+                            });
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // Handle symbol without closing brace (e.g., mod declaration without body)
+        if let Some((name, kind, start_line)) = current_symbol
+            && let Some(blame) = blame_entries.iter().find(|e| e.line == start_line)
+        {
+            let introduced_by = self
+                .get_commit_info(&blame.commit_hash)
+                .unwrap_or_else(|_| CommitInfo {
+                    hash: blame.commit_hash.clone(),
+                    short_hash: blame.short_hash.clone(),
+                    author: blame.author.clone(),
+                    author_email: String::new(),
+                    date: blame.date.clone(),
+                    timestamp: 0,
+                    message: String::new(),
+                    message_full: String::new(),
+                });
+
+            symbols.push(SymbolBlame {
+                name,
+                kind,
+                start_line,
+                end_line: lines.len(),
+                introduced_by,
+                last_modified_by: None,
+            });
+        }
+
+        Ok(FileSymbolBlame {
+            path: file_path.to_string_lossy().to_string(),
+            language: "rust".to_string(),
+            symbols,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -482,5 +750,373 @@ mod tests {
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].status, ChangeStatus::Added);
         assert_eq!(changes[0].new_path, Some(PathBuf::from("utils.ts")));
+    }
+
+    #[test]
+    fn test_git_error_display_not_a_repository() {
+        let err = GitError::NotARepository("/some/path".to_string());
+        assert_eq!(format!("{}", err), "not a git repository: /some/path");
+    }
+
+    #[test]
+    fn test_git_error_display_ref_not_found() {
+        let err = GitError::RefNotFound("main".to_string());
+        assert_eq!(format!("{}", err), "reference not found: main");
+    }
+
+    #[test]
+    fn test_git_error_display_operation_failed() {
+        let err = GitError::OperationFailed("something went wrong".to_string());
+        assert_eq!(
+            format!("{}", err),
+            "git operation failed: something went wrong"
+        );
+    }
+
+    #[test]
+    fn test_git_error_display_io_error() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
+        let err = GitError::IoError(io_err);
+        assert!(format!("{}", err).contains("IO error"));
+    }
+
+    #[test]
+    fn test_git_error_from_io_error() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
+        let git_err: GitError = io_err.into();
+        assert!(matches!(git_err, GitError::IoError(_)));
+    }
+
+    #[test]
+    fn test_changed_file_path_new_path() {
+        let file = ChangedFile {
+            old_path: Some(PathBuf::from("old.ts")),
+            new_path: Some(PathBuf::from("new.ts")),
+            status: ChangeStatus::Renamed,
+        };
+        assert_eq!(file.path(), Some(Path::new("new.ts")));
+    }
+
+    #[test]
+    fn test_changed_file_path_old_path_only() {
+        let file = ChangedFile {
+            old_path: Some(PathBuf::from("deleted.ts")),
+            new_path: None,
+            status: ChangeStatus::Deleted,
+        };
+        assert_eq!(file.path(), Some(Path::new("deleted.ts")));
+    }
+
+    #[test]
+    fn test_changed_file_path_none() {
+        let file = ChangedFile {
+            old_path: None,
+            new_path: None,
+            status: ChangeStatus::Modified,
+        };
+        assert!(file.path().is_none());
+    }
+
+    #[test]
+    fn test_resolve_ref_nonexistent() {
+        let (_temp_dir, repo) = create_test_repo();
+        let result = repo.resolve_ref("nonexistent-branch");
+        assert!(matches!(result, Err(GitError::RefNotFound(_))));
+    }
+
+    #[test]
+    fn test_resolve_ref_with_commit_hash() {
+        let (_temp_dir, repo) = create_test_repo();
+        let head = repo.head_commit().unwrap();
+        let resolved = repo.resolve_ref(&head).unwrap();
+        assert_eq!(resolved, head);
+    }
+
+    #[test]
+    fn test_log_with_file_filter() {
+        let (temp_dir, repo) = create_test_repo();
+        let path = temp_dir.path();
+
+        // Create another file and commit
+        std::fs::write(path.join("utils.ts"), "export const x = 1;").unwrap();
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(path)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "Add utils"])
+            .current_dir(path)
+            .output()
+            .unwrap();
+
+        // Log for main.ts should only show initial commit
+        let commits = repo.log(Some(Path::new("main.ts")), 10).unwrap();
+        assert_eq!(commits.len(), 1);
+        assert_eq!(commits[0].message, "Initial commit");
+
+        // Log for utils.ts should only show second commit
+        let commits = repo.log(Some(Path::new("utils.ts")), 10).unwrap();
+        assert_eq!(commits.len(), 1);
+        assert_eq!(commits[0].message, "Add utils");
+    }
+
+    #[test]
+    fn test_log_limit() {
+        let (temp_dir, repo) = create_test_repo();
+        let path = temp_dir.path();
+
+        // Create multiple commits
+        for i in 1..5 {
+            std::fs::write(path.join("main.ts"), format!("version {}", i)).unwrap();
+            Command::new("git")
+                .args(["add", "."])
+                .current_dir(path)
+                .output()
+                .unwrap();
+            Command::new("git")
+                .args(["commit", "-m", &format!("Commit {}", i)])
+                .current_dir(path)
+                .output()
+                .unwrap();
+        }
+
+        // Limit should work
+        let commits = repo.log(None, 2).unwrap();
+        assert_eq!(commits.len(), 2);
+    }
+
+    #[test]
+    fn test_file_content_at_nonexistent() {
+        let (_temp_dir, repo) = create_test_repo();
+        let result = repo.file_content_at("HEAD", Path::new("nonexistent.ts"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_changed_files_modified() {
+        let (temp_dir, repo) = create_test_repo();
+        let path = temp_dir.path();
+
+        // Modify existing file
+        std::fs::write(path.join("main.ts"), "export function main() { return 1; }").unwrap();
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(path)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "Modify main"])
+            .current_dir(path)
+            .output()
+            .unwrap();
+
+        let changes = repo.changed_files("HEAD~1", "HEAD").unwrap();
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].status, ChangeStatus::Modified);
+    }
+
+    #[test]
+    fn test_changed_files_deleted() {
+        let (temp_dir, repo) = create_test_repo();
+        let path = temp_dir.path();
+
+        // Delete file
+        std::fs::remove_file(path.join("main.ts")).unwrap();
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(path)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "Delete main"])
+            .current_dir(path)
+            .output()
+            .unwrap();
+
+        let changes = repo.changed_files("HEAD~1", "HEAD").unwrap();
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].status, ChangeStatus::Deleted);
+    }
+
+    #[test]
+    fn test_commit_info_fields() {
+        let (_temp_dir, repo) = create_test_repo();
+        let info = repo.get_commit_info("HEAD").unwrap();
+
+        // Verify all fields are populated
+        assert!(!info.hash.is_empty());
+        assert_eq!(info.short_hash.len(), 7);
+        assert_eq!(info.author, "Test User");
+        assert_eq!(info.author_email, "test@test.com");
+        assert!(!info.date.is_empty());
+        assert!(info.timestamp > 0);
+        assert!(!info.message.is_empty());
+        assert!(!info.message_full.is_empty());
+    }
+
+    #[test]
+    fn test_list_files_at_multiple() {
+        let (temp_dir, repo) = create_test_repo();
+        let path = temp_dir.path();
+
+        // Create additional files and commit
+        std::fs::create_dir(path.join("src")).unwrap();
+        std::fs::write(path.join("src/utils.ts"), "export const x = 1;").unwrap();
+        std::fs::write(path.join("config.json"), "{}").unwrap();
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(path)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "Add files"])
+            .current_dir(path)
+            .output()
+            .unwrap();
+
+        let files = repo.list_files_at("HEAD").unwrap();
+        assert_eq!(files.len(), 3);
+    }
+
+    #[test]
+    fn test_change_status_equality() {
+        assert_eq!(ChangeStatus::Added, ChangeStatus::Added);
+        assert_ne!(ChangeStatus::Added, ChangeStatus::Deleted);
+        assert_eq!(ChangeStatus::Modified, ChangeStatus::Modified);
+        assert_eq!(ChangeStatus::Renamed, ChangeStatus::Renamed);
+        assert_eq!(ChangeStatus::Copied, ChangeStatus::Copied);
+    }
+
+    fn create_rust_test_repo() -> (TempDir, GitRepo) {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path();
+
+        // Initialize git repo
+        Command::new("git")
+            .args(["init"])
+            .current_dir(path)
+            .output()
+            .unwrap();
+
+        // Configure git user
+        Command::new("git")
+            .args(["config", "user.email", "test@test.com"])
+            .current_dir(path)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.name", "Test User"])
+            .current_dir(path)
+            .output()
+            .unwrap();
+
+        // Create initial Rust file and commit
+        let rust_content = r#"
+pub fn hello() {
+    println!("Hello");
+}
+
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+impl Point {
+    fn new(x: i32, y: i32) -> Self {
+        Self { x, y }
+    }
+}
+"#;
+        std::fs::write(path.join("lib.rs"), rust_content).unwrap();
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(path)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "Initial Rust commit"])
+            .current_dir(path)
+            .output()
+            .unwrap();
+
+        let repo = GitRepo::discover(path).unwrap();
+        (temp_dir, repo)
+    }
+
+    #[test]
+    fn test_blame_file() {
+        let (_temp_dir, repo) = create_test_repo();
+        let entries = repo.blame_file(Path::new("main.ts")).unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].line, 1);
+        assert_eq!(entries[0].author, "Test User");
+        assert_eq!(entries[0].content, "export function main() {}");
+    }
+
+    #[test]
+    fn test_symbol_blame_rust() {
+        let (_temp_dir, repo) = create_rust_test_repo();
+        let result = repo.symbol_blame_rust(Path::new("lib.rs")).unwrap();
+
+        assert_eq!(result.language, "rust");
+        assert_eq!(result.path, "lib.rs");
+
+        // Should find: fn hello, struct Point, impl Point, fn new
+        assert!(result.symbols.len() >= 3);
+
+        // Find the hello function
+        let hello_fn = result
+            .symbols
+            .iter()
+            .find(|s| s.name == "hello" && s.kind == "fn");
+        assert!(hello_fn.is_some());
+        let hello_fn = hello_fn.unwrap();
+        assert_eq!(hello_fn.introduced_by.author, "Test User");
+
+        // Find the Point struct
+        let point_struct = result
+            .symbols
+            .iter()
+            .find(|s| s.name == "Point" && s.kind == "struct");
+        assert!(point_struct.is_some());
+    }
+
+    #[test]
+    fn test_blame_entry_fields() {
+        let (_temp_dir, repo) = create_test_repo();
+        let entries = repo.blame_file(Path::new("main.ts")).unwrap();
+
+        let entry = &entries[0];
+        assert!(!entry.commit_hash.is_empty());
+        assert_eq!(entry.short_hash.len(), 7);
+        assert!(!entry.date.is_empty());
+    }
+
+    #[test]
+    fn test_symbol_blame_serde() {
+        let symbol = SymbolBlame {
+            name: "test_fn".to_string(),
+            kind: "fn".to_string(),
+            start_line: 1,
+            end_line: 5,
+            introduced_by: CommitInfo {
+                hash: "abc123".to_string(),
+                short_hash: "abc123".to_string(),
+                author: "Test".to_string(),
+                author_email: "test@test.com".to_string(),
+                date: "2025-01-01T00:00:00Z".to_string(),
+                timestamp: 0,
+                message: "Test".to_string(),
+                message_full: "Test".to_string(),
+            },
+            last_modified_by: None,
+        };
+
+        let json = serde_json::to_string(&symbol).unwrap();
+        let parsed: SymbolBlame = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.name, "test_fn");
+        assert_eq!(parsed.kind, "fn");
     }
 }

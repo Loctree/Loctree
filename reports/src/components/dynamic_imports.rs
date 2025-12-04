@@ -4,9 +4,7 @@ use leptos::prelude::*;
 
 /// Table showing dynamic import patterns
 #[component]
-pub fn DynamicImportsTable(
-    imports: Vec<(String, Vec<String>)>,
-) -> impl IntoView {
+pub fn DynamicImportsTable(imports: Vec<(String, Vec<String>)>) -> impl IntoView {
     let count = imports.len();
     view! {
         <h3>"Dynamic imports"</h3>

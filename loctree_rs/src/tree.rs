@@ -519,3 +519,257 @@ pub fn run_tree(root_list: &[PathBuf], parsed: &crate::args::ParsedArgs) -> io::
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn create_test_tree() -> TempDir {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+
+        // Create directories
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::create_dir_all(root.join("lib")).unwrap();
+
+        // Create files with content
+        fs::write(
+            root.join("src/main.ts"),
+            "export function main() {\n  console.log('hello');\n}\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("src/utils.ts"),
+            "export const add = (a: number, b: number) => a + b;\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("lib/helper.ts"),
+            "export function help() { return 'help'; }\n",
+        )
+        .unwrap();
+
+        temp
+    }
+
+    fn default_parsed_args() -> crate::args::ParsedArgs {
+        crate::args::ParsedArgs::default()
+    }
+
+    #[test]
+    fn test_run_tree_basic() {
+        let temp = create_test_tree();
+        let roots = vec![temp.path().to_path_buf()];
+        let parsed = default_parsed_args();
+
+        let result = run_tree(&roots, &parsed);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_run_tree_with_summary() {
+        let temp = create_test_tree();
+        let roots = vec![temp.path().to_path_buf()];
+        let mut parsed = default_parsed_args();
+        parsed.summary = true;
+
+        let result = run_tree(&roots, &parsed);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_run_tree_json_output() {
+        let temp = create_test_tree();
+        let roots = vec![temp.path().to_path_buf()];
+        let mut parsed = default_parsed_args();
+        parsed.output = OutputMode::Json;
+
+        let result = run_tree(&roots, &parsed);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_run_tree_jsonl_output() {
+        let temp = create_test_tree();
+        let roots = vec![temp.path().to_path_buf()];
+        let mut parsed = default_parsed_args();
+        parsed.output = OutputMode::Jsonl;
+
+        let result = run_tree(&roots, &parsed);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_run_tree_with_extension_filter() {
+        let temp = create_test_tree();
+        let roots = vec![temp.path().to_path_buf()];
+        let mut parsed = default_parsed_args();
+        parsed.extensions = Some(["ts".to_string()].into_iter().collect());
+
+        let result = run_tree(&roots, &parsed);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_run_tree_with_max_depth() {
+        let temp = create_test_tree();
+        let roots = vec![temp.path().to_path_buf()];
+        let mut parsed = default_parsed_args();
+        parsed.max_depth = Some(1);
+
+        let result = run_tree(&roots, &parsed);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_run_tree_empty_directory() {
+        let temp = TempDir::new().unwrap();
+        let roots = vec![temp.path().to_path_buf()];
+        let parsed = default_parsed_args();
+
+        let result = run_tree(&roots, &parsed);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_run_tree_multiple_roots() {
+        let temp1 = create_test_tree();
+        let temp2 = create_test_tree();
+        let roots = vec![temp1.path().to_path_buf(), temp2.path().to_path_buf()];
+        let parsed = default_parsed_args();
+
+        let result = run_tree(&roots, &parsed);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_run_tree_show_hidden() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+
+        // Create hidden file
+        fs::write(root.join(".hidden.ts"), "const hidden = true;\n").unwrap();
+        fs::write(root.join("visible.ts"), "const visible = true;\n").unwrap();
+
+        let roots = vec![temp.path().to_path_buf()];
+        let mut parsed = default_parsed_args();
+        parsed.show_hidden = true;
+
+        let result = run_tree(&roots, &parsed);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_run_tree_with_gitignore() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+
+        // Create .gitignore
+        fs::write(root.join(".gitignore"), "*.log\nnode_modules/\n").unwrap();
+        fs::write(root.join("app.ts"), "const app = 'app';\n").unwrap();
+        fs::write(root.join("debug.log"), "log content\n").unwrap();
+
+        let roots = vec![temp.path().to_path_buf()];
+        let mut parsed = default_parsed_args();
+        parsed.use_gitignore = true;
+
+        let result = run_tree(&roots, &parsed);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_run_tree_with_loc_threshold() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+
+        // Create a file with many lines
+        let large_content: String = (0..100)
+            .map(|i| format!("const line{} = {};\n", i, i))
+            .collect();
+        fs::write(root.join("large.ts"), large_content).unwrap();
+
+        let roots = vec![temp.path().to_path_buf()];
+        let mut parsed = default_parsed_args();
+        parsed.loc_threshold = 50;
+
+        let result = run_tree(&roots, &parsed);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_find_artifacts_mode() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+
+        // Create build artifact directories
+        fs::create_dir_all(root.join("node_modules")).unwrap();
+        fs::create_dir_all(root.join("dist")).unwrap();
+        fs::create_dir_all(root.join("target")).unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+
+        // Add some files
+        fs::write(root.join("node_modules/package.json"), "{}").unwrap();
+        fs::write(root.join("src/main.ts"), "export default {};\n").unwrap();
+
+        let roots = vec![temp.path().to_path_buf()];
+        let mut parsed = default_parsed_args();
+        parsed.find_artifacts = true;
+
+        let result = run_tree(&roots, &parsed);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_build_artifact_dirs_constant() {
+        // Verify BUILD_ARTIFACT_DIRS contains expected directories
+        assert!(BUILD_ARTIFACT_DIRS.contains(&"node_modules"));
+        assert!(BUILD_ARTIFACT_DIRS.contains(&"target"));
+        assert!(BUILD_ARTIFACT_DIRS.contains(&"dist"));
+        assert!(BUILD_ARTIFACT_DIRS.contains(&".venv"));
+        assert!(BUILD_ARTIFACT_DIRS.contains(&"vendor"));
+    }
+
+    #[test]
+    fn test_run_tree_with_ignore_patterns() {
+        let temp = create_test_tree();
+        let roots = vec![temp.path().to_path_buf()];
+        let mut parsed = default_parsed_args();
+        parsed.ignore_patterns = vec!["lib".to_string()];
+
+        let result = run_tree(&roots, &parsed);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_run_tree_with_color_always() {
+        let temp = create_test_tree();
+        let roots = vec![temp.path().to_path_buf()];
+        let mut parsed = default_parsed_args();
+        parsed.color = ColorMode::Always;
+
+        let result = run_tree(&roots, &parsed);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_run_tree_nested_directories() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+
+        // Create deeply nested structure
+        fs::create_dir_all(root.join("a/b/c/d")).unwrap();
+        fs::write(
+            root.join("a/b/c/d/deep.ts"),
+            "export const deep = 'deep';\n",
+        )
+        .unwrap();
+
+        let roots = vec![temp.path().to_path_buf()];
+        let parsed = default_parsed_args();
+
+        let result = run_tree(&roots, &parsed);
+        assert!(result.is_ok());
+    }
+}

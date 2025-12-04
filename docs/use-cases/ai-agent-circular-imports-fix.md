@@ -7,8 +7,8 @@
 ```
 Your task: Fix 6 circular import cycles and prepare a PR to upstream.
 
-STEP 1: Learn the tool - Run `loctree --help-full`
-STEP 2: Diagnose - Run `loctree . -A --circular`
+STEP 1: Learn the tool - Run `loct --help-full`
+STEP 2: Diagnose - Run `loct cycles`
 STEP 3: Fix each cycle
 STEP 4: Validate with `yarn lint` and `yarn test`
 STEP 5: Prepare PR
@@ -19,29 +19,27 @@ STEP 5: Prepare PR
 ### Step 1: Learning the Tool
 
 ```bash
-$ loctree --help-full
+$ loct --help
 
-loctree (Rust) - AI-oriented Project Analyzer - Full reference
-
-Usage: loctree [root ...] [options]
+loct (Rust) - AI-oriented Project Analyzer
 
 Modes:
-  init (default)            Scan and save snapshot to .loctree/snapshot.json
-  slice <file>              Holographic slice: extract context for AI agents
-  --analyze-imports, -A     Import/export analyzer mode
-  --tree                    Directory tree view with LOC counts
-
-Analyzer mode options (-A):
-  --circular                Find circular imports (SCC analysis)
-  --dead                    List potentially unused exports
-  --sarif                   SARIF 2.1.0 output for CI integration
-  ...
+  (default)                 Scan, save snapshot + reports to .loctree/
+  slice <file>              Holographic slice (add --consumers, --json)
+  find                      Unified search (symbols, similar, impact)
+  dead                      Unused exports
+  cycles                    Circular imports (SCC analysis)
+  commands                  Tauri FE↔BE coverage (missing/unused)
+  events                    Emit/listen/races summary
+  tree                      Directory tree with LOC counts
+  report --graph            HTML report with graph
+  lint --fail --sarif       CI guardrails / SARIF output
 ```
 
 ### Step 2: Initial Diagnosis
 
 ```bash
-$ loctree . -A --circular
+$ loct cycles
 
 Circular imports detected (6 cycles):
   Cycle 1: embed/src/components/ChatWindow/ChatContainer -> .../ChatHistory
@@ -74,8 +72,7 @@ export const SEND_TEXT_EVENT = "anythingllm-embed-send-prompt";
 ```
 
 **Verify:**
-```bash
-$ loctree . -A --circular
+$ loct cycles
 Circular imports detected (5 cycles):  # ✅ Down from 6!
 ```
 
@@ -85,8 +82,7 @@ Circular imports detected (5 cycles):  # ✅ Down from 6!
 
 **Fix:** Create `constants.js`, update imports.
 
-```bash
-$ loctree . -A --circular
+$ loct cycles
 Circular imports detected (4 cycles):  # ✅ Down from 5!
 ```
 
@@ -100,8 +96,7 @@ Each cycle followed the same pattern:
 
 ### Final Result
 
-```bash
-$ loctree . -A --circular
+$ loct cycles
 No circular imports detected.  # 🎉
 ```
 
@@ -126,7 +121,7 @@ Resolves 6 circular import cycles detected by static analysis.
 ## Testing
 - [x] `yarn lint` passes
 - [x] `yarn test` passes
-- [x] `loctree . -A --circular` reports no cycles
+- [x] `loct cycles` reports no cycles
 ```
 
 ---

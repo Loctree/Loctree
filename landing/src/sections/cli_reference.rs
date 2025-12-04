@@ -13,20 +13,40 @@ pub fn CliReference() -> impl IntoView {
                     <div class="cli-group">
                         <h3 class="cli-group-title">"Modes"</h3>
                         <div class="cli-item">
-                            <code class="cli-cmd">"loctree"</code>
-                            <span class="cli-desc">"Scan and save snapshot (default)"</span>
+                            <code class="cli-cmd">"loct"</code>
+                            <span class="cli-desc">"Auto scan + snapshot (use `loct report --serve` for HTML)"</span>
                         </div>
                         <div class="cli-item">
-                            <code class="cli-cmd">"loctree slice <file>"</code>
+                            <code class="cli-cmd">"loct slice <file>"</code>
                             <span class="cli-desc">"Holographic slice for AI context"</span>
                         </div>
                         <div class="cli-item">
-                            <code class="cli-cmd">"loctree -A"</code>
-                            <span class="cli-desc">"Import/export analyzer mode"</span>
+                            <code class="cli-cmd">"loct find --impact <file>"</code>
+                            <span class="cli-desc">"Blast radius / dependency impact"</span>
                         </div>
                         <div class="cli-item">
-                            <code class="cli-cmd">"loctree trace <handler>"</code>
-                            <span class="cli-desc">"Investigate unused handler"</span>
+                            <code class="cli-cmd">"loct dead"</code>
+                            <span class="cli-desc">"Unused exports (alias/barrel aware)"</span>
+                        </div>
+                        <div class="cli-item">
+                            <code class="cli-cmd">"loct cycles"</code>
+                            <span class="cli-desc">"Detect circular imports"</span>
+                        </div>
+                        <div class="cli-item">
+                            <code class="cli-cmd">"loct commands"</code>
+                            <span class="cli-desc">"Tauri FE↔BE coverage (missing/unused)"</span>
+                        </div>
+                        <div class="cli-item">
+                            <code class="cli-cmd">"loct events"</code>
+                            <span class="cli-desc">"Emit/listen/races summary"</span>
+                        </div>
+                        <div class="cli-item">
+                            <code class="cli-cmd">"loct query <kind> <target>"</code>
+                            <span class="cli-desc">"Quick queries (who-imports, where-symbol)"</span>
+                        </div>
+                        <div class="cli-item">
+                            <code class="cli-cmd">"loct diff --since <id>"</code>
+                            <span class="cli-desc">"Compare snapshots, show delta"</span>
                         </div>
                     </div>
 
@@ -43,45 +63,29 @@ pub fn CliReference() -> impl IntoView {
                     </div>
 
                     <div class="cli-group">
-                        <h3 class="cli-group-title">"Analyzer Options (-A)"</h3>
+                        <h3 class="cli-group-title">"Find / Analyze"</h3>
                         <div class="cli-item">
-                            <code class="cli-cmd">"--circular"</code>
-                            <span class="cli-desc">"Find circular imports"</span>
+                            <code class="cli-cmd">"loct find <query>"</code>
+                            <span class="cli-desc">"One command: fuzzy match + defs/uses + dead status"</span>
                         </div>
                         <div class="cli-item">
-                            <code class="cli-cmd">"--dead"</code>
-                            <span class="cli-desc">"Find unused exports"</span>
+                            <code class="cli-cmd">"loct query who-imports <file>"</code>
+                            <span class="cli-desc">"Quick: files that import target"</span>
                         </div>
                         <div class="cli-item">
-                            <code class="cli-cmd">"--confidence <level>"</code>
-                            <span class="cli-desc">"Filter: high, low, all"</span>
+                            <code class="cli-cmd">"loct query where-symbol <name>"</code>
+                            <span class="cli-desc">"Quick: where symbol is defined"</span>
                         </div>
                         <div class="cli-item">
-                            <code class="cli-cmd">"--entrypoints"</code>
-                            <span class="cli-desc">"List entry points"</span>
+                            <code class="cli-cmd">"loct dead --confidence high"</code>
+                            <span class="cli-desc">"Unused exports with stricter filter"</span>
                         </div>
                         <div class="cli-item">
-                            <code class="cli-cmd">"--check <query>"</code>
-                            <span class="cli-desc">"Find similar components"</span>
+                            <code class="cli-cmd">"loct report --serve"</code>
+                            <span class="cli-desc">"HTML with embedded dependency graph + local server"</span>
                         </div>
                         <div class="cli-item">
-                            <code class="cli-cmd">"--impact <file>"</code>
-                            <span class="cli-desc">"Show what imports target"</span>
-                        </div>
-                        <div class="cli-item">
-                            <code class="cli-cmd">"--symbol <name>"</code>
-                            <span class="cli-desc">"Search for symbol"</span>
-                        </div>
-                        <div class="cli-item">
-                            <code class="cli-cmd">"--graph"</code>
-                            <span class="cli-desc">"Output DOT graph format"</span>
-                        </div>
-                        <div class="cli-item">
-                            <code class="cli-cmd">"--html-report"</code>
-                            <span class="cli-desc">"Generate HTML report"</span>
-                        </div>
-                        <div class="cli-item">
-                            <code class="cli-cmd">"--sarif"</code>
+                            <code class="cli-cmd">"loct lint --sarif"</code>
                             <span class="cli-desc">"SARIF 2.1.0 output for CI"</span>
                         </div>
                     </div>
@@ -89,16 +93,16 @@ pub fn CliReference() -> impl IntoView {
                     <div class="cli-group">
                         <h3 class="cli-group-title">"Pipeline Checks"</h3>
                         <div class="cli-item">
-                            <code class="cli-cmd">"--fail-on-missing-handlers"</code>
-                            <span class="cli-desc">"FE->BE integrity"</span>
+                            <code class="cli-cmd">"loct lint --fail"</code>
+                            <span class="cli-desc">"Fail CI on missing/ghost handlers"</span>
                         </div>
                         <div class="cli-item">
-                            <code class="cli-cmd">"--fail-on-ghost-events"</code>
-                            <span class="cli-desc">"Unused events"</span>
+                            <code class="cli-cmd">"loct commands --missing"</code>
+                            <span class="cli-desc">"List FE calls without handlers"</span>
                         </div>
                         <div class="cli-item">
-                            <code class="cli-cmd">"--fail-on-races"</code>
-                            <span class="cli-desc">"Race conditions"</span>
+                            <code class="cli-cmd">"loct commands --unused"</code>
+                            <span class="cli-desc">"Handlers without FE calls"</span>
                         </div>
                     </div>
 

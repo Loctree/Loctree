@@ -41,6 +41,10 @@ pub struct ParsedArgs {
     pub fail_on_missing_handlers: bool,
     pub fail_on_ghost_events: bool,
     pub fail_on_races: bool,
+    /// Maximum allowed dead exports before failing (CI policy)
+    pub max_dead: Option<usize>,
+    /// Maximum allowed circular imports before failing (CI policy)
+    pub max_cycles: Option<usize>,
     pub ai_mode: bool,
     pub top_dead_symbols: usize,
     pub skip_dead_symbols: bool,
@@ -54,11 +58,38 @@ pub struct ParsedArgs {
     pub find_artifacts: bool,
     pub circular: bool,
     pub entrypoints: bool,
+    pub py_races: bool,
     pub sarif: bool,
     pub full_scan: bool,
     pub slice_target: Option<String>,
     pub slice_consumers: bool,
     pub trace_handler: Option<String>,
+    /// Unified search query
+    pub search_query: Option<String>,
+    /// Filter search to symbol matches only
+    pub search_symbol_only: bool,
+    /// Filter search to dead code only
+    pub search_dead_only: bool,
+    /// Filter search to semantic matches only
+    pub search_semantic_only: bool,
+    /// Auto mode: eagerly emit HTML/JSON/cycle artifacts into .loctree
+    pub auto_outputs: bool,
+    /// Filter search to exported symbols only
+    pub search_exported_only: bool,
+    /// Language filter for search
+    pub search_lang: Option<String>,
+    /// Limit search results
+    pub search_limit: Option<usize>,
+    /// Command name regex filter (commands subcommand)
+    pub commands_name_filter: Option<String>,
+    /// Only commands missing backend handlers
+    pub commands_missing_only: bool,
+    /// Only commands unused on frontend
+    pub commands_unused_only: bool,
+    /// Include tests in dead-export analysis
+    pub with_tests: bool,
+    /// Include helper/docs/scripts in dead-export analysis
+    pub with_helpers: bool,
 }
 
 impl Default for ParsedArgs {
@@ -71,7 +102,7 @@ impl Default for ParsedArgs {
             focus_patterns: Vec::new(),
             exclude_report_patterns: Vec::new(),
             graph: false,
-            use_gitignore: false,
+            use_gitignore: true,
             max_depth: None,
             color: ColorMode::Auto,
             output: OutputMode::Human,
@@ -101,6 +132,8 @@ impl Default for ParsedArgs {
             fail_on_missing_handlers: false,
             fail_on_ghost_events: false,
             fail_on_races: false,
+            max_dead: None,
+            max_cycles: None,
             ai_mode: false,
             top_dead_symbols: 20,
             skip_dead_symbols: false,
@@ -114,11 +147,25 @@ impl Default for ParsedArgs {
             find_artifacts: false,
             circular: false,
             entrypoints: false,
+            py_races: false,
             sarif: false,
             full_scan: false,
             slice_target: None,
             slice_consumers: false,
             trace_handler: None,
+            search_query: None,
+            search_symbol_only: false,
+            search_dead_only: false,
+            search_semantic_only: false,
+            auto_outputs: false,
+            search_exported_only: false,
+            search_lang: None,
+            search_limit: None,
+            commands_name_filter: None,
+            commands_missing_only: false,
+            commands_unused_only: false,
+            with_tests: false,
+            with_helpers: false,
         }
     }
 }
@@ -328,6 +375,10 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
                 parsed.use_gitignore = true;
                 i += 1;
             }
+            "--no-gitignore" => {
+                parsed.use_gitignore = false;
+                i += 1;
+            }
             "--graph" => {
                 parsed.graph = true;
                 i += 1;
@@ -346,6 +397,42 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
             }
             "--fail-on-races" => {
                 parsed.fail_on_races = true;
+                i += 1;
+            }
+            "--max-dead" => {
+                let next = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--max-dead requires a non-negative integer".to_string())?;
+                let value = next
+                    .parse::<usize>()
+                    .map_err(|_| "--max-dead requires a non-negative integer".to_string())?;
+                parsed.max_dead = Some(value);
+                i += 2;
+            }
+            _ if arg.starts_with("--max-dead=") => {
+                let value = arg
+                    .trim_start_matches("--max-dead=")
+                    .parse::<usize>()
+                    .map_err(|_| "--max-dead requires a non-negative integer".to_string())?;
+                parsed.max_dead = Some(value);
+                i += 1;
+            }
+            "--max-cycles" => {
+                let next = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--max-cycles requires a non-negative integer".to_string())?;
+                let value = next
+                    .parse::<usize>()
+                    .map_err(|_| "--max-cycles requires a non-negative integer".to_string())?;
+                parsed.max_cycles = Some(value);
+                i += 2;
+            }
+            _ if arg.starts_with("--max-cycles=") => {
+                let value = arg
+                    .trim_start_matches("--max-cycles=")
+                    .parse::<usize>()
+                    .map_err(|_| "--max-cycles requires a non-negative integer".to_string())?;
+                parsed.max_cycles = Some(value);
                 i += 1;
             }
             "--show-hidden" | "-H" => {
@@ -533,6 +620,11 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
                 parsed.mode = Mode::AnalyzeImports;
                 i += 1;
             }
+            "--py-races" => {
+                parsed.py_races = true;
+                parsed.mode = Mode::AnalyzeImports;
+                i += 1;
+            }
             "--sarif" => {
                 parsed.sarif = true;
                 parsed.output = OutputMode::Json;
@@ -567,6 +659,29 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
                     i += 2;
                     continue;
                 }
+                i += 1;
+            }
+            "search" => {
+                parsed.mode = Mode::Search;
+                if let Some(next) = args.get(i + 1)
+                    && !next.starts_with('-')
+                {
+                    parsed.search_query = Some(next.clone());
+                    i += 2;
+                    continue;
+                }
+                i += 1;
+            }
+            "--symbol-only" => {
+                parsed.search_symbol_only = true;
+                i += 1;
+            }
+            "--dead-only" => {
+                parsed.search_dead_only = true;
+                i += 1;
+            }
+            "--semantic-only" | "--sem-only" => {
+                parsed.search_semantic_only = true;
                 i += 1;
             }
             "git" => {
@@ -722,6 +837,11 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
             "--for-ai" | "for-ai" => {
                 parsed.mode = Mode::ForAi;
                 parsed.output = OutputMode::Json;
+                i += 1;
+            }
+            "--for-agent-feed" => {
+                parsed.mode = Mode::ForAi;
+                parsed.output = OutputMode::Jsonl;
                 i += 1;
             }
             "--confidence" => {
@@ -954,8 +1074,9 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
     validate_globs(&parsed.exclude_report_patterns, "--exclude-report")?;
     detect_glob_conflicts(&parsed.focus_patterns, &parsed.exclude_report_patterns)?;
 
-    if parsed.serve && parsed.report_path.is_none() {
-        return Err("--serve requires --html-report to be set".to_string());
+    if parsed.serve {
+        // --serve implies full analysis + HTML report generation
+        parsed.mode = Mode::AnalyzeImports;
     }
 
     for extra in &parsed.py_roots {
@@ -994,6 +1115,31 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_extensions_with_dots() {
+        // Extensions with leading dots should be trimmed
+        let res = parse_extensions(".rs, .ts, .js").expect("parse extensions");
+        assert!(res.contains("rs"));
+        assert!(res.contains("ts"));
+        assert!(res.contains("js"));
+        assert_eq!(res.len(), 3);
+    }
+
+    #[test]
+    fn test_parse_extensions_uppercase() {
+        // Extensions should be lowercased
+        let res = parse_extensions("RS,TS").expect("parse extensions");
+        assert!(res.contains("rs"));
+        assert!(res.contains("ts"));
+    }
+
+    #[test]
+    fn test_parse_extensions_empty_segments() {
+        // Empty segments should be ignored
+        let res = parse_extensions("rs,,ts, ,js").expect("parse extensions");
+        assert_eq!(res.len(), 3);
+    }
+
+    #[test]
     fn test_parse_color_mode() {
         assert_eq!(
             parse_color_mode("always").expect("color always"),
@@ -1007,10 +1153,153 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_color_mode_auto() {
+        assert_eq!(
+            parse_color_mode("auto").expect("color auto"),
+            ColorMode::Auto
+        );
+    }
+
+    #[test]
     fn test_parse_summary_limit() {
         assert_eq!(parse_summary_limit("5").expect("summary"), 5);
         assert!(parse_summary_limit("0").is_err());
         assert!(parse_summary_limit("abc").is_err());
+    }
+
+    #[test]
+    fn test_parse_summary_limit_large() {
+        assert_eq!(parse_summary_limit("100").expect("summary"), 100);
+    }
+
+    #[test]
+    fn test_parse_glob_list() {
+        let list = parse_glob_list("src/**,tests/**,lib/*");
+        assert_eq!(list.len(), 3);
+        assert!(list.contains(&"src/**".to_string()));
+        assert!(list.contains(&"tests/**".to_string()));
+        assert!(list.contains(&"lib/*".to_string()));
+    }
+
+    #[test]
+    fn test_parse_glob_list_with_spaces() {
+        let list = parse_glob_list(" src/** , tests/** ");
+        assert_eq!(list.len(), 2);
+        assert!(list.contains(&"src/**".to_string()));
+        assert!(list.contains(&"tests/**".to_string()));
+    }
+
+    #[test]
+    fn test_parse_glob_list_empty() {
+        let list = parse_glob_list("");
+        assert!(list.is_empty());
+
+        let list = parse_glob_list("  ,  ,  ");
+        assert!(list.is_empty());
+    }
+
+    #[test]
+    fn test_parse_positive_usize() {
+        assert_eq!(parse_positive_usize("10", "--limit").expect("parse"), 10);
+        assert_eq!(parse_positive_usize("1", "--limit").expect("parse"), 1);
+    }
+
+    #[test]
+    fn test_parse_positive_usize_zero_error() {
+        let result = parse_positive_usize("0", "--limit");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("requires a positive integer"));
+    }
+
+    #[test]
+    fn test_parse_positive_usize_non_numeric() {
+        let result = parse_positive_usize("abc", "--limit");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_port() {
+        assert_eq!(parse_port("8080", "--port").expect("port"), 8080);
+        assert_eq!(parse_port("0", "--port").expect("port"), 0);
+        assert_eq!(parse_port("65535", "--port").expect("port"), 65535);
+    }
+
+    #[test]
+    fn test_parse_port_invalid() {
+        let result = parse_port("abc", "--port");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("port number"));
+    }
+
+    #[test]
+    fn test_validate_globs_valid() {
+        let patterns = vec!["src/**".to_string(), "*.rs".to_string()];
+        assert!(validate_globs(&patterns, "--focus").is_ok());
+    }
+
+    #[test]
+    fn test_validate_globs_invalid() {
+        let patterns = vec!["[invalid".to_string()]; // Unclosed bracket
+        assert!(validate_globs(&patterns, "--focus").is_err());
+    }
+
+    #[test]
+    fn test_validate_globs_empty() {
+        let patterns: Vec<String> = vec![];
+        assert!(validate_globs(&patterns, "--focus").is_ok());
+
+        let patterns = vec!["".to_string(), "  ".to_string()];
+        assert!(validate_globs(&patterns, "--focus").is_ok()); // Empty patterns are skipped
+    }
+
+    #[test]
+    fn test_parse_ignore_symbols() {
+        let result = parse_ignore_symbols("main,setup,test").expect("parse");
+        assert!(result.contains("main"));
+        assert!(result.contains("setup"));
+        assert!(result.contains("test"));
+        assert_eq!(result.len(), 3);
+    }
+
+    #[test]
+    fn test_parse_ignore_symbols_empty() {
+        assert!(parse_ignore_symbols("").is_none());
+        assert!(parse_ignore_symbols("  ,  ,  ").is_none());
+    }
+
+    #[test]
+    fn test_parse_ignore_symbols_case_insensitive() {
+        let result = parse_ignore_symbols("Main,SETUP").expect("parse");
+        assert!(result.contains("main"));
+        assert!(result.contains("setup"));
+    }
+
+    #[test]
+    fn test_preset_ignore_symbols_common() {
+        let symbols = preset_ignore_symbols("common").expect("preset common");
+        assert!(symbols.contains("main"));
+        assert!(symbols.contains("run"));
+        assert!(symbols.contains("setup"));
+    }
+
+    #[test]
+    fn test_preset_ignore_symbols_tauri() {
+        let symbols = preset_ignore_symbols("tauri").expect("preset tauri");
+        assert!(symbols.contains("main"));
+        assert!(symbols.contains("default"));
+        assert!(symbols.contains("new"));
+        assert!(symbols.contains("from"));
+    }
+
+    #[test]
+    fn test_preset_ignore_symbols_unknown() {
+        assert!(preset_ignore_symbols("unknown").is_none());
+    }
+
+    #[test]
+    fn test_preset_ignore_symbols_case_insensitive() {
+        assert!(preset_ignore_symbols("COMMON").is_some());
+        assert!(preset_ignore_symbols("Tauri").is_some());
     }
 
     #[test]
@@ -1025,5 +1314,44 @@ mod tests {
         let focus = vec!["src/**".to_string()];
         let exclude = vec!["tests/**".to_string()];
         assert!(detect_glob_conflicts(&focus, &exclude).is_ok());
+    }
+
+    #[test]
+    fn detect_glob_conflicts_empty_lists() {
+        // Empty lists should not conflict
+        assert!(detect_glob_conflicts(&[], &[]).is_ok());
+        assert!(detect_glob_conflicts(&["src/**".to_string()], &[]).is_ok());
+        assert!(detect_glob_conflicts(&[], &["tests/**".to_string()]).is_ok());
+    }
+
+    #[test]
+    fn test_parsed_args_default() {
+        let args = ParsedArgs::default();
+        assert!(args.extensions.is_none());
+        assert!(args.ignore_patterns.is_empty());
+        assert!(!args.graph);
+        assert!(args.use_gitignore); // Default: respect gitignore
+        assert!(args.max_depth.is_none());
+        assert_eq!(args.color, ColorMode::Auto);
+        assert_eq!(args.output, OutputMode::Human);
+        assert!(!args.summary);
+        assert_eq!(args.summary_limit, 5);
+        assert!(!args.show_help);
+        assert!(!args.show_version);
+        assert!(args.root_list.is_empty());
+        assert_eq!(args.loc_threshold, DEFAULT_LOC_THRESHOLD);
+        assert!(matches!(args.mode, Mode::Tree));
+        assert_eq!(args.analyze_limit, 8);
+        assert!(!args.verbose);
+        assert!(!args.tauri_preset);
+        assert!(!args.fail_on_missing_handlers);
+        assert!(args.max_dead.is_none());
+        assert!(args.max_cycles.is_none());
+        assert!(!args.ai_mode);
+        assert_eq!(args.top_dead_symbols, 20);
+        assert!(!args.dead_exports);
+        assert!(!args.circular);
+        assert!(!args.entrypoints);
+        assert!(!args.sarif);
     }
 }

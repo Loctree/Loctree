@@ -40,6 +40,7 @@ pub(crate) fn render_html_report(path: &Path, sections: &[ReportSection]) -> io:
         layout_base_path: "loctree-layout-base.js".into(),
         cose_base_path: "loctree-cose-base.js".into(),
         cytoscape_cose_bilkent_path: "loctree-cytoscape-cose-bilkent.js".into(),
+        ..Default::default()
     };
 
     let html = report_leptos::render_report(&leptos_sections, &js_assets);
@@ -97,10 +98,12 @@ mod tests {
         let dup = RankedDup {
             name: "Foo".into(),
             files: vec!["a.ts".into(), "b.ts".into()],
+            locations: vec![],
             score: 2,
             prod_count: 2,
             dev_count: 0,
             canonical: "a.ts".into(),
+            canonical_line: None,
             refactors: vec!["b.ts".into()],
         };
 
@@ -112,6 +115,7 @@ mod tests {
             dynamic_imports_count: 1,
             ranked_dups: vec![dup],
             cascades: vec![("a.ts".into(), "b.ts".into())],
+            circular_imports: vec![],
             dynamic: vec![("dyn.ts".into(), vec!["./lazy".into()])],
             analyze_limit: 5,
             missing_handlers: Vec::new(),
@@ -120,6 +124,7 @@ mod tests {
             command_counts: (0, 0),
             command_bridges: Vec::new(),
             open_base: None,
+            tree: None,
             graph: None,
             graph_warning: None,
             insights: vec![AiInsight {
@@ -127,6 +132,8 @@ mod tests {
                 severity: "medium".into(),
                 message: "Message".into(),
             }],
+            git_branch: None,
+            git_commit: None,
         };
 
         render_html_report(&out_path, &[section]).expect("render html");
@@ -155,6 +162,7 @@ mod tests {
             dynamic_imports_count: 0,
             ranked_dups: Vec::new(),
             cascades: Vec::new(),
+            circular_imports: Vec::new(),
             dynamic: Vec::new(),
             analyze_limit: 1,
             missing_handlers: Vec::new(),
@@ -163,9 +171,12 @@ mod tests {
             command_counts: (0, 0),
             command_bridges: Vec::new(),
             open_base: None,
+            tree: None,
             graph: None,
             graph_warning: None,
             insights: Vec::new(),
+            git_branch: None,
+            git_commit: None,
         };
 
         render_html_report(&out_path, &[section]).expect("render html");

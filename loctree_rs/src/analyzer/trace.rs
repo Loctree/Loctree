@@ -189,6 +189,7 @@ fn find_frontend_invokes(
     search_variations: &[String],
 ) -> Vec<FrontendMention> {
     let mut invokes = Vec::new();
+    let mut seen: std::collections::HashSet<(String, usize)> = std::collections::HashSet::new();
     let normalized = normalize_name(handler_name);
 
     for (cmd_name, locations) in fe_commands {
@@ -201,13 +202,16 @@ fn find_frontend_invokes(
 
         if matches {
             for (path, line, _impl_name) in locations {
-                invokes.push(FrontendMention {
-                    file: path.clone(),
-                    line: *line,
-                    context: "invoke".to_string(),
-                    is_invoke: true,
-                    snippet: None,
-                });
+                // Deduplicate by (file, line)
+                if seen.insert((path.clone(), *line)) {
+                    invokes.push(FrontendMention {
+                        file: path.clone(),
+                        line: *line,
+                        context: "invoke".to_string(),
+                        is_invoke: true,
+                        snippet: None,
+                    });
+                }
             }
         }
     }
@@ -375,4 +379,403 @@ pub fn print_trace_human(result: &TraceResult) {
 pub fn print_trace_json(result: &TraceResult) {
     let json = serde_json::to_string_pretty(&result).expect("serialize trace result");
     println!("{}", json);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{CommandRef, ExportSymbol, FileAnalysis};
+    use std::collections::{HashMap, HashSet};
+
+    fn mock_file(path: &str) -> FileAnalysis {
+        FileAnalysis {
+            path: path.to_string(),
+            ..Default::default()
+        }
+    }
+
+    fn mock_rust_file_with_handler(
+        path: &str,
+        handler_name: &str,
+        exposed_name: Option<&str>,
+    ) -> FileAnalysis {
+        FileAnalysis {
+            path: path.to_string(),
+            command_handlers: vec![CommandRef {
+                name: handler_name.to_string(),
+                exposed_name: exposed_name.map(|s| s.to_string()),
+                line: 10,
+                generic_type: None,
+                payload: None,
+            }],
+            ..Default::default()
+        }
+    }
+
+    fn mock_ts_file_with_export(path: &str, export_name: &str) -> FileAnalysis {
+        FileAnalysis {
+            path: path.to_string(),
+            exports: vec![ExportSymbol {
+                name: export_name.to_string(),
+                kind: "named".to_string(),
+                export_type: "export".to_string(),
+                line: Some(5),
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_normalize_name() {
+        assert_eq!(normalize_name("get_user"), "getuser");
+        assert_eq!(normalize_name("getUser"), "getuser");
+        assert_eq!(normalize_name("GET-USER"), "getuser");
+        assert_eq!(normalize_name("get_user_123"), "getuser123");
+    }
+
+    #[test]
+    fn test_to_snake_case() {
+        assert_eq!(to_snake_case("getUser"), "get_user");
+        assert_eq!(to_snake_case("getUserData"), "get_user_data");
+        assert_eq!(to_snake_case("get_user"), "get_user");
+        assert_eq!(to_snake_case("API"), "a_p_i");
+    }
+
+    #[test]
+    fn test_to_camel_case() {
+        assert_eq!(to_camel_case("get_user"), "getUser");
+        assert_eq!(to_camel_case("get_user_data"), "getUserData");
+        assert_eq!(to_camel_case("getUser"), "getUser");
+    }
+
+    #[test]
+    fn test_generate_search_variations() {
+        let variations = generate_search_variations("get_user");
+        assert!(variations.contains(&"get_user".to_string()));
+        assert!(variations.contains(&"getUser".to_string()));
+        assert!(variations.contains(&"get_user_command".to_string()));
+
+        let variations2 = generate_search_variations("getUserData_command");
+        assert!(variations2.contains(&"getUserData_command".to_string()));
+        assert!(variations2.contains(&"getUserData".to_string())); // stripped _command
+    }
+
+    #[test]
+    fn test_find_backend_definition_found() {
+        let analyses = vec![mock_rust_file_with_handler(
+            "src-tauri/src/commands.rs",
+            "get_user",
+            Some("getUser"),
+        )];
+        let registered: HashSet<String> = ["get_user".to_string()].into_iter().collect();
+
+        let result = find_backend_definition("get_user", &analyses, &registered);
+        assert!(result.is_some());
+        let be = result.unwrap();
+        assert_eq!(be.function_name, "get_user");
+        assert_eq!(be.exposed_name, Some("getUser".to_string()));
+        assert!(be.is_registered);
+    }
+
+    #[test]
+    fn test_find_backend_definition_by_exposed_name() {
+        let analyses = vec![mock_rust_file_with_handler(
+            "src-tauri/src/commands.rs",
+            "internal_get_user",
+            Some("getUser"),
+        )];
+        let registered: HashSet<String> = HashSet::new();
+
+        let result = find_backend_definition("getUser", &analyses, &registered);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().function_name, "internal_get_user");
+    }
+
+    #[test]
+    fn test_find_backend_definition_not_found() {
+        let analyses = vec![mock_rust_file_with_handler(
+            "src-tauri/src/commands.rs",
+            "other_handler",
+            None,
+        )];
+        let registered: HashSet<String> = HashSet::new();
+
+        let result = find_backend_definition("get_user", &analyses, &registered);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_find_backend_definition_skips_non_rust() {
+        let mut ts_file = mock_file("src/api.ts");
+        ts_file.command_handlers = vec![CommandRef {
+            name: "get_user".to_string(),
+            exposed_name: None,
+            line: 10,
+            generic_type: None,
+            payload: None,
+        }];
+
+        let analyses = vec![ts_file];
+        let registered: HashSet<String> = HashSet::new();
+
+        let result = find_backend_definition("get_user", &analyses, &registered);
+        assert!(result.is_none()); // Should skip .ts files
+    }
+
+    #[test]
+    fn test_find_frontend_invokes_found() {
+        let mut fe_commands: CommandUsage = HashMap::new();
+        fe_commands.insert(
+            "get_user".to_string(),
+            vec![("src/api.ts".to_string(), 20, "fn".to_string())],
+        );
+
+        let variations = generate_search_variations("get_user");
+        let result = find_frontend_invokes("get_user", &fe_commands, &variations);
+
+        assert_eq!(result.len(), 1);
+        assert!(result[0].is_invoke);
+        assert_eq!(result[0].context, "invoke");
+    }
+
+    #[test]
+    fn test_find_frontend_invokes_by_variation() {
+        let mut fe_commands: CommandUsage = HashMap::new();
+        fe_commands.insert(
+            "getUser".to_string(), // camelCase in FE
+            vec![("src/api.ts".to_string(), 20, String::new())],
+        );
+
+        let variations = generate_search_variations("get_user"); // snake_case search
+        let result = find_frontend_invokes("get_user", &fe_commands, &variations);
+
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_find_frontend_invokes_empty() {
+        let fe_commands: CommandUsage = HashMap::new();
+        let variations = generate_search_variations("get_user");
+        let result = find_frontend_invokes("get_user", &fe_commands, &variations);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_find_frontend_mentions_export() {
+        let analyses = vec![mock_ts_file_with_export("src/commands.ts", "get_user")];
+        let variations = generate_search_variations("get_user");
+
+        let result = find_frontend_mentions("get_user", &analyses, &variations);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].context, "export/allowlist");
+        assert!(!result[0].is_invoke);
+    }
+
+    #[test]
+    fn test_find_frontend_mentions_skips_rust() {
+        let analyses = vec![mock_ts_file_with_export("src-tauri/src/lib.rs", "get_user")];
+        let variations = generate_search_variations("get_user");
+
+        let result = find_frontend_mentions("get_user", &analyses, &variations);
+        assert!(result.is_empty()); // Should skip Rust files
+    }
+
+    #[test]
+    fn test_generate_verdict_not_found() {
+        let (verdict, suggestion) = generate_verdict(&None, &[], &[], "get_user");
+        assert!(verdict.contains("NOT FOUND"));
+        assert!(suggestion.contains("spelling"));
+    }
+
+    #[test]
+    fn test_generate_verdict_missing_handler() {
+        let invokes = vec![FrontendMention {
+            file: "src/api.ts".to_string(),
+            line: 10,
+            context: "invoke".to_string(),
+            is_invoke: true,
+            snippet: None,
+        }];
+        let (verdict, suggestion) = generate_verdict(&None, &invokes, &[], "get_user");
+        assert!(verdict.contains("MISSING HANDLER"));
+        assert!(suggestion.contains("Add #[tauri::command]"));
+    }
+
+    #[test]
+    fn test_generate_verdict_unused() {
+        let backend = Some(BackendDefinition {
+            file: "src-tauri/src/lib.rs".to_string(),
+            line: 50,
+            function_name: "get_user".to_string(),
+            exposed_name: None,
+            is_registered: true,
+        });
+        let (verdict, suggestion) = generate_verdict(&backend, &[], &[], "get_user");
+        assert!(verdict.contains("UNUSED"));
+        assert!(suggestion.contains("wire up invoke"));
+    }
+
+    #[test]
+    fn test_generate_verdict_unused_not_registered() {
+        let backend = Some(BackendDefinition {
+            file: "src-tauri/src/lib.rs".to_string(),
+            line: 50,
+            function_name: "get_user".to_string(),
+            exposed_name: None,
+            is_registered: false,
+        });
+        let (verdict, suggestion) = generate_verdict(&backend, &[], &[], "get_user");
+        assert!(verdict.contains("NOT registered"));
+        assert!(suggestion.contains("generate_handler!"));
+    }
+
+    #[test]
+    fn test_generate_verdict_unused_with_mentions() {
+        let backend = Some(BackendDefinition {
+            file: "src-tauri/src/lib.rs".to_string(),
+            line: 50,
+            function_name: "get_user".to_string(),
+            exposed_name: None,
+            is_registered: true,
+        });
+        let mentions = vec![FrontendMention {
+            file: "src/allowlist.ts".to_string(),
+            line: 5,
+            context: "export/allowlist".to_string(),
+            is_invoke: false,
+            snippet: None,
+        }];
+        let (verdict, _) = generate_verdict(&backend, &[], &mentions, "get_user");
+        assert!(verdict.contains("1 non-invoke mentions"));
+    }
+
+    #[test]
+    fn test_generate_verdict_connected() {
+        let backend = Some(BackendDefinition {
+            file: "src-tauri/src/lib.rs".to_string(),
+            line: 50,
+            function_name: "get_user".to_string(),
+            exposed_name: None,
+            is_registered: true,
+        });
+        let invokes = vec![
+            FrontendMention {
+                file: "src/api.ts".to_string(),
+                line: 10,
+                context: "invoke".to_string(),
+                is_invoke: true,
+                snippet: None,
+            },
+            FrontendMention {
+                file: "src/other.ts".to_string(),
+                line: 20,
+                context: "invoke".to_string(),
+                is_invoke: true,
+                snippet: None,
+            },
+        ];
+        let (verdict, suggestion) = generate_verdict(&backend, &invokes, &[], "get_user");
+        assert!(verdict.contains("CONNECTED"));
+        assert!(verdict.contains("2 time(s)"));
+        assert!(suggestion.contains("No action needed"));
+    }
+
+    #[test]
+    fn test_trace_handler_full() {
+        let analyses = vec![
+            mock_rust_file_with_handler("src-tauri/src/commands.rs", "get_user", Some("getUser")),
+            mock_ts_file_with_export("src/commands.ts", "getUser"),
+        ];
+        let mut fe_commands: CommandUsage = HashMap::new();
+        fe_commands.insert(
+            "getUser".to_string(),
+            vec![("src/api.ts".to_string(), 30, String::new())],
+        );
+        let be_commands: CommandUsage = HashMap::new();
+        let registered: HashSet<String> = ["get_user".to_string()].into_iter().collect();
+
+        let result = trace_handler(
+            "get_user",
+            &analyses,
+            &fe_commands,
+            &be_commands,
+            &registered,
+        );
+
+        assert_eq!(result.handler_name, "get_user");
+        assert!(!result.search_variations.is_empty());
+        assert!(result.backend.is_some());
+        assert_eq!(result.frontend_invokes.len(), 1);
+        assert_eq!(result.files_searched, 2);
+        assert!(result.verdict.contains("CONNECTED"));
+    }
+
+    #[test]
+    fn test_print_trace_human() {
+        let result = TraceResult {
+            handler_name: "test_handler".to_string(),
+            search_variations: vec!["test_handler".to_string(), "testHandler".to_string()],
+            backend: Some(BackendDefinition {
+                file: "src/lib.rs".to_string(),
+                line: 10,
+                function_name: "test_handler".to_string(),
+                exposed_name: Some("testHandler".to_string()),
+                is_registered: true,
+            }),
+            frontend_invokes: vec![FrontendMention {
+                file: "src/api.ts".to_string(),
+                line: 20,
+                context: "invoke".to_string(),
+                is_invoke: true,
+                snippet: None,
+            }],
+            frontend_mentions: vec![FrontendMention {
+                file: "src/config.ts".to_string(),
+                line: 5,
+                context: "export/allowlist".to_string(),
+                is_invoke: false,
+                snippet: Some("export const handlers".to_string()),
+            }],
+            files_searched: 10,
+            verdict: "CONNECTED".to_string(),
+            suggestion: "No action needed".to_string(),
+        };
+
+        // Should not panic
+        print_trace_human(&result);
+    }
+
+    #[test]
+    fn test_print_trace_human_no_backend() {
+        let result = TraceResult {
+            handler_name: "missing".to_string(),
+            search_variations: vec!["missing".to_string()],
+            backend: None,
+            frontend_invokes: vec![],
+            frontend_mentions: vec![],
+            files_searched: 5,
+            verdict: "NOT FOUND".to_string(),
+            suggestion: "Check spelling".to_string(),
+        };
+
+        // Should not panic
+        print_trace_human(&result);
+    }
+
+    #[test]
+    fn test_print_trace_json() {
+        let result = TraceResult {
+            handler_name: "test".to_string(),
+            search_variations: vec!["test".to_string()],
+            backend: None,
+            frontend_invokes: vec![],
+            frontend_mentions: vec![],
+            files_searched: 1,
+            verdict: "NOT FOUND".to_string(),
+            suggestion: "Add handler".to_string(),
+        };
+
+        // Should not panic
+        print_trace_json(&result);
+    }
 }

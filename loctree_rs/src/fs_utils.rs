@@ -49,14 +49,22 @@ impl GitIgnoreChecker {
     }
 }
 
-/// Load patterns from `.loctreeignore` file in root directory.
+/// Load patterns from `.loctignore` (preferred) or `.loctreeignore` (legacy) file in root directory.
 /// Supports gitignore-style syntax: one pattern per line, # comments, empty lines ignored.
 /// Returns empty vec if file doesn't exist.
 pub fn load_loctreeignore(root: &Path) -> Vec<String> {
-    let ignore_file = root.join(".loctreeignore");
-    if !ignore_file.exists() {
-        return Vec::new();
-    }
+    // Prefer .loctignore (short form, matches `loct` CLI)
+    let ignore_file = root.join(".loctignore");
+    let ignore_file = if ignore_file.exists() {
+        ignore_file
+    } else {
+        // Fallback to .loctreeignore for backward compatibility
+        let legacy = root.join(".loctreeignore");
+        if !legacy.exists() {
+            return Vec::new();
+        }
+        legacy
+    };
 
     let file = match File::open(&ignore_file) {
         Ok(f) => f,
@@ -264,7 +272,7 @@ pub fn sort_dir_entries(entries: &mut [std::fs::DirEntry]) {
 
 #[cfg(test)]
 mod tests {
-    use super::gather_files;
+    use super::*;
     use crate::types::{ColorMode, Options, OutputMode};
     use std::collections::HashSet;
     use std::path::PathBuf;
@@ -275,6 +283,33 @@ mod tests {
             ignore_paths: Vec::new(),
             use_gitignore: false,
             max_depth: Some(1),
+            color: ColorMode::Never,
+            output: OutputMode::Human,
+            summary: false,
+            summary_limit: 5,
+            show_hidden: false,
+            show_ignored: false,
+            loc_threshold: crate::types::DEFAULT_LOC_THRESHOLD,
+            analyze_limit: 8,
+            report_path: None,
+            serve: false,
+            editor_cmd: None,
+            max_graph_nodes: None,
+            max_graph_edges: None,
+            verbose: false,
+            scan_all: false,
+            symbol: None,
+            impact: None,
+            find_artifacts: false,
+        }
+    }
+
+    fn default_opts() -> Options {
+        Options {
+            extensions: None,
+            ignore_paths: Vec::new(),
+            use_gitignore: false,
+            max_depth: None,
             color: ColorMode::Never,
             output: OutputMode::Human,
             summary: false,
@@ -396,5 +431,158 @@ mod tests {
             .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
             .collect();
         assert_eq!(names, vec!["keep.rs".to_string()]);
+    }
+
+    #[test]
+    fn test_count_lines() {
+        let tmp = tempfile::tempdir().expect("tmp dir");
+        let file_path = tmp.path().join("test.txt");
+        std::fs::write(&file_path, "line1\nline2\nline3\n").expect("write file");
+
+        let count = count_lines(&file_path);
+        assert_eq!(count, Some(3));
+    }
+
+    #[test]
+    fn test_count_lines_empty_file() {
+        let tmp = tempfile::tempdir().expect("tmp dir");
+        let file_path = tmp.path().join("empty.txt");
+        std::fs::write(&file_path, "").expect("write file");
+
+        let count = count_lines(&file_path);
+        assert_eq!(count, Some(0));
+    }
+
+    #[test]
+    fn test_count_lines_missing_file() {
+        let count = count_lines(Path::new("/nonexistent/file.txt"));
+        assert!(count.is_none());
+    }
+
+    #[test]
+    fn test_matches_extension_with_set() {
+        let extensions: HashSet<String> = ["rs", "ts", "js"]
+            .into_iter()
+            .map(|s| s.to_string())
+            .collect();
+
+        assert!(matches_extension(Path::new("file.rs"), Some(&extensions)));
+        assert!(matches_extension(Path::new("file.ts"), Some(&extensions)));
+        assert!(matches_extension(Path::new("file.RS"), Some(&extensions))); // case insensitive
+        assert!(!matches_extension(Path::new("file.py"), Some(&extensions)));
+        assert!(!matches_extension(Path::new("noext"), Some(&extensions)));
+    }
+
+    #[test]
+    fn test_matches_extension_none() {
+        // None means no filter - all files match
+        assert!(matches_extension(Path::new("file.rs"), None));
+        assert!(matches_extension(Path::new("file.txt"), None));
+        assert!(matches_extension(Path::new("noext"), None));
+    }
+
+    #[test]
+    fn test_is_allowed_hidden() {
+        // Allowed hidden files
+        assert!(is_allowed_hidden(".env"));
+        assert!(is_allowed_hidden(".ENV")); // case insensitive
+        assert!(is_allowed_hidden(".env.local"));
+        assert!(is_allowed_hidden(".env.production"));
+        assert!(is_allowed_hidden(".loctree.json"));
+        assert!(is_allowed_hidden(".loctree.yml"));
+        assert!(is_allowed_hidden(".example"));
+
+        // Not allowed
+        assert!(!is_allowed_hidden(".gitignore"));
+        assert!(!is_allowed_hidden(".npmrc"));
+        assert!(!is_allowed_hidden(".hidden"));
+    }
+
+    #[test]
+    fn test_should_ignore_with_ignore_paths() {
+        let opts = Options {
+            ignore_paths: vec![PathBuf::from("/ignored/path")],
+            ..default_opts()
+        };
+
+        assert!(should_ignore(
+            Path::new("/ignored/path/file.rs"),
+            &opts,
+            None
+        ));
+        assert!(!should_ignore(
+            Path::new("/other/path/file.rs"),
+            &opts,
+            None
+        ));
+    }
+
+    #[test]
+    fn test_load_loctreeignore_nonexistent() {
+        let tmp = tempfile::tempdir().expect("tmp dir");
+        let patterns = load_loctreeignore(tmp.path());
+        assert!(patterns.is_empty());
+    }
+
+    #[test]
+    fn test_load_loctreeignore_with_patterns() {
+        let tmp = tempfile::tempdir().expect("tmp dir");
+        let ignore_file = tmp.path().join(".loctreeignore");
+        std::fs::write(
+            &ignore_file,
+            "# Comment\nnode_modules\n\n*.log\n# Another comment\nbuild/\n",
+        )
+        .expect("write loctreeignore");
+
+        let patterns = load_loctreeignore(tmp.path());
+        assert_eq!(patterns.len(), 3);
+        assert!(patterns.contains(&"node_modules".to_string()));
+        assert!(patterns.contains(&"*.log".to_string()));
+        assert!(patterns.contains(&"build/".to_string()));
+    }
+
+    #[test]
+    fn test_normalise_ignore_patterns_relative() {
+        let tmp = tempfile::tempdir().expect("tmp dir");
+        let patterns = vec!["src".to_string(), "lib".to_string()];
+
+        let normalized = normalise_ignore_patterns(&patterns, tmp.path());
+        assert_eq!(normalized.len(), 2);
+        // Normalized paths should be based on root
+        assert!(normalized[0].ends_with("src") || normalized[0].to_string_lossy().contains("src"));
+    }
+
+    #[test]
+    fn test_sort_dir_entries() {
+        let tmp = tempfile::tempdir().expect("tmp dir");
+
+        // Create some files and directories
+        std::fs::create_dir(tmp.path().join("z_dir")).expect("mkdir");
+        std::fs::create_dir(tmp.path().join("a_dir")).expect("mkdir");
+        std::fs::write(tmp.path().join("z_file.txt"), "").expect("write");
+        std::fs::write(tmp.path().join("a_file.txt"), "").expect("write");
+
+        let mut entries: Vec<_> = std::fs::read_dir(tmp.path())
+            .expect("read dir")
+            .filter_map(Result::ok)
+            .collect();
+
+        sort_dir_entries(&mut entries);
+
+        // After sorting: directories first (a_dir, z_dir), then files (a_file, z_file)
+        let names: Vec<_> = entries
+            .iter()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+
+        // First two should be directories
+        assert!(entries[0].path().is_dir());
+        assert!(entries[1].path().is_dir());
+        // Directories alphabetically
+        assert_eq!(names[0], "a_dir");
+        assert_eq!(names[1], "z_dir");
+        // Files alphabetically
+        assert_eq!(names[2], "a_file.txt");
+        assert_eq!(names[3], "z_file.txt");
     }
 }

@@ -1,12 +1,12 @@
 [package]
 name = "loctree"
-version = "0.5.3"
+version = "0.5.13"
 edition = "2024"
 default-run = "loctree"
-authors = ["LibraxisAI <the1st@whoai.am>"]
+authors = ["Loctree <loct@loctree.io>"]
 description = "Fast, language-aware codebase analyzer for detecting dead exports, circular imports, and generating dependency graphs"
 license = "MIT"
-repository = "https://github.com/LibraxisAI/Loctree"
+repository = "https://github.com/Loctree/Loctree"
 readme = "../README.md"
 keywords = ["static-analysis", "dead-code", "imports", "exports", "codebase"]
 categories = ["development-tools", "command-line-utilities"]
@@ -17,11 +17,11 @@ path = "src/lib.rs"
 
 [[bin]]
 name = "loctree"
-path = "src/main.rs"
+path = "src/bin/loctree.rs"
 
 [[bin]]
 name = "loct"
-path = "src/main.rs"
+path = "src/bin/loct.rs"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
@@ -31,10 +31,21 @@ regex = "1.12"
 globset = "0.4"
 heck = "0.5"
 time = { version = "0.3", features = ["formatting"] }
-report-leptos = { version = "0.1", path = "../reports" }
-git2 = "0.19"
+report-leptos = { version = "0.1.1", path = "../reports" }
+git2 = "0.20"
+toml = "0.8"
+urlencoding = "2.1"
+
+# AST Parsing (TypeScript/JavaScript) - OXC
+oxc_allocator = "0.100.0"
+oxc_parser = "0.100.0"
+oxc_span = "0.100.0"
+oxc_ast = "0.100.0"
+oxc_ast_visit = "0.100.0"
+oxc_semantic = "0.100.0"
+tempfile = "3"
 
 [dev-dependencies]
-tempfile = "3"
 assert_cmd = "2.0"
 predicates = "3.1"
+regex = "1.12"

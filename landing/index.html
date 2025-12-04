@@ -19,7 +19,10 @@
     <meta name="twitter:description" content="Static analysis tool designed for AI agents.">
     <meta name="twitter:image" content="https://loctree.io/assets/loctree-logo-brutal.svg">
 
-    <!-- Canonical -->
+    <!-- Canonical URL for SEO - rel="canonical" is metadata only, not a resource loader.
+         Integrity attribute is only meaningful for scripts/stylesheets that execute code.
+         Canonical links are hints to search engines and do not fetch/execute external content. -->
+    <!-- nosemgrep: html.security.audit.missing-integrity.missing-integrity -->
     <link rel="canonical" href="https://loctree.io">
 
     <!-- Fonts -->

@@ -2,18 +2,18 @@
 //!
 //! Implements the App Shell layout with Sidebar and Main Content areas.
 
-use leptos::prelude::*;
-use crate::styles::{REPORT_CSS, CSP};
+use super::{
+    Icon, ReportSectionView, ICON_COPY, ICON_GRAPH, ICON_LIGHTNING, ICON_SQUARES_FOUR,
+    ICON_TERMINAL,
+};
+use crate::styles::{CSP, REPORT_CSS};
 use crate::types::ReportSection;
 use crate::JsAssets;
-use super::{ReportSectionView, Icon, ICON_SQUARES_FOUR, ICON_COPY, ICON_LIGHTNING, ICON_TERMINAL, ICON_GRAPH};
+use leptos::prelude::*;
 
 /// The complete HTML document for the report
 #[component]
-pub fn ReportDocument(
-    sections: Vec<ReportSection>,
-    js_assets: JsAssets,
-) -> impl IntoView {
+pub fn ReportDocument(sections: Vec<ReportSection>, js_assets: JsAssets) -> impl IntoView {
     view! {
         <html>
             <head>
@@ -39,7 +39,7 @@ pub fn ReportDocument(
                                 </svg>
                             </button>
                         </div>
-                        
+
                         <nav class="sidebar-nav">
                             <button class="nav-item active" data-tab="overview">
                                 <Icon path=ICON_SQUARES_FOUR class="icon-sm" />
@@ -61,10 +61,14 @@ pub fn ReportDocument(
                                 <Icon path=ICON_GRAPH class="icon-sm" />
                                 "Graph"
                             </button>
+                            <button class="nav-item" data-tab="tree">
+                                <Icon path=ICON_SQUARES_FOUR class="icon-sm" />
+                                "Tree"
+                            </button>
                         </nav>
 
                         <div class="app-footer">
-                            "loctree v0.5.2"
+                            "loctree v0.5.13"
                             <br />
                             <span style="color:var(--theme-text-tertiary)">"Snapshot"</span>
                         </div>
@@ -75,10 +79,10 @@ pub fn ReportDocument(
                             let view_id = format!("section-view-{}", idx);
                             let active = idx == 0;
                             view! {
-                                <ReportSectionView 
-                                    section=section 
-                                    active=active 
-                                    view_id=view_id 
+                                <ReportSectionView
+                                    section=section
+                                    active=active
+                                    view_id=view_id
                                 />
                             }
                         }).collect::<Vec<_>>()}
@@ -113,9 +117,20 @@ fn GraphScripts(js_assets: JsAssets) -> impl IntoView {
     }
 }
 
-/// Application logic (Navigation, Tabs, Resize, Theme Toggle)
+/// Application logic (Navigation, Tabs, Resize, Theme Toggle, Copy)
 const APP_SCRIPT: &str = r#"
 (() => {
+  // -1. Copy Button Handler
+  document.querySelectorAll('.copy-btn[data-copy]').forEach(btn => {
+      btn.addEventListener('click', () => {
+          const text = btn.dataset.copy;
+          navigator.clipboard.writeText(text).then(() => {
+              const orig = btn.textContent;
+              btn.textContent = '✓';
+              setTimeout(() => btn.textContent = orig, 1500);
+          });
+      });
+  });
   // 0. Theme Initialization & Toggle
   const initTheme = () => {
       const stored = localStorage.getItem('loctree-theme');
