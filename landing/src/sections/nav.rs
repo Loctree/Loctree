@@ -9,11 +9,10 @@ pub fn Nav() -> impl IntoView {
     let (prompt_copied, set_prompt_copied) = signal(false);
     let (expanded, set_expanded) = signal(false);
 
-    let install_command =
-        "curl -fsSL https://raw.githubusercontent.com/Loctree/Loctree/main/tools/install.sh | sh";
+    let install_command = "cargo install loctree";
 
     let agent_prompt_short = r#"## loct — AI Agent Quick Reference
-**Scan once, slice many.** Install: `curl -fsSL .../install.sh | sh`
+**Scan once, slice many.** Install: `cargo install loctree`
 
 ### Key Commands
 - `loct` — scan repo, save snapshot + reports to .loctree/
@@ -33,7 +32,7 @@ pub fn Nav() -> impl IntoView {
 
 ### Install & Scan
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Loctree/Loctree/main/tools/install.sh | sh
+cargo install loctree
 loct          # snapshot + report.html + analysis.json
 ```
 
