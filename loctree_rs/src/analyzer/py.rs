@@ -135,19 +135,21 @@ fn parse_all_list(content: &str) -> Vec<String> {
     let mut names = Vec::new();
     for caps in regex_py_all().captures_iter(content) {
         let body = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-        let cleaned: String = body
-            .lines()
-            .map(|l| strip_line_comment(l).trim_end().to_string())
-            .collect::<Vec<_>>()
-            .join("\n");
-        for item in cleaned.split(',') {
-            let trimmed = item.trim();
-            let name = trimmed
-                .trim_matches(|c| c == '\'' || c == '"')
-                .trim()
-                .to_string();
-            if !name.is_empty() {
-                names.push(name);
+        for line in body.lines() {
+            let cleaned = strip_line_comment(line);
+            let cleaned = cleaned.trim();
+            if cleaned.is_empty() || cleaned.starts_with('#') {
+                continue;
+            }
+            for item in cleaned.split(',') {
+                let trimmed = item.trim();
+                let name = trimmed
+                    .trim_matches(|c| c == '\'' || c == '"')
+                    .trim()
+                    .to_string();
+                if !name.is_empty() {
+                    names.push(name);
+                }
             }
         }
     }
