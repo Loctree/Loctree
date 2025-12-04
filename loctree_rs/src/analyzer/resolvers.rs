@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use regex::Regex;
 use serde_json;
 use serde_json::Value;
 
@@ -77,6 +78,26 @@ impl TsPathResolver {
         // Load package.json exports if available
         let package_exports = load_package_exports(root).unwrap_or_default();
 
+        // Load SvelteKit aliases from svelte.config.js
+        // These take precedence over tsconfig paths for $-prefixed aliases
+        let sveltekit_aliases = load_sveltekit_aliases(root);
+        for (alias, target_path) in sveltekit_aliases {
+            // Convert to tsconfig-style mapping: $components/* -> src/components/*
+            let pattern = format!("{}/*", alias);
+            let target = format!("{}/*", target_path);
+            mappings.push(AliasMapping {
+                pattern,
+                targets: vec![target],
+                wildcard_count: 1,
+            });
+            // Also add exact match without wildcard for direct imports
+            mappings.push(AliasMapping {
+                pattern: alias,
+                targets: vec![target_path],
+                wildcard_count: 0,
+            });
+        }
+
         Some(Self {
             base_dir: base_dir.canonicalize().unwrap_or(base_dir),
             root: root.to_path_buf(),
@@ -132,6 +153,16 @@ impl TsPathResolver {
     }
 
     fn resolve_internal(&self, normalized: &str, exts: Option<&HashSet<String>>) -> Option<String> {
+        // SvelteKit convention: $lib/ maps to src/lib/
+        // This is a well-known convention that may not be in tsconfig.json
+        // (SvelteKit generates tsconfig at build time)
+        if let Some(rest) = normalized.strip_prefix("$lib/") {
+            let candidate = self.root.join("src/lib").join(rest);
+            if let Some(res) = resolve_with_extensions(candidate, &self.root, exts) {
+                return Some(res);
+            }
+        }
+
         // Try tsconfig path mappings
         for mapping in &self.mappings {
             if mapping.wildcard_count > 0 {
@@ -597,6 +628,81 @@ fn load_package_exports(root: &Path) -> Option<HashMap<String, String>> {
     }
 
     Some(result)
+}
+
+/// Load SvelteKit aliases from svelte.config.js
+/// SvelteKit defines path aliases in kit.alias configuration
+fn load_sveltekit_aliases(root: &Path) -> HashMap<String, String> {
+    let mut result = HashMap::new();
+
+    // Search for svelte.config.js in root and immediate subdirectories (for monorepos)
+    let config_candidates = [root.join("svelte.config.js"), root.join("svelte.config.ts")];
+
+    // Also check subdirectories (apps/*, packages/*)
+    let mut all_candidates: Vec<PathBuf> = config_candidates.to_vec();
+    for entry in ["apps", "packages"].iter() {
+        let dir = root.join(entry);
+        if dir.is_dir()
+            && let Ok(entries) = std::fs::read_dir(&dir)
+        {
+            for e in entries.flatten() {
+                let path = e.path();
+                if path.is_dir() {
+                    all_candidates.push(path.join("svelte.config.js"));
+                    all_candidates.push(path.join("svelte.config.ts"));
+                }
+            }
+        }
+    }
+
+    // Pre-compile regexes outside the loop
+    let alias_regex = match Regex::new(r#"alias\s*:\s*\{([^}]+)\}"#) {
+        Ok(re) => re,
+        Err(_) => return result,
+    };
+    let entry_regex =
+        match Regex::new(r#"['"]?(\$[a-zA-Z_][a-zA-Z0-9_]*)['"]?\s*:\s*['"]([^'"]+)['"]"#) {
+            Ok(re) => re,
+            Err(_) => return result,
+        };
+
+    for config_path in all_candidates {
+        if !config_path.exists() {
+            continue;
+        }
+
+        let content = match std::fs::read_to_string(&config_path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        // Parse alias configuration from svelte.config.js
+        // Format: alias: { $components: './src/components', ... }
+        if let Some(caps) = alias_regex.captures(&content) {
+            let alias_block = &caps[1];
+            let config_dir = config_path.parent().unwrap_or(root);
+
+            for entry_caps in entry_regex.captures_iter(alias_block) {
+                let alias = entry_caps[1].to_string();
+                let path_str = entry_caps[2].to_string();
+
+                // Make path relative to config file location
+                let resolved = if let Some(stripped) = path_str.strip_prefix("./") {
+                    config_dir.join(stripped)
+                } else {
+                    config_dir.join(&path_str)
+                };
+
+                if let Ok(canonical) = resolved.canonicalize()
+                    && let Ok(rel) = canonical.strip_prefix(root)
+                {
+                    result.insert(alias, rel.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+
+    result
 }
 
 /// Resolve Rust module imports to file paths.

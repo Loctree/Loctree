@@ -98,6 +98,39 @@ pub fn detect_stack(root: &Path) -> DetectedStack {
         }
     }
 
+    // Check for svelte.config.* -> SvelteKit project
+    let svelte_exists =
+        root.join("svelte.config.js").exists() || root.join("svelte.config.ts").exists();
+    // Also check apps/* and packages/* for monorepos
+    let mut svelte_in_subdir = false;
+    for subdir in ["apps", "packages"] {
+        let dir = root.join(subdir);
+        if dir.is_dir()
+            && let Ok(entries) = std::fs::read_dir(&dir)
+        {
+            for e in entries.flatten() {
+                let path = e.path();
+                if path.is_dir()
+                    && (path.join("svelte.config.js").exists()
+                        || path.join("svelte.config.ts").exists())
+                {
+                    svelte_in_subdir = true;
+                    break;
+                }
+            }
+        }
+        if svelte_in_subdir {
+            break;
+        }
+    }
+    if svelte_exists || svelte_in_subdir {
+        result.extensions.insert("svelte".to_string());
+        result.ignores.push(".svelte-kit".to_string());
+        if !detected_parts.contains(&"SvelteKit") {
+            detected_parts.push("SvelteKit");
+        }
+    }
+
     // Check for pyproject.toml / setup.py -> Python
     if root.join("pyproject.toml").exists() || root.join("setup.py").exists() {
         result.extensions.insert("py".to_string());

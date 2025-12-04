@@ -525,7 +525,10 @@ fn scan_single_root(
                     .unwrap_or_default();
                 resolved_target = if spec.starts_with('.') {
                     resolve_js_relative(&file, root_path, spec, options.extensions.as_ref())
-                } else if matches!(ext.as_str(), "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs") {
+                } else if matches!(
+                    ext.as_str(),
+                    "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "svelte"
+                ) {
                     ts_resolver
                         .as_ref()
                         .and_then(|r| r.resolve(spec, options.extensions.as_ref()))
@@ -577,7 +580,7 @@ fn scan_single_root(
                             )
                         }
                     }
-                    "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "css" => {
+                    "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "css" | "svelte" => {
                         if imp.source.starts_with('.') {
                             resolve_js_relative(
                                 &file,
@@ -923,12 +926,12 @@ pub(crate) fn normalize_module_id(path: &str) -> NormalizedModule {
 
     // Extract language family from extension (collapse TS/JS variants)
     for ext in [
-        ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".rs", ".py", ".css",
+        ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".rs", ".py", ".css", ".svelte",
     ] {
         if let Some(stripped) = p.strip_suffix(ext) {
             p = stripped.to_string();
             lang = match ext {
-                ".ts" | ".tsx" | ".js" | ".jsx" | ".mjs" | ".cjs" => "ts".to_string(),
+                ".ts" | ".tsx" | ".js" | ".jsx" | ".mjs" | ".cjs" | ".svelte" => "ts".to_string(),
                 ".rs" => "rs".to_string(),
                 ".py" => "py".to_string(),
                 ".css" => "css".to_string(),

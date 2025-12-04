@@ -114,6 +114,8 @@ pub struct DeadExport {
     pub symbol: String,
     pub line: Option<usize>,
     pub confidence: String,
+    /// Human-readable reason explaining why this export is considered dead
+    pub reason: String,
     /// IDE integration URL (loctree://open?f={file}&l={line})
     #[serde(skip_serializing_if = "Option::is_none")]
     pub open_url: Option<String>,
@@ -339,6 +341,69 @@ pub fn print_similarity_results(
     }
 }
 
+/// Check if a file should be skipped from dead export detection.
+/// These are files whose exports are consumed by external tools/frameworks,
+/// not by regular imports in the codebase.
+fn should_skip_dead_export_check(analysis: &FileAnalysis) -> bool {
+    let path = &analysis.path;
+
+    // Test files and fixtures
+    if analysis.is_test {
+        return true;
+    }
+
+    // Test-related directories
+    const TEST_DIRS: &[&str] = &[
+        "stories",
+        "__tests__",
+        "__mocks__",
+        "__fixtures__",
+        "/cypress/",
+        "/e2e/",
+        "/playwright/",
+        "/test/",
+        "/tests/",
+        "/spec/",
+    ];
+    if TEST_DIRS.iter().any(|d| path.contains(d)) {
+        return true;
+    }
+
+    // TypeScript declaration files (.d.ts) - only contain type declarations
+    if path.ends_with(".d.ts") {
+        return true;
+    }
+
+    // Config files loaded dynamically by build tools (Vite, Jest, Cypress, etc.)
+    if path.contains(".config.") || path.ends_with(".config.ts") || path.ends_with(".config.js") {
+        return true;
+    }
+
+    // Framework routing/entry point conventions
+    // SvelteKit: +page.ts, +layout.ts, +server.ts, +page.server.ts
+    // Next.js: page.tsx, layout.tsx, route.ts (in app/ directory)
+    const FRAMEWORK_ENTRY_PATTERNS: &[&str] = &[
+        "+page.",
+        "+layout.",
+        "+server.",
+        "+error.",
+        "/page.tsx",
+        "/page.ts",
+        "/layout.tsx",
+        "/layout.ts",
+        "/route.ts",
+        "/route.tsx",
+        "/error.tsx",
+        "/loading.tsx",
+        "/not-found.tsx",
+    ];
+    if FRAMEWORK_ENTRY_PATTERNS.iter().any(|p| path.contains(p)) {
+        return true;
+    }
+
+    false
+}
+
 /// Find potentially dead (unused) exports in the codebase
 pub fn find_dead_exports(
     analyses: &[FileAnalysis],
@@ -347,6 +412,8 @@ pub fn find_dead_exports(
 ) -> Vec<DeadExport> {
     // Build usage set: (resolved_path, symbol_name)
     let mut used_exports: HashSet<(String, String)> = HashSet::new();
+    // Track all imported symbol names as fallback (handles $lib/, @scope/, monorepo paths)
+    let mut all_imported_symbols: HashSet<String> = HashSet::new();
 
     for analysis in analyses {
         for imp in &analysis.imports {
@@ -366,7 +433,12 @@ pub fn find_dead_exports(
                 } else {
                     sym.name.clone()
                 };
-                used_exports.insert((target_norm.clone(), used_name));
+                used_exports.insert((target_norm.clone(), used_name.clone()));
+                // Track all imported symbol names as fallback for unresolved/incorrectly resolved paths
+                // This catches symbols imported via $lib/, @scope/, or other aliases that may not resolve correctly
+                if !used_name.is_empty() {
+                    all_imported_symbols.insert(used_name);
+                }
             }
         }
         // Track re-exports as usage (if A re-exports B, A uses B)
@@ -389,26 +461,89 @@ pub fn find_dead_exports(
         }
     }
 
+    // Build set of all Tauri registered command handlers (used via generate_handler![])
+    let tauri_handlers: HashSet<String> = analyses
+        .iter()
+        .flat_map(|a| a.tauri_registered_handlers.iter().cloned())
+        .collect();
+
+    // Build transitive closure of files reachable from dynamic imports.
+    // React.lazy(), Next.js dynamic(), and other code-splitting patterns use dynamic imports.
+    // Files imported this way (and all their dependencies) should not be considered "dead".
+    let dynamically_reachable: HashSet<String> = {
+        // Build import graph: file_path -> list of resolved import paths
+        let mut import_graph: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        for analysis in analyses {
+            let key = normalize_module_id(&analysis.path).as_key();
+            let imports: Vec<String> = analysis
+                .imports
+                .iter()
+                .filter_map(|imp| imp.resolved_path.as_ref())
+                .map(|p| normalize_module_id(p).as_key())
+                .collect();
+            import_graph.insert(key, imports);
+        }
+
+        // Collect initial set of dynamically imported files
+        let mut reachable: HashSet<String> = HashSet::new();
+        for analysis in analyses {
+            for dyn_imp in &analysis.dynamic_imports {
+                let dyn_norm = normalize_module_id(dyn_imp).as_key();
+                // Find matching file in analyses
+                for a in analyses {
+                    let a_norm = normalize_module_id(&a.path).as_key();
+                    if paths_match(dyn_imp, &a_norm) || paths_match(dyn_imp, &a.path) {
+                        reachable.insert(a_norm);
+                        break;
+                    }
+                }
+                // Also add the normalized dynamic import path itself
+                reachable.insert(dyn_norm);
+            }
+        }
+
+        // BFS to compute transitive closure
+        let mut queue: std::collections::VecDeque<String> = reachable.iter().cloned().collect();
+        while let Some(current) = queue.pop_front() {
+            if let Some(imports) = import_graph.get(&current) {
+                for imp in imports {
+                    if !reachable.contains(imp) {
+                        reachable.insert(imp.clone());
+                        queue.push_back(imp.clone());
+                    }
+                }
+            }
+        }
+
+        reachable
+    };
+
     // Identify dead exports
     let mut dead_candidates = Vec::new();
 
     for analysis in analyses {
-        if analysis.is_test
-            || analysis.path.contains("stories")
-            || analysis.path.contains("__tests__")
-        {
+        // Skip files that should be excluded from dead export detection
+        if should_skip_dead_export_check(analysis) {
             continue;
         }
+
+        // Skip lib.rs and main.rs - they are crate entry points:
+        // - lib.rs is the crate's public API, called via qualified paths like `crate_name::func()`
+        // - main.rs is the binary entry point, its exports are not meant to be imported
+        let is_crate_root = analysis.path == "lib.rs"
+            || analysis.path == "main.rs"
+            || analysis.path.ends_with("/lib.rs")
+            || analysis.path.ends_with("/main.rs");
+        if is_crate_root {
+            continue;
+        }
+
         let path_norm = normalize_module_id(&analysis.path).as_key();
 
-        // Skip if file is dynamically imported (assume all exports used)
-        let is_dyn_imported = analyses.iter().any(|a| {
-            a.dynamic_imports.iter().any(|imp| {
-                // Use proper path matching to avoid false positives
-                paths_match(imp, &path_norm) || paths_match(imp, &analysis.path)
-            })
-        });
-        if is_dyn_imported {
+        // Skip if file is reachable from dynamic imports (directly or transitively)
+        // This handles React.lazy(), Next.js dynamic(), and other code-splitting patterns
+        if dynamically_reachable.contains(&path_norm) {
             continue;
         }
 
@@ -436,9 +571,31 @@ pub fn find_dead_exports(
             // Also check if "*" was imported from this file
             let star_used = used_exports.contains(&(path_norm.clone(), "*".to_string()));
             let locally_used = local_uses.contains(&exp.name);
+            // Check if this is a Tauri command handler registered via generate_handler![]
+            let is_tauri_handler = tauri_handlers.contains(&exp.name);
+            // Fallback: check if symbol is imported anywhere by name
+            // This handles cases where path resolution fails (monorepos, $lib/, @scope/ packages)
+            let imported_by_name = all_imported_symbols.contains(&exp.name);
 
-            if !is_used && !star_used && !locally_used {
+            if !is_used && !star_used && !locally_used && !is_tauri_handler && !imported_by_name {
                 let open_url = super::build_open_url(&analysis.path, exp.line, open_base);
+                let is_rust_file = analysis.path.ends_with(".rs");
+
+                // Build human-readable reason
+                let reason = if is_rust_file {
+                    format!(
+                        "No imports found for '{}'. Checked: direct imports (0 matches), \
+                         star imports (none), local uses (none), Tauri handlers (not registered)",
+                        exp.name
+                    )
+                } else {
+                    format!(
+                        "No imports found for '{}'. Checked: resolved imports (0 matches), \
+                         star re-exports (none), local references (none)",
+                        exp.name
+                    )
+                };
+
                 dead_candidates.push(DeadExport {
                     file: analysis.path.clone(),
                     symbol: exp.name.clone(),
@@ -448,6 +605,7 @@ pub fn find_dead_exports(
                     } else {
                         "high".to_string()
                     },
+                    reason,
                     open_url: Some(open_url),
                 });
             }
@@ -473,7 +631,8 @@ pub fn print_dead_exports(
                     "file": d.file,
                     "symbol": d.symbol,
                     "line": d.line,
-                    "confidence": d.confidence
+                    "confidence": d.confidence,
+                    "reason": d.reason
                 })
             })
             .collect();
@@ -488,7 +647,8 @@ pub fn print_dead_exports(
                 "file": item.file,
                 "symbol": item.symbol,
                 "line": item.line,
-                "confidence": item.confidence
+                "confidence": item.confidence,
+                "reason": item.reason
             });
             println!(
                 "{}",
@@ -509,6 +669,7 @@ pub fn print_dead_exports(
                 None => item.file.clone(),
             };
             println!("  - {} in {}", item.symbol, location);
+            println!("    Reason: {}", item.reason);
         }
         if count > limit {
             println!("  ... and {} more", count - limit);
@@ -824,6 +985,7 @@ mod tests {
             symbol: "unused".to_string(),
             line: Some(10),
             confidence: "high".to_string(),
+            reason: "No imports found for 'unused'. Checked: resolved imports (0 matches), star re-exports (none), local references (none)".to_string(),
             open_url: Some("loctree://open?f=src%2Futils.ts&l=10".to_string()),
         }];
         // Should not panic
@@ -837,6 +999,7 @@ mod tests {
             symbol: "unused".to_string(),
             line: None,
             confidence: "high".to_string(),
+            reason: "No imports found for 'unused'. Checked: resolved imports (0 matches), star re-exports (none), local references (none)".to_string(),
             open_url: None,
         }];
         // Should not panic
@@ -852,6 +1015,7 @@ mod tests {
                 symbol: format!("unused{}", i),
                 line: Some(i),
                 confidence: "high".to_string(),
+                reason: format!("No imports found for 'unused{}'. Checked: resolved imports (0 matches), star re-exports (none), local references (none)", i),
                 open_url: Some(format!("loctree://open?f=src%2Ffile{}.ts&l={}", i, i)),
             })
             .collect();

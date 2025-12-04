@@ -255,6 +255,10 @@ mod tests {
             symbol: symbol.to_string(),
             line,
             confidence: "high".to_string(),
+            reason: format!(
+                "No imports found for '{}'. Checked: resolved imports (0 matches), star re-exports (none), local references (none)",
+                symbol
+            ),
             open_url: None,
         }
     }

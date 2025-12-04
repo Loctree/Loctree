@@ -101,14 +101,16 @@ pub struct CommandBridge {
     pub language: String,
 }
 
+/// Directory or file node used by the report tree view.
+///
+/// Contains relative path, aggregated LOC, and children.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct TreeNode {
-    /// Directory or file node used by the report tree view.
-    /// Relative path of this file/directory
+    /// Relative path of this file/directory.
     pub path: String,
-    /// Lines of code aggregated for this node (file LOC + children)
+    /// Lines of code aggregated for this node (file LOC + children).
     pub loc: usize,
-    /// Child nodes
+    /// Child nodes.
     #[serde(default)]
     pub children: Vec<TreeNode>,
 }

@@ -138,7 +138,13 @@ fn parse_rust_brace_names(raw: &str) -> Vec<String> {
             if let Some((_, alias)) = trimmed.split_once(" as ") {
                 Some(alias.trim().to_string())
             } else {
-                Some(trimmed.to_string())
+                // Extract the last segment for nested paths like `models::Visit`
+                let last_segment = trimmed.rsplit("::").next().unwrap_or(trimmed).trim();
+                if last_segment.is_empty() {
+                    None
+                } else {
+                    Some(last_segment.to_string())
+                }
             }
         })
         .collect()
@@ -311,11 +317,53 @@ pub(crate) fn analyze_rust_file(
 
     for caps in regex_rust_use().captures_iter(&production_content) {
         let source = caps.get(1).map(|m| m.as_str()).unwrap_or("").trim();
-        if !source.is_empty() {
-            analysis
-                .imports
-                .push(ImportEntry::new(source.to_string(), ImportKind::Static));
+        if source.is_empty() {
+            continue;
         }
+
+        let mut imp = ImportEntry::new(source.to_string(), ImportKind::Static);
+
+        // Parse symbols from use statements like `use foo::{Bar, Baz}`
+        if source.contains('{') && source.contains('}') {
+            let mut parts = source.splitn(2, '{');
+            let prefix = parts.next().unwrap_or("").trim().trim_end_matches("::");
+            let braces = parts.next().unwrap_or("").trim_end_matches('}').trim();
+            let names = parse_rust_brace_names(braces);
+            for name in names {
+                imp.symbols.push(crate::types::ImportSymbol {
+                    name,
+                    alias: None,
+                    is_default: false,
+                });
+            }
+            // Set source to the prefix for better matching
+            imp.source = prefix.to_string();
+        } else {
+            // Single import like `use foo::Bar` or `use foo::*`
+            if let Some(last_segment) = source.rsplit("::").next() {
+                let last = last_segment.trim();
+                if last == "*" {
+                    // Star import - add "*" as symbol to trigger star_used check
+                    imp.symbols.push(crate::types::ImportSymbol {
+                        name: "*".to_string(),
+                        alias: None,
+                        is_default: false,
+                    });
+                    // Also set source to the prefix path
+                    if let Some(prefix) = source.rsplit_once("::") {
+                        imp.source = prefix.0.to_string();
+                    }
+                } else if !last.is_empty() && last != "self" {
+                    imp.symbols.push(crate::types::ImportSymbol {
+                        name: last.to_string(),
+                        alias: None,
+                        is_default: false,
+                    });
+                }
+            }
+        }
+
+        analysis.imports.push(imp);
     }
 
     for caps in regex_rust_pub_use().captures_iter(content) {

@@ -7,6 +7,7 @@ use oxc_ast_visit::{Visit, walk::walk_expression};
 use oxc_parser::Parser;
 use oxc_semantic::SemanticBuilder;
 use oxc_span::{SourceType, Span};
+use regex::Regex;
 
 use crate::types::{
     CommandPayloadCasing, CommandRef, EventRef, ExportSymbol, FileAnalysis, ImportEntry,
@@ -114,6 +115,26 @@ impl Default for CommandDetectionConfig {
     }
 }
 
+/// Extract script content from a Svelte file
+/// Handles both `<script>` and `<script lang="ts">` variants
+fn extract_svelte_script(content: &str) -> String {
+    // Match <script> or <script lang="ts"> or <script module> etc.
+    // Use lazy matching to capture all script blocks
+    let script_regex = Regex::new(r#"<script[^>]*>([\s\S]*?)</script>"#).ok();
+
+    if let Some(re) = script_regex {
+        let mut scripts = Vec::new();
+        for caps in re.captures_iter(content) {
+            if let Some(script_content) = caps.get(1) {
+                scripts.push(script_content.as_str().to_string());
+            }
+        }
+        scripts.join("\n")
+    } else {
+        String::new()
+    }
+}
+
 /// Analyze JS/TS file using OXC AST parser
 pub(crate) fn analyze_js_file_ast(
     content: &str,
@@ -131,13 +152,28 @@ pub(crate) fn analyze_js_file_ast(
     // (e.g., `const fn = <T>(...) =>` would be parsed as JSX tag with JSX enabled)
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
     let is_jsx_file = ext == "tsx" || ext == "jsx";
+    let is_svelte_file = ext == "svelte";
 
-    let source_type = SourceType::from_path(path)
-        .unwrap_or_default()
-        .with_typescript(true)
-        .with_jsx(is_jsx_file);
+    // For Svelte files, extract script content first
+    let parsed_content: String;
+    let content_to_parse = if is_svelte_file {
+        parsed_content = extract_svelte_script(content);
+        parsed_content.as_str()
+    } else {
+        content
+    };
 
-    let ret = Parser::new(&allocator, content, source_type).parse();
+    // For svelte files, parse as TypeScript
+    let source_type = if is_svelte_file {
+        SourceType::tsx().with_typescript(true)
+    } else {
+        SourceType::from_path(path)
+            .unwrap_or_default()
+            .with_typescript(true)
+            .with_jsx(is_jsx_file)
+    };
+
+    let ret = Parser::new(&allocator, content_to_parse, source_type).parse();
 
     // Log parser errors for debugging (verbose mode only)
     if !ret.errors.is_empty() && std::env::var("LOCTREE_VERBOSE").is_ok() {
@@ -168,7 +204,7 @@ pub(crate) fn analyze_js_file_ast(
         root,
         extensions,
         ts_resolver,
-        source_text: content,
+        source_text: content_to_parse,
         command_cfg,
     };
 
