@@ -6,7 +6,7 @@ pub fn Footer() -> impl IntoView {
         <footer class="footer">
             <div class="container">
                 <div class="footer-brand">
-                    <span class="footer-logo">
+                <span class="footer-logo">
                         <img src="assets/loctree-logo.png" alt="loctree" />
                     </span>
                     <span class="footer-title">"loctree"</span>

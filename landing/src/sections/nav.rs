@@ -108,9 +108,9 @@ loct lint --fail --sarif > results.sarif
         <nav class="nav">
             <div class="nav-inner">
                 <a href="/" class="nav-brand">
-                    <div class="nav-logo">
-                        <img src="assets/loctree-logo.png" alt="loctree" />
-                    </div>
+                <div class="nav-logo">
+                    <img src="assets/loctree-logo.png" alt="loctree" />
+                </div>
                     <span class="nav-title">"loctree"</span>
                     <span class="nav-version">{VERSION}</span>
                 </a>

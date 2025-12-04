@@ -57,10 +57,10 @@
 
 #![doc(html_root_url = "https://docs.rs/loctree/0.5.13")]
 #![doc(
-    html_favicon_url = "https://raw.githubusercontent.com/Loctree/Loctree/main/assets/loctree-logo.svg"
+    html_favicon_url = "https://raw.githubusercontent.com/Loctree/Loctree/main/assets/loctree-badge.svg"
 )]
 #![doc(
-    html_logo_url = "https://raw.githubusercontent.com/Loctree/Loctree/main/assets/loctree-logo.svg"
+    html_logo_url = "https://raw.githubusercontent.com/Loctree/Loctree/main/assets/loctree-badge.svg"
 )]
 
 // ============================================================================

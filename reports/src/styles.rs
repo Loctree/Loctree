@@ -240,6 +240,19 @@ html.dark .theme-icon-dark { display: block; }
     letter-spacing: 0.02em;
 }
 
+.logo-img {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.logo-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.2;
+}
+
 .sidebar-nav {
     flex: 1;
     overflow-y: auto;

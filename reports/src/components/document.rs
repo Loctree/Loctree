@@ -11,6 +11,9 @@ use crate::types::ReportSection;
 use crate::JsAssets;
 use leptos::prelude::*;
 
+// Inline data URI for the loctree badge (ensures logo renders offline in reports)
+const LOGO_DATA_URI: &str = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMzAiIGhlaWdodD0iMjAiIHJvbGU9ImltZyIgYXJpYS1sYWJlbD0iYW5hbHl6ZWQgd2l0aDogbG9jdHJlZSI+CiAgPHRpdGxlPmFuYWx5emVkIHdpdGg6IGxvY3RyZWU8L3RpdGxlPgogIDxsaW5lYXJHcmFkaWVudCBpZD0icyIgeDI9IjAiIHkyPSIxMDAlIj4KICAgIDxzdG9wIG9mZnNldD0iMCIgc3RvcC1jb2xvcj0iI2JiYiIgc3RvcC1vcGFjaXR5PSIuMSIvPgogICAgPHN0b3Agb2Zmc2V0PSIxIiBzdG9wLW9wYWNpdHk9Ii4xIi8+CiAgPC9saW5lYXJHcmFkaWVudD4KICA8Y2xpcFBhdGggaWQ9InIiPgogICAgPHJlY3Qgd2lkdGg9IjEzMCIgaGVpZ2h0PSIyMCIgcng9IjMiIGZpbGw9IiNmZmYiLz4KICA8L2NsaXBQYXRoPgogIDxnIGNsaXAtcGF0aD0idXJsKCNyKSI+CiAgICA8cmVjdCB3aWR0aD0iODUiIGhlaWdodD0iMjAiIGZpbGw9IiM1NTUiLz4KICAgIDxyZWN0IHg9Ijg1IiB3aWR0aD0iNDUiIGhlaWdodD0iMjAiIGZpbGw9IiMwYTBhMGEiLz4KICAgIDxyZWN0IHdpZHRoPSIxMzAiIGhlaWdodD0iMjAiIGZpbGw9InVybCgjcykiLz4KICA8L2c+CiAgPGcgZmlsbD0iI2ZmZiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IlZlcmRhbmEsR2VuZXZhLERlamFWdSBTYW5zLHNhbnMtc2VyaWYiIHRleHQtcmVuZGVyaW5nPSJnZW9tZXRyaWNQcmVjaXNpb24iIGZvbnQtc2l6ZT0iMTEwIj4KICAgIDx0ZXh0IGFyaWEtaGlkZGVuPSJ0cnVlIiB4PSI0MzUiIHk9IjE1MCIgZmlsbD0iIzAxMDEwMSIgZmlsbC1vcGFjaXR5PSIuMyIgdHJhbnNmb3JtPSJzY2FsZSguMSkiIHRleHRMZW5ndGg9Ijc1MCI+YW5hbHl6ZWQgd2l0aDwvdGV4dD4KICAgIDx0ZXh0IHg9IjQzNSIgeT0iMTQwIiB0cmFuc2Zvcm09InNjYWxlKC4xKSIgZmlsbD0iI2ZmZiIgdGV4dExlbmd0aD0iNzUwIj5hbmFseXplZCB3aXRoPC90ZXh0PgogICAgPHRleHQgYXJpYS1oaWRkZW49InRydWUiIHg9IjEwNjUiIHk9IjE1MCIgZmlsbD0iIzAxMDEwMSIgZmlsbC1vcGFjaXR5PSIuMyIgdHJhbnNmb3JtPSJzY2FsZSguMSkiIHRleHRMZW5ndGg9IjM1MCI+bG9jdHJlZTwvdGV4dD4KICAgIDx0ZXh0IHg9IjEwNjUiIHk9IjE0MCIgdHJhbnNmb3JtPSJzY2FsZSguMSkiIGZpbGw9IiNhOGE4YTgiIHRleHRMZW5ndGg9IjM1MCI+bG9jdHJlZTwvdGV4dD4KICA8L2c+Cjwvc3ZnPgo=";
+
 /// The complete HTML document for the report
 #[component]
 pub fn ReportDocument(sections: Vec<ReportSection>, js_assets: JsAssets) -> impl IntoView {
@@ -27,8 +30,11 @@ pub fn ReportDocument(sections: Vec<ReportSection>, js_assets: JsAssets) -> impl
                     <aside class="app-sidebar">
                         <div class="sidebar-header">
                             <div class="logo-box">
-                                <span style="color:var(--theme-accent)">"loctree"</span>
-                                <span style="opacity:0.5">"report"</span>
+                                <img class="logo-img" src=LOGO_DATA_URI alt="loctree logo" />
+                                <div class="logo-text">
+                                    <span style="color:var(--theme-accent)">"loctree"</span>
+                                    <span style="opacity:0.5">"report"</span>
+                                </div>
                             </div>
                             <button class="theme-toggle" data-role="theme-toggle" title="Toggle light/dark mode">
                                 <svg class="theme-icon-light" xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor" viewBox="0 0 256 256">
@@ -68,7 +74,7 @@ pub fn ReportDocument(sections: Vec<ReportSection>, js_assets: JsAssets) -> impl
                         </nav>
 
                         <div class="app-footer">
-                            "loctree v0.5.13"
+                            "loctree v0.5.14"
                             <br />
                             <span style="color:var(--theme-text-tertiary)">"Snapshot"</span>
                         </div>
