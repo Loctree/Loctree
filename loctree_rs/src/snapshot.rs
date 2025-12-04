@@ -1101,12 +1101,7 @@ fn write_auto_artifacts(
         circular_imports: &cycles,
         pipeline_summary: &pipeline_summary,
     })
-    .map_err(|err| {
-        io::Error::new(
-            io::ErrorKind::Other,
-            format!("Failed to serialize SARIF: {err}"),
-        )
-    })?;
+    .map_err(|err| io::Error::other(format!("Failed to serialize SARIF: {err}")))?;
     fs::write(&sarif_path, sarif_content)?;
     created.push(format!(
         "./{}",
