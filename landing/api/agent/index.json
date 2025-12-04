@@ -1,9 +1,9 @@
 {
   "name": "loctree",
-  "version": "0.5.11",
+  "version": "0.5.13",
   "tagline": "Scan once, slice many.",
   "description": "AI-oriented codebase analyzer. Use BEFORE reading files manually.",
-  "install": "curl -fsSL https://raw.githubusercontent.com/Loctree/Loctree/main/tools/install.sh | sh",
+  "install": "cargo install loctree",
   "commands": {
     "scan": {
       "cmd": "loct",

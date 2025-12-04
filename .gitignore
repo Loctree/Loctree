@@ -38,3 +38,8 @@ loctree-*.min.js
 /loctree_rs/tests/fixtures/tauri_app/src/.loctree
 .replit
 /.tools
+
+.gemini/
+gha-creds-*.json
+GEMINI.md
+**/.loctree/**/report.html

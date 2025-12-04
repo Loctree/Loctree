@@ -1,4 +1,4 @@
-# loct — AI Agent Quick Reference (v0.5.10)
+# loct — AI Agent Quick Reference (v0.5.12)
 
 Static analysis for AI agents: scan once, slice many. Default `loct` writes `.loctree/<branch@sha>/snapshot.json`; use `loct report --serve` (or `loct lint --sarif`) when you need full artifacts (`analysis.json`, `report.html`, `report.sarif`, etc.).
 
@@ -67,6 +67,16 @@ loct --version   # expect 0.5.9+
 - **Tauri FE↔BE**: `loct commands --missing`, `loct commands --unused`, `loct events --json`
 - **Delta between scans**: `loct diff --since <snapshot_id>`
 - **CI guardrails**: `loct lint --fail --sarif > results.sarif`
+
+## CLI cheat sheet (`loct --help`)
+
+- Scan & cache: `loct` (writes `.loctree/<branch@sha>/snapshot.json`)
+- Slice for AI: `loct slice <file> [--consumers --json]`
+- Quick queries: `loct query who-imports <file>`, `loct query where-symbol <sym>`, `loct query component-of <file>`
+- Analysis shortcuts: `loct -A --dead`, `loct -A --circular`, `loct -A --report report.html`
+- Diff snapshots: `loct diff --since <main|HEAD~N|snapshot_id>`
+- Serve report: `loct -A --report report.html --serve`
+- Full options: `loct --help-full` (agent-friendly)
 
 ## Tips
 

@@ -168,7 +168,16 @@ fn main() -> std::io::Result<()> {
     install_broken_pipe_handler();
 
     // Get raw args for the new parser
+    // nosemgrep: rust.lang.security.args.args
+    // SECURITY: args() is used only for CLI flag parsing (paths, --json, etc.),
+    // not for security decisions. The executable path (args[0]) is skipped.
     let raw_args: Vec<String> = std::env::args().skip(1).collect();
+
+    // Preserve legacy full help output expected by CI/tests
+    if raw_args.iter().any(|a| a == "--help-full") {
+        println!("{}", format_usage_full());
+        return Ok(());
+    }
 
     // Try new subcommand parser first
     let mut parsed = match cli::parse_command(&raw_args) {
@@ -309,7 +318,7 @@ fn main() -> std::io::Result<()> {
             let query = parsed.search_query.as_ref().ok_or_else(|| {
                 std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
-                    "search requires a query, e.g.: loct search my_function",
+                    "search requires a query, e.g.: loctree search my_function",
                 )
             })?;
             run_search(&root_list, query, &parsed)?;

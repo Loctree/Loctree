@@ -215,6 +215,10 @@ fn parse_auto_command(args: &[String]) -> Result<Command, String> {
                 opts.scan_all = true;
                 i += 1;
             }
+            "--for-agent-feed" => {
+                opts.for_agent_feed = true;
+                i += 1;
+            }
             _ if !arg.starts_with('-') => {
                 opts.roots.push(PathBuf::from(arg));
                 i += 1;
@@ -478,6 +482,14 @@ fn parse_dead_command(args: &[String]) -> Result<Command, String> {
                     .ok_or_else(|| "--path requires a pattern".to_string())?;
                 opts.path_filter = Some(value.clone());
                 i += 2;
+            }
+            "--with-tests" => {
+                opts.with_tests = true;
+                i += 1;
+            }
+            "--with-helpers" => {
+                opts.with_helpers = true;
+                i += 1;
             }
             _ if !arg.starts_with('-') => {
                 opts.roots.push(PathBuf::from(arg));

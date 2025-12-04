@@ -1,6 +1,6 @@
 [package]
 name = "loctree"
-version = "0.5.11"
+version = "0.5.13"
 edition = "2024"
 default-run = "loctree"
 authors = ["Loctree <loct@loctree.io>"]
@@ -43,9 +43,9 @@ oxc_span = "0.100.0"
 oxc_ast = "0.100.0"
 oxc_ast_visit = "0.100.0"
 oxc_semantic = "0.100.0"
+tempfile = "3"
 
 [dev-dependencies]
-tempfile = "3"
 assert_cmd = "2.0"
 predicates = "3.1"
 regex = "1.12"

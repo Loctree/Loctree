@@ -93,14 +93,28 @@ pub struct GraphData {
     pub truncation_reason: Option<String>,
 }
 
+/// Location of a duplicate export with line number
+#[derive(Clone, Serialize)]
+pub struct DupLocation {
+    pub file: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<usize>,
+}
+
 #[derive(Clone, Serialize)]
 pub struct RankedDup {
     pub name: String,
     pub files: Vec<String>,
+    /// Locations with line numbers (file, line)
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub locations: Vec<DupLocation>,
     pub score: usize,
     pub prod_count: usize,
     pub dev_count: usize,
     pub canonical: String,
+    /// Line number in canonical file
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub canonical_line: Option<usize>,
     pub refactors: Vec<String>,
 }
 
@@ -137,6 +151,9 @@ pub struct ReportSection {
     pub dynamic_imports_count: usize,
     pub ranked_dups: Vec<RankedDup>,
     pub cascades: Vec<(String, String)>,
+    /// Actual circular import components (normalized)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub circular_imports: Vec<Vec<String>>,
     pub dynamic: Vec<(String, Vec<String>)>,
     pub analyze_limit: usize,
     pub missing_handlers: Vec<CommandGap>,
