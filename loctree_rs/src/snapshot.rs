@@ -1100,7 +1100,13 @@ fn write_auto_artifacts(
         dead_exports: &dead_exports,
         circular_imports: &cycles,
         pipeline_summary: &pipeline_summary,
-    });
+    })
+    .map_err(|err| {
+        io::Error::new(
+            io::ErrorKind::Other,
+            format!("Failed to serialize SARIF: {err}"),
+        )
+    })?;
     fs::write(&sarif_path, sarif_content)?;
     created.push(format!(
         "./{}",

@@ -453,8 +453,10 @@ fn extract_quick_wins(sections: &[ReportSection]) -> Vec<QuickWin> {
 /// Print quick wins as JSONL (one JSON object per line) for agent consumption
 pub fn print_agent_feed_jsonl(report: &ForAiReport) {
     for win in &report.quick_wins {
-        let json = serde_json::to_string(win).expect("serialize QuickWin");
-        println!("{}", json);
+        match serde_json::to_string(win) {
+            Ok(json) => println!("{}", json),
+            Err(err) => eprintln!("[loctree][warn] could not serialize quick win: {err}"),
+        }
     }
 }
 

@@ -68,6 +68,16 @@ loct --version   # expect 0.5.9+
 - **Delta between scans**: `loct diff --since <snapshot_id>`
 - **CI guardrails**: `loct lint --fail --sarif > results.sarif`
 
+## CLI cheat sheet (`loct --help`)
+
+- Scan & cache: `loct` (writes `.loctree/<branch@sha>/snapshot.json`)
+- Slice for AI: `loct slice <file> [--consumers --json]`
+- Quick queries: `loct query who-imports <file>`, `loct query where-symbol <sym>`, `loct query component-of <file>`
+- Analysis shortcuts: `loct -A --dead`, `loct -A --circular`, `loct -A --report report.html`
+- Diff snapshots: `loct diff --since <main|HEAD~N|snapshot_id>`
+- Serve report: `loct -A --report report.html --serve`
+- Full options: `loct --help-full` (agent-friendly)
+
 ## Tips
 
 - `loct` caches analyses; use `--full-scan` to force a rescan.

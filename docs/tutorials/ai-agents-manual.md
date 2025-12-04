@@ -536,6 +536,8 @@ loct cycles --json | jq '.[] | select(.files | length > 2)'
 | CI lint | `loct lint --fail --sarif` |
 | Git blame | `loct git blame <file>` |
 
+Keep artifacts together: snapshots and agent metadata (e.g., `AI_META.json` or `for-ai.json`) should live under `.loctree/<branch@sha>/` alongside `snapshot.json` so diffs and queries stay aligned with the scan.
+
 ---
 
 Developed with care by The Loctree Team (c)2025.

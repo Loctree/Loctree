@@ -19,6 +19,16 @@ use crate::types::{FileAnalysis, OutputMode, ReexportKind};
 
 use super::root_scan::{RootContext, normalize_module_id};
 
+fn strip_alias_prefix(path: &str) -> &str {
+    // Drop leading alias markers like @core/... -> core/...
+    let without_at = path.trim_start_matches('@');
+    if let Some(idx) = without_at.find('/') {
+        &without_at[idx + 1..]
+    } else {
+        without_at
+    }
+}
+
 use serde::Serialize;
 
 /// Compare two paths for equality using proper path matching
@@ -33,16 +43,30 @@ fn paths_match(a: &str, b: &str) -> bool {
     let a_norm = a.replace('\\', "/");
     let b_norm = b.replace('\\', "/");
     // Trim leading "./" to align relative specs with normalized paths
-    let a_clean = a_norm.trim_start_matches("./");
-    let b_clean = b_norm.trim_start_matches("./");
+    let a_clean = a_norm.trim_start_matches("./").to_string();
+    let b_clean = b_norm.trim_start_matches("./").to_string();
+
+    // On Windows, compare case-insensitively to avoid false mismatches on case variants
+    #[cfg(windows)]
+    {
+        a_clean = a_clean.to_lowercase();
+        b_clean = b_clean.to_lowercase();
+    }
 
     if a_clean == b_clean {
         return true;
     }
 
+    // Also allow alias-stripped comparisons (e.g., @core/utils vs src/core/utils)
+    let a_alias = strip_alias_prefix(&a_clean);
+    let b_alias = strip_alias_prefix(&b_clean);
+    if a_alias == b_clean || b_alias == a_clean || a_alias == b_alias {
+        return true;
+    }
+
     // Normalize to module ids (collapse extensions/index) and compare paths
-    let mod_a = normalize_module_id(a_clean);
-    let mod_b = normalize_module_id(b_clean);
+    let mod_a = normalize_module_id(&a_clean);
+    let mod_b = normalize_module_id(&b_clean);
     if mod_a.path == mod_b.path || mod_a.as_key() == mod_b.as_key() {
         return true;
     }
@@ -51,7 +75,7 @@ fn paths_match(a: &str, b: &str) -> bool {
     // This handles "src/App.tsx" vs "App.tsx" but prevents "foo.ts" matching "foo.test.ts"
     if a_clean.len() > b_clean.len() {
         // Check if a ends with b at a component boundary
-        if let Some(suffix_start) = a_clean.rfind(b_clean) {
+        if let Some(suffix_start) = a_clean.rfind(&b_clean) {
             // Valid if b is at the start OR preceded by a separator
             if suffix_start == 0 || a_clean.chars().nth(suffix_start - 1) == Some('/') {
                 return true;
@@ -59,7 +83,7 @@ fn paths_match(a: &str, b: &str) -> bool {
         }
     } else if b_clean.len() > a_clean.len() {
         // Check if b ends with a at a component boundary
-        if let Some(suffix_start) = b_clean.rfind(a_clean) {
+        if let Some(suffix_start) = b_clean.rfind(&a_clean) {
             // Valid if a is at the start OR preceded by a separator
             if suffix_start == 0 || b_clean.chars().nth(suffix_start - 1) == Some('/') {
                 return true;
@@ -684,17 +708,29 @@ pub fn find_dead_exports(
         let mut reachable: HashSet<String> = HashSet::new();
         for analysis in analyses {
             for dyn_imp in &analysis.dynamic_imports {
-                let dyn_norm = normalize_module_id(dyn_imp).as_key();
+                let dyn_norm = normalize_module_id(dyn_imp);
+                let dyn_key = dyn_norm.as_key();
+                let dyn_alias = strip_alias_prefix(&dyn_norm.path).to_string();
                 // Find matching file in analyses
                 for a in analyses {
-                    let a_norm = normalize_module_id(&a.path).as_key();
-                    if paths_match(dyn_imp, &a_norm) || paths_match(dyn_imp, &a.path) {
-                        reachable.insert(a_norm);
+                    let a_norm = normalize_module_id(&a.path);
+                    let a_key = a_norm.as_key();
+                    if paths_match(dyn_imp, &a_norm.path)
+                        || paths_match(dyn_imp, &a.path)
+                        || a_norm.path.starts_with(&dyn_norm.path)
+                        || a_norm.path.starts_with(&dyn_alias)
+                        || a_norm.path.ends_with(&dyn_alias)
+                    {
+                        reachable.insert(a_key);
                         break;
                     }
                 }
                 // Also add the normalized dynamic import path itself
-                reachable.insert(dyn_norm);
+                reachable.insert(dyn_key.clone());
+                // Alias-prefix fallback for unresolvable module ids (e.g., @core/foo)
+                if !dyn_alias.is_empty() {
+                    reachable.insert(dyn_alias.clone());
+                }
             }
         }
 
@@ -1272,6 +1308,25 @@ mod tests {
         assert!(
             result.is_empty(),
             "dynamic import should mark module as used"
+        );
+    }
+
+    #[test]
+    fn test_dynamic_import_with_alias_prefix_marks_reachable() {
+        let mut importer = mock_file("src/app.ts");
+        importer.dynamic_imports = vec!["@core/utils".to_string()];
+
+        let exporter = mock_file_with_exports("src/core/utils/index.ts", vec!["helper"]);
+
+        let result = find_dead_exports(
+            &[importer, exporter],
+            false,
+            None,
+            DeadFilterConfig::default(),
+        );
+        assert!(
+            result.is_empty(),
+            "alias-prefixed dynamic import should keep target reachable"
         );
     }
 

@@ -685,16 +685,19 @@
       // Fixed positioning is relative to viewport, no scroll offset needed
       let left = rect.left + evt.renderedPosition.x + 12;
       let top = rect.top + evt.renderedPosition.y + 12;
-      // Ensure tooltip stays within viewport bounds
-      const tooltipWidth = 220;
-      const tooltipHeight = 120;
+      // Ensure tooltip stays within viewport bounds (measure after content)
+      tooltip.style.visibility = "hidden";
+      tooltip.style.display = "block";
+      const bounds = tooltip.getBoundingClientRect();
+      const tooltipWidth = bounds.width || 220;
+      const tooltipHeight = bounds.height || 120;
       const maxLeft = window.innerWidth - tooltipWidth - 10;
       const maxTop = window.innerHeight - tooltipHeight - 10;
       if (left > maxLeft) left = maxLeft;
       if (top > maxTop) top = Math.max(10, top - tooltipHeight - 24);
       tooltip.style.left = left + "px";
       tooltip.style.top = top + "px";
-      tooltip.style.display = "block";
+      tooltip.style.visibility = "visible";
       nodeHover = true;
     };
 

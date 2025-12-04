@@ -506,7 +506,13 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             dead_exports: &dead_exports,
             circular_imports: &circular_imports,
             pipeline_summary: &pipeline_summary,
-        });
+        })
+        .map_err(|err| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("Failed to serialize SARIF: {err}"),
+            )
+        })?;
         return Ok(());
     }
 
