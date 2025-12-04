@@ -404,6 +404,134 @@ fn should_skip_dead_export_check(analysis: &FileAnalysis) -> bool {
     false
 }
 
+/// Check if an export from a Svelte file is likely a component API method.
+/// Svelte components expose methods via `export function` that are called via `bind:this`:
+///   let modal: MyModal;
+///   <MyModal bind:this={modal} />
+///   modal.show();  // calling the exported function
+///
+/// These are NOT imported via ES imports, so they appear as "dead" in static analysis.
+/// Common patterns: show/hide/open/close for modals, focus/blur for inputs, scroll* for containers.
+fn is_svelte_component_api(file_path: &str, export_name: &str) -> bool {
+    // Only applies to .svelte files
+    if !file_path.ends_with(".svelte") {
+        return false;
+    }
+
+    // Common component API method names used via bind:this
+    const COMPONENT_API_METHODS: &[&str] = &[
+        // Modal/dialog patterns
+        "show",
+        "hide",
+        "open",
+        "close",
+        "toggle",
+        "dismiss",
+        // Form/input patterns
+        "focus",
+        "blur",
+        "select",
+        "selectAll",
+        "clear",
+        "reset",
+        "validate",
+        "submit",
+        // Text/editor patterns
+        "getText",
+        "setText",
+        "getValue",
+        "setValue",
+        "getContent",
+        "setContent",
+        "insertText",
+        "replaceText",
+        // Scroll patterns
+        "scrollTo",
+        "scrollToTop",
+        "scrollToBottom",
+        "scrollIntoView",
+        // Animation/transition patterns
+        "play",
+        "pause",
+        "stop",
+        "restart",
+        "animate",
+        // State patterns
+        "enable",
+        "disable",
+        "activate",
+        "deactivate",
+        "expand",
+        "collapse",
+        // Lifecycle patterns
+        "init",
+        "destroy",
+        "refresh",
+        "update",
+        "reload",
+    ];
+
+    // Check exact match
+    if COMPONENT_API_METHODS.contains(&export_name) {
+        return true;
+    }
+
+    // Check prefix patterns (e.g., scrollToElement, setFoo, getFoo, applyPr, isActive)
+    // These are common patterns for component methods called via bind:this
+    const API_PREFIXES: &[&str] = &[
+        "scroll",
+        "get",
+        "set",
+        "on",
+        "handle",
+        "apply",
+        "is",
+        "has",
+        "can",
+        "should",
+        "do",
+        "trigger",
+        "emit",
+        "fire",
+        "dispatch",
+        "notify",
+        "load",
+        "fetch",
+        "save",
+        "delete",
+        "add",
+        "remove",
+        "insert",
+        "append",
+        "prepend",
+        "move",
+        "swap",
+        "sort",
+        "filter",
+        "find",
+        "search",
+        "check",
+        "verify",
+        "compute",
+        "calculate",
+        "render",
+        "draw",
+    ];
+    for prefix in API_PREFIXES {
+        if export_name.starts_with(prefix)
+            && export_name.len() > prefix.len()
+            && export_name
+                .chars()
+                .nth(prefix.len())
+                .is_some_and(|c| c.is_uppercase())
+        {
+            return true;
+        }
+    }
+
+    false
+}
+
 /// Find potentially dead (unused) exports in the codebase
 pub fn find_dead_exports(
     analyses: &[FileAnalysis],
@@ -576,8 +704,16 @@ pub fn find_dead_exports(
             // Fallback: check if symbol is imported anywhere by name
             // This handles cases where path resolution fails (monorepos, $lib/, @scope/ packages)
             let imported_by_name = all_imported_symbols.contains(&exp.name);
+            // Check if this is likely a Svelte component API method (called via bind:this)
+            let is_svelte_api = is_svelte_component_api(&analysis.path, &exp.name);
 
-            if !is_used && !star_used && !locally_used && !is_tauri_handler && !imported_by_name {
+            if !is_used
+                && !star_used
+                && !locally_used
+                && !is_tauri_handler
+                && !imported_by_name
+                && !is_svelte_api
+            {
                 let open_url = super::build_open_url(&analysis.path, exp.line, open_base);
                 let is_rust_file = analysis.path.ends_with(".rs");
 
