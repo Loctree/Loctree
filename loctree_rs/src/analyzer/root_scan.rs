@@ -145,16 +145,40 @@ pub fn scan_roots(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
             for (handle, root_path) in handles.into_iter().zip(chunk.iter()) {
                 match handle.join() {
                     Ok(Ok(result)) => {
-                        results.lock().unwrap().push(result);
+                        let mut guard = match results.lock() {
+                            Ok(g) => g,
+                            Err(poisoned) => {
+                                eprintln!(
+                                    "[loctree][warn] result mutex poisoned; salvaging partial data"
+                                );
+                                poisoned.into_inner()
+                            }
+                        };
+                        guard.push(result);
                     }
                     Ok(Err(e)) => {
-                        errors.lock().unwrap().push((root_path.clone(), e));
+                        let mut guard = match errors.lock() {
+                            Ok(g) => g,
+                            Err(poisoned) => {
+                                eprintln!(
+                                    "[loctree][warn] error mutex poisoned; salvaging partial errors"
+                                );
+                                poisoned.into_inner()
+                            }
+                        };
+                        guard.push((root_path.clone(), e));
                     }
                     Err(_) => {
-                        errors
-                            .lock()
-                            .unwrap()
-                            .push((root_path.clone(), io::Error::other("thread panic")));
+                        let mut guard = match errors.lock() {
+                            Ok(g) => g,
+                            Err(poisoned) => {
+                                eprintln!(
+                                    "[loctree][warn] error mutex poisoned; salvaging partial errors"
+                                );
+                                poisoned.into_inner()
+                            }
+                        };
+                        guard.push((root_path.clone(), io::Error::other("thread panic")));
                     }
                 }
             }
@@ -162,7 +186,15 @@ pub fn scan_roots(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
     });
 
     // Check for errors
-    let errors = errors.into_inner().unwrap();
+    let errors = match errors.into_inner() {
+        Ok(v) => v,
+        Err(poisoned) => {
+            eprintln!(
+                "[loctree][warn] error mutex poisoned during unwrap; returning partial errors"
+            );
+            poisoned.into_inner()
+        }
+    };
     if !errors.is_empty() {
         let first_err = errors.into_iter().next().unwrap();
         return Err(io::Error::new(
@@ -172,7 +204,15 @@ pub fn scan_roots(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
     }
 
     // Merge results from all roots
-    let all_results = results.into_inner().unwrap();
+    let all_results = match results.into_inner() {
+        Ok(v) => v,
+        Err(poisoned) => {
+            eprintln!(
+                "[loctree][warn] result mutex poisoned during unwrap; returning partial results"
+            );
+            poisoned.into_inner()
+        }
+    };
     let mut contexts: Vec<RootContext> = Vec::new();
     let mut global_fe_commands: CommandUsage = HashMap::new();
     let mut global_be_commands: CommandUsage = HashMap::new();

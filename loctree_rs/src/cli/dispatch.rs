@@ -352,7 +352,13 @@ fn handle_diff_command(opts: &DiffOptions, global: &GlobalOptions) -> DispatchRe
 
     // For MVP: Load snapshots from paths or IDs
     // `--since` is required and points to a snapshot path or ID
-    let since_path = opts.since.as_ref().expect("--since is required");
+    let since_path = if let Some(s) = opts.since.as_ref() {
+        s
+    } else {
+        eprintln!("[loct][error] --since is required for diff.");
+        eprintln!("[loct][hint] try: loct diff --since <snapshot_path|branch@sha|HEAD~N>");
+        return DispatchResult::Exit(1);
+    };
 
     // Load "from" snapshot
     let from_snapshot = match Snapshot::load(Path::new(since_path)) {

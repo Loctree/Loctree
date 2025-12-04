@@ -83,6 +83,11 @@ pub const REPORT_CSS: &str = r#"
     color-scheme: light dark;
 }
 
+/* Tooltip safety layer */
+.tooltip-floating {
+    z-index: 9999 !important;
+}
+
 /* ============================================
    Theme: Dark Mode (Vista Galaxy Black Steel)
    ============================================ */

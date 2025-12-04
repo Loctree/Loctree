@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
@@ -23,6 +24,19 @@ pub const SNAPSHOT_DIR: &str = ".loctree";
 
 /// Default snapshot file name
 pub const SNAPSHOT_FILE: &str = "snapshot.json";
+
+fn write_atomic(path: &Path, contents: impl AsRef<[u8]>) -> io::Result<()> {
+    let dir = path
+        .parent()
+        .ok_or_else(|| io::Error::other("path has no parent for atomic write"))?;
+    let mut tmp = tempfile::Builder::new()
+        .prefix("loctree_tmp")
+        .tempfile_in(dir)?;
+    tmp.write_all(contents.as_ref())?;
+    tmp.flush()?;
+    tmp.persist(path).map_err(|e| e.error)?;
+    Ok(())
+}
 
 /// Git workspace context for artifact isolation.
 ///
@@ -382,7 +396,7 @@ impl Snapshot {
         let json = serde_json::to_string_pretty(self)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
-        fs::write(&snapshot_path, json)?;
+        write_atomic(&snapshot_path, json)?;
 
         Ok(())
     }
@@ -1010,7 +1024,7 @@ fn write_auto_artifacts(
         .flat_map(|ctx| ctx.graph_edges.clone())
         .collect();
     let cycles = find_cycles(&all_graph_edges);
-    fs::write(
+    write_atomic(
         &circular_json_path,
         serde_json::to_string_pretty(&json!({ "circularImports": cycles }))
             .map_err(io::Error::other)?,
@@ -1039,7 +1053,7 @@ fn write_auto_artifacts(
             })
         })
         .collect();
-    fs::write(
+    write_atomic(
         &races_json_path,
         serde_json::to_string_pretty(&race_items).map_err(io::Error::other)?,
     )?;
@@ -1067,7 +1081,7 @@ fn write_auto_artifacts(
         "circularImports": cycles,
         "pyRaceIndicators": race_items,
     });
-    fs::write(
+    write_atomic(
         &analysis_json_path,
         serde_json::to_string_pretty(&bundle).map_err(io::Error::other)?,
     )?;
@@ -1102,7 +1116,7 @@ fn write_auto_artifacts(
         pipeline_summary: &pipeline_summary,
     })
     .map_err(|err| io::Error::other(format!("Failed to serialize SARIF: {err}")))?;
-    fs::write(&sarif_path, sarif_content)?;
+    write_atomic(&sarif_path, sarif_content)?;
     created.push(format!(
         "./{}",
         sarif_path
@@ -1125,7 +1139,7 @@ fn write_auto_artifacts(
         }).collect::<Vec<_>>(),
         "count": dead_exports.len(),
     });
-    fs::write(
+    write_atomic(
         &dead_json_path,
         serde_json::to_string_pretty(&dead_json).map_err(io::Error::other)?,
     )?;
@@ -1173,7 +1187,7 @@ fn write_auto_artifacts(
             "unregistered": global_unregistered_handlers.len(),
         },
     });
-    fs::write(
+    write_atomic(
         &handlers_json_path,
         serde_json::to_string_pretty(&handlers_json).map_err(io::Error::other)?,
     )?;
