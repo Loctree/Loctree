@@ -752,6 +752,21 @@ pub fn find_dead_exports(
                 continue;
             }
 
+            // Python-specific heuristics: skip framework magic patterns
+            let is_python_file = analysis.path.ends_with(".py");
+            let python_framework_magic = is_python_file
+                && (
+                    // arq framework looks up WorkerSettings by name convention
+                    exp.name == "WorkerSettings"
+                    // Standard Python package versioning
+                    || exp.name == "__version__"
+                    // pytest fixtures can be used without explicit import (via conftest.py)
+                    || (analysis.path.contains("conftest") && exp.kind == "def")
+                );
+            if python_framework_magic {
+                continue;
+            }
+
             if exp.name == "default"
                 && (analysis.path.ends_with("page.tsx") || analysis.path.ends_with("layout.tsx"))
             {

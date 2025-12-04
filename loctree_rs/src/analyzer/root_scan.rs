@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::thread;
 
@@ -1210,13 +1210,13 @@ fn rank_duplicates(
     ranked
 }
 
-fn build_py_roots(root_canon: &PathBuf, extra_roots: &[PathBuf]) -> Vec<PathBuf> {
+fn build_py_roots(root_canon: &Path, extra_roots: &[PathBuf]) -> Vec<PathBuf> {
     let mut roots: Vec<PathBuf> = Vec::new();
 
     // Always include project root
     let root_canon = root_canon
         .canonicalize()
-        .unwrap_or_else(|_| root_canon.clone());
+        .unwrap_or_else(|_| root_canon.to_path_buf());
     roots.push(root_canon.clone());
 
     // Common src/ layout
@@ -1227,46 +1227,45 @@ fn build_py_roots(root_canon: &PathBuf, extra_roots: &[PathBuf]) -> Vec<PathBuf>
 
     // Discover from pyproject.toml (poetry/setuptools)
     let pyproject = root_canon.join("pyproject.toml");
-    if pyproject.exists() {
-        if let Ok(text) = std::fs::read_to_string(&pyproject) {
-            if let Ok(val) = text.parse::<Value>() {
-                // tool.poetry.packages = [{ include = "...", from = "src" }]
-                if let Some(packages) = val
-                    .get("tool")
-                    .and_then(|t| t.get("poetry"))
-                    .and_then(|p| p.get("packages"))
-                    .and_then(|p| p.as_array())
-                {
-                    for pkg in packages {
-                        if let Some(include) = pkg.get("include").and_then(|i| i.as_str()) {
-                            let from = pkg.get("from").and_then(|f| f.as_str());
-                            let base = from
-                                .map(|f| root_canon.join(f))
-                                .unwrap_or_else(|| root_canon.clone());
-                            let candidate = base.join(include);
-                            if candidate.exists() {
-                                roots.push(candidate.canonicalize().unwrap_or(candidate));
-                            }
-                        }
+    if pyproject.exists()
+        && let Ok(text) = std::fs::read_to_string(&pyproject)
+        && let Ok(val) = text.parse::<Value>()
+    {
+        // tool.poetry.packages = [{ include = "...", from = "src" }]
+        if let Some(packages) = val
+            .get("tool")
+            .and_then(|t| t.get("poetry"))
+            .and_then(|p| p.get("packages"))
+            .and_then(|p| p.as_array())
+        {
+            for pkg in packages {
+                if let Some(include) = pkg.get("include").and_then(|i| i.as_str()) {
+                    let from = pkg.get("from").and_then(|f| f.as_str());
+                    let base = from
+                        .map(|f| root_canon.join(f))
+                        .unwrap_or_else(|| root_canon.clone());
+                    let candidate = base.join(include);
+                    if candidate.exists() {
+                        roots.push(candidate.canonicalize().unwrap_or(candidate));
                     }
                 }
+            }
+        }
 
-                // tool.setuptools.packages.find.where = ["src", ...]
-                if let Some(where_arr) = val
-                    .get("tool")
-                    .and_then(|t| t.get("setuptools"))
-                    .and_then(|s| s.get("packages"))
-                    .and_then(|p| p.get("find"))
-                    .and_then(|f| f.get("where"))
-                    .and_then(|w| w.as_array())
-                {
-                    for entry in where_arr {
-                        if let Some(path_str) = entry.as_str() {
-                            let candidate = root_canon.join(path_str);
-                            if candidate.exists() {
-                                roots.push(candidate.canonicalize().unwrap_or(candidate));
-                            }
-                        }
+        // tool.setuptools.packages.find.where = ["src", ...]
+        if let Some(where_arr) = val
+            .get("tool")
+            .and_then(|t| t.get("setuptools"))
+            .and_then(|s| s.get("packages"))
+            .and_then(|p| p.get("find"))
+            .and_then(|f| f.get("where"))
+            .and_then(|w| w.as_array())
+        {
+            for entry in where_arr {
+                if let Some(path_str) = entry.as_str() {
+                    let candidate = root_canon.join(path_str);
+                    if candidate.exists() {
+                        roots.push(candidate.canonicalize().unwrap_or(candidate));
                     }
                 }
             }

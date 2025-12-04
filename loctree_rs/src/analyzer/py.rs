@@ -154,6 +154,93 @@ fn parse_all_list(content: &str) -> Vec<String> {
     names
 }
 
+/// Check if a decorator line indicates a framework that "uses" the decorated function.
+/// Returns true for pytest fixtures, CLI decorators, web route handlers, etc.
+fn is_framework_decorator(line: &str) -> bool {
+    let lower = line.to_lowercase();
+
+    // pytest fixtures and parametrize
+    if lower.contains("@pytest.fixture")
+        || lower.contains("@fixture")
+        || lower.contains("@pytest.mark")
+        || lower.contains("@pytest.parametrize")
+    {
+        return true;
+    }
+
+    // Click/Typer CLI
+    if lower.contains(".command")
+        || lower.contains("@click.")
+        || lower.contains("@app.command")
+        || lower.contains("@typer.")
+    {
+        return true;
+    }
+
+    // FastAPI routes
+    if lower.contains("@app.get")
+        || lower.contains("@app.post")
+        || lower.contains("@app.put")
+        || lower.contains("@app.delete")
+        || lower.contains("@app.patch")
+        || lower.contains("@router.get")
+        || lower.contains("@router.post")
+        || lower.contains("@router.put")
+        || lower.contains("@router.delete")
+        || lower.contains("@router.patch")
+        || lower.contains("@api_router.")
+    {
+        return true;
+    }
+
+    // Flask routes
+    if lower.contains("@app.route")
+        || lower.contains("@blueprint.route")
+        || lower.contains(".route(")
+    {
+        return true;
+    }
+
+    // Celery tasks
+    if lower.contains("@celery.task")
+        || lower.contains("@app.task")
+        || lower.contains("@shared_task")
+    {
+        return true;
+    }
+
+    // Django
+    if lower.contains("@admin.register")
+        || lower.contains("@receiver")
+        || lower.contains("@login_required")
+        || lower.contains("@permission_required")
+    {
+        return true;
+    }
+
+    // arq worker
+    if lower.contains("@cron") || lower.contains("@func") {
+        return true;
+    }
+
+    // rumps (macOS menu bar apps)
+    if lower.contains("@rumps.") || lower.contains(".timer(") {
+        return true;
+    }
+
+    // Generic callback/event patterns
+    if lower.contains("@on_event")
+        || lower.contains("@event_handler")
+        || lower.contains("@callback")
+        || lower.contains("@hook")
+        || lower.contains("@register")
+    {
+        return true;
+    }
+
+    false
+}
+
 fn read_all_from_resolved(resolved: &Option<String>, root: &Path) -> Option<Vec<String>> {
     let path_str = resolved.as_ref()?;
     let candidate = {
@@ -397,6 +484,7 @@ pub(crate) fn analyze_py_file(
     let mut analysis = FileAnalysis::new(relative);
     let mut type_check_stack: Vec<usize> = Vec::new();
     let mut pending_callback_decorator = false;
+    let mut pending_framework_decorator = false;
 
     // Set Python-specific metadata
     analysis.is_test = is_python_test_file(path, content);
@@ -436,6 +524,10 @@ pub(crate) fn analyze_py_file(
             // Track decorators that register callbacks (e.g., @rumps.clicked)
             if trimmed.contains("clicked") || trimmed.contains("rumps.") {
                 pending_callback_decorator = true;
+            }
+            // Track framework decorators that mark functions as "used"
+            if is_framework_decorator(trimmed) {
+                pending_framework_decorator = true;
             }
             continue;
         }
@@ -578,10 +670,18 @@ pub(crate) fn analyze_py_file(
                     ));
                 }
 
-                if pending_callback_decorator && !name.is_empty() {
+                // Mark function as used if decorated with callback/framework decorator
+                if (pending_callback_decorator || pending_framework_decorator) && !name.is_empty() {
                     analysis.local_uses.push(name.to_string());
                 }
                 pending_callback_decorator = false;
+                pending_framework_decorator = false;
+            } else if !trimmed.is_empty()
+                && !trimmed.starts_with('#')
+                && !trimmed.starts_with("class ")
+            {
+                // Reset decorator flags if we hit a non-decorator, non-def, non-class line
+                pending_framework_decorator = false;
             }
         }
     }
@@ -624,10 +724,181 @@ pub(crate) fn analyze_py_file(
     // This catches local function calls like `helper_func(...)` within the same file
     extract_python_function_calls(content, &mut analysis.local_uses);
 
+    // Detect type hint usages (dict[str, MyClass], defaultdict(MyClass), etc.)
+    extract_type_hint_usages(content, &mut analysis.local_uses);
+
     // Detect Python concurrency race indicators
     analysis.py_race_indicators = detect_py_race_indicators(content);
 
     analysis
+}
+
+/// Extract identifiers used in type hints from Python code.
+/// This catches patterns like `x: MyClass`, `def foo(x: MyClass)`, `List[MyClass]`, `dict[str, MyClass]`
+/// Also catches factory patterns like `defaultdict(MyClass)`, `set(MyClass)` etc.
+fn extract_type_hint_usages(content: &str, local_uses: &mut Vec<String>) {
+    // Match type annotations: `: SomeType` or `-> SomeType`
+    // Also match generic params: `List[Type]`, `Dict[K, V]`, `Optional[T]`
+    // And factory calls: `defaultdict(Type)`
+
+    let bytes = content.as_bytes();
+    let len = bytes.len();
+
+    // Known type containers that take types as parameters
+    const TYPE_FACTORIES: &[&str] = &[
+        "defaultdict",
+        "Counter",
+        "deque",
+        "OrderedDict",
+        "ChainMap",
+        "namedtuple",
+        "TypedDict",
+        "NewType",
+        "cast",
+    ];
+
+    // Keywords and builtins to skip
+    const SKIP_IDENTS: &[&str] = &[
+        "None",
+        "True",
+        "False",
+        "str",
+        "int",
+        "float",
+        "bool",
+        "bytes",
+        "list",
+        "dict",
+        "set",
+        "tuple",
+        "frozenset",
+        "type",
+        "object",
+        "Any",
+        "Union",
+        "Optional",
+        "List",
+        "Dict",
+        "Set",
+        "Tuple",
+        "Callable",
+        "Sequence",
+        "Mapping",
+        "Iterable",
+        "Iterator",
+        "Generator",
+        "Coroutine",
+        "Awaitable",
+        "AsyncIterator",
+        "AsyncGenerator",
+        "Type",
+        "ClassVar",
+        "Final",
+        "Literal",
+        "TypeVar",
+        "Generic",
+        "Protocol",
+        "Self",
+        "self",
+        "cls",
+    ];
+
+    let mut i = 0;
+    while i < len {
+        // Look for `:` or `->` followed by type annotation
+        if bytes[i] == b':' || (i + 1 < len && bytes[i] == b'-' && bytes[i + 1] == b'>') {
+            if bytes[i] == b'-' {
+                i += 2; // skip `->`
+            } else {
+                i += 1; // skip `:`
+            }
+
+            // Skip whitespace
+            while i < len && bytes[i].is_ascii_whitespace() {
+                i += 1;
+            }
+
+            // Now extract identifiers from the type annotation
+            // Handle nested brackets for generics like Dict[str, List[MyClass]]
+            let mut bracket_depth = 0;
+            let start_pos = i;
+
+            while i < len {
+                match bytes[i] {
+                    b'[' => {
+                        bracket_depth += 1;
+                        i += 1;
+                    }
+                    b']' => {
+                        if bracket_depth > 0 {
+                            bracket_depth -= 1;
+                        }
+                        i += 1;
+                    }
+                    b',' | b')' | b'\n' | b'#' | b'=' if bracket_depth == 0 => {
+                        break;
+                    }
+                    _ if bytes[i].is_ascii_alphabetic() || bytes[i] == b'_' => {
+                        let ident_start = i;
+                        while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                            i += 1;
+                        }
+                        let ident = &content[ident_start..i];
+                        if !SKIP_IDENTS.contains(&ident) && !local_uses.contains(&ident.to_string())
+                        {
+                            local_uses.push(ident.to_string());
+                        }
+                    }
+                    _ => {
+                        i += 1;
+                    }
+                }
+
+                // Stop if we've gone too far (reasonable limit for type annotations)
+                if i - start_pos > 500 {
+                    break;
+                }
+            }
+        }
+        // Look for factory calls like defaultdict(MyClass)
+        else if bytes[i].is_ascii_alphabetic() || bytes[i] == b'_' {
+            let ident_start = i;
+            while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                i += 1;
+            }
+            let ident = &content[ident_start..i];
+
+            if TYPE_FACTORIES.contains(&ident) {
+                // Skip whitespace
+                while i < len && bytes[i].is_ascii_whitespace() {
+                    i += 1;
+                }
+                // Check for opening paren
+                if i < len && bytes[i] == b'(' {
+                    i += 1;
+                    // Skip whitespace
+                    while i < len && bytes[i].is_ascii_whitespace() {
+                        i += 1;
+                    }
+                    // Extract the type argument
+                    if i < len && (bytes[i].is_ascii_alphabetic() || bytes[i] == b'_') {
+                        let type_start = i;
+                        while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                            i += 1;
+                        }
+                        let type_ident = &content[type_start..i];
+                        if !SKIP_IDENTS.contains(&type_ident)
+                            && !local_uses.contains(&type_ident.to_string())
+                        {
+                            local_uses.push(type_ident.to_string());
+                        }
+                    }
+                }
+            }
+        } else {
+            i += 1;
+        }
+    }
 }
 
 /// Extract function calls from Python code to detect local usage.
@@ -1289,5 +1560,89 @@ class Base:\n    pass\n\nclass Child(Base):\n    def method(self):\n        pass
 
         assert!(analysis.local_uses.contains(&"top".to_string()));
         assert!(analysis.local_uses.contains(&"Base".to_string()));
+    }
+
+    #[test]
+    fn detects_type_hint_usage() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path();
+
+        // Test various type hint patterns
+        let content = r#"
+from collections import defaultdict
+from typing import Dict, List
+
+class UserRateLimit:
+    pass
+
+class Session:
+    pass
+
+# Type hints in variable annotations
+rate_limits: dict[str, UserRateLimit] = {}
+sessions: Dict[str, Session] = {}
+
+# defaultdict factory
+user_limits = defaultdict(UserRateLimit)
+
+# Function signature type hints
+def get_limit(user_id: str) -> UserRateLimit:
+    return rate_limits[user_id]
+
+def process(items: List[Session]) -> None:
+    pass
+"#;
+
+        let analysis = analyze_py_file(
+            content,
+            &root.join("session_security.py"),
+            root,
+            Some(&py_exts()),
+            "session_security.py".to_string(),
+            &[root.to_path_buf()],
+            &HashSet::new(),
+        );
+
+        // UserRateLimit should be detected from:
+        // - type hint: dict[str, UserRateLimit]
+        // - defaultdict(UserRateLimit)
+        // - return type: -> UserRateLimit
+        assert!(
+            analysis.local_uses.contains(&"UserRateLimit".to_string()),
+            "UserRateLimit not found in local_uses: {:?}",
+            analysis.local_uses
+        );
+
+        // Session should be detected from type hints
+        assert!(
+            analysis.local_uses.contains(&"Session".to_string()),
+            "Session not found in local_uses: {:?}",
+            analysis.local_uses
+        );
+    }
+
+    #[test]
+    fn type_hint_skips_builtins() {
+        let mut uses = Vec::new();
+        let content = "def foo(x: str, y: int) -> bool: pass";
+        extract_type_hint_usages(content, &mut uses);
+
+        // Should NOT contain builtins
+        assert!(!uses.contains(&"str".to_string()));
+        assert!(!uses.contains(&"int".to_string()));
+        assert!(!uses.contains(&"bool".to_string()));
+    }
+
+    #[test]
+    fn detects_nested_generic_type_hints() {
+        let mut uses = Vec::new();
+        let content = "cache: Dict[str, List[MyClass]] = {}";
+        extract_type_hint_usages(content, &mut uses);
+
+        assert!(
+            uses.contains(&"MyClass".to_string()),
+            "MyClass not found in: {:?}",
+            uses
+        );
     }
 }
