@@ -597,6 +597,8 @@ fn handle_problems_only_diff(
         .filter(|b| !b.has_handler && b.is_called && !from_missing.contains(&b.name))
         .collect();
 
+    let total_problems = new_dead_exports.len() + new_cycles.len() + new_missing_handlers.len();
+
     // Output results
     if global.json || opts.jsonl {
         let problems = json!({
@@ -653,8 +655,6 @@ fn handle_problems_only_diff(
             println!("  To:   (current)");
         }
         println!();
-
-        let total_problems = new_dead_exports.len() + new_cycles.len() + new_missing_handlers.len();
 
         if total_problems == 0 {
             println!("✓ No new problems detected!");
@@ -714,7 +714,6 @@ fn handle_problems_only_diff(
     }
 
     // For JSON output, exit with non-zero if problems found
-    let total_problems = new_dead_exports.len() + new_cycles.len() + new_missing_handlers.len();
     DispatchResult::Exit(if total_problems > 0 { 1 } else { 0 })
 }
 

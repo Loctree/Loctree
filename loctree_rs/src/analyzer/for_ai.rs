@@ -370,7 +370,7 @@ fn extract_quick_wins(sections: &[ReportSection]) -> Vec<QuickWin> {
                 target: dup.name.clone(),
                 location,
                 impact: format!(
-                    "Duplicate exported across {} files - causes confusion and maintenance burden",
+                    "Duplicate export across {} files - causes confusion and maintenance burden",
                     dup.files.len()
                 ),
                 why: format!(

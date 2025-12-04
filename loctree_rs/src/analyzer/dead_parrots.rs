@@ -47,11 +47,11 @@ fn paths_match(a: &str, b: &str) -> bool {
     let b_clean = b_norm.trim_start_matches("./").to_string();
 
     // On Windows, compare case-insensitively to avoid false mismatches on case variants
-    #[cfg(windows)]
-    {
-        a_clean = a_clean.to_lowercase();
-        b_clean = b_clean.to_lowercase();
-    }
+    let (a_clean, b_clean) = if cfg!(windows) {
+        (a_clean.to_lowercase(), b_clean.to_lowercase())
+    } else {
+        (a_clean, b_clean)
+    };
 
     if a_clean == b_clean {
         return true;
