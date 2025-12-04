@@ -83,65 +83,6 @@ pub struct RootArtifacts {
     pub report_section: Option<ReportSection>,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::build_tree;
-    use crate::types::FileAnalysis;
-    use std::path::Path;
-
-    #[test]
-    fn build_tree_aggregates_loc_and_hierarchy() {
-        let analyses = vec![
-            FileAnalysis {
-                path: "src/a.ts".into(),
-                loc: 10,
-                ..Default::default()
-            },
-            FileAnalysis {
-                path: "src/nested/b.ts".into(),
-                loc: 20,
-                ..Default::default()
-            },
-            FileAnalysis {
-                path: "src/nested/deeper/c.ts".into(),
-                loc: 30,
-                ..Default::default()
-            },
-        ];
-        let tree = build_tree(&analyses, Path::new("src"));
-        // Expect top-level nodes include a.ts and nested/
-        let a = tree.iter().find(|n| n.path == "a.ts").unwrap();
-        assert_eq!(a.loc, 10);
-        assert!(a.children.is_empty());
-
-        let nested = tree.iter().find(|n| n.path == "nested").unwrap();
-        assert_eq!(nested.loc, 50); // 20 + 30
-        let b = nested.children.iter().find(|c| c.path == "b.ts").unwrap();
-        assert_eq!(b.loc, 20);
-        let deeper = nested.children.iter().find(|c| c.path == "deeper").unwrap();
-        assert_eq!(deeper.path, "deeper");
-        assert_eq!(deeper.loc, 30);
-        assert_eq!(deeper.children.len(), 1);
-        let leaf = &deeper.children[0];
-        assert_eq!(leaf.path, "c.ts");
-        assert_eq!(leaf.loc, 30);
-    }
-
-    #[test]
-    fn build_tree_handles_root_prefix_mismatch() {
-        let analyses = vec![FileAnalysis {
-            path: "other/file.ts".into(),
-            loc: 5,
-            ..Default::default()
-        }];
-        // If strip_prefix fails, it should fall back to the full path parts.
-        let tree = build_tree(&analyses, Path::new("src"));
-        assert_eq!(tree.len(), 1);
-        assert_eq!(tree[0].path, "other");
-        assert_eq!(tree[0].loc, 5);
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 pub fn process_root_context(
     idx: usize,
@@ -1176,4 +1117,63 @@ pub fn write_report(
         eprintln!("[loctree] HTML report written to {}", display_path);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_tree;
+    use crate::types::FileAnalysis;
+    use std::path::Path;
+
+    #[test]
+    fn build_tree_aggregates_loc_and_hierarchy() {
+        let analyses = vec![
+            FileAnalysis {
+                path: "src/a.ts".into(),
+                loc: 10,
+                ..Default::default()
+            },
+            FileAnalysis {
+                path: "src/nested/b.ts".into(),
+                loc: 20,
+                ..Default::default()
+            },
+            FileAnalysis {
+                path: "src/nested/deeper/c.ts".into(),
+                loc: 30,
+                ..Default::default()
+            },
+        ];
+        let tree = build_tree(&analyses, Path::new("src"));
+        // Expect top-level nodes include a.ts and nested/
+        let a = tree.iter().find(|n| n.path == "a.ts").unwrap();
+        assert_eq!(a.loc, 10);
+        assert!(a.children.is_empty());
+
+        let nested = tree.iter().find(|n| n.path == "nested").unwrap();
+        assert_eq!(nested.loc, 50); // 20 + 30
+        let b = nested.children.iter().find(|c| c.path == "b.ts").unwrap();
+        assert_eq!(b.loc, 20);
+        let deeper = nested.children.iter().find(|c| c.path == "deeper").unwrap();
+        assert_eq!(deeper.path, "deeper");
+        assert_eq!(deeper.loc, 30);
+        assert_eq!(deeper.children.len(), 1);
+        let leaf = &deeper.children[0];
+        assert_eq!(leaf.path, "c.ts");
+        assert_eq!(leaf.loc, 30);
+    }
+
+    #[test]
+    fn build_tree_handles_root_prefix_mismatch() {
+        let analyses = vec![FileAnalysis {
+            path: "other/file.ts".into(),
+            loc: 5,
+            ..Default::default()
+        }];
+        // If strip_prefix fails, it should fall back to the full path parts.
+        let tree = build_tree(&analyses, Path::new("src"));
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree[0].path, "other");
+        assert_eq!(tree[0].loc, 5);
+    }
 }

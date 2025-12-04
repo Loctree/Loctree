@@ -36,7 +36,9 @@ pub fn detect_stack(root: &Path) -> DetectedStack {
     let mut detected_parts: Vec<&str> = Vec::new();
 
     // Check for Cargo.toml -> Rust project
-    if root.join("Cargo.toml").exists() {
+    // Also check direct subdirectories for monorepo-style layouts (e.g., codex-rs/Cargo.toml)
+    let has_cargo_toml = root.join("Cargo.toml").exists() || has_cargo_in_subdir(root);
+    if has_cargo_toml {
         result.extensions.insert("rs".to_string());
         result.ignores.push("target".to_string());
         detected_parts.push("Rust");
@@ -186,6 +188,34 @@ pub fn detect_stack(root: &Path) -> DetectedStack {
     }
 
     result
+}
+
+/// Check if any direct subdirectory contains a Cargo.toml (monorepo detection)
+fn has_cargo_in_subdir(root: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return false;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            // Skip common non-Rust directories
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if name_str.starts_with('.')
+                || name_str == "node_modules"
+                || name_str == "dist"
+                || name_str == "build"
+            {
+                continue;
+            }
+
+            if path.join("Cargo.toml").exists() {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Apply detected stack to parsed args if no explicit config provided
@@ -442,5 +472,53 @@ mod tests {
             ..Default::default()
         };
         assert!(!with_preset.is_empty());
+    }
+
+    #[test]
+    fn test_detect_rust_in_subdirectory() {
+        // Monorepo layout: package.json at root, Cargo.toml in subdirectory
+        let tmp = TempDir::new().expect("create temp dir");
+        std::fs::write(tmp.path().join("package.json"), "{}").expect("write package.json");
+        std::fs::create_dir(tmp.path().join("codex-rs")).expect("mkdir codex-rs");
+        std::fs::write(
+            tmp.path().join("codex-rs").join("Cargo.toml"),
+            "[package]\nname = \"test\"",
+        )
+        .expect("write Cargo.toml");
+
+        let detected = detect_stack(tmp.path());
+
+        // Should detect both JavaScript and Rust
+        assert!(detected.extensions.contains("rs"));
+        assert!(detected.extensions.contains("js"));
+        assert!(detected.description.contains("JavaScript"));
+        assert!(detected.description.contains("Rust"));
+    }
+
+    #[test]
+    fn test_has_cargo_in_subdir() {
+        let tmp = TempDir::new().expect("create temp dir");
+
+        // No subdirs yet
+        assert!(!has_cargo_in_subdir(tmp.path()));
+
+        // Add a subdir without Cargo.toml
+        std::fs::create_dir(tmp.path().join("src")).expect("mkdir");
+        assert!(!has_cargo_in_subdir(tmp.path()));
+
+        // Add a subdir with Cargo.toml
+        std::fs::create_dir(tmp.path().join("backend")).expect("mkdir");
+        std::fs::write(tmp.path().join("backend").join("Cargo.toml"), "").expect("write");
+        assert!(has_cargo_in_subdir(tmp.path()));
+    }
+
+    #[test]
+    fn test_has_cargo_in_subdir_skips_hidden() {
+        let tmp = TempDir::new().expect("create temp dir");
+        std::fs::create_dir(tmp.path().join(".hidden")).expect("mkdir");
+        std::fs::write(tmp.path().join(".hidden").join("Cargo.toml"), "").expect("write");
+
+        // Should not find Cargo.toml in hidden directories
+        assert!(!has_cargo_in_subdir(tmp.path()));
     }
 }
