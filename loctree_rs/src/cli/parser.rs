@@ -12,7 +12,7 @@ use crate::types::ColorMode;
 /// Known subcommand names for the new CLI interface.
 const SUBCOMMANDS: &[&str] = &[
     "auto", "scan", "tree", "slice", "find", "dead", "unused", "cycles", "commands", "events",
-    "info", "lint", "report", "help",
+    "info", "lint", "report", "help", "query", "diff",
 ];
 
 /// Check if an argument looks like a new-style subcommand.
@@ -171,6 +171,8 @@ pub fn parse_command(args: &[String]) -> Result<Option<ParsedCommand>, String> {
         Some("lint") => parse_lint_command(&remaining_args)?,
         Some("report") => parse_report_command(&remaining_args)?,
         Some("help") => parse_help_command(&remaining_args)?,
+        Some("query") => parse_query_command(&remaining_args)?,
+        Some("diff") => parse_diff_command(&remaining_args)?,
         Some(unknown) => {
             return Err(format!(
                 "Unknown command '{}'. Run 'loct --help' for available commands.",
@@ -731,6 +733,91 @@ fn parse_help_command(args: &[String]) -> Result<Command, String> {
     }
 
     Ok(Command::Help(opts))
+}
+
+fn parse_query_command(args: &[String]) -> Result<Command, String> {
+    if args.len() < 2 {
+        return Err(
+            "query command requires a kind and target.\nUsage: loct query <kind> <target>\nKinds: who-imports, where-symbol, component-of"
+                .to_string(),
+        );
+    }
+
+    let kind_str = &args[0];
+    let target = args[1].clone();
+
+    let kind = match kind_str.as_str() {
+        "who-imports" => QueryKind::WhoImports,
+        "where-symbol" => QueryKind::WhereSymbol,
+        "component-of" => QueryKind::ComponentOf,
+        _ => {
+            return Err(format!(
+                "Unknown query kind '{}'. Valid kinds: who-imports, where-symbol, component-of",
+                kind_str
+            ));
+        }
+    };
+
+    Ok(Command::Query(QueryOptions { kind, target }))
+}
+
+fn parse_diff_command(args: &[String]) -> Result<Command, String> {
+    let mut opts = DiffOptions::default();
+    let mut i = 0;
+
+    while i < args.len() {
+        let arg = &args[i];
+        match arg.as_str() {
+            "--since" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--since requires a snapshot ID or path".to_string())?;
+                opts.since = Some(value.clone());
+                i += 2;
+            }
+            "--to" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--to requires a snapshot ID or path".to_string())?;
+                opts.to = Some(value.clone());
+                i += 2;
+            }
+            "--jsonl" => {
+                opts.jsonl = true;
+                i += 1;
+            }
+            "--problems-only" => {
+                opts.problems_only = true;
+                i += 1;
+            }
+            _ if !arg.starts_with('-') => {
+                // First positional arg is --since value
+                if opts.since.is_none() {
+                    opts.since = Some(arg.clone());
+                } else if opts.to.is_none() {
+                    opts.to = Some(arg.clone());
+                } else {
+                    return Err(format!(
+                        "Unexpected argument '{}'. diff takes at most two snapshot IDs.",
+                        arg
+                    ));
+                }
+                i += 1;
+            }
+            _ => {
+                return Err(format!("Unknown option '{}' for 'diff' command.", arg));
+            }
+        }
+    }
+
+    if opts.since.is_none() {
+        return Err(
+            "'diff' command requires a snapshot ID to compare from.\nUsage: loct diff --since <snapshot-id> [--to <snapshot-id>]"
+                .to_string(),
+        );
+    }
+
+    Ok(Command::Diff(opts))
 }
 
 // ============================================================================

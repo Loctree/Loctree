@@ -9,10 +9,12 @@ pub struct SarifInputs<'a> {
     pub missing_handlers: &'a [CommandGap],
     pub unused_handlers: &'a [CommandGap],
     pub dead_exports: &'a [DeadExport],
+    /// Circular imports: each cycle is a Vec of file paths
+    pub circular_imports: &'a [Vec<String>],
     pub pipeline_summary: &'a serde_json::Value,
 }
 
-pub fn print_sarif(inputs: SarifInputs) {
+fn build_sarif(inputs: SarifInputs) -> serde_json::Value {
     let mut results = Vec::new();
 
     // Duplicate exports
@@ -73,7 +75,7 @@ pub fn print_sarif(inputs: SarifInputs) {
 
     // Dead exports
     for dead in inputs.dead_exports {
-        results.push(json!({
+        let mut result = json!({
             "ruleId": "dead-export",
             "level": "warning",
             "message": {
@@ -85,6 +87,44 @@ pub fn print_sarif(inputs: SarifInputs) {
                     "region": { "startLine": dead.line.unwrap_or(1) }
                 }
             }]
+        });
+
+        if let Some(ref open_url) = dead.open_url {
+            result["properties"] = json!({
+                "openUrl": open_url
+            });
+        }
+
+        results.push(result);
+    }
+
+    // Circular imports
+    for cycle in inputs.circular_imports {
+        if cycle.is_empty() {
+            continue;
+        }
+        let cycle_desc = cycle.join(" → ");
+        let first_file = &cycle[0];
+        results.push(json!({
+            "ruleId": "circular-import",
+            "level": "warning",
+            "message": {
+                "text": format!("Circular import detected: {}", cycle_desc)
+            },
+            "locations": [{
+                "physicalLocation": {
+                    "artifactLocation": { "uri": first_file }
+                }
+            }],
+            "relatedLocations": cycle.iter().skip(1).enumerate().map(|(idx, file)| {
+                json!({
+                    "id": idx + 1,
+                    "physicalLocation": {
+                        "artifactLocation": { "uri": file }
+                    },
+                    "message": { "text": format!("Part of cycle at position {}", idx + 2) }
+                })
+            }).collect::<Vec<_>>()
         }));
     }
 
@@ -146,25 +186,37 @@ pub fn print_sarif(inputs: SarifInputs) {
                 { "id": "missing-handler", "shortDescription": { "text": "Missing backend handler for frontend command" } },
                 { "id": "unused-handler", "shortDescription": { "text": "Unused backend handler" } },
                 { "id": "dead-export", "shortDescription": { "text": "Export defined but never imported" } },
+                { "id": "circular-import", "shortDescription": { "text": "Circular import dependency detected" } },
                 { "id": "ghost-event", "shortDescription": { "text": "Event emitted but not listened to" } },
                 { "id": "orphan-listener", "shortDescription": { "text": "Event listener without emitter" } }
             ]
         }
     });
 
-    let sarif = json!({
+    json!({
         "version": "2.1.0",
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "runs": [{
             "tool": tool,
             "results": results
         }]
-    });
+    })
+}
 
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&sarif).expect("Failed to serialize SARIF report to JSON")
-    );
+/// Generate SARIF report as a JSON value (for file output or further processing)
+pub fn generate_sarif(inputs: SarifInputs) -> serde_json::Value {
+    build_sarif(inputs)
+}
+
+/// Generate SARIF report as a pretty-printed JSON string
+pub fn generate_sarif_string(inputs: SarifInputs) -> String {
+    serde_json::to_string_pretty(&build_sarif(inputs))
+        .expect("Failed to serialize SARIF report to JSON")
+}
+
+/// Print SARIF report to stdout
+pub fn print_sarif(inputs: SarifInputs) {
+    println!("{}", generate_sarif_string(inputs));
 }
 
 #[cfg(test)]
@@ -203,6 +255,11 @@ mod tests {
             symbol: symbol.to_string(),
             line,
             confidence: "high".to_string(),
+            reason: format!(
+                "No imports found for '{}'. Checked: resolved imports (0 matches), star re-exports (none), local references (none)",
+                symbol
+            ),
+            open_url: None,
         }
     }
 
@@ -213,6 +270,7 @@ mod tests {
             missing_handlers: &[],
             unused_handlers: &[],
             dead_exports: &[],
+            circular_imports: &[],
             pipeline_summary: &json!({}),
         };
         // Should not panic
@@ -227,6 +285,7 @@ mod tests {
             missing_handlers: &[],
             unused_handlers: &[],
             dead_exports: &[],
+            circular_imports: &[],
             pipeline_summary: &json!({}),
         };
         print_sarif(inputs);
@@ -240,6 +299,7 @@ mod tests {
             missing_handlers: &missing,
             unused_handlers: &[],
             dead_exports: &[],
+            circular_imports: &[],
             pipeline_summary: &json!({}),
         };
         print_sarif(inputs);
@@ -253,6 +313,7 @@ mod tests {
             missing_handlers: &[],
             unused_handlers: &unused,
             dead_exports: &[],
+            circular_imports: &[],
             pipeline_summary: &json!({}),
         };
         print_sarif(inputs);
@@ -269,6 +330,25 @@ mod tests {
             missing_handlers: &[],
             unused_handlers: &[],
             dead_exports: &dead,
+            circular_imports: &[],
+            pipeline_summary: &json!({}),
+        };
+        print_sarif(inputs);
+    }
+
+    #[test]
+    fn test_print_sarif_with_circular_imports() {
+        let cycles = vec![vec![
+            "src/a.ts".to_string(),
+            "src/b.ts".to_string(),
+            "src/a.ts".to_string(),
+        ]];
+        let inputs = SarifInputs {
+            duplicate_exports: &[],
+            missing_handlers: &[],
+            unused_handlers: &[],
+            dead_exports: &[],
+            circular_imports: &cycles,
             pipeline_summary: &json!({}),
         };
         print_sarif(inputs);
@@ -288,6 +368,7 @@ mod tests {
             missing_handlers: &[],
             unused_handlers: &[],
             dead_exports: &[],
+            circular_imports: &[],
             pipeline_summary: &summary,
         };
         print_sarif(inputs);
@@ -307,6 +388,7 @@ mod tests {
             missing_handlers: &[],
             unused_handlers: &[],
             dead_exports: &[],
+            circular_imports: &[],
             pipeline_summary: &summary,
         };
         print_sarif(inputs);
@@ -318,6 +400,7 @@ mod tests {
         let missing = vec![mock_gap("api_call", vec![("src/api.ts", 5)])];
         let unused = vec![mock_gap("legacy_fn", vec![("src-tauri/src/main.rs", 100)])];
         let dead = vec![mock_dead("src/old.ts", "deprecated", Some(1))];
+        let cycles = vec![vec!["src/x.ts".to_string(), "src/y.ts".to_string()]];
         let summary = json!({
             "events": {
                 "ghostEmits": [{"name": "evt", "path": "a.ts", "line": 1, "confidence": "low"}],
@@ -330,6 +413,7 @@ mod tests {
             missing_handlers: &missing,
             unused_handlers: &unused,
             dead_exports: &dead,
+            circular_imports: &cycles,
             pipeline_summary: &summary,
         };
         print_sarif(inputs);
@@ -350,6 +434,7 @@ mod tests {
             missing_handlers: &missing,
             unused_handlers: &[],
             dead_exports: &[],
+            circular_imports: &[],
             pipeline_summary: &json!({}),
         };
         print_sarif(inputs);

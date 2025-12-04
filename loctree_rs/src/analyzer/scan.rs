@@ -16,6 +16,7 @@ use super::resolvers::{
     resolve_rust_import,
 };
 use super::rust::analyze_rust_file;
+use crate::analyzer::ast_js::CommandDetectionConfig;
 
 /// Build a globset from user patterns.
 pub fn build_globset(patterns: &[String]) -> Option<GlobSet> {
@@ -134,6 +135,7 @@ pub(crate) fn analyze_file(
     py_stdlib: &HashSet<String>,
     symbol: Option<&str>,
     custom_command_macros: &[String],
+    command_cfg: &CommandDetectionConfig,
 ) -> io::Result<FileAnalysis> {
     let canonical = path.canonicalize()?;
     if !canonical.starts_with(root_canon) {
@@ -170,6 +172,7 @@ pub(crate) fn analyze_file(
             extensions,
             ts_resolver,
             relative,
+            command_cfg,
         ),
     };
 

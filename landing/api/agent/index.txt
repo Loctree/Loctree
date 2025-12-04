@@ -1,4 +1,4 @@
-# loctree — AI Agent Quick Reference
+# loctree v0.5.9 — AI Agent Quick Reference
 
 > You have access to loctree for codebase analysis.
 > Use these commands BEFORE reading files manually or grepping.
@@ -8,25 +8,38 @@
 ## Install & Scan
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Loctree/Loctree/main/tools/install.sh | sh
-loct             # creates .loctree/snapshot.json
+loct             # creates .loctree/ with snapshot + reports
+```
+
+## Quick Queries (no full scan needed)
+```bash
+loct query who-imports <file>     # files that import target
+loct query where-symbol <name>    # find symbol definitions
+loct query component-of <file>    # graph component containing file
 ```
 
 ## Before creating new components
 ```bash
-loct find <Name>            # find similar/symbols (avoid duplicates)
+loct find --similar <Name>        # find similar (avoid duplicates)
+loct query where-symbol <Name>    # check if exists
 ```
 
 ## Before refactoring
 ```bash
-loct slice <file> --consumers     # what depends on it
-loct report --impact <file>       # what breaks if removed
-loct cycles                       # detect import cycles
+loct slice <file> --consumers --json  # what depends on it
+loct find --impact <file>             # what breaks if removed
+loct cycles                           # detect import cycles
+```
+
+## Compare branches/commits
+```bash
+loct diff --since main            # compare against main branch
+loct diff --since HEAD~5          # delta since 5 commits ago
 ```
 
 ## Dead code detection
 ```bash
-loct dead --confidence high       # unused exports
-loct report --entrypoints         # main/script entry points
+loct dead --confidence high       # unused exports (safe to remove)
 ```
 
 ## Focused AI context
@@ -37,16 +50,20 @@ loct --for-ai                     # project overview JSON
 
 ## Tauri FE<>BE coverage
 ```bash
-loct report --preset-tauri src src-tauri/src
+loct commands --missing           # FE calls without BE handlers
+loct commands --unused            # BE handlers without FE calls
 loct trace <handler>              # investigate handler usage
 ```
 
 ## CI pipeline checks
 ```bash
-loct report --fail-on-missing-handlers  # FE->BE integrity
-loct report --fail-on-ghost-events      # unused events
-loct report --sarif > results.sarif     # SARIF output
+loct lint --fail --sarif > results.sarif
+```
+
+## IDE Integration
+```
+loctree://open?f=<file>&l=<line>  # clickable URLs in SARIF output
 ```
 
 ---
-More: https://loctree.io | Docs: https://docs.rs/loctree
+More: https://loctree.io | Docs: https://docs.rs/loctree | Blog: https://loctree.io/#blog

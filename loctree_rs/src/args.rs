@@ -41,6 +41,10 @@ pub struct ParsedArgs {
     pub fail_on_missing_handlers: bool,
     pub fail_on_ghost_events: bool,
     pub fail_on_races: bool,
+    /// Maximum allowed dead exports before failing (CI policy)
+    pub max_dead: Option<usize>,
+    /// Maximum allowed circular imports before failing (CI policy)
+    pub max_cycles: Option<usize>,
     pub ai_mode: bool,
     pub top_dead_symbols: usize,
     pub skip_dead_symbols: bool,
@@ -94,7 +98,7 @@ impl Default for ParsedArgs {
             focus_patterns: Vec::new(),
             exclude_report_patterns: Vec::new(),
             graph: false,
-            use_gitignore: false,
+            use_gitignore: true,
             max_depth: None,
             color: ColorMode::Auto,
             output: OutputMode::Human,
@@ -124,6 +128,8 @@ impl Default for ParsedArgs {
             fail_on_missing_handlers: false,
             fail_on_ghost_events: false,
             fail_on_races: false,
+            max_dead: None,
+            max_cycles: None,
             ai_mode: false,
             top_dead_symbols: 20,
             skip_dead_symbols: false,
@@ -363,6 +369,10 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
                 parsed.use_gitignore = true;
                 i += 1;
             }
+            "--no-gitignore" => {
+                parsed.use_gitignore = false;
+                i += 1;
+            }
             "--graph" => {
                 parsed.graph = true;
                 i += 1;
@@ -381,6 +391,42 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
             }
             "--fail-on-races" => {
                 parsed.fail_on_races = true;
+                i += 1;
+            }
+            "--max-dead" => {
+                let next = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--max-dead requires a non-negative integer".to_string())?;
+                let value = next
+                    .parse::<usize>()
+                    .map_err(|_| "--max-dead requires a non-negative integer".to_string())?;
+                parsed.max_dead = Some(value);
+                i += 2;
+            }
+            _ if arg.starts_with("--max-dead=") => {
+                let value = arg
+                    .trim_start_matches("--max-dead=")
+                    .parse::<usize>()
+                    .map_err(|_| "--max-dead requires a non-negative integer".to_string())?;
+                parsed.max_dead = Some(value);
+                i += 1;
+            }
+            "--max-cycles" => {
+                let next = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--max-cycles requires a non-negative integer".to_string())?;
+                let value = next
+                    .parse::<usize>()
+                    .map_err(|_| "--max-cycles requires a non-negative integer".to_string())?;
+                parsed.max_cycles = Some(value);
+                i += 2;
+            }
+            _ if arg.starts_with("--max-cycles=") => {
+                let value = arg
+                    .trim_start_matches("--max-cycles=")
+                    .parse::<usize>()
+                    .map_err(|_| "--max-cycles requires a non-negative integer".to_string())?;
+                parsed.max_cycles = Some(value);
                 i += 1;
             }
             "--show-hidden" | "-H" => {
@@ -787,6 +833,11 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
                 parsed.output = OutputMode::Json;
                 i += 1;
             }
+            "--for-agent-feed" => {
+                parsed.mode = Mode::ForAi;
+                parsed.output = OutputMode::Jsonl;
+                i += 1;
+            }
             "--confidence" => {
                 let next = args
                     .get(i + 1)
@@ -1017,8 +1068,9 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
     validate_globs(&parsed.exclude_report_patterns, "--exclude-report")?;
     detect_glob_conflicts(&parsed.focus_patterns, &parsed.exclude_report_patterns)?;
 
-    if parsed.serve && parsed.report_path.is_none() {
-        return Err("--serve requires --html-report to be set".to_string());
+    if parsed.serve {
+        // --serve implies full analysis + HTML report generation
+        parsed.mode = Mode::AnalyzeImports;
     }
 
     for extra in &parsed.py_roots {
@@ -1272,7 +1324,7 @@ mod tests {
         assert!(args.extensions.is_none());
         assert!(args.ignore_patterns.is_empty());
         assert!(!args.graph);
-        assert!(!args.use_gitignore);
+        assert!(args.use_gitignore); // Default: respect gitignore
         assert!(args.max_depth.is_none());
         assert_eq!(args.color, ColorMode::Auto);
         assert_eq!(args.output, OutputMode::Human);
@@ -1287,6 +1339,8 @@ mod tests {
         assert!(!args.verbose);
         assert!(!args.tauri_preset);
         assert!(!args.fail_on_missing_handlers);
+        assert!(args.max_dead.is_none());
+        assert!(args.max_cycles.is_none());
         assert!(!args.ai_mode);
         assert_eq!(args.top_dead_symbols, 20);
         assert!(!args.dead_exports);

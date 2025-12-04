@@ -6,6 +6,21 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Released]
 
+## [0.5.10] - 2025-12-03
+
+### Added
+- Snapshot artifacts now live under `.loctree/<branch@commit>/` and `save()` skips rewrites for the same commit/branch (with a hint when the worktree is dirty).
+- Base scans print a concise human summary (files, handlers, languages, elapsed); `--serve` binds 0.0.0.0:5075 with loopback/random fallback and warns about the upcoming `loct report --serve` migration.
+
+### Fixed
+- Python analyzer: dead-export FP reduction (imported symbols, mixin inheritance, callbacks), line numbers in dead output, faster scan path; `who-imports` query now reports Python imports correctly.
+- Report WASM: removed deprecated-init console warning from `report_wasm.js`.
+- HTML/auto-artifacts no longer auto-open during tests/builds; analysis artifacts key off parsed output mode (JSON/SARIF now written reliably).
+
+### Changed
+- HTML reports are generated only when explicitly requested (`loct report --serve` or `--report`); global `--serve` remains as a backwards-compatible alias with a warning.
+- Snapshot writing warns and reuses the existing snapshot when nothing changed for the current commit/branch.
+
 ## [0.5.7] - 2025-12-01
 
 ### Added

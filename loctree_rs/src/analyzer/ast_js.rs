@@ -2,17 +2,27 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use oxc_allocator::Allocator;
+use oxc_ast::ast::ImportOrExportKind;
 use oxc_ast::ast::*;
-use oxc_ast::visit::Visit;
+use oxc_ast_visit::{Visit, walk::walk_expression};
 use oxc_parser::Parser;
-use oxc_span::SourceType;
+use oxc_semantic::SemanticBuilder;
+use oxc_span::{SourceType, Span};
+use regex::Regex;
 
 use crate::types::{
-    CommandRef, EventRef, ExportSymbol, FileAnalysis, ImportEntry, ImportKind, ImportSymbol,
-    ReexportEntry, ReexportKind,
+    CommandPayloadCasing, CommandRef, EventRef, ExportSymbol, FileAnalysis, ImportEntry,
+    ImportKind, ImportSymbol, ReexportEntry, ReexportKind, StringLiteral,
 };
 
 use super::resolvers::{TsPathResolver, resolve_reexport_target};
+
+#[derive(Clone, Debug)]
+pub struct CommandDetectionConfig {
+    pub dom_exclusions: HashSet<String>,
+    pub non_invoke_exclusions: HashSet<String>,
+    pub invalid_command_names: HashSet<String>,
+}
 
 // Known DOM APIs to exclude from Tauri command detection
 const DOM_EXCLUSIONS: &[&str] = &[
@@ -71,6 +81,61 @@ const INVALID_COMMAND_NAMES: &[&str] = &[
     "test", "mock", "stub", "fake",
 ];
 
+impl CommandDetectionConfig {
+    pub fn new(
+        dom_exclusions: &[String],
+        non_invoke_exclusions: &[String],
+        invalid_command_names: &[String],
+    ) -> Self {
+        let mut dom: HashSet<String> = DOM_EXCLUSIONS.iter().map(|s| s.to_string()).collect();
+        dom.extend(dom_exclusions.iter().cloned());
+
+        let mut non_invoke: HashSet<String> = NON_INVOKE_EXCLUSIONS
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        non_invoke.extend(non_invoke_exclusions.iter().cloned());
+
+        let mut invalid: HashSet<String> = INVALID_COMMAND_NAMES
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        invalid.extend(invalid_command_names.iter().cloned());
+
+        Self {
+            dom_exclusions: dom,
+            non_invoke_exclusions: non_invoke,
+            invalid_command_names: invalid,
+        }
+    }
+}
+
+impl Default for CommandDetectionConfig {
+    fn default() -> Self {
+        Self::new(&[], &[], &[])
+    }
+}
+
+/// Extract script content from a Svelte file
+/// Handles both `<script>` and `<script lang="ts">` variants
+fn extract_svelte_script(content: &str) -> String {
+    // Match <script> or <script lang="ts"> or <script module> etc.
+    // Use lazy matching to capture all script blocks
+    let script_regex = Regex::new(r#"<script[^>]*>([\s\S]*?)</script>"#).ok();
+
+    if let Some(re) = script_regex {
+        let mut scripts = Vec::new();
+        for caps in re.captures_iter(content) {
+            if let Some(script_content) = caps.get(1) {
+                scripts.push(script_content.as_str().to_string());
+            }
+        }
+        scripts.join("\n")
+    } else {
+        String::new()
+    }
+}
+
 /// Analyze JS/TS file using OXC AST parser
 pub(crate) fn analyze_js_file_ast(
     content: &str,
@@ -79,6 +144,7 @@ pub(crate) fn analyze_js_file_ast(
     extensions: Option<&HashSet<String>>,
     ts_resolver: Option<&TsPathResolver>,
     relative: String,
+    command_cfg: &CommandDetectionConfig,
 ) -> FileAnalysis {
     let allocator = Allocator::default();
 
@@ -87,13 +153,28 @@ pub(crate) fn analyze_js_file_ast(
     // (e.g., `const fn = <T>(...) =>` would be parsed as JSX tag with JSX enabled)
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
     let is_jsx_file = ext == "tsx" || ext == "jsx";
+    let is_svelte_file = ext == "svelte";
 
-    let source_type = SourceType::from_path(path)
-        .unwrap_or_default()
-        .with_typescript(true)
-        .with_jsx(is_jsx_file);
+    // For Svelte files, extract script content first
+    let parsed_content: String;
+    let content_to_parse = if is_svelte_file {
+        parsed_content = extract_svelte_script(content);
+        parsed_content.as_str()
+    } else {
+        content
+    };
 
-    let ret = Parser::new(&allocator, content, source_type).parse();
+    // For svelte files, parse as TypeScript
+    let source_type = if is_svelte_file {
+        SourceType::tsx().with_typescript(true)
+    } else {
+        SourceType::from_path(path)
+            .unwrap_or_default()
+            .with_typescript(true)
+            .with_jsx(is_jsx_file)
+    };
+
+    let ret = Parser::new(&allocator, content_to_parse, source_type).parse();
 
     // Log parser errors for debugging (verbose mode only)
     if !ret.errors.is_empty() && std::env::var("LOCTREE_VERBOSE").is_ok() {
@@ -124,10 +205,38 @@ pub(crate) fn analyze_js_file_ast(
         root,
         extensions,
         ts_resolver,
-        source_text: content,
+        source_text: content_to_parse,
+        command_cfg,
     };
 
     visitor.visit_program(&ret.program);
+
+    // Use oxc_semantic to track local symbol references
+    // This helps detect when exported symbols are used internally (not dead)
+    let semantic_ret = SemanticBuilder::new().build(&ret.program);
+    if semantic_ret.errors.is_empty() {
+        let semantic = semantic_ret.semantic;
+
+        // Build set of exported symbol names for quick lookup
+        let exported_names: HashSet<&str> = visitor
+            .analysis
+            .exports
+            .iter()
+            .map(|e| e.name.as_str())
+            .collect();
+
+        // Check each symbol - if it's exported AND has references, it's used locally
+        for symbol_id in semantic.scoping().symbol_ids() {
+            let name = semantic.scoping().symbol_name(symbol_id);
+            if exported_names.contains(name) {
+                // Check if this symbol has any references (beyond its declaration)
+                let ref_ids = semantic.scoping().get_resolved_reference_ids(symbol_id);
+                if !ref_ids.is_empty() {
+                    visitor.analysis.local_uses.push(name.to_string());
+                }
+            }
+        }
+    }
 
     visitor.analysis
 }
@@ -139,11 +248,31 @@ struct JsVisitor<'a> {
     extensions: Option<&'a HashSet<String>>,
     ts_resolver: Option<&'a TsPathResolver>,
     source_text: &'a str,
+    command_cfg: &'a CommandDetectionConfig,
 }
 
 impl<'a> JsVisitor<'a> {
     fn resolve_path(&self, source: &str) -> Option<String> {
-        resolve_reexport_target(self.path, self.root, source, self.extensions)
+        let file_ext = self
+            .path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|s| s.to_lowercase());
+
+        // For TS/JS files, skip resolve_reexport_target (uses Python logic)
+        // Go straight to TS resolver or JS relative resolution
+        let skip_python = matches!(
+            file_ext.as_deref(),
+            Some("ts") | Some("tsx") | Some("js") | Some("jsx") | Some("mjs") | Some("cjs")
+        );
+
+        let initial = if skip_python {
+            None
+        } else {
+            resolve_reexport_target(self.path, self.root, source, self.extensions)
+        };
+
+        initial
             .or_else(|| {
                 self.ts_resolver
                     .and_then(|r| r.resolve(source, self.extensions))
@@ -153,12 +282,22 @@ impl<'a> JsVisitor<'a> {
             })
     }
 
-    fn get_line(&self, span: oxc_span::Span) -> usize {
-        self.source_text[..span.start as usize]
+    fn get_line(&self, span: Span) -> usize {
+        let start = span.start as usize;
+        let capped = std::cmp::min(start, self.source_text.len());
+        self.source_text[..capped]
             .bytes()
             .filter(|b| *b == b'\n')
             .count()
             + 1
+    }
+
+    fn push_string_literal(&mut self, value: &str, span: Span) {
+        let line = self.get_line(span);
+        self.analysis.string_literals.push(StringLiteral {
+            value: value.to_string(),
+            line,
+        });
     }
 
     /// Extract basic type representation from TSType
@@ -181,11 +320,32 @@ impl<'a> JsVisitor<'a> {
                     q.right.name
                 )
             }
+            TSTypeName::ThisExpression(_) => "This".to_string(),
         }
     }
 }
 
 impl<'a> Visit<'a> for JsVisitor<'a> {
+    fn visit_expression(&mut self, expr: &Expression<'a>) {
+        match expr {
+            Expression::StringLiteral(lit) => {
+                self.push_string_literal(&lit.value, lit.span);
+            }
+            Expression::TemplateLiteral(tpl) => {
+                if tpl.expressions.is_empty()
+                    && tpl.quasis.len() == 1
+                    && let Some(cooked) = &tpl.quasis[0].value.cooked
+                {
+                    self.push_string_literal(cooked, tpl.span);
+                } else if tpl.expressions.is_empty() && tpl.quasis.len() == 1 {
+                    self.push_string_literal(&tpl.quasis[0].value.raw, tpl.span);
+                }
+            }
+            _ => {}
+        }
+        walk_expression(self, expr);
+    }
+
     // --- IMPORTS ---
 
     fn visit_import_declaration(&mut self, decl: &ImportDeclaration<'a>) {
@@ -193,6 +353,9 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
         let mut entry = ImportEntry::new(source.clone(), ImportKind::Static);
         entry.resolved_path = self.resolve_path(&source);
         entry.is_bare = !source.starts_with('.') && !source.starts_with('/');
+        if matches!(decl.import_kind, ImportOrExportKind::Type) {
+            entry.kind = ImportKind::Type;
+        }
 
         if let Some(specifiers) = &decl.specifiers {
             for spec in specifiers {
@@ -438,16 +601,31 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
         // Handle import("./foo")
         if let Expression::StringLiteral(s) = &expr.source {
             let source = s.value.to_string();
-            // Track as dynamic import
+
+            // Track in dynamic_imports for backward compatibility
             if !self.analysis.dynamic_imports.contains(&source) {
                 self.analysis.dynamic_imports.push(source.clone());
             }
+
+            // NEW: Also create an ImportEntry with Dynamic kind for graph edges
+            let mut entry = ImportEntry::new(source.clone(), ImportKind::Dynamic);
+            entry.resolved_path = self.resolve_path(&source);
+            entry.is_bare = !source.starts_with('.') && !source.starts_with('/');
+            // Dynamic imports don't have specific symbols - they import the whole module
+            self.analysis.imports.push(entry);
+
+            // Also track resolved path in dynamic_imports if available
+            if let Some(resolved) = self.resolve_path(&source)
+                && !self.analysis.dynamic_imports.contains(&resolved)
+            {
+                self.analysis.dynamic_imports.push(resolved);
+            }
         }
 
-        // Continue visiting arguments (if any)
+        // Continue visiting children
         self.visit_expression(&expr.source);
-        for arg in &expr.arguments {
-            self.visit_expression(arg);
+        if let Some(opts) = &expr.options {
+            self.visit_expression(opts);
         }
     }
 
@@ -476,8 +654,8 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
             let is_potential_command = name_lower.contains("invoke") || name.contains("Command");
 
             if is_potential_command
-                && !DOM_EXCLUSIONS.contains(&name.as_str())
-                && !NON_INVOKE_EXCLUSIONS.contains(&name.as_str())
+                && !self.command_cfg.dom_exclusions.contains(&name)
+                && !self.command_cfg.non_invoke_exclusions.contains(&name)
                 && let Some(arg) = call.arguments.first()
             {
                 // Extract command name from first argument (string literal or template literal)
@@ -500,10 +678,33 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                 if let Some(cmd_name) = cmd_name {
                     // Filter out command names that are clearly not Tauri commands
                     // (e.g., CLI tools, shell commands found in scripts/config files)
-                    if INVALID_COMMAND_NAMES.contains(&cmd_name.as_str()) {
+                    if self.command_cfg.invalid_command_names.contains(&cmd_name) {
                         // Skip - not a real Tauri command
                     } else {
-                        let generic = call.type_parameters.as_ref().and_then(|params| {
+                        // Payload casing drift: if command name looks snake_case and payload keys are camelCase
+                        let mut casing_issues: Vec<CommandPayloadCasing> = Vec::new();
+                        if cmd_name.contains('_')
+                            && let Some(Argument::ObjectExpression(obj)) = call.arguments.first()
+                        {
+                            for prop in &obj.properties {
+                                if let ObjectPropertyKind::ObjectProperty(p) = prop
+                                    && let PropertyKey::Identifier(id) = &p.key
+                                {
+                                    let key = id.name.to_string();
+                                    if key.chars().any(|c| c.is_uppercase()) {
+                                        casing_issues.push(CommandPayloadCasing {
+                                            command: cmd_name.clone(),
+                                            key,
+                                            path: self.path.to_string_lossy().to_string(),
+                                            line: self.get_line(p.span),
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                        self.analysis.command_payload_casing.extend(casing_issues);
+
+                        let generic = call.type_arguments.as_ref().and_then(|params| {
                             params.params.first().map(JsVisitor::type_to_string)
                         });
 
@@ -638,6 +839,7 @@ mod tests {
             None,
             None,
             "test.ts".to_string(),
+            &CommandDetectionConfig::default(),
         );
 
         // Imports
@@ -717,6 +919,7 @@ mod tests {
             None,
             None,
             "events.ts".to_string(),
+            &CommandDetectionConfig::default(),
         );
 
         // Constants
@@ -749,5 +952,49 @@ mod tests {
             .collect();
         assert!(listens.contains(&"data-update")); // Resolved from const
         assert!(listens.contains(&"window-event"));
+    }
+
+    #[test]
+    fn test_dynamic_imports_added_to_imports_list() {
+        let content = r#"
+            // Regular static import
+            import { Button } from './Button';
+
+            // Dynamic import with import()
+            const LazyComponent = import('./LazyComponent');
+
+            // React.lazy with dynamic import
+            const LazyPage = React.lazy(() => import('./pages/Home'));
+        "#;
+
+        let analysis = analyze_js_file_ast(
+            content,
+            Path::new("src/App.tsx"),
+            Path::new("src"),
+            None,
+            None,
+            "App.tsx".to_string(),
+            &CommandDetectionConfig::default(),
+        );
+
+        // Check that static import is captured
+        assert!(analysis.imports.iter().any(|i| i.source == "./Button"));
+
+        // Check that dynamic imports are captured in imports list (not just dynamic_imports)
+        assert!(
+            analysis
+                .imports
+                .iter()
+                .any(|i| i.source == "./LazyComponent")
+        );
+        assert!(analysis.imports.iter().any(|i| i.source == "./pages/Home"));
+
+        // Verify they're marked as Dynamic kind
+        let lazy_import = analysis
+            .imports
+            .iter()
+            .find(|i| i.source == "./LazyComponent")
+            .unwrap();
+        assert!(matches!(lazy_import.kind, ImportKind::Dynamic));
     }
 }

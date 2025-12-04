@@ -138,7 +138,13 @@ fn parse_rust_brace_names(raw: &str) -> Vec<String> {
             if let Some((_, alias)) = trimmed.split_once(" as ") {
                 Some(alias.trim().to_string())
             } else {
-                Some(trimmed.to_string())
+                // Extract the last segment for nested paths like `models::Visit`
+                let last_segment = trimmed.rsplit("::").next().unwrap_or(trimmed).trim();
+                if last_segment.is_empty() {
+                    None
+                } else {
+                    Some(last_segment.to_string())
+                }
             }
         })
         .collect()
@@ -161,6 +167,193 @@ fn find_balanced_bracket(s: &str) -> usize {
         }
     }
     0
+}
+
+/// Strip `use` statements from inside function bodies to avoid false positive cycles.
+/// Inline imports (inside `fn`) are lazy-resolved and shouldn't contribute to module cycles.
+fn strip_function_body_uses(content: &str) -> String {
+    let mut result = String::new();
+    let bytes = content.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+    let mut fn_brace_depth: i32 = 0; // Track depth only when inside a function body
+
+    while i < len {
+        // Look for 'fn ' keyword (must be preceded by whitespace or start of file)
+        if i + 3 <= len
+            && &bytes[i..i + 3] == b"fn "
+            && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric())
+        {
+            // Found 'fn ', now skip to the opening brace '{'
+            result.push_str("fn ");
+            i += 3;
+
+            // Skip until we find '{' (the function body start)
+            while i < len {
+                let ch = bytes[i] as char;
+                result.push(ch);
+                i += 1;
+                if ch == '{' {
+                    fn_brace_depth = 1;
+                    break;
+                }
+            }
+            continue;
+        }
+
+        // If we're inside a function body
+        if fn_brace_depth > 0 {
+            let ch = bytes[i] as char;
+
+            // Track brace depth
+            match ch {
+                '{' => {
+                    fn_brace_depth += 1;
+                    result.push(ch);
+                    i += 1;
+                }
+                '}' => {
+                    fn_brace_depth -= 1;
+                    result.push(ch);
+                    i += 1;
+                }
+                _ => {
+                    // Check for 'use ' at start of statement (after whitespace/newline)
+                    if i + 4 <= len
+                        && &bytes[i..i + 4] == b"use "
+                        && (i == 0
+                            || bytes[i - 1] == b'\n'
+                            || bytes[i - 1] == b' '
+                            || bytes[i - 1] == b'\t'
+                            || bytes[i - 1] == b'{')
+                    {
+                        // Skip the entire use statement until ';'
+                        while i < len && bytes[i] != b';' {
+                            i += 1;
+                        }
+                        // Skip the ';' too
+                        if i < len {
+                            i += 1;
+                        }
+                        // Skip trailing whitespace/newline
+                        while i < len && (bytes[i] == b' ' || bytes[i] == b'\n') {
+                            i += 1;
+                        }
+                    } else {
+                        result.push(ch);
+                        i += 1;
+                    }
+                }
+            }
+        } else {
+            result.push(bytes[i] as char);
+            i += 1;
+        }
+    }
+
+    result
+}
+
+/// Strip `#[cfg(test)]` annotated modules from content to avoid false positive cycles.
+/// This removes test-only imports from dependency analysis.
+fn strip_cfg_test_modules(content: &str) -> String {
+    let mut result = String::new();
+    let mut chars = content.chars().peekable();
+    let mut in_cfg_test_attr = false;
+
+    while let Some(ch) = chars.next() {
+        // Look for #[cfg(test)]
+        if ch == '#' && chars.peek() == Some(&'[') {
+            let pos = result.len();
+            result.push(ch);
+
+            // Collect the attribute
+            let mut attr = String::from("#");
+            for next in chars.by_ref() {
+                attr.push(next);
+                if next == ']' {
+                    break;
+                }
+            }
+            result.push_str(&attr[1..]); // Skip the '#' we already added
+
+            // Check if it's #[cfg(test)] or #[cfg(all(..., test, ...))]
+            let attr_inner = attr.trim();
+            if attr_inner.starts_with("#[cfg(test)")
+                || attr_inner.starts_with("#[cfg(all(") && attr_inner.contains("test")
+            {
+                in_cfg_test_attr = true;
+                // Remove the attribute we just added
+                result.truncate(pos);
+            }
+            continue;
+        }
+
+        // If we're after #[cfg(test)], look for `mod` keyword and skip the block
+        if in_cfg_test_attr {
+            result.push(ch);
+
+            // Skip whitespace and look for `mod`
+            if ch.is_whitespace() {
+                continue;
+            }
+
+            // Check for 'mod' keyword
+            if ch == 'm' {
+                let mut keyword = String::from("m");
+                while let Some(&next) = chars.peek() {
+                    if next.is_alphabetic() || next == '_' {
+                        keyword.push(chars.next().unwrap());
+                    } else {
+                        break;
+                    }
+                }
+
+                if keyword == "mod" {
+                    // Skip until we find the opening brace
+                    let mut found_brace = false;
+                    for next in chars.by_ref() {
+                        if next == '{' {
+                            found_brace = true;
+                            break;
+                        }
+                    }
+
+                    if found_brace {
+                        // Skip the entire block (handle nested braces)
+                        let mut depth = 1;
+                        for next in chars.by_ref() {
+                            match next {
+                                '{' => depth += 1,
+                                '}' => {
+                                    depth -= 1;
+                                    if depth == 0 {
+                                        break;
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+
+                    // Remove 'mod' we just added to result
+                    result.truncate(result.len() - 1); // Remove the 'm'
+                    in_cfg_test_attr = false;
+                    continue;
+                } else {
+                    // Not a mod, push the keyword
+                    result.push_str(&keyword[1..]); // Skip 'm' we already added
+                    in_cfg_test_attr = false;
+                }
+            } else {
+                in_cfg_test_attr = false;
+            }
+            continue;
+        }
+
+        result.push(ch);
+    }
+    result
 }
 
 /// Strip `#[...]` attributes from a string (handles nested brackets).
@@ -203,13 +396,59 @@ pub(crate) fn analyze_rust_file(
     let mut analysis = FileAnalysis::new(relative);
     let mut event_emits = Vec::new();
     let mut event_listens = Vec::new();
-    for caps in regex_rust_use().captures_iter(content) {
+
+    // Strip #[cfg(test)] modules and inline function-body imports to avoid false positive cycles
+    let production_content = strip_function_body_uses(&strip_cfg_test_modules(content));
+
+    for caps in regex_rust_use().captures_iter(&production_content) {
         let source = caps.get(1).map(|m| m.as_str()).unwrap_or("").trim();
-        if !source.is_empty() {
-            analysis
-                .imports
-                .push(ImportEntry::new(source.to_string(), ImportKind::Static));
+        if source.is_empty() {
+            continue;
         }
+
+        let mut imp = ImportEntry::new(source.to_string(), ImportKind::Static);
+
+        // Parse symbols from use statements like `use foo::{Bar, Baz}`
+        if source.contains('{') && source.contains('}') {
+            let mut parts = source.splitn(2, '{');
+            let prefix = parts.next().unwrap_or("").trim().trim_end_matches("::");
+            let braces = parts.next().unwrap_or("").trim_end_matches('}').trim();
+            let names = parse_rust_brace_names(braces);
+            for name in names {
+                imp.symbols.push(crate::types::ImportSymbol {
+                    name,
+                    alias: None,
+                    is_default: false,
+                });
+            }
+            // Set source to the prefix for better matching
+            imp.source = prefix.to_string();
+        } else {
+            // Single import like `use foo::Bar` or `use foo::*`
+            if let Some(last_segment) = source.rsplit("::").next() {
+                let last = last_segment.trim();
+                if last == "*" {
+                    // Star import - add "*" as symbol to trigger star_used check
+                    imp.symbols.push(crate::types::ImportSymbol {
+                        name: "*".to_string(),
+                        alias: None,
+                        is_default: false,
+                    });
+                    // Also set source to the prefix path
+                    if let Some(prefix) = source.rsplit_once("::") {
+                        imp.source = prefix.0.to_string();
+                    }
+                } else if !last.is_empty() && last != "self" {
+                    imp.symbols.push(crate::types::ImportSymbol {
+                        name: last.to_string(),
+                        alias: None,
+                        is_default: false,
+                    });
+                }
+            }
+        }
+
+        analysis.imports.push(imp);
     }
 
     for caps in regex_rust_pub_use().captures_iter(content) {
@@ -471,7 +710,120 @@ pub(crate) fn analyze_rust_file(
         analysis.entry_points.push("async_main".to_string());
     }
 
+    // Detect path-qualified calls like `module::function()` or `Type::method()`
+    // These are function calls via module path without explicit `use` import.
+    // Pattern: `::<identifier>(` or `::<Identifier>{` or `::<Identifier><`
+    // This catches: command::branch::handle(), OutputChannel::new(), etc.
+    extract_path_qualified_calls(&production_content, &mut analysis.local_uses);
+
+    // Detect bare function calls like `func_name(...)` in the same file
+    // This catches local function calls without path qualification
+    extract_bare_function_calls(&production_content, &mut analysis.local_uses);
+
     analysis
+}
+
+/// Extract identifiers that are followed by `(` indicating a function call.
+/// This catches bare function calls like `my_func(arg)` within the same file.
+fn extract_bare_function_calls(content: &str, local_uses: &mut Vec<String>) {
+    let bytes = content.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+
+    while i < len {
+        // Look for identifier followed by `(`
+        if bytes[i].is_ascii_alphabetic() || bytes[i] == b'_' {
+            let start = i;
+            while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                i += 1;
+            }
+            let ident = &content[start..i];
+
+            // Skip whitespace
+            while i < len && bytes[i].is_ascii_whitespace() {
+                i += 1;
+            }
+
+            // Check if followed by `(` (function call) or `!` (macro call)
+            if i < len && (bytes[i] == b'(' || bytes[i] == b'!') {
+                // Skip Rust keywords that aren't function calls
+                const KEYWORDS: &[&str] = &[
+                    "if", "else", "while", "for", "loop", "match", "return", "break", "continue",
+                    "fn", "let", "const", "static", "pub", "use", "mod", "struct", "enum", "impl",
+                    "trait", "type", "where", "unsafe", "async", "await", "move", "ref", "mut",
+                    "self", "super", "crate", "dyn", "as", "in", "true", "false",
+                ];
+                if !KEYWORDS.contains(&ident) && !local_uses.contains(&ident.to_string()) {
+                    local_uses.push(ident.to_string());
+                }
+            }
+        } else {
+            i += 1;
+        }
+    }
+}
+
+/// Extract identifiers from path-qualified calls like `foo::bar::func()` or `Type::new()`
+/// These are usages that don't require a `use` import.
+/// For `Foo::bar::baz()`, we record ALL segments: Foo, bar, baz (each might be a pub export)
+fn extract_path_qualified_calls(content: &str, local_uses: &mut Vec<String>) {
+    let bytes = content.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+
+    // Helper to add identifier if not already present
+    fn add_ident(ident: &str, uses: &mut Vec<String>) {
+        if !ident.is_empty() && !uses.contains(&ident.to_string()) {
+            uses.push(ident.to_string());
+        }
+    }
+
+    while i < len {
+        // Look for identifier followed by `::`
+        if bytes[i].is_ascii_alphabetic() || bytes[i] == b'_' {
+            let start = i;
+            while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                i += 1;
+            }
+            let ident = &content[start..i];
+
+            // Skip whitespace
+            while i < len && bytes[i].is_ascii_whitespace() {
+                i += 1;
+            }
+
+            // Check if followed by `::`
+            if i + 1 < len && bytes[i] == b':' && bytes[i + 1] == b':' {
+                // This is a path-qualified usage (Type::method or module::func)
+                // Record the first identifier (it's a type or module being used)
+                add_ident(ident, local_uses);
+
+                // Now scan the rest of the path, recording all segments
+                while i + 1 < len && bytes[i] == b':' && bytes[i + 1] == b':' {
+                    i += 2;
+                    // Skip whitespace
+                    while i < len && bytes[i].is_ascii_whitespace() {
+                        i += 1;
+                    }
+                    // Read next identifier
+                    let seg_start = i;
+                    while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                        i += 1;
+                    }
+                    if i > seg_start {
+                        let seg = &content[seg_start..i];
+                        add_ident(seg, local_uses);
+                    }
+                    // Skip whitespace
+                    while i < len && bytes[i].is_ascii_whitespace() {
+                        i += 1;
+                    }
+                }
+            }
+        } else {
+            i += 1;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -675,5 +1027,199 @@ pub fn double_annotated() {}
             analysis.command_handlers[0].name, "double_annotated",
             "Handler name should match"
         );
+    }
+
+    #[test]
+    fn strip_cfg_test_excludes_test_imports() {
+        // This is the exact pattern that caused false positive cycles
+        let content = r#"
+use serde::Serialize;
+
+pub struct MyType {
+    pub name: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::snapshot::CommandBridge;
+
+    #[test]
+    fn my_test() {
+        assert!(true);
+    }
+}
+"#;
+        let analysis = analyze_rust_file(content, "report.rs".to_string(), &[]);
+
+        // Should only have the serde import, not the test-only imports
+        assert_eq!(
+            analysis.imports.len(),
+            1,
+            "Should have 1 import, got {:?}",
+            analysis.imports
+        );
+        assert!(
+            analysis.imports[0].source.contains("serde"),
+            "Should import serde, got: {}",
+            analysis.imports[0].source
+        );
+        // Should NOT contain the test-only import
+        assert!(
+            !analysis
+                .imports
+                .iter()
+                .any(|i| i.source.contains("snapshot")),
+            "Should NOT contain test-only snapshot import"
+        );
+    }
+
+    #[test]
+    fn strip_cfg_test_handles_nested_blocks() {
+        let content = r#"
+use crate::types::FileAnalysis;
+
+pub fn production_fn() {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::helper;
+
+    fn nested_helper() {
+        let block = { "nested braces" };
+    }
+
+    #[test]
+    fn test_with_nested_braces() {
+        if true {
+            let x = { 1 };
+        }
+    }
+}
+
+pub fn another_production_fn() {}
+"#;
+        let analysis = analyze_rust_file(content, "module.rs".to_string(), &[]);
+
+        // Should only have production imports
+        assert_eq!(analysis.imports.len(), 1, "Should have 1 production import");
+        assert!(
+            analysis.imports[0].source.contains("types::FileAnalysis"),
+            "Should have FileAnalysis import"
+        );
+    }
+
+    #[test]
+    fn strip_cfg_test_preserves_non_test_cfg() {
+        let content = r#"
+use crate::production::Type;
+
+#[cfg(target_os = "macos")]
+mod platform {
+    use crate::platform_specific::MacType;
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::test_only::TestHelper;
+}
+"#;
+        let analysis = analyze_rust_file(content, "platform.rs".to_string(), &[]);
+
+        // Should have production import and platform-specific import
+        // but NOT the test-only import
+        let sources: Vec<&str> = analysis.imports.iter().map(|i| i.source.as_str()).collect();
+        assert!(
+            sources.iter().any(|s| s.contains("production::Type")),
+            "Should have production import"
+        );
+        assert!(
+            sources
+                .iter()
+                .any(|s| s.contains("platform_specific::MacType")),
+            "Should have platform-specific import (not #[cfg(test)])"
+        );
+        assert!(
+            !sources.iter().any(|s| s.contains("test_only")),
+            "Should NOT have test-only import"
+        );
+    }
+
+    #[test]
+    fn strip_function_body_uses_excludes_inline_imports() {
+        // This is the exact pattern that caused false positive cycles in snapshot.rs
+        let content = r#"
+use crate::types::FileAnalysis;
+
+pub fn run_init() {
+    use crate::analyzer::root_scan::{ScanConfig, scan_roots};
+    use crate::analyzer::runner::default_analyzer_exts;
+
+    let _x = 1;
+}
+
+pub fn another_fn() {}
+"#;
+        let analysis = analyze_rust_file(content, "snapshot.rs".to_string(), &[]);
+
+        // Should only have the module-level import, NOT the inline imports
+        assert_eq!(
+            analysis.imports.len(),
+            1,
+            "Should have 1 module-level import, got {:?}",
+            analysis.imports
+        );
+        assert!(
+            analysis.imports[0].source.contains("types::FileAnalysis"),
+            "Should have FileAnalysis import"
+        );
+        // Should NOT contain the inline imports
+        assert!(
+            !analysis
+                .imports
+                .iter()
+                .any(|i| i.source.contains("root_scan")),
+            "Should NOT contain inline root_scan import"
+        );
+        assert!(
+            !analysis.imports.iter().any(|i| i.source.contains("runner")),
+            "Should NOT contain inline runner import"
+        );
+    }
+
+    #[test]
+    fn strip_function_body_preserves_module_level_imports() {
+        let content = r#"
+use crate::one::A;
+use crate::two::B;
+
+fn helper() {
+    use crate::inline::C;
+}
+
+use crate::three::D;
+"#;
+        let analysis = analyze_rust_file(content, "test.rs".to_string(), &[]);
+
+        // Should have 3 module-level imports (A, B, D), NOT the inline one (C)
+        let sources: Vec<&str> = analysis.imports.iter().map(|i| i.source.as_str()).collect();
+        assert!(
+            sources.iter().any(|s| s.contains("one::A")),
+            "Should have A"
+        );
+        assert!(
+            sources.iter().any(|s| s.contains("two::B")),
+            "Should have B"
+        );
+        assert!(
+            sources.iter().any(|s| s.contains("three::D")),
+            "Should have D"
+        );
+        assert!(
+            !sources.iter().any(|s| s.contains("inline::C")),
+            "Should NOT have inline C"
+        );
+        assert_eq!(sources.len(), 3, "Should have exactly 3 imports");
     }
 }

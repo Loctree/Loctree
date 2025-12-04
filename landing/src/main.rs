@@ -22,6 +22,7 @@ fn App() -> impl IntoView {
             <SliceDemo />
             <StackDetection />
             <RealWorldResults />
+            <Blog />
             <ForAgents />
             <CliReference />
             <InstallSection />

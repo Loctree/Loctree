@@ -126,13 +126,27 @@ pub(crate) fn start_open_server(
     report_path: Option<PathBuf>,
     port_hint: Option<u16>,
 ) -> Option<(String, thread::JoinHandle<()>)> {
-    let bind_addr = match port_hint {
-        Some(p) => format!("127.0.0.1:{p}"),
-        None => "127.0.0.1:0".to_string(),
+    // Prefer stable public-ish bind: 0.0.0.0:5075, fall back to loopback random port.
+    let mut attempts = Vec::new();
+    if let Some(p) = port_hint {
+        attempts.push(format!("0.0.0.0:{p}"));
+        attempts.push(format!("127.0.0.1:{p}"));
+    } else {
+        attempts.push("0.0.0.0:5075".to_string());
+        attempts.push("127.0.0.1:0".to_string());
+    }
+
+    let (listener, _bind_addr) = attempts
+        .into_iter()
+        .find_map(|addr| TcpListener::bind(&addr).ok().map(|l| (l, addr)))?;
+
+    let bound_addr = listener.local_addr().ok()?;
+    let port = bound_addr.port();
+    let base = if bound_addr.ip().is_unspecified() {
+        format!("http://127.0.0.1:{port}")
+    } else {
+        format!("http://{}:{port}", bound_addr.ip())
     };
-    let listener = TcpListener::bind(&bind_addr).ok()?;
-    let port = listener.local_addr().ok()?.port();
-    let base = format!("http://127.0.0.1:{port}");
     let _ = OPEN_SERVER_BASE.set(base.clone());
 
     let handle = thread::spawn(move || {

@@ -541,6 +541,7 @@ mod tests {
             git_repo: None,
             git_branch: None,
             git_commit: None,
+            git_scan_id: None,
         }
     }
 

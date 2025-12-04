@@ -114,7 +114,8 @@ pub(crate) fn rust_pub_decl_regexes() -> &'static [Regex] {
             regex_rust_pub_item("trait"),
             regex_rust_pub_item("type"),
             regex_rust_pub_item("union"),
-            regex_rust_pub_item("mod"),
+            // Note: pub mod is NOT included - modules are not exports that need to be imported
+            // They are path prefixes for accessing items within the module
         ]
     })
     .as_slice()
@@ -171,11 +172,13 @@ pub(crate) fn regex_py_all() -> &'static Regex {
     RE.get_or_init(|| regex(r#"(?s)__all__\s*=\s*\[([^\]]*)\]"#))
 }
 
+#[allow(dead_code)]
 pub(crate) fn regex_py_def() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| regex(r#"(?m)^\s*def\s+([A-Za-z_][A-Za-z0-9_]*)"#))
 }
 
+#[allow(dead_code)]
 pub(crate) fn regex_py_class() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| regex(r#"(?m)^\s*class\s+([A-Za-z_][A-Za-z0-9_]*)"#))

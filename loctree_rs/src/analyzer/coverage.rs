@@ -1,3 +1,9 @@
+//! Tauri command coverage analysis.
+//!
+//! Matches frontend `invoke()` calls with backend `#[tauri::command]` handlers.
+//! Identifies missing handlers (FE calls without BE impl) and unused handlers
+//! (BE impl without FE calls).
+
 use std::collections::{HashMap, HashSet};
 
 use globset::GlobSet;
@@ -10,7 +16,9 @@ use crate::types::FileAnalysis;
 
 pub type CommandUsage = HashMap<String, Vec<(String, usize, String)>>;
 
-fn normalize_cmd_name(name: &str) -> String {
+/// Normalize a command name for comparison (snake_case, lowercase, alphanumeric only)
+/// Used to match FE calls (camelCase) with BE handlers (snake_case)
+pub fn normalize_cmd_name(name: &str) -> String {
     let mut buffered = String::new();
     for ch in name.chars() {
         if ch.is_alphanumeric() {
@@ -121,6 +129,22 @@ pub fn find_string_literal_matches(
                     file: analysis.path.clone(),
                     line: 0, // Line not available from event_consts
                     context: format!("const {} = '{}'", const_name, const_val),
+                });
+            }
+        }
+
+        // Check string literals (registry-style arrays/objects)
+        for lit in &analysis.string_literals {
+            let val_normalized = normalize_cmd_name(&lit.value);
+            if variations.contains(&val_normalized)
+                || variations
+                    .iter()
+                    .any(|v| lit.value.contains(v) || val_normalized.contains(v))
+            {
+                matches.push(StringLiteralMatch {
+                    file: analysis.path.clone(),
+                    line: lit.line,
+                    context: format!("string \"{}\"", lit.value),
                 });
             }
         }

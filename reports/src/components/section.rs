@@ -4,7 +4,7 @@
 
 use super::{
     AiInsightsPanel, AnalysisSummary, CascadesList, DuplicateExportsTable, DynamicImportsTable,
-    GraphContainer, TabContent, TauriCommandCoverage,
+    GraphContainer, QuickCommandsPanel, TabContent, TauriCommandCoverage, TreeView,
 };
 use crate::types::ReportSection;
 use leptos::prelude::*;
@@ -37,6 +37,15 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
         .collect::<String>();
+    let root_id_value = root_id.clone();
+    let root_id_overview = root_id_value.clone();
+    let root_id_dups = root_id_value.clone();
+    let root_id_dynamic = root_id_value.clone();
+    let root_id_commands = root_id_value.clone();
+    let root_id_graph = root_id_value.clone();
+    let root_id_graph_tab = root_id_graph.clone();
+    let root_id_graph_container = root_id_graph.clone();
+    let root_id_tree = root_id_value.clone();
 
     let section_clone = section.clone();
     let view_class = if active {
@@ -52,7 +61,17 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
     let reexport_files_count = section.reexport_files_count;
     let dynamic_imports_count = section.dynamic_imports_count;
 
+    // QuickCommands panel flags (computed before view! to avoid move issues)
+    let has_duplicates = duplicate_exports_count > 0;
+    let has_command_issues =
+        !section.missing_handlers.is_empty() || !section.unused_handlers.is_empty();
+
     let short_path = shorten_path(&section.root);
+    let git_label = match (section.git_branch.clone(), section.git_commit.clone()) {
+        (Some(b), Some(c)) => format!("{}@{}", b, c),
+        (Some(b), None) => b,
+        _ => String::new(),
+    };
 
     view! {
         <div id=view_id class=view_class>
@@ -60,6 +79,11 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
                 <div class="header-title">
                     <h1>{short_path}</h1>
                     <p class="header-path" title=section.root.clone()>{section.root.clone()}</p>
+                    {(!git_label.is_empty()).then(|| view! {
+                        <p class="header-path" style="margin-top:4px;color:var(--theme-text-tertiary)" title="git branch @ commit">
+                            {git_label.clone()}
+                        </p>
+                    })}
                 </div>
                 <div class="header-stats">
                     <span class="stat-badge">
@@ -79,7 +103,7 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
 
             <div class="app-content">
                 <TabContent
-                    root_id=root_id.clone()
+                    root_id=root_id_overview
                     tab_name="overview"
                     active=true
                 >
@@ -92,11 +116,16 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
                             dynamic_imports=dynamic_imports_count
                         />
                         <AiInsightsPanel insights=section.insights.clone() />
+                        <QuickCommandsPanel
+                            root=section.root.clone()
+                            has_duplicates=has_duplicates
+                            has_command_issues=has_command_issues
+                        />
                     </div>
                 </TabContent>
 
                 <TabContent
-                    root_id=root_id.clone()
+                    root_id=root_id_dups
                     tab_name="dups"
                     active=false
                 >
@@ -109,7 +138,7 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
                 </TabContent>
 
                 <TabContent
-                    root_id=root_id.clone()
+                    root_id=root_id_dynamic
                     tab_name="dynamic"
                     active=false
                 >
@@ -121,7 +150,7 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
                 </TabContent>
 
                 <TabContent
-                    root_id=root_id.clone()
+                    root_id=root_id_commands
                     tab_name="commands"
                     active=false
                 >
@@ -137,15 +166,28 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
                 </TabContent>
 
                 <TabContent
-                    root_id=root_id.clone()
+                    root_id=root_id_graph_tab
                     tab_name="graph"
                     active=false
                 >
                     // Graph takes full width/height, so no content-container
                     <GraphContainer
                         section=section_clone
-                        root_id=root_id
+                        root_id=root_id_graph_container
                     />
+                </TabContent>
+
+                <TabContent
+                    root_id=root_id_tree
+                    tab_name="tree"
+                    active=false
+                >
+                    <div class="content-container">
+                        <TreeView
+                            root_id=root_id_value
+                            tree=section.tree.clone().unwrap_or_default()
+                        />
+                    </div>
                 </TabContent>
             </div>
         </div>

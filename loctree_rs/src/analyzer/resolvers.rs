@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use regex::Regex;
 use serde_json;
 use serde_json::Value;
 
@@ -22,6 +23,15 @@ struct AliasMapping {
     pattern: String,
     targets: Vec<String>,
     wildcard_count: usize,
+}
+
+/// Extracted resolver configuration for caching in snapshots
+#[derive(Debug, Clone, Default)]
+pub struct ExtractedResolverConfig {
+    /// TypeScript path aliases
+    pub ts_paths: HashMap<String, Vec<String>>,
+    /// Base URL for resolution
+    pub ts_base_url: Option<String>,
 }
 
 impl TsPathResolver {
@@ -68,6 +78,26 @@ impl TsPathResolver {
         // Load package.json exports if available
         let package_exports = load_package_exports(root).unwrap_or_default();
 
+        // Load SvelteKit aliases from svelte.config.js
+        // These take precedence over tsconfig paths for $-prefixed aliases
+        let sveltekit_aliases = load_sveltekit_aliases(root);
+        for (alias, target_path) in sveltekit_aliases {
+            // Convert to tsconfig-style mapping: $components/* -> src/components/*
+            let pattern = format!("{}/*", alias);
+            let target = format!("{}/*", target_path);
+            mappings.push(AliasMapping {
+                pattern,
+                targets: vec![target],
+                wildcard_count: 1,
+            });
+            // Also add exact match without wildcard for direct imports
+            mappings.push(AliasMapping {
+                pattern: alias,
+                targets: vec![target_path],
+                wildcard_count: 0,
+            });
+        }
+
         Some(Self {
             base_dir: base_dir.canonicalize().unwrap_or(base_dir),
             root: root.to_path_buf(),
@@ -75,6 +105,27 @@ impl TsPathResolver {
             cache: Mutex::new(HashMap::new()),
             package_exports,
         })
+    }
+
+    /// Extract the resolver configuration for caching in snapshots
+    pub(crate) fn extract_config(&self) -> ExtractedResolverConfig {
+        let ts_paths: HashMap<String, Vec<String>> = self
+            .mappings
+            .iter()
+            .map(|m| (m.pattern.clone(), m.targets.clone()))
+            .collect();
+
+        let ts_base_url = self
+            .base_dir
+            .strip_prefix(&self.root)
+            .ok()
+            .map(|p| p.to_string_lossy().to_string())
+            .or_else(|| Some(self.base_dir.to_string_lossy().to_string()));
+
+        ExtractedResolverConfig {
+            ts_paths,
+            ts_base_url,
+        }
     }
 
     pub(crate) fn resolve(&self, spec: &str, exts: Option<&HashSet<String>>) -> Option<String> {
@@ -102,6 +153,16 @@ impl TsPathResolver {
     }
 
     fn resolve_internal(&self, normalized: &str, exts: Option<&HashSet<String>>) -> Option<String> {
+        // SvelteKit convention: $lib/ maps to src/lib/
+        // This is a well-known convention that may not be in tsconfig.json
+        // (SvelteKit generates tsconfig at build time)
+        if let Some(rest) = normalized.strip_prefix("$lib/") {
+            let candidate = self.root.join("src/lib").join(rest);
+            if let Some(res) = resolve_with_extensions(candidate, &self.root, exts) {
+                return Some(res);
+            }
+        }
+
         // Try tsconfig path mappings
         for mapping in &self.mappings {
             if mapping.wildcard_count > 0 {
@@ -285,6 +346,7 @@ pub(crate) fn resolve_python_candidate(
     exts: Option<&HashSet<String>>,
 ) -> Option<String> {
     if candidate.is_dir() {
+        // Traditional packages: check for __init__.py variants
         let init_candidates = [
             candidate.join("__init__.py"),
             candidate.join("__init__.pyi"),
@@ -295,9 +357,51 @@ pub(crate) fn resolve_python_candidate(
                 return canonical_rel(&init, root).or_else(|| canonical_abs(&init));
             }
         }
+
+        // PEP 420: Namespace packages - directories without __init__.py
+        // A directory is a valid namespace package if it contains any .py files
+        // or has subdirectories that are packages
+        if is_namespace_package(&candidate) {
+            // Return the directory path itself as the package resolution
+            return canonical_rel(&candidate, root).or_else(|| canonical_abs(&candidate));
+        }
     }
 
     resolve_with_extensions(candidate, root, exts)
+}
+
+/// Check if a directory is a valid PEP 420 namespace package
+/// A namespace package is a directory that:
+/// - Has no __init__.py (already checked by caller)
+/// - Contains at least one .py file or valid subpackage
+fn is_namespace_package(dir: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file() {
+            if let Some(ext) = path.extension()
+                && (ext == "py" || ext == "pyi")
+            {
+                return true;
+            }
+        } else if path.is_dir() {
+            // Check if subdirectory is a package (has __init__.py or is namespace)
+            let subdir_init = path.join("__init__.py");
+            if subdir_init.exists() || is_namespace_package(&path) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Check if a Python package has py.typed marker (PEP 561)
+/// indicating it provides type information
+pub(crate) fn has_py_typed_marker(package_dir: &Path) -> bool {
+    package_dir.join("py.typed").exists()
 }
 
 pub(crate) fn resolve_python_absolute(
@@ -316,16 +420,34 @@ pub(crate) fn resolve_python_absolute(
     None
 }
 
+/// Known JS/TS extensions that shouldn't trigger extension probing
+const KNOWN_JS_EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts"];
+
+/// Check if a path has a known JS/TS extension
+fn has_known_js_extension(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| KNOWN_JS_EXTENSIONS.contains(&e.to_lowercase().as_str()))
+        .unwrap_or(false)
+}
+
 pub(crate) fn resolve_with_extensions(
     candidate: PathBuf,
     root: &Path,
     exts: Option<&HashSet<String>>,
 ) -> Option<String> {
-    if candidate.extension().is_none()
+    // Try adding extensions if candidate doesn't have a known JS/TS extension
+    // This handles cases like "Foo.types" where .types is NOT a real extension
+    if !has_known_js_extension(&candidate)
         && let Some(set) = exts
     {
         for ext in set {
-            let with_ext = candidate.with_extension(ext);
+            // IMPORTANT: Append extension to full filename, don't replace
+            // "Foo.types" + "ts" -> "Foo.types.ts" (not "Foo.ts")
+            let mut new_name = candidate.as_os_str().to_os_string();
+            new_name.push(".");
+            new_name.push(ext);
+            let with_ext = PathBuf::from(new_name);
             if with_ext.exists() {
                 return canonical_rel(&with_ext, root).or_else(|| canonical_abs(&with_ext));
             }
@@ -336,7 +458,7 @@ pub(crate) fn resolve_with_extensions(
         canonical_rel(&candidate, root).or_else(|| canonical_abs(&candidate))
     } else {
         // Fallback: if this looks like a directory/module, try index.* inside it
-        if candidate.extension().is_none() {
+        if !has_known_js_extension(&candidate) {
             let dir_path = candidate.clone();
             for index_name in ["index.ts", "index.tsx", "index.js", "index.jsx"] {
                 let index_candidate = dir_path.join(index_name);
@@ -506,6 +628,81 @@ fn load_package_exports(root: &Path) -> Option<HashMap<String, String>> {
     }
 
     Some(result)
+}
+
+/// Load SvelteKit aliases from svelte.config.js
+/// SvelteKit defines path aliases in kit.alias configuration
+fn load_sveltekit_aliases(root: &Path) -> HashMap<String, String> {
+    let mut result = HashMap::new();
+
+    // Search for svelte.config.js in root and immediate subdirectories (for monorepos)
+    let config_candidates = [root.join("svelte.config.js"), root.join("svelte.config.ts")];
+
+    // Also check subdirectories (apps/*, packages/*)
+    let mut all_candidates: Vec<PathBuf> = config_candidates.to_vec();
+    for entry in ["apps", "packages"].iter() {
+        let dir = root.join(entry);
+        if dir.is_dir()
+            && let Ok(entries) = std::fs::read_dir(&dir)
+        {
+            for e in entries.flatten() {
+                let path = e.path();
+                if path.is_dir() {
+                    all_candidates.push(path.join("svelte.config.js"));
+                    all_candidates.push(path.join("svelte.config.ts"));
+                }
+            }
+        }
+    }
+
+    // Pre-compile regexes outside the loop
+    let alias_regex = match Regex::new(r#"alias\s*:\s*\{([^}]+)\}"#) {
+        Ok(re) => re,
+        Err(_) => return result,
+    };
+    let entry_regex =
+        match Regex::new(r#"['"]?(\$[a-zA-Z_][a-zA-Z0-9_]*)['"]?\s*:\s*['"]([^'"]+)['"]"#) {
+            Ok(re) => re,
+            Err(_) => return result,
+        };
+
+    for config_path in all_candidates {
+        if !config_path.exists() {
+            continue;
+        }
+
+        let content = match std::fs::read_to_string(&config_path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        // Parse alias configuration from svelte.config.js
+        // Format: alias: { $components: './src/components', ... }
+        if let Some(caps) = alias_regex.captures(&content) {
+            let alias_block = &caps[1];
+            let config_dir = config_path.parent().unwrap_or(root);
+
+            for entry_caps in entry_regex.captures_iter(alias_block) {
+                let alias = entry_caps[1].to_string();
+                let path_str = entry_caps[2].to_string();
+
+                // Make path relative to config file location
+                let resolved = if let Some(stripped) = path_str.strip_prefix("./") {
+                    config_dir.join(stripped)
+                } else {
+                    config_dir.join(&path_str)
+                };
+
+                if let Ok(canonical) = resolved.canonicalize()
+                    && let Ok(rel) = canonical.strip_prefix(root)
+                {
+                    result.insert(alias, rel.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+
+    result
 }
 
 /// Resolve Rust module imports to file paths.

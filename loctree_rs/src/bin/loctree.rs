@@ -127,7 +127,7 @@ git when-introduced --dead <sym>  Find when issue appeared (planned)\n\n\
 === COMMON OPTIONS ===\n\n  \
 -g, --gitignore           Respect .gitignore rules\n  \
 -I, --ignore <path>       Ignore path (repeatable)\n  \
-.loctreeignore            Auto-loaded gitignore-style patterns\n  \
+.loctignore               Auto-loaded gitignore-style patterns\n  \
 --full-scan               Ignore mtime cache, re-analyze all\n  \
 --scan-all                Include node_modules, target, .venv\n  \
 --verbose                 Detailed progress\n  \
@@ -189,7 +189,7 @@ fn main() -> std::io::Result<()> {
         if !loctreeignore_patterns.is_empty() {
             if parsed.verbose {
                 eprintln!(
-                    "[loctree] loaded {} patterns from .loctreeignore",
+                    "[loctree] loaded {} patterns from .loctignore",
                     loctreeignore_patterns.len()
                 );
             }
@@ -309,6 +309,11 @@ fn run_trace(
         .map(|root| LoctreeConfig::load(root))
         .unwrap_or_default();
     let custom_command_macros = loctree_config.tauri.command_macros;
+    let command_detection = analyzer::ast_js::CommandDetectionConfig::new(
+        &loctree_config.tauri.dom_exclusions,
+        &loctree_config.tauri.non_invoke_exclusions,
+        &loctree_config.tauri.invalid_command_names,
+    );
 
     let scan_results = scan_roots(ScanConfig {
         roots: root_list,
@@ -322,6 +327,7 @@ fn run_trace(
         cached_analyses: None,
         collect_edges: false,
         custom_command_macros: &custom_command_macros,
+        command_detection,
     })?;
 
     let ScanResults {
@@ -381,6 +387,11 @@ fn run_for_ai(root_list: &[PathBuf], parsed: &args::ParsedArgs) -> std::io::Resu
         .map(|root| LoctreeConfig::load(root))
         .unwrap_or_default();
     let custom_command_macros = loctree_config.tauri.command_macros;
+    let command_detection = analyzer::ast_js::CommandDetectionConfig::new(
+        &loctree_config.tauri.dom_exclusions,
+        &loctree_config.tauri.non_invoke_exclusions,
+        &loctree_config.tauri.invalid_command_names,
+    );
 
     let scan_results = scan_roots(ScanConfig {
         roots: root_list,
@@ -394,6 +405,7 @@ fn run_for_ai(root_list: &[PathBuf], parsed: &args::ParsedArgs) -> std::io::Resu
         cached_analyses: None,
         collect_edges: true, // Need edges for hub files
         custom_command_macros: &custom_command_macros,
+        command_detection,
     })?;
 
     let ScanResults {
@@ -441,6 +453,17 @@ fn run_for_ai(root_list: &[PathBuf], parsed: &args::ParsedArgs) -> std::io::Resu
         &exclude_set,
     );
 
+    let pipeline_summary = analyzer::pipelines::build_pipeline_summary(
+        &global_analyses,
+        &focus_set,
+        &exclude_set,
+        &global_fe_commands,
+        &global_be_commands,
+        &std::collections::HashMap::new(),
+        &std::collections::HashMap::new(),
+    );
+    let git_ctx = snapshot::Snapshot::current_git_context();
+
     // Build report sections
     let mut report_sections = Vec::new();
     for (idx, ctx) in contexts.into_iter().enumerate() {
@@ -453,17 +476,11 @@ fn run_for_ai(root_list: &[PathBuf], parsed: &args::ParsedArgs) -> std::io::Resu
             &global_missing,
             &global_unregistered,
             &global_unused,
-            &analyzer::pipelines::build_pipeline_summary(
-                &global_analyses,
-                &focus_set,
-                &exclude_set,
-                &global_fe_commands,
-                &global_be_commands,
-                &std::collections::HashMap::new(),
-                &std::collections::HashMap::new(),
-            ),
+            &pipeline_summary,
+            Some(&git_ctx),
             "loctree-json",
             "1.2.0",
+            &global_analyses,
         );
         if let Some(section) = artifacts.report_section {
             report_sections.push(section);
@@ -477,7 +494,13 @@ fn run_for_ai(root_list: &[PathBuf], parsed: &args::ParsedArgs) -> std::io::Resu
         .unwrap_or_else(|| ".".to_string());
 
     let report = generate_for_ai_report(&project_root, &report_sections, &global_analyses);
-    print_for_ai_json(&report);
+
+    // JSONL mode outputs one QuickWin per line for streaming agent consumption
+    if parsed.output == OutputMode::Jsonl {
+        analyzer::for_ai::print_agent_feed_jsonl(&report);
+    } else {
+        print_for_ai_json(&report);
+    }
 
     Ok(())
 }
@@ -503,6 +526,16 @@ fn run_search(
     });
 
     let py_stdlib = python_stdlib();
+    let loctree_config = root_list
+        .first()
+        .map(|root| LoctreeConfig::load(root))
+        .unwrap_or_default();
+    let custom_command_macros = loctree_config.tauri.command_macros;
+    let command_detection = analyzer::ast_js::CommandDetectionConfig::new(
+        &loctree_config.tauri.dom_exclusions,
+        &loctree_config.tauri.non_invoke_exclusions,
+        &loctree_config.tauri.invalid_command_names,
+    );
 
     let scan_results = scan_roots(ScanConfig {
         roots: root_list,
@@ -515,7 +548,8 @@ fn run_search(
         py_stdlib: &py_stdlib,
         cached_analyses: None,
         collect_edges: false,
-        custom_command_macros: &[],
+        custom_command_macros: &custom_command_macros,
+        command_detection,
     })?;
 
     let ScanResults {
