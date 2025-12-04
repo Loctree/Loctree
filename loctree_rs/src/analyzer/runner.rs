@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use crate::args::{ParsedArgs, preset_ignore_symbols};
 use crate::config::LoctreeConfig;
+use crate::snapshot::Snapshot;
 use crate::types::OutputMode;
 
 use super::ReportSection;
@@ -20,7 +21,7 @@ use super::output::{RootArtifacts, process_root_context, write_report};
 use super::pipelines::build_pipeline_summary;
 use super::root_scan::{ScanConfig, ScanResults, scan_results_from_snapshot, scan_roots};
 use super::scan::{opt_globset, python_stdlib};
-use crate::snapshot::Snapshot;
+use crate::analyzer::ast_js::CommandDetectionConfig;
 
 const DEFAULT_EXCLUDE_REPORT_PATTERNS: &[&str] =
     &["**/__tests__/**", "scripts/semgrep-fixtures/**"];
@@ -123,6 +124,9 @@ fn print_py_race_indicators(analyses: &[crate::types::FileAnalysis], json: bool)
 }
 
 pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
+    use std::time::Instant;
+
+    let scan_started = Instant::now();
     let mut json_results = Vec::new();
     let mut report_sections: Vec<ReportSection> = Vec::new();
     let mut server_handle = None;
@@ -165,6 +169,11 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         .map(|root| LoctreeConfig::load(root))
         .unwrap_or_default();
     let custom_command_macros = loctree_config.tauri.command_macros;
+    let command_detection = CommandDetectionConfig::new(
+        &loctree_config.tauri.dom_exclusions,
+        &loctree_config.tauri.non_invoke_exclusions,
+        &loctree_config.tauri.invalid_command_names,
+    );
 
     let mut exclude_patterns = parsed.exclude_report_patterns.clone();
     exclude_patterns.extend(
@@ -179,11 +188,25 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         parsed.editor_cmd.clone(),
     );
 
+    // Only generate HTML when explicitly requested or serving; avoid auto-opening during tests/builds.
+    let auto_report_path = if parsed.serve || parsed.report_path.is_some() {
+        parsed.report_path.clone().or_else(|| {
+            root_list
+                .first()
+                .map(|root| Snapshot::artifacts_dir(root).join("report.html"))
+        })
+    } else {
+        None
+    };
+
     if parsed.serve {
+        eprintln!(
+            "[loctree][warn] `--serve` will move to `loct report --serve`; please prefer the report subcommand (backwards compatible for now)"
+        );
         if let Some((base, handle)) = start_open_server(
             root_list.to_vec(),
             editor_cfg.clone(),
-            parsed.report_path.clone(),
+            auto_report_path.clone(),
             parsed.serve_port,
         ) {
             server_handle = Some(handle);
@@ -249,6 +272,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                                 || parsed.impact.is_some()
                                 || parsed.circular,
                             custom_command_macros: &custom_command_macros,
+                            command_detection: command_detection.clone(),
                         })?
                     }
                 }
@@ -266,6 +290,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                     cached_analyses: None,
                     collect_edges: parsed.graph || parsed.impact.is_some() || parsed.circular,
                     custom_command_macros: &custom_command_macros,
+                    command_detection: command_detection.clone(),
                 })?
             }
         } else {
@@ -282,6 +307,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                 cached_analyses: None,
                 collect_edges: parsed.graph || parsed.impact.is_some() || parsed.circular,
                 custom_command_macros: &custom_command_macros,
+                command_detection: command_detection.clone(),
             })?
         }
     } else {
@@ -298,6 +324,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             cached_analyses: None,
             collect_edges: parsed.graph || parsed.impact.is_some() || parsed.circular,
             custom_command_macros: &custom_command_macros,
+            command_detection,
         })?
     };
     let ScanResults {
@@ -307,6 +334,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         global_fe_payloads,
         global_be_payloads,
         global_analyses,
+        ..
     } = scan_results;
 
     if let Some(sym) = &parsed.symbol {
@@ -340,7 +368,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
 
     if parsed.dead_exports {
         let high_confidence = parsed.dead_confidence.as_deref() == Some("high");
-        let dead_exports = find_dead_exports(&global_analyses, high_confidence);
+        let dead_exports = find_dead_exports(&global_analyses, high_confidence, None);
         // Apply --focus and --exclude-report filters to dead exports
         let filtered_dead: Vec<_> = dead_exports
             .into_iter()
@@ -438,6 +466,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         &global_fe_payloads,
         &global_be_payloads,
     );
+    let git_ctx = Snapshot::current_git_context();
 
     // Handle SARIF output
     if parsed.sarif {
@@ -449,13 +478,17 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
 
         // Get dead exports
         let high_confidence = parsed.dead_confidence.as_deref() == Some("high");
-        let dead_exports = find_dead_exports(&global_analyses, high_confidence);
+        let dead_exports = find_dead_exports(&global_analyses, high_confidence, None);
+
+        // Get circular imports
+        let circular_imports = super::cycles::find_cycles(&all_graph_edges);
 
         super::sarif::print_sarif(super::sarif::SarifInputs {
             duplicate_exports: &all_ranked_dups,
             missing_handlers: &global_missing_handlers,
             unused_handlers: &global_unused_handlers,
             dead_exports: &dead_exports,
+            circular_imports: &circular_imports,
             pipeline_summary: &pipeline_summary,
         });
         return Ok(());
@@ -475,8 +508,10 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             &global_unregistered_handlers,
             &global_unused_handlers,
             &pipeline_summary,
+            Some(&git_ctx),
             SCHEMA_NAME,
             SCHEMA_VERSION,
+            &global_analyses,
         );
         json_results.extend(json_items);
         if let Some(section) = report_section {
@@ -524,7 +559,9 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         }
     }
 
-    if let Some(report_path) = parsed.report_path.as_ref() {
+    if (parsed.serve || parsed.report_path.is_some())
+        && let Some(report_path) = auto_report_path.as_ref()
+    {
         write_report(report_path, &report_sections, parsed.verbose)?;
         open_in_browser(report_path);
     }
@@ -599,12 +636,56 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         }
     }
 
+    // Threshold-based CI policy checks
+    if let Some(max_dead) = parsed.max_dead {
+        let high_confidence = parsed.dead_confidence.as_deref() == Some("high");
+        let dead_exports =
+            super::dead_parrots::find_dead_exports(&global_analyses, high_confidence, None);
+        let dead_count = dead_exports.len();
+        if dead_count > max_dead {
+            fail_reasons.push(format!(
+                "{} dead export(s) exceed threshold of {} (--max-dead)",
+                dead_count, max_dead
+            ));
+        }
+    }
+
+    if let Some(max_cycles) = parsed.max_cycles {
+        let cycles = super::cycles::find_cycles(&all_graph_edges);
+        let cycle_count = cycles.len();
+        if cycle_count > max_cycles {
+            fail_reasons.push(format!(
+                "{} circular import(s) exceed threshold of {} (--max-cycles)",
+                cycle_count, max_cycles
+            ));
+        }
+    }
+
     if !fail_reasons.is_empty() {
         eprintln!("[loctree][fail] {}", fail_reasons.join("; "));
         return Err(io::Error::other(format!(
             "Pipeline check failed: {}",
             fail_reasons.join("; ")
         )));
+    }
+
+    // Human-friendly summary for the default scan (avoid empty output).
+    if matches!(parsed.output, OutputMode::Human) && !parsed.sarif {
+        let elapsed = scan_started.elapsed();
+        let mut langs: HashSet<String> = HashSet::new();
+        for fa in &global_analyses {
+            if !fa.language.is_empty() {
+                langs.insert(fa.language.clone());
+            }
+        }
+        eprintln!(
+            "[loctree] Summary: files {}, missing handlers {}, unused handlers {}, languages [{}], elapsed {:.2?}",
+            global_analyses.len(),
+            global_missing_handlers.len(),
+            global_unused_handlers.len(),
+            langs.iter().cloned().collect::<Vec<_>>().join(","),
+            elapsed
+        );
     }
 
     Ok(())

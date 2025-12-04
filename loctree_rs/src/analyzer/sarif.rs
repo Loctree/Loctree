@@ -209,41 +209,30 @@ pub fn generate_sarif(inputs: SarifInputs) -> serde_json::Value {
 }
 
 /// Generate SARIF report as a pretty-printed JSON string
-pub fn generate_sarif_string(inputs: SarifInputs) -> Result<String, serde_json::Error> {
+pub fn generate_sarif_string(inputs: SarifInputs) -> String {
     serde_json::to_string_pretty(&build_sarif(inputs))
+        .expect("Failed to serialize SARIF report to JSON")
 }
 
 /// Print SARIF report to stdout
-pub fn print_sarif(inputs: SarifInputs) -> Result<(), serde_json::Error> {
-    match generate_sarif_string(inputs) {
-        Ok(json) => {
-            println!("{}", json);
-            Ok(())
-        }
-        Err(err) => Err(err),
-    }
+pub fn print_sarif(inputs: SarifInputs) {
+    println!("{}", generate_sarif_string(inputs));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analyzer::report::{Confidence, DupSeverity};
+    use crate::analyzer::report::Confidence;
 
     fn mock_dup(name: &str, files: Vec<&str>) -> RankedDup {
         RankedDup {
             name: name.to_string(),
             canonical: name.to_lowercase(),
             files: files.into_iter().map(|s| s.to_string()).collect(),
-            locations: vec![],
             score: 1,
             prod_count: 0,
             dev_count: 0,
-            canonical_line: None,
             refactors: vec![],
-            severity: DupSeverity::SamePackage,
-            is_cross_lang: false,
-            packages: vec![],
-            reason: String::new(),
         }
     }
 
@@ -284,7 +273,8 @@ mod tests {
             circular_imports: &[],
             pipeline_summary: &json!({}),
         };
-        assert!(print_sarif(inputs).is_ok());
+        // Should not panic
+        print_sarif(inputs);
     }
 
     #[test]
@@ -298,7 +288,7 @@ mod tests {
             circular_imports: &[],
             pipeline_summary: &json!({}),
         };
-        assert!(print_sarif(inputs).is_ok());
+        print_sarif(inputs);
     }
 
     #[test]
@@ -312,7 +302,7 @@ mod tests {
             circular_imports: &[],
             pipeline_summary: &json!({}),
         };
-        assert!(print_sarif(inputs).is_ok());
+        print_sarif(inputs);
     }
 
     #[test]
@@ -326,7 +316,7 @@ mod tests {
             circular_imports: &[],
             pipeline_summary: &json!({}),
         };
-        assert!(print_sarif(inputs).is_ok());
+        print_sarif(inputs);
     }
 
     #[test]
@@ -343,7 +333,7 @@ mod tests {
             circular_imports: &[],
             pipeline_summary: &json!({}),
         };
-        assert!(print_sarif(inputs).is_ok());
+        print_sarif(inputs);
     }
 
     #[test]
@@ -361,7 +351,7 @@ mod tests {
             circular_imports: &cycles,
             pipeline_summary: &json!({}),
         };
-        assert!(print_sarif(inputs).is_ok());
+        print_sarif(inputs);
     }
 
     #[test]
@@ -381,7 +371,7 @@ mod tests {
             circular_imports: &[],
             pipeline_summary: &summary,
         };
-        assert!(print_sarif(inputs).is_ok());
+        print_sarif(inputs);
     }
 
     #[test]
@@ -401,7 +391,7 @@ mod tests {
             circular_imports: &[],
             pipeline_summary: &summary,
         };
-        assert!(print_sarif(inputs).is_ok());
+        print_sarif(inputs);
     }
 
     #[test]
@@ -426,7 +416,7 @@ mod tests {
             circular_imports: &cycles,
             pipeline_summary: &summary,
         };
-        assert!(print_sarif(inputs).is_ok());
+        print_sarif(inputs);
     }
 
     #[test]
@@ -445,195 +435,6 @@ mod tests {
             unused_handlers: &[],
             dead_exports: &[],
             circular_imports: &[],
-            pipeline_summary: &json!({}),
-        };
-        assert!(print_sarif(inputs).is_ok());
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::analyzer::report::Confidence;
-
-    fn mock_dup(name: &str, files: Vec<&str>) -> RankedDup {
-        RankedDup {
-            name: name.to_string(),
-            canonical: name.to_lowercase(),
-            files: files.into_iter().map(|s| s.to_string()).collect(),
-            score: 1,
-            prod_count: 0,
-            dev_count: 0,
-            refactors: vec![],
-        }
-    }
-
-    fn mock_gap(name: &str, locations: Vec<(&str, usize)>) -> CommandGap {
-        CommandGap {
-            name: name.to_string(),
-            confidence: Some(Confidence::High),
-            locations: locations
-                .into_iter()
-                .map(|(f, l)| (f.to_string(), l))
-                .collect(),
-            implementation_name: None,
-            string_literal_matches: vec![],
-        }
-    }
-
-    fn mock_dead(file: &str, symbol: &str, line: Option<usize>) -> DeadExport {
-        DeadExport {
-            file: file.to_string(),
-            symbol: symbol.to_string(),
-            line,
-            confidence: "high".to_string(),
-        }
-    }
-
-    #[test]
-    fn test_print_sarif_empty() {
-        let inputs = SarifInputs {
-            duplicate_exports: &[],
-            missing_handlers: &[],
-            unused_handlers: &[],
-            dead_exports: &[],
-            pipeline_summary: &json!({}),
-        };
-        // Should not panic
-        print_sarif(inputs);
-    }
-
-    #[test]
-    fn test_print_sarif_with_duplicates() {
-        let dups = vec![mock_dup("Button", vec!["src/a.ts", "src/b.ts"])];
-        let inputs = SarifInputs {
-            duplicate_exports: &dups,
-            missing_handlers: &[],
-            unused_handlers: &[],
-            dead_exports: &[],
-            pipeline_summary: &json!({}),
-        };
-        print_sarif(inputs);
-    }
-
-    #[test]
-    fn test_print_sarif_with_missing_handlers() {
-        let missing = vec![mock_gap("get_user", vec![("src/api.ts", 10)])];
-        let inputs = SarifInputs {
-            duplicate_exports: &[],
-            missing_handlers: &missing,
-            unused_handlers: &[],
-            dead_exports: &[],
-            pipeline_summary: &json!({}),
-        };
-        print_sarif(inputs);
-    }
-
-    #[test]
-    fn test_print_sarif_with_unused_handlers() {
-        let unused = vec![mock_gap("old_handler", vec![("src-tauri/src/lib.rs", 50)])];
-        let inputs = SarifInputs {
-            duplicate_exports: &[],
-            missing_handlers: &[],
-            unused_handlers: &unused,
-            dead_exports: &[],
-            pipeline_summary: &json!({}),
-        };
-        print_sarif(inputs);
-    }
-
-    #[test]
-    fn test_print_sarif_with_dead_exports() {
-        let dead = vec![
-            mock_dead("src/utils.ts", "unusedHelper", Some(10)),
-            mock_dead("src/helpers.ts", "oldFunction", None),
-        ];
-        let inputs = SarifInputs {
-            duplicate_exports: &[],
-            missing_handlers: &[],
-            unused_handlers: &[],
-            dead_exports: &dead,
-            pipeline_summary: &json!({}),
-        };
-        print_sarif(inputs);
-    }
-
-    #[test]
-    fn test_print_sarif_with_ghost_events() {
-        let summary = json!({
-            "events": {
-                "ghostEmits": [
-                    {"name": "user-updated", "path": "src/user.ts", "line": 20, "confidence": "high"}
-                ]
-            }
-        });
-        let inputs = SarifInputs {
-            duplicate_exports: &[],
-            missing_handlers: &[],
-            unused_handlers: &[],
-            dead_exports: &[],
-            pipeline_summary: &summary,
-        };
-        print_sarif(inputs);
-    }
-
-    #[test]
-    fn test_print_sarif_with_orphan_listeners() {
-        let summary = json!({
-            "events": {
-                "orphanListeners": [
-                    {"name": "deleted-event", "path": "src/listener.ts", "line": 15}
-                ]
-            }
-        });
-        let inputs = SarifInputs {
-            duplicate_exports: &[],
-            missing_handlers: &[],
-            unused_handlers: &[],
-            dead_exports: &[],
-            pipeline_summary: &summary,
-        };
-        print_sarif(inputs);
-    }
-
-    #[test]
-    fn test_print_sarif_full() {
-        let dups = vec![mock_dup("Component", vec!["src/a.tsx", "src/b.tsx"])];
-        let missing = vec![mock_gap("api_call", vec![("src/api.ts", 5)])];
-        let unused = vec![mock_gap("legacy_fn", vec![("src-tauri/src/main.rs", 100)])];
-        let dead = vec![mock_dead("src/old.ts", "deprecated", Some(1))];
-        let summary = json!({
-            "events": {
-                "ghostEmits": [{"name": "evt", "path": "a.ts", "line": 1, "confidence": "low"}],
-                "orphanListeners": [{"name": "old-evt", "path": "b.ts", "line": 2}]
-            }
-        });
-
-        let inputs = SarifInputs {
-            duplicate_exports: &dups,
-            missing_handlers: &missing,
-            unused_handlers: &unused,
-            dead_exports: &dead,
-            pipeline_summary: &summary,
-        };
-        print_sarif(inputs);
-    }
-
-    #[test]
-    fn test_print_sarif_multiple_locations() {
-        let missing = vec![mock_gap(
-            "shared_command",
-            vec![
-                ("src/page1.ts", 10),
-                ("src/page2.ts", 20),
-                ("src/page3.ts", 30),
-            ],
-        )];
-        let inputs = SarifInputs {
-            duplicate_exports: &[],
-            missing_handlers: &missing,
-            unused_handlers: &[],
-            dead_exports: &[],
             pipeline_summary: &json!({}),
         };
         print_sarif(inputs);

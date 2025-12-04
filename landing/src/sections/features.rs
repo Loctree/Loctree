@@ -100,6 +100,24 @@ pub fn Features() -> impl IntoView {
                         description="SARIF 2.1.0 output for GitHub Actions, GitLab CI, and other CI/CD systems."
                         code=Some("loct lint --sarif > results.sarif")
                     />
+                    <FeatureCard
+                        icon="[15]"
+                        title="Query API"
+                        description="Quick graph queries: who-imports, where-symbol, component-of. Fast answers without full analysis."
+                        code=Some("loct query who-imports src/utils.ts")
+                    />
+                    <FeatureCard
+                        icon="[16]"
+                        title="Snapshot Diff"
+                        description="Compare snapshots to see what changed. Track new cycles, dead exports, and graph changes."
+                        code=Some("loct diff --since main")
+                    />
+                    <FeatureCard
+                        icon="[17]"
+                        title="IDE Integration URLs"
+                        description="SARIF includes loctree://open URLs for direct file:line navigation in VS Code, JetBrains, etc."
+                        code=Some("loctree://open?f=src/app.ts&l=42")
+                    />
                 </div>
             </div>
         </section>

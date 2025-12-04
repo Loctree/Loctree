@@ -15,13 +15,22 @@ pub(crate) fn analyze_js_file(
     extensions: Option<&HashSet<String>>,
     ts_resolver: Option<&TsPathResolver>,
     relative: String,
+    command_cfg: &super::ast_js::CommandDetectionConfig,
 ) -> FileAnalysis {
-    ast_js::analyze_js_file_ast(content, path, root, extensions, ts_resolver, relative)
+    ast_js::analyze_js_file_ast(
+        content,
+        path,
+        root,
+        extensions,
+        ts_resolver,
+        relative,
+        command_cfg,
+    )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::analyze_js_file;
+    use super::{analyze_js_file, ast_js::CommandDetectionConfig};
     use std::collections::HashSet;
     use std::path::Path;
 
@@ -57,6 +66,7 @@ customCommandWrapper("another_cmd", options);
             Some(&HashSet::from(["ts".to_string(), "tsx".to_string()])),
             None,
             "app.tsx".to_string(),
+            &CommandDetectionConfig::default(),
         );
 
         assert!(
@@ -129,6 +139,7 @@ import * as Everything from "./everything";
             Some(&HashSet::from(["ts".to_string(), "tsx".to_string()])),
             None,
             "app.tsx".to_string(),
+            &CommandDetectionConfig::default(),
         );
 
         // Check default import from "./foo"
@@ -224,6 +235,7 @@ import Baz from "./component";
             None,
             None,
             "component.tsx".to_string(),
+            &CommandDetectionConfig::default(),
         );
 
         let importer = analyze_js_file(
@@ -233,6 +245,7 @@ import Baz from "./component";
             None,
             None,
             "app.tsx".to_string(),
+            &CommandDetectionConfig::default(),
         );
 
         // The export should be stored with kind "default"

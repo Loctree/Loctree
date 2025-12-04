@@ -50,6 +50,10 @@ update_file "$ROOT_DIR/landing/src/sections/easter_eggs.rs" 's/v[0-9]\+\.[0-9]\+
 # Update landing page version constant
 update_file "$ROOT_DIR/landing/src/sections/mod.rs" 's/VERSION: \&str = "v[^"]*"/VERSION: \&str = "v'$VERSION'"/'
 
+# Update API agent endpoint files
+update_file "$ROOT_DIR/landing/api/agent/index.json" 's/"version": "[^"]*"/"version": "'$VERSION'"/'
+update_file "$ROOT_DIR/landing/public/api/agent/index.txt" 's/loctree v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*/loctree v'$VERSION'/'
+
 echo ""
 echo "Version sync complete: v$VERSION"
 echo ""

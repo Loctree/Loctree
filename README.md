@@ -26,6 +26,9 @@ curl -fsSL https://raw.githubusercontent.com/Loctree/Loctree/main/tools/install.
 cd your-project
 loct
 
+# View interactive report (HTML + graph)
+loct report --serve
+
 # Extract context for AI agents
 loct slice src/components/ChatPanel.tsx --consumers --json
 
@@ -178,7 +181,7 @@ Find problems before they become tech debt:
 
 ```bash
 # Check if similar component exists before creating
-loct find --similar ChatSurface
+loct find ChatSurface
 # Found: ChatPanel (distance: 2), ChatWindow (distance: 3)
 
 # Find potentially unused exports
@@ -188,10 +191,10 @@ loct dead --confidence high
 loct cycles
 
 # Analyze impact of changing a file
-loct find --impact src/utils/api.ts
+loct impact src/utils/api.ts
 
 # Find a symbol across the codebase
-loct find --symbol useAuth
+loct find useAuth
 
 # List entry points
 loct lint --entrypoints
@@ -240,6 +243,8 @@ Modes:
   tree                      Directory tree with LOC counts
   report --graph            HTML report with graph
   lint --fail --sarif       CI guardrails / SARIF output
+  diff --since <id>         Compare snapshots, show delta
+  query <kind> <target>     Quick queries (who-imports, where-symbol, component-of)
   --for-ai                  AI-optimized hierarchical JSON (legacy flag)
 
 Find options:
@@ -250,6 +255,11 @@ Find options:
 Slice options:
   --consumers               Include files that import the target
   --json                    JSON output for piping to AI
+
+Query kinds:
+  who-imports <file>        Files that import target
+  where-symbol <name>       Where symbol is defined/used
+  component-of <file>       Which graph component contains file
 
 Tree options:
   --find-artifacts          Find build dirs (node_modules, target, etc.)
@@ -358,4 +368,4 @@ MIT — use it, fork it, improve it. See [LICENSE](LICENSE).
 
 ---
 
-**Developed with 💀 by The Loctree Team (c)2025 **
+**Developed with 💀 by The Loctree Team (c)2025**

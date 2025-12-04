@@ -9,6 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::Instant;
 
 use crate::args::ParsedArgs;
@@ -22,6 +23,21 @@ pub const SNAPSHOT_DIR: &str = ".loctree";
 
 /// Default snapshot file name
 pub const SNAPSHOT_FILE: &str = "snapshot.json";
+
+/// Git workspace context for artifact isolation.
+///
+/// Used to store snapshots per branch@commit (e.g., `.loctree/main@abc123/snapshot.json`).
+#[derive(Clone, Debug)]
+pub struct GitContext {
+    /// Repository name (extracted from remote origin).
+    pub repo: Option<String>,
+    /// Current branch name.
+    pub branch: Option<String>,
+    /// Short commit hash.
+    pub commit: Option<String>,
+    /// Combined identifier: `branch@commit` (sanitized for filesystem).
+    pub scan_id: Option<String>,
+}
 
 /// Metadata about the snapshot
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -59,6 +75,9 @@ pub struct SnapshotMetadata {
     /// Git commit hash (short)
     #[serde(default)]
     pub git_commit: Option<String>,
+    /// Combined scan identifier (e.g., branch@sha) for artifact isolation
+    #[serde(default)]
+    pub git_scan_id: Option<String>,
 }
 
 /// Configuration for path resolution (aliases, etc.)
@@ -168,7 +187,7 @@ impl Snapshot {
             .unwrap_or_else(|_| "unknown".to_string());
 
         // Get git info from current directory
-        let git_info = Self::get_git_info();
+        let git_info = Self::current_git_context();
 
         Self {
             metadata: SnapshotMetadata {
@@ -180,9 +199,10 @@ impl Snapshot {
                 total_loc: 0,
                 scan_duration_ms: 0,
                 resolver_config: None,
-                git_repo: git_info.0,
-                git_branch: git_info.1,
-                git_commit: git_info.2,
+                git_repo: git_info.repo,
+                git_branch: git_info.branch,
+                git_commit: git_info.commit,
+                git_scan_id: git_info.scan_id,
             },
             files: Vec::new(),
             edges: Vec::new(),
@@ -195,11 +215,13 @@ impl Snapshot {
 
     /// Get git repository info (repo name, branch, commit)
     fn get_git_info() -> (Option<String>, Option<String>, Option<String>) {
-        use std::process::Command;
+        use std::process::{Command, Stdio};
 
         // Get repo name from remote origin URL
+        // Suppress stderr to avoid "not a git repository" spam in non-git dirs
         let repo = Command::new("git")
             .args(["remote", "get-url", "origin"])
+            .stderr(Stdio::null())
             .output()
             .ok()
             .and_then(|output| {
@@ -222,6 +244,7 @@ impl Snapshot {
         // Get current branch
         let branch = Command::new("git")
             .args(["rev-parse", "--abbrev-ref", "HEAD"])
+            .stderr(Stdio::null())
             .output()
             .ok()
             .and_then(|output| {
@@ -237,6 +260,7 @@ impl Snapshot {
         // Get short commit hash
         let commit = Command::new("git")
             .args(["rev-parse", "--short", "HEAD"])
+            .stderr(Stdio::null())
             .output()
             .ok()
             .and_then(|output| {
@@ -252,15 +276,63 @@ impl Snapshot {
         (repo, branch, commit)
     }
 
+    /// Sanitise branch/commit for filesystem path segments
+    fn sanitize_ref(value: &str) -> String {
+        value.replace(['/', '\\', ' ', ':'], "_").trim().to_string()
+    }
+
+    /// Build the current git context (repo, branch, commit, scan_id)
+    pub fn current_git_context() -> GitContext {
+        let (repo, branch, commit) = Self::get_git_info();
+        let scan_id = branch.as_ref().map(|b| {
+            let mut base = Self::sanitize_ref(b);
+            if let Some(c) = &commit {
+                base = format!("{}@{}", base, Self::sanitize_ref(c));
+            }
+            base
+        });
+
+        GitContext {
+            repo,
+            branch,
+            commit,
+            scan_id,
+        }
+    }
+
+    fn candidate_snapshot_paths(root: &Path) -> Vec<PathBuf> {
+        let mut paths = Vec::new();
+        if let Some(seg) = Self::current_git_context().scan_id {
+            paths.push(root.join(SNAPSHOT_DIR).join(seg).join(SNAPSHOT_FILE));
+        }
+        paths.push(root.join(SNAPSHOT_DIR).join(SNAPSHOT_FILE));
+        paths
+    }
+
     /// Get the snapshot file path for a given root
     pub fn snapshot_path(root: &Path) -> PathBuf {
-        root.join(SNAPSHOT_DIR).join(SNAPSHOT_FILE)
+        // Prefer the branch@sha path; fall back to legacy path
+        let paths = Self::candidate_snapshot_paths(root);
+        paths
+            .first()
+            .cloned()
+            .unwrap_or_else(|| root.join(SNAPSHOT_DIR).join(SNAPSHOT_FILE))
+    }
+
+    /// Directory where snapshot and artifacts should be stored for the current scan
+    pub fn artifacts_dir(root: &Path) -> PathBuf {
+        let path = Self::snapshot_path(root);
+        path.parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| root.join(SNAPSHOT_DIR))
     }
 
     /// Check if a snapshot exists for the given root (used by VS2 slice module)
     #[allow(dead_code)]
     pub fn exists(root: &Path) -> bool {
-        Self::snapshot_path(root).exists()
+        Self::candidate_snapshot_paths(root)
+            .iter()
+            .any(|p| p.exists())
     }
 
     /// Search upward for .loctree directory (like git finds .git/)
@@ -280,10 +352,33 @@ impl Snapshot {
 
     /// Save snapshot to disk
     pub fn save(&self, root: &Path) -> io::Result<()> {
-        let snapshot_dir = root.join(SNAPSHOT_DIR);
-        fs::create_dir_all(&snapshot_dir)?;
+        // If a snapshot already exists for the same branch/commit, skip rewriting.
+        if let (Some(commit), Some(branch), Ok(existing)) = (
+            self.metadata.git_commit.as_ref(),
+            self.metadata.git_branch.as_ref(),
+            Self::load(root),
+        ) && existing.metadata.git_commit.as_ref() == Some(commit)
+            && existing.metadata.git_branch.as_ref() == Some(branch)
+        {
+            let dirty = is_git_dirty(root).unwrap_or(false);
+            if dirty {
+                eprintln!(
+                    "[loctree] snapshot for {}@{} exists; worktree dirty → commit changes to refresh snapshot",
+                    branch, commit
+                );
+            } else {
+                eprintln!(
+                    "[loctree] snapshot for {}@{} already exists; skipping write (no changes detected)",
+                    branch, commit
+                );
+            }
+            return Ok(());
+        }
 
         let snapshot_path = Self::snapshot_path(root);
+        if let Some(dir) = snapshot_path.parent() {
+            fs::create_dir_all(dir)?;
+        }
         let json = serde_json::to_string_pretty(self)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
@@ -295,17 +390,27 @@ impl Snapshot {
     /// Load snapshot from disk (used by VS2 slice module)
     #[allow(dead_code)]
     pub fn load(root: &Path) -> io::Result<Self> {
-        let snapshot_path = Self::snapshot_path(root);
-
-        if !snapshot_path.exists() {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                format!(
-                    "No snapshot found. Run `loctree` first to create one.\nExpected: {}",
-                    snapshot_path.display()
-                ),
-            ));
+        let mut snapshot_path = None;
+        for candidate in Self::candidate_snapshot_paths(root) {
+            if candidate.exists() {
+                snapshot_path = Some(candidate);
+                break;
+            }
         }
+
+        let snapshot_path = match snapshot_path {
+            Some(p) => p,
+            None => {
+                let primary = Self::snapshot_path(root);
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!(
+                        "No snapshot found. Run `loctree` first to create one.\nExpected: {}",
+                        primary.display()
+                    ),
+                ));
+            }
+        };
 
         // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path -- SAFETY: snapshot_path is derived from root/.loctree/snapshot.json where root is validated as existing directory by caller; no user-controlled path segments are interpolated
         let content = fs::read_to_string(&snapshot_path)?;
@@ -346,13 +451,18 @@ impl Snapshot {
     }
 
     /// Print summary of the snapshot
-    pub fn print_summary(&self) {
+    pub fn print_summary(&self, root: &Path) {
         println!(
             "Scanned {} files in {:.2}s",
             self.metadata.file_count,
             self.metadata.scan_duration_ms as f64 / 1000.0
         );
-        println!("Graph saved to ./{}/{}", SNAPSHOT_DIR, SNAPSHOT_FILE);
+        let snapshot_path = Self::snapshot_path(root);
+        let pretty_path = snapshot_path
+            .strip_prefix(root)
+            .map(|p| format!("./{}", p.display()))
+            .unwrap_or_else(|_| snapshot_path.display().to_string());
+        println!("Graph saved to {}", pretty_path);
 
         let languages: Vec<_> = self.metadata.languages.iter().collect();
         if !languages.is_empty() {
@@ -413,9 +523,20 @@ impl Snapshot {
     }
 }
 
+/// Best-effort check for uncommitted changes in the working tree
+fn is_git_dirty(root: &Path) -> Option<bool> {
+    let output = Command::new("git")
+        .arg("status")
+        .arg("--porcelain")
+        .current_dir(root)
+        .output()
+        .ok()?;
+    Some(!String::from_utf8_lossy(&output.stdout).trim().is_empty())
+}
+
 /// Run the init command: scan the project and save snapshot
 pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
-    use crate::analyzer::coverage::compute_command_gaps;
+    use crate::analyzer::coverage::{compute_command_gaps, normalize_cmd_name};
     use crate::analyzer::root_scan::{ScanConfig, scan_roots};
     use crate::analyzer::runner::default_analyzer_exts;
     use crate::analyzer::scan::{opt_globset, python_stdlib};
@@ -487,6 +608,11 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
         .map(|root| LoctreeConfig::load(root))
         .unwrap_or_default();
     let custom_command_macros = loctree_config.tauri.command_macros;
+    let command_detection = crate::analyzer::ast_js::CommandDetectionConfig::new(
+        &loctree_config.tauri.dom_exclusions,
+        &loctree_config.tauri.non_invoke_exclusions,
+        &loctree_config.tauri.invalid_command_names,
+    );
 
     let scan_config = ScanConfig {
         roots: root_list,
@@ -500,6 +626,7 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
         cached_analyses: cached_analyses.as_ref(),
         collect_edges: true, // Always collect edges for snapshot (needed by slice)
         custom_command_macros: &custom_command_macros,
+        command_detection,
     };
 
     // Perform the scan
@@ -546,41 +673,105 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
         }
     }
 
+    // Build registered handlers set to filter BE commands (same as in loct.rs/loctree.rs)
+    let registered_impls: HashSet<String> = scan_results
+        .global_analyses
+        .iter()
+        .flat_map(|a| a.tauri_registered_handlers.iter().cloned())
+        .collect();
+
+    // Filter BE commands to only include registered handlers (or all if no registration info)
+    let mut global_be_registered: HashMap<String, Vec<(String, usize, String)>> = HashMap::new();
+    for (name, locs) in &scan_results.global_be_commands {
+        for (path, line, impl_name) in locs {
+            if registered_impls.is_empty() || registered_impls.contains(impl_name) {
+                global_be_registered.entry(name.clone()).or_default().push((
+                    path.clone(),
+                    *line,
+                    impl_name.clone(),
+                ));
+            }
+        }
+    }
+
     // Build command bridges from global command data
+    // Use normalized names for matching (handles camelCase FE vs snake_case BE)
     let (_missing_handlers, _unused_handlers) = compute_command_gaps(
         &scan_results.global_fe_commands,
-        &scan_results.global_be_commands,
+        &global_be_registered,
         &focus_set,
         &exclude_set,
     );
 
-    // Create command bridges
-    let mut all_commands: HashSet<String> = HashSet::new();
+    // Build normalized lookup maps for cross-matching
+    // FE: normalized_name -> original_names (can have multiple originals mapping to same normalized)
+    let mut fe_by_norm: HashMap<String, Vec<String>> = HashMap::new();
     for name in scan_results.global_fe_commands.keys() {
-        all_commands.insert(name.clone());
-    }
-    for name in scan_results.global_be_commands.keys() {
-        all_commands.insert(name.clone());
+        fe_by_norm
+            .entry(normalize_cmd_name(name))
+            .or_default()
+            .push(name.clone());
     }
 
-    for cmd_name in all_commands {
-        let fe_calls: Vec<(String, usize)> = scan_results
-            .global_fe_commands
-            .get(&cmd_name)
-            .map(|v| v.iter().map(|(f, l, _)| (f.clone(), *l)).collect())
-            .unwrap_or_default();
+    // BE: normalized_name -> original_names (only registered handlers)
+    let mut be_by_norm: HashMap<String, Vec<String>> = HashMap::new();
+    for name in global_be_registered.keys() {
+        be_by_norm
+            .entry(normalize_cmd_name(name))
+            .or_default()
+            .push(name.clone());
+    }
 
-        let be_handler: Option<(String, usize)> = scan_results
-            .global_be_commands
-            .get(&cmd_name)
-            .and_then(|v| v.first())
-            .map(|(f, l, _)| (f.clone(), *l));
+    // Collect all unique normalized command names
+    let mut all_normalized: HashSet<String> = HashSet::new();
+    all_normalized.extend(fe_by_norm.keys().cloned());
+    all_normalized.extend(be_by_norm.keys().cloned());
+
+    // Create command bridges using normalized matching
+    for norm_name in all_normalized {
+        // Get all FE original names that normalize to this
+        let fe_originals = fe_by_norm.get(&norm_name).cloned().unwrap_or_default();
+        // Get all BE original names that normalize to this (registered only)
+        let be_originals = be_by_norm.get(&norm_name).cloned().unwrap_or_default();
+
+        // Collect all FE calls (from all original names that map here)
+        let fe_calls: Vec<(String, usize)> = fe_originals
+            .iter()
+            .flat_map(|orig| {
+                scan_results
+                    .global_fe_commands
+                    .get(orig)
+                    .map(|v| {
+                        v.iter()
+                            .map(|(f, l, _)| (f.clone(), *l))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default()
+            })
+            .collect();
+
+        // Get BE handler (prefer first BE original name found, registered only)
+        let (be_handler, canonical_name) = be_originals
+            .first()
+            .and_then(|orig| {
+                global_be_registered
+                    .get(orig)
+                    .and_then(|v| v.first())
+                    .map(|(f, l, _)| (Some((f.clone(), *l)), orig.clone()))
+            })
+            .unwrap_or_else(|| {
+                // No BE handler, use first FE name as canonical
+                (
+                    None,
+                    fe_originals.first().cloned().unwrap_or(norm_name.clone()),
+                )
+            });
 
         let has_handler = be_handler.is_some();
         let is_called = !fe_calls.is_empty();
 
         snapshot.command_bridges.push(CommandBridge {
-            name: cmd_name,
+            name: canonical_name,
             frontend_calls: fe_calls,
             backend_handler: be_handler,
             has_handler,
@@ -626,6 +817,23 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
         });
     }
 
+    // Store resolver configuration from scan results for caching
+    if scan_results.ts_resolver_config.is_some() || !scan_results.py_roots.is_empty() {
+        snapshot.metadata.resolver_config = Some(ResolverConfig {
+            ts_paths: scan_results
+                .ts_resolver_config
+                .as_ref()
+                .map(|c| c.ts_paths.clone())
+                .unwrap_or_default(),
+            ts_base_url: scan_results
+                .ts_resolver_config
+                .as_ref()
+                .and_then(|c| c.ts_base_url.clone()),
+            py_roots: scan_results.py_roots.clone(),
+            rust_crate_roots: vec![], // TODO: populate from Cargo.toml scanning
+        });
+    }
+
     // Finalize metadata
     let duration_ms = start_time.elapsed().as_millis() as u64;
     snapshot.finalize_metadata(duration_ms);
@@ -634,7 +842,7 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
     snapshot.save(&snapshot_root)?;
 
     // Print summary
-    snapshot.print_summary();
+    snapshot.print_summary(&snapshot_root);
 
     // Auto mode: emit full artifact set into ./.loctree to avoid extra commands
     if parsed.auto_outputs {
@@ -666,8 +874,10 @@ fn write_auto_artifacts(
         CommandUsage, compute_command_gaps_with_confidence, compute_unregistered_handlers,
     };
     use crate::analyzer::cycles::find_cycles;
+    use crate::analyzer::dead_parrots::find_dead_exports;
     use crate::analyzer::output::{RootArtifacts, process_root_context, write_report};
     use crate::analyzer::pipelines::build_pipeline_summary;
+    use crate::analyzer::sarif::{SarifInputs, generate_sarif_string};
     use crate::analyzer::scan::opt_globset;
     use serde_json::json;
 
@@ -678,11 +888,12 @@ fn write_auto_artifacts(
 
     let mut created = Vec::new();
 
-    let loctree_dir = snapshot_root.join(SNAPSHOT_DIR);
+    let loctree_dir = Snapshot::artifacts_dir(snapshot_root);
     fs::create_dir_all(&loctree_dir)?;
 
     let report_path = loctree_dir.join("report.html");
     let analysis_json_path = loctree_dir.join("analysis.json");
+    let sarif_path = loctree_dir.join("report.sarif");
     let circular_json_path = loctree_dir.join("circular.json");
     let races_json_path = loctree_dir.join("py_races.json");
 
@@ -757,6 +968,8 @@ fn write_auto_artifacts(
         ..ParsedArgs::default()
     };
 
+    let git_ctx = Snapshot::current_git_context();
+
     for (idx, ctx) in scan_results.contexts.iter().cloned().enumerate() {
         let RootArtifacts {
             json_items,
@@ -771,8 +984,10 @@ fn write_auto_artifacts(
             &global_unregistered_handlers,
             &global_unused_handlers,
             &pipeline_summary,
+            Some(&git_ctx),
             SCHEMA_NAME,
             SCHEMA_VERSION,
+            &scan_results.global_analyses,
         );
         json_results.extend(json_items);
         if let Some(section) = report_section {
@@ -781,13 +996,13 @@ fn write_auto_artifacts(
     }
 
     write_report(&report_path, &report_sections, parsed.verbose)?;
-    created.push(
+    created.push(format!(
+        "./{}",
         report_path
             .strip_prefix(snapshot_root)
             .unwrap_or(&report_path)
             .display()
-            .to_string(),
-    );
+    ));
 
     let all_graph_edges: Vec<_> = scan_results
         .contexts
@@ -800,13 +1015,13 @@ fn write_auto_artifacts(
         serde_json::to_string_pretty(&json!({ "circularImports": cycles }))
             .map_err(io::Error::other)?,
     )?;
-    created.push(
+    created.push(format!(
+        "./{}",
         circular_json_path
             .strip_prefix(snapshot_root)
             .unwrap_or(&circular_json_path)
             .display()
-            .to_string(),
-    );
+    ));
 
     let race_items: Vec<_> = scan_results
         .global_analyses
@@ -828,19 +1043,25 @@ fn write_auto_artifacts(
         &races_json_path,
         serde_json::to_string_pretty(&race_items).map_err(io::Error::other)?,
     )?;
-    created.push(
+    created.push(format!(
+        "./{}",
         races_json_path
             .strip_prefix(snapshot_root)
             .unwrap_or(&races_json_path)
             .display()
-            .to_string(),
-    );
+    ));
 
     let bundle = json!({
         "schema": { "name": SCHEMA_NAME, "version": SCHEMA_VERSION },
         "generatedAt": time::OffsetDateTime::now_utc()
             .format(&time::format_description::well_known::Iso8601::DEFAULT)
             .unwrap_or_else(|_| "unknown".to_string()),
+        "git": {
+            "repo": git_ctx.repo,
+            "branch": git_ctx.branch,
+            "commit": git_ctx.commit,
+            "scanId": git_ctx.scan_id,
+        },
         "analysis": json_results,
         "pipelineSummary": pipeline_summary,
         "circularImports": cycles,
@@ -850,13 +1071,113 @@ fn write_auto_artifacts(
         &analysis_json_path,
         serde_json::to_string_pretty(&bundle).map_err(io::Error::other)?,
     )?;
-    created.push(
+    created.push(format!(
+        "./{}",
         analysis_json_path
             .strip_prefix(snapshot_root)
             .unwrap_or(&analysis_json_path)
             .display()
-            .to_string(),
-    );
+    ));
+
+    // Generate SARIF report for CI integration
+    let all_ranked_dups: Vec<_> = scan_results
+        .contexts
+        .iter()
+        .flat_map(|ctx| ctx.filtered_ranked.clone())
+        .collect();
+    let high_confidence = parsed.dead_confidence.as_deref() == Some("high");
+    let dead_exports = find_dead_exports(&scan_results.global_analyses, high_confidence, None);
+
+    let sarif_content = generate_sarif_string(SarifInputs {
+        duplicate_exports: &all_ranked_dups,
+        missing_handlers: &global_missing_handlers,
+        unused_handlers: &global_unused_handlers,
+        dead_exports: &dead_exports,
+        circular_imports: &cycles,
+        pipeline_summary: &pipeline_summary,
+    });
+    fs::write(&sarif_path, sarif_content)?;
+    created.push(format!(
+        "./{}",
+        sarif_path
+            .strip_prefix(snapshot_root)
+            .unwrap_or(&sarif_path)
+            .display()
+    ));
+
+    // Save dead exports to standalone JSON for easy access
+    let dead_json_path = loctree_dir.join("dead.json");
+    let dead_json = json!({
+        "deadExports": dead_exports.iter().map(|d| {
+            json!({
+                "file": d.file,
+                "symbol": d.symbol,
+                "line": d.line,
+                "confidence": format!("{:?}", d.confidence),
+                "reason": d.reason,
+            })
+        }).collect::<Vec<_>>(),
+        "count": dead_exports.len(),
+    });
+    fs::write(
+        &dead_json_path,
+        serde_json::to_string_pretty(&dead_json).map_err(io::Error::other)?,
+    )?;
+    created.push(format!(
+        "./{}",
+        dead_json_path
+            .strip_prefix(snapshot_root)
+            .unwrap_or(&dead_json_path)
+            .display()
+    ));
+
+    // Save command handlers coverage to standalone JSON
+    let handlers_json_path = loctree_dir.join("handlers.json");
+    let handlers_json = json!({
+        "missingHandlers": global_missing_handlers.iter().map(|gap| {
+            json!({
+                "command": gap.name,
+                "locations": gap.locations.iter().map(|(path, line)| {
+                    json!({ "path": path, "line": line })
+                }).collect::<Vec<_>>(),
+            })
+        }).collect::<Vec<_>>(),
+        "unusedHandlers": global_unused_handlers.iter().map(|gap| {
+            json!({
+                "command": gap.name,
+                "implementationName": gap.implementation_name,
+                "locations": gap.locations.iter().map(|(path, line)| {
+                    json!({ "path": path, "line": line })
+                }).collect::<Vec<_>>(),
+                "confidence": gap.confidence.as_ref().map(|c| format!("{:?}", c)),
+            })
+        }).collect::<Vec<_>>(),
+        "unregisteredHandlers": global_unregistered_handlers.iter().map(|gap| {
+            json!({
+                "handler": gap.name,
+                "implementationName": gap.implementation_name,
+                "locations": gap.locations.iter().map(|(path, line)| {
+                    json!({ "path": path, "line": line })
+                }).collect::<Vec<_>>(),
+            })
+        }).collect::<Vec<_>>(),
+        "summary": {
+            "missing": global_missing_handlers.len(),
+            "unused": global_unused_handlers.len(),
+            "unregistered": global_unregistered_handlers.len(),
+        },
+    });
+    fs::write(
+        &handlers_json_path,
+        serde_json::to_string_pretty(&handlers_json).map_err(io::Error::other)?,
+    )?;
+    created.push(format!(
+        "./{}",
+        handlers_json_path
+            .strip_prefix(snapshot_root)
+            .unwrap_or(&handlers_json_path)
+            .display()
+    ));
 
     Ok(created)
 }
@@ -911,7 +1232,42 @@ mod tests {
     #[test]
     fn test_snapshot_path() {
         let path = Snapshot::snapshot_path(Path::new("/some/project"));
-        assert_eq!(path, PathBuf::from("/some/project/.loctree/snapshot.json"));
+        // Accept branch@sha subdir if present, but require .loctree and snapshot.json
+        assert!(path.starts_with("/some/project/.loctree"));
+        assert!(path.ends_with("snapshot.json"));
+    }
+
+    #[test]
+    fn test_snapshot_path_prefers_scan_id_when_available() {
+        let ctx = Snapshot::current_git_context();
+        if let Some(scan) = ctx.scan_id {
+            let path = Snapshot::snapshot_path(Path::new("/tmp/loctree"));
+            let display = path.display().to_string();
+            assert!(
+                display.contains(&scan),
+                "expected snapshot path to include scan id {} but got {}",
+                scan,
+                display
+            );
+            assert!(display.ends_with("/snapshot.json"));
+        }
+    }
+
+    #[test]
+    fn test_artifacts_dir_prefers_scan_id() {
+        let ctx = Snapshot::current_git_context();
+        let dir = Snapshot::artifacts_dir(Path::new("/tmp/loctree"));
+        if let Some(scan) = ctx.scan_id {
+            let display = dir.display().to_string();
+            assert!(
+                display.contains(&scan),
+                "expected artifacts dir to include scan id {} but got {}",
+                scan,
+                display
+            );
+        } else {
+            assert!(dir.ends_with(Path::new(".loctree")));
+        }
     }
 
     #[test]
@@ -1065,6 +1421,7 @@ mod tests {
             git_repo: None,
             git_branch: None,
             git_commit: None,
+            git_scan_id: None,
         };
 
         let json = serde_json::to_string(&metadata).expect("serialize");

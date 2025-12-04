@@ -1,6 +1,8 @@
-# loct — AI Agent Quick Reference (v0.5.7)
+# loct — AI Agent Quick Reference (v0.5.10)
 
-Static analysis for AI agents: scan once, slice many. Default `loct` now saves both `.loctree/snapshot.json` **and** a full bundle (`report.html`, `analysis.json`, `circular.json`, `py_races.json`) so you can operate without extra commands.
+Static analysis for AI agents: scan once, slice many. Default `loct` writes `.loctree/<branch@sha>/snapshot.json`; use `loct report --serve` (or `loct lint --sarif`) when you need full artifacts (`analysis.json`, `report.html`, `report.sarif`, etc.).
+
+> **Full documentation:** [AI Agent's Manual](docs/tutorials/ai-agents-manual.md)
 
 ## Core Flow
 
@@ -11,21 +13,29 @@ loct
 # 2) Extract context for a task (3 layers: core, deps, consumers)
 loct slice src/components/ChatPanel.tsx --consumers --json | claude
 
-# 3) Find before you create
-loct find --similar ChatPanel        # avoid duplicates
-loct find --symbol useAuth           # definitions & uses
-loct find --impact src/utils/api.ts  # what breaks if changed
+# 3) Find before you create (fuzzy + defs/uses in one)
+loct find ChatPanel                  # avoid duplicates
+loct find useAuth                    # definitions & uses
+loct find src/utils/api.ts           # quick impact-ish lookup
 
-# 4) Tauri FE↔BE coverage
+# 4) Quick queries (new!)
+loct query who-imports src/utils.ts    # what files import this
+loct query where-symbol useAuth        # find symbol definitions
+loct query component-of src/api.ts     # graph component
+
+# 5) Tauri FE↔BE coverage
 loct commands --missing   # FE calls without BE handlers
 loct commands --unused    # Handlers without FE calls
 loct events --json        # Emit/listen, ghost/orphan/races
 
-# 5) Hygiene
+# 6) Hygiene
 loct dead --confidence high  # unused exports (alias-aware)
 loct cycles                  # circular imports
 
-# 6) CI / policy
+# 7) Delta / diff (new!)
+loct diff --since main       # compare against another snapshot
+
+# 8) CI / policy
 loct lint --fail --sarif > results.sarif
 ```
 
@@ -33,7 +43,7 @@ loct lint --fail --sarif > results.sarif
 
 ```bash
 cargo install loctree
-loct --version   # expect 0.5.7
+loct --version   # expect 0.5.9+
 ```
 
 ## Auto-Detect Stack
@@ -48,18 +58,22 @@ loct --version   # expect 0.5.7
 
 ## What to Run (by goal)
 
-- **Context for AI**: `loct slice <file> --consumers --json`
-- **Find duplicates/usage**: `loct find --similar <Name>`, `loct find --symbol <sym>`
-- **Impact**: `loct find --impact <file>`
+- **Context for AI**: `loct slice <file> --consumers --json` (deps always included)
+- **Find duplicates/usage**: `loct find <pattern>` (fuzzy + defs/uses)
+- **Quick queries**: `loct query who-imports <file>`, `loct query where-symbol <sym>`
+- **Impact**: `loct impact <file>`
 - **Dead code**: `loct dead --confidence high`
 - **Circular imports**: `loct cycles`
 - **Tauri FE↔BE**: `loct commands --missing`, `loct commands --unused`, `loct events --json`
+- **Delta between scans**: `loct diff --since <snapshot_id>`
 - **CI guardrails**: `loct lint --fail --sarif > results.sarif`
 
 ## Tips
 
 - `loct` caches analyses; use `--full-scan` to force a rescan.
-- Artifacts live in `.loctree/` (snapshot + reports) after each scan.
+- Artifacts live in `.loctree/<branch@sha>/`: `snapshot.json` is always written; `analysis.json`/`report.html`/`report.sarif` are produced via `loct report` or `loct lint --sarif`.
+- SARIF file integrates with GitHub/GitLab code scanning and IDEs.
+- SARIF includes `loctree://open?f=<file>&l=<line>` URLs for IDE integration.
 - Respect `.gitignore` by default; add `--scan-all` to include node_modules/target/.venv.
 
 ## Philosophy

@@ -10,6 +10,7 @@
 //! - Dead exports detection (`--dead`)
 
 use std::collections::HashSet;
+use std::fs;
 
 use serde_json::json;
 
@@ -31,26 +32,36 @@ fn paths_match(a: &str, b: &str) -> bool {
     // Normalize separators to forward slashes
     let a_norm = a.replace('\\', "/");
     let b_norm = b.replace('\\', "/");
+    // Trim leading "./" to align relative specs with normalized paths
+    let a_clean = a_norm.trim_start_matches("./");
+    let b_clean = b_norm.trim_start_matches("./");
 
-    if a_norm == b_norm {
+    if a_clean == b_clean {
+        return true;
+    }
+
+    // Normalize to module ids (collapse extensions/index) and compare paths
+    let mod_a = normalize_module_id(a_clean);
+    let mod_b = normalize_module_id(b_clean);
+    if mod_a.path == mod_b.path || mod_a.as_key() == mod_b.as_key() {
         return true;
     }
 
     // Check if one is a suffix of the other at a path component boundary
     // This handles "src/App.tsx" vs "App.tsx" but prevents "foo.ts" matching "foo.test.ts"
-    if a_norm.len() > b_norm.len() {
+    if a_clean.len() > b_clean.len() {
         // Check if a ends with b at a component boundary
-        if let Some(suffix_start) = a_norm.rfind(&b_norm) {
+        if let Some(suffix_start) = a_clean.rfind(b_clean) {
             // Valid if b is at the start OR preceded by a separator
-            if suffix_start == 0 || a_norm.chars().nth(suffix_start - 1) == Some('/') {
+            if suffix_start == 0 || a_clean.chars().nth(suffix_start - 1) == Some('/') {
                 return true;
             }
         }
-    } else if b_norm.len() > a_norm.len() {
+    } else if b_clean.len() > a_clean.len() {
         // Check if b ends with a at a component boundary
-        if let Some(suffix_start) = b_norm.rfind(&a_norm) {
+        if let Some(suffix_start) = b_clean.rfind(a_clean) {
             // Valid if a is at the start OR preceded by a separator
-            if suffix_start == 0 || b_norm.chars().nth(suffix_start - 1) == Some('/') {
+            if suffix_start == 0 || b_clean.chars().nth(suffix_start - 1) == Some('/') {
                 return true;
             }
         }
@@ -104,6 +115,11 @@ pub struct DeadExport {
     pub symbol: String,
     pub line: Option<usize>,
     pub confidence: String,
+    /// Human-readable reason explaining why this export is considered dead
+    pub reason: String,
+    /// IDE integration URL (loctree://open?f={file}&l={line})
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub open_url: Option<String>,
 }
 
 /// Search for symbol occurrences across analyzed files
@@ -326,10 +342,243 @@ pub fn print_similarity_results(
     }
 }
 
+/// Check if a file should be skipped from dead export detection.
+/// These are files whose exports are consumed by external tools/frameworks,
+/// not by regular imports in the codebase.
+fn should_skip_dead_export_check(analysis: &FileAnalysis) -> bool {
+    let path = &analysis.path;
+
+    // Test files and fixtures
+    if analysis.is_test {
+        return true;
+    }
+
+    // Test-related directories
+    const TEST_DIRS: &[&str] = &[
+        "stories",
+        "__tests__",
+        "__mocks__",
+        "__fixtures__",
+        "/cypress/",
+        "/e2e/",
+        "/playwright/",
+        "/test/",
+        "/tests/",
+        "/spec/",
+    ];
+    if TEST_DIRS.iter().any(|d| path.contains(d)) {
+        return true;
+    }
+
+    // TypeScript declaration files (.d.ts) - only contain type declarations
+    if path.ends_with(".d.ts") {
+        return true;
+    }
+
+    // Config files loaded dynamically by build tools (Vite, Jest, Cypress, etc.)
+    if path.contains(".config.") || path.ends_with(".config.ts") || path.ends_with(".config.js") {
+        return true;
+    }
+
+    // Framework routing/entry point conventions
+    // SvelteKit: +page.ts, +layout.ts, +server.ts, +page.server.ts, hooks.*.ts
+    // Next.js: page.tsx, layout.tsx, route.ts (in app/ directory)
+    const FRAMEWORK_ENTRY_PATTERNS: &[&str] = &[
+        "+page.",
+        "+layout.",
+        "+server.",
+        "+error.",
+        "/page.tsx",
+        "/page.ts",
+        "/layout.tsx",
+        "/layout.ts",
+        "/route.ts",
+        "/route.tsx",
+        "/error.tsx",
+        "/loading.tsx",
+        "/not-found.tsx",
+        // SvelteKit hooks (auto-loaded by framework)
+        "hooks.client.",
+        "hooks.server.",
+        "/hooks.",
+    ];
+    if FRAMEWORK_ENTRY_PATTERNS.iter().any(|p| path.contains(p)) {
+        return true;
+    }
+
+    false
+}
+
+/// Check if an export from a Svelte file is likely a component API method.
+/// Svelte components expose methods via `export function` that are called via `bind:this`:
+///   let modal: MyModal;
+///   <MyModal bind:this={modal} />
+///   modal.show();  // calling the exported function
+///
+/// These are NOT imported via ES imports, so they appear as "dead" in static analysis.
+/// Common patterns: show/hide/open/close for modals, focus/blur for inputs, scroll* for containers.
+fn is_svelte_component_api(file_path: &str, export_name: &str) -> bool {
+    // Only applies to .svelte and .svelte.ts files (Svelte modules)
+    let is_svelte_file = file_path.ends_with(".svelte") || file_path.ends_with(".svelte.ts");
+    if !is_svelte_file {
+        return false;
+    }
+
+    // Common component API method names used via bind:this
+    const COMPONENT_API_METHODS: &[&str] = &[
+        // Modal/dialog patterns
+        "show",
+        "hide",
+        "open",
+        "close",
+        "toggle",
+        "dismiss",
+        // Form/input patterns
+        "focus",
+        "blur",
+        "select",
+        "selectAll",
+        "clear",
+        "reset",
+        "validate",
+        "submit",
+        // Text/editor patterns
+        "getText",
+        "setText",
+        "getValue",
+        "setValue",
+        "getContent",
+        "setContent",
+        "insertText",
+        "replaceText",
+        // Scroll patterns
+        "scrollTo",
+        "scrollToTop",
+        "scrollToBottom",
+        "scrollIntoView",
+        // Animation/transition patterns
+        "play",
+        "pause",
+        "stop",
+        "restart",
+        "animate",
+        // State patterns
+        "enable",
+        "disable",
+        "activate",
+        "deactivate",
+        "expand",
+        "collapse",
+        // Lifecycle patterns
+        "init",
+        "destroy",
+        "refresh",
+        "update",
+        "reload",
+        // Svelte reactive getter object patterns (exposed via bind:this)
+        "imports",
+        "exports",
+        "getters",
+        "state",
+        "values",
+    ];
+
+    // Check exact match
+    if COMPONENT_API_METHODS.contains(&export_name) {
+        return true;
+    }
+
+    // Check prefix patterns (e.g., scrollToElement, setFoo, getFoo, applyPr, isActive)
+    // These are common patterns for component methods called via bind:this
+    const API_PREFIXES: &[&str] = &[
+        "scroll",
+        "get",
+        "set",
+        "on",
+        "handle",
+        "apply",
+        "is",
+        "has",
+        "can",
+        "should",
+        "do",
+        "trigger",
+        "emit",
+        "fire",
+        "dispatch",
+        "notify",
+        "load",
+        "fetch",
+        "save",
+        "delete",
+        "add",
+        "remove",
+        "insert",
+        "append",
+        "prepend",
+        "move",
+        "swap",
+        "sort",
+        "filter",
+        "find",
+        "search",
+        "check",
+        "verify",
+        "compute",
+        "calculate",
+        "render",
+        "draw",
+        // CRUD patterns
+        "create",
+        "update",
+        "edit",
+        "reset",
+        "clear",
+        "refresh",
+        "submit",
+        // Navigation/UI patterns
+        "show",
+        "hide",
+        "open",
+        "close",
+        "toggle",
+        "select",
+        "click",
+        "press",
+        // Validation patterns
+        "validate",
+        "sanitize",
+        "normalize",
+        "format",
+        "parse",
+        "serialize",
+        "deserialize",
+    ];
+    for prefix in API_PREFIXES {
+        if export_name.starts_with(prefix)
+            && export_name.len() > prefix.len()
+            && export_name
+                .chars()
+                .nth(prefix.len())
+                .is_some_and(|c| c.is_uppercase())
+        {
+            return true;
+        }
+    }
+
+    false
+}
+
 /// Find potentially dead (unused) exports in the codebase
-pub fn find_dead_exports(analyses: &[FileAnalysis], high_confidence: bool) -> Vec<DeadExport> {
+pub fn find_dead_exports(
+    analyses: &[FileAnalysis],
+    high_confidence: bool,
+    open_base: Option<&str>,
+) -> Vec<DeadExport> {
     // Build usage set: (resolved_path, symbol_name)
     let mut used_exports: HashSet<(String, String)> = HashSet::new();
+    // Track all imported symbol names as fallback (handles $lib/, @scope/, monorepo paths)
+    let mut all_imported_symbols: HashSet<String> = HashSet::new();
 
     for analysis in analyses {
         for imp in &analysis.imports {
@@ -344,51 +593,180 @@ pub fn find_dead_exports(analyses: &[FileAnalysis], high_confidence: bool) -> Ve
 
             // Track named imports
             for sym in &imp.symbols {
-                used_exports.insert((target_norm.clone(), sym.name.clone()));
+                let used_name = if sym.is_default {
+                    "default".to_string()
+                } else {
+                    sym.name.clone()
+                };
+                used_exports.insert((target_norm.clone(), used_name.clone()));
+                // Track all imported symbol names as fallback for unresolved/incorrectly resolved paths
+                // This catches symbols imported via $lib/, @scope/, or other aliases that may not resolve correctly
+                if !used_name.is_empty() {
+                    all_imported_symbols.insert(used_name);
+                }
             }
         }
         // Track re-exports as usage (if A re-exports B, A uses B)
         for re in &analysis.reexports {
-            if let Some(target) = &re.resolved {
-                let target_norm = normalize_module_id(target).as_key();
-                match &re.kind {
-                    ReexportKind::Star => {
-                        used_exports.insert((target_norm, "*".to_string()));
-                    }
-                    ReexportKind::Named(names) => {
-                        for name in names {
-                            used_exports.insert((target_norm.clone(), name.clone()));
-                        }
+            let target_norm = re
+                .resolved
+                .as_ref()
+                .map(|t| normalize_module_id(t).as_key())
+                .unwrap_or_else(|| normalize_module_id(&re.source).as_key());
+            match &re.kind {
+                ReexportKind::Star => {
+                    used_exports.insert((target_norm, "*".to_string()));
+                }
+                ReexportKind::Named(names) => {
+                    for name in names {
+                        used_exports.insert((target_norm.clone(), name.clone()));
                     }
                 }
             }
         }
     }
 
+    // Build set of all Tauri registered command handlers (used via generate_handler![])
+    let tauri_handlers: HashSet<String> = analyses
+        .iter()
+        .flat_map(|a| a.tauri_registered_handlers.iter().cloned())
+        .collect();
+
+    // Build set of all path-qualified symbols from Rust files
+    // These are calls like `command::branch::handle()` that don't use `use` imports
+    let rust_path_qualified_symbols: HashSet<String> = analyses
+        .iter()
+        .filter(|a| a.path.ends_with(".rs"))
+        .flat_map(|a| a.local_uses.iter().cloned())
+        .collect();
+
+    // Build transitive closure of files reachable from dynamic imports.
+    // React.lazy(), Next.js dynamic(), and other code-splitting patterns use dynamic imports.
+    // Files imported this way (and all their dependencies) should not be considered "dead".
+    let dynamically_reachable: HashSet<String> = {
+        // Build import graph: file_path -> list of resolved import paths
+        let mut import_graph: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        for analysis in analyses {
+            let key = normalize_module_id(&analysis.path).as_key();
+            let imports: Vec<String> = analysis
+                .imports
+                .iter()
+                .filter_map(|imp| imp.resolved_path.as_ref())
+                .map(|p| normalize_module_id(p).as_key())
+                .collect();
+            import_graph.insert(key, imports);
+        }
+
+        // Collect initial set of dynamically imported files
+        let mut reachable: HashSet<String> = HashSet::new();
+        for analysis in analyses {
+            for dyn_imp in &analysis.dynamic_imports {
+                let dyn_norm = normalize_module_id(dyn_imp).as_key();
+                // Find matching file in analyses
+                for a in analyses {
+                    let a_norm = normalize_module_id(&a.path).as_key();
+                    if paths_match(dyn_imp, &a_norm) || paths_match(dyn_imp, &a.path) {
+                        reachable.insert(a_norm);
+                        break;
+                    }
+                }
+                // Also add the normalized dynamic import path itself
+                reachable.insert(dyn_norm);
+            }
+        }
+
+        // BFS to compute transitive closure
+        let mut queue: std::collections::VecDeque<String> = reachable.iter().cloned().collect();
+        while let Some(current) = queue.pop_front() {
+            if let Some(imports) = import_graph.get(&current) {
+                for imp in imports {
+                    if !reachable.contains(imp) {
+                        reachable.insert(imp.clone());
+                        queue.push_back(imp.clone());
+                    }
+                }
+            }
+        }
+
+        reachable
+    };
+
     // Identify dead exports
     let mut dead_candidates = Vec::new();
 
     for analysis in analyses {
-        if analysis.is_test
-            || analysis.path.contains("stories")
-            || analysis.path.contains("__tests__")
-        {
+        // Skip files that should be excluded from dead export detection
+        if should_skip_dead_export_check(analysis) {
             continue;
         }
+
+        // Skip lib.rs and main.rs - they are crate entry points:
+        // - lib.rs is the crate's public API, called via qualified paths like `crate_name::func()`
+        // - main.rs is the binary entry point, its exports are not meant to be imported
+        let is_crate_root = analysis.path == "lib.rs"
+            || analysis.path == "main.rs"
+            || analysis.path.ends_with("/lib.rs")
+            || analysis.path.ends_with("/main.rs");
+        if is_crate_root {
+            continue;
+        }
+
         let path_norm = normalize_module_id(&analysis.path).as_key();
 
-        // Skip if file is dynamically imported (assume all exports used)
-        let is_dyn_imported = analyses.iter().any(|a| {
-            a.dynamic_imports.iter().any(|imp| {
-                // Use proper path matching to avoid false positives
-                paths_match(imp, &path_norm) || paths_match(imp, &analysis.path)
-            })
-        });
-        if is_dyn_imported {
+        // Skip if file is reachable from dynamic imports (directly or transitively)
+        // This handles React.lazy(), Next.js dynamic(), and other code-splitting patterns
+        if dynamically_reachable.contains(&path_norm) {
             continue;
         }
 
+        let local_uses: HashSet<_> = analysis.local_uses.iter().cloned().collect();
+
         for exp in &analysis.exports {
+            let is_rust_file = analysis.path.ends_with(".rs");
+            if exp.kind == "reexport" {
+                // Skip barrel bindings to avoid double-reporting re-exported symbols
+                continue;
+            }
+
+            // Rust-specific heuristics: skip common macro-derived public types and CLI args
+            let rust_macro_marked = is_rust_file
+                && rust_has_known_derives(
+                    &analysis.path,
+                    &[
+                        "serialize",
+                        "deserialize",
+                        "parser",
+                        "args",
+                        "valueenum",
+                        "subcommand",
+                        "fromargmatches",
+                    ],
+                );
+            let rust_cli_pattern = is_rust_file
+                && (exp.name.ends_with("Args")
+                    || exp.name.ends_with("Command")
+                    || exp.name.ends_with("Response")
+                    || exp.name.ends_with("Request"));
+            if rust_macro_marked || rust_cli_pattern {
+                continue;
+            }
+
+            // Python-specific heuristics: skip framework magic patterns
+            let is_python_file = analysis.path.ends_with(".py");
+            let python_framework_magic = is_python_file
+                && (
+                    // arq framework looks up WorkerSettings by name convention
+                    exp.name == "WorkerSettings"
+                    // Standard Python package versioning
+                    || exp.name == "__version__"
+                    // pytest fixtures can be used without explicit import (via conftest.py)
+                    || (analysis.path.contains("conftest") && exp.kind == "def")
+                );
+            if python_framework_magic {
+                continue;
+            }
+
             if exp.name == "default"
                 && (analysis.path.ends_with("page.tsx") || analysis.path.ends_with("layout.tsx"))
             {
@@ -404,8 +782,43 @@ pub fn find_dead_exports(analyses: &[FileAnalysis], high_confidence: bool) -> Ve
             let is_used = used_exports.contains(&(path_norm.clone(), exp.name.clone()));
             // Also check if "*" was imported from this file
             let star_used = used_exports.contains(&(path_norm.clone(), "*".to_string()));
+            let locally_used = local_uses.contains(&exp.name);
+            // Check if this is a Tauri command handler registered via generate_handler![]
+            let is_tauri_handler = tauri_handlers.contains(&exp.name);
+            // Fallback: check if symbol is imported anywhere by name
+            // This handles cases where path resolution fails (monorepos, $lib/, @scope/ packages)
+            let imported_by_name = all_imported_symbols.contains(&exp.name);
+            // Check if this is likely a Svelte component API method (called via bind:this)
+            let is_svelte_api = is_svelte_component_api(&analysis.path, &exp.name);
+            // Check if this Rust symbol is called via path qualification (e.g., `module::func()`)
+            let is_rust_path_qualified =
+                analysis.path.ends_with(".rs") && rust_path_qualified_symbols.contains(&exp.name);
 
-            if !is_used && !star_used {
+            if !is_used
+                && !star_used
+                && !locally_used
+                && !is_tauri_handler
+                && !imported_by_name
+                && !is_svelte_api
+                && !is_rust_path_qualified
+            {
+                let open_url = super::build_open_url(&analysis.path, exp.line, open_base);
+
+                // Build human-readable reason
+                let reason = if is_rust_file {
+                    format!(
+                        "No imports found for '{}'. Checked: direct imports (0 matches), \
+                         star imports (none), local uses (none), Tauri handlers (not registered)",
+                        exp.name
+                    )
+                } else {
+                    format!(
+                        "No imports found for '{}'. Checked: resolved imports (0 matches), \
+                         star re-exports (none), local references (none)",
+                        exp.name
+                    )
+                };
+
                 dead_candidates.push(DeadExport {
                     file: analysis.path.clone(),
                     symbol: exp.name.clone(),
@@ -415,12 +828,22 @@ pub fn find_dead_exports(analyses: &[FileAnalysis], high_confidence: bool) -> Ve
                     } else {
                         "high".to_string()
                     },
+                    reason,
+                    open_url: Some(open_url),
                 });
             }
         }
     }
 
     dead_candidates
+}
+
+fn rust_has_known_derives(path: &str, keywords: &[&str]) -> bool {
+    let Ok(content) = fs::read_to_string(path) else {
+        return false;
+    };
+    let lower = content.to_lowercase();
+    lower.contains("derive(") && keywords.iter().any(|kw| lower.contains(kw))
 }
 
 /// Print dead exports results to stdout
@@ -439,7 +862,8 @@ pub fn print_dead_exports(
                     "file": d.file,
                     "symbol": d.symbol,
                     "line": d.line,
-                    "confidence": d.confidence
+                    "confidence": d.confidence,
+                    "reason": d.reason
                 })
             })
             .collect();
@@ -454,7 +878,8 @@ pub fn print_dead_exports(
                 "file": item.file,
                 "symbol": item.symbol,
                 "line": item.line,
-                "confidence": item.confidence
+                "confidence": item.confidence,
+                "reason": item.reason
             });
             println!(
                 "{}",
@@ -475,6 +900,7 @@ pub fn print_dead_exports(
                 None => item.file.clone(),
             };
             println!("  - {} in {}", item.symbol, location);
+            println!("    Reason: {}", item.reason);
         }
         if count > limit {
             println!("  ... and {} more", count - limit);
@@ -486,7 +912,8 @@ pub fn print_dead_exports(
 mod tests {
     use super::*;
     use crate::types::{
-        ExportSymbol, ImportEntry, ImportKind, ImportSymbol, SymbolMatch as TypesSymbolMatch,
+        ExportSymbol, ImportEntry, ImportKind, ImportSymbol, ReexportEntry, ReexportKind,
+        SymbolMatch as TypesSymbolMatch,
     };
 
     fn mock_file(path: &str) -> FileAnalysis {
@@ -554,6 +981,77 @@ mod tests {
         let result = search_symbol("foo", &analyses);
         assert!(result.found);
         assert_eq!(result.files.len(), 1);
+    }
+
+    #[test]
+    fn test_find_dead_exports_respects_from_imports() {
+        let exporter = mock_file_with_exports("pkg/module.py", vec!["Foo"]);
+        let mut importer = mock_file("main.py");
+        let mut imp = ImportEntry::new("pkg.module".to_string(), ImportKind::Static);
+        imp.resolved_path = Some("pkg/module.py".to_string());
+        imp.symbols.push(ImportSymbol {
+            name: "Foo".to_string(),
+            alias: None,
+            is_default: false,
+        });
+        importer.imports.push(imp);
+
+        let result = find_dead_exports(&[importer, exporter], false, None);
+        assert!(
+            result.is_empty(),
+            "export imported with explicit symbol should not be dead"
+        );
+    }
+
+    #[test]
+    fn test_find_dead_exports_respects_local_usage() {
+        let mut file = mock_file_with_exports("app.py", vec!["refresh"]);
+        file.local_uses.push("refresh".to_string());
+        let result = find_dead_exports(&[file], false, None);
+        assert!(
+            result.is_empty(),
+            "locally referenced export should not be marked dead"
+        );
+    }
+
+    #[test]
+    fn test_find_dead_exports_respects_type_imports() {
+        let exporter = mock_file_with_exports("client/actions.ts", vec!["Action"]);
+        let mut importer = mock_file("client/state.ts");
+        let mut imp = ImportEntry::new("client/actions".to_string(), ImportKind::Type);
+        imp.resolved_path = Some("client/actions.ts".to_string());
+        imp.symbols.push(ImportSymbol {
+            name: "Action".to_string(),
+            alias: None,
+            is_default: false,
+        });
+        importer.imports.push(imp);
+
+        let result = find_dead_exports(&[importer, exporter], true, None);
+        assert!(
+            result.is_empty(),
+            "type-only import should count as usage for dead export detection"
+        );
+    }
+
+    #[test]
+    fn test_find_dead_exports_cross_extension_match() {
+        let exporter = mock_file_with_exports("src/ComboBox.tsx", vec!["ComboBox"]);
+        let mut importer = mock_file("src/app.js");
+        let mut imp = ImportEntry::new("./ComboBox".to_string(), ImportKind::Static);
+        imp.resolved_path = Some("src/ComboBox.tsx".to_string());
+        imp.symbols.push(ImportSymbol {
+            name: "ComboBox".to_string(),
+            alias: None,
+            is_default: false,
+        });
+        importer.imports.push(imp);
+
+        let result = find_dead_exports(&[importer, exporter], false, None);
+        assert!(
+            result.is_empty(),
+            "imports across JS/TSX extensions should prevent dead export marking"
+        );
     }
 
     #[test]
@@ -636,7 +1134,7 @@ mod tests {
     #[test]
     fn test_find_dead_exports_empty() {
         let analyses: Vec<FileAnalysis> = vec![];
-        let result = find_dead_exports(&analyses, false);
+        let result = find_dead_exports(&analyses, false, None);
         assert!(result.is_empty());
     }
 
@@ -657,7 +1155,7 @@ mod tests {
         let exporter = mock_file_with_exports("src/utils.ts", vec!["helper"]);
 
         let analyses = vec![importer, exporter];
-        let result = find_dead_exports(&analyses, false);
+        let result = find_dead_exports(&analyses, false, None);
         assert!(result.is_empty());
     }
 
@@ -667,7 +1165,7 @@ mod tests {
             mock_file("src/app.ts"),
             mock_file_with_exports("src/utils.ts", vec!["unusedHelper"]),
         ];
-        let result = find_dead_exports(&analyses, false);
+        let result = find_dead_exports(&analyses, false, None);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].symbol, "unusedHelper");
     }
@@ -679,7 +1177,7 @@ mod tests {
         test_file.is_test = true;
 
         let analyses = vec![mock_file("src/app.ts"), test_file];
-        let result = find_dead_exports(&analyses, false);
+        let result = find_dead_exports(&analyses, false, None);
         assert!(result.is_empty());
     }
 
@@ -689,8 +1187,66 @@ mod tests {
             mock_file("src/app.ts"),
             mock_file_with_exports("src/utils.ts", vec!["default", "helper"]),
         ];
-        let result = find_dead_exports(&analyses, true);
+        let result = find_dead_exports(&analyses, true, None);
         assert!(!result.iter().any(|d| d.symbol == "default"));
+    }
+
+    #[test]
+    fn test_find_dead_exports_skips_dynamic_import_without_extension() {
+        let mut importer = mock_file("src/app.tsx");
+        importer.dynamic_imports = vec!["./utils".to_string()];
+
+        let exporter = mock_file_with_exports("src/utils/index.ts", vec!["foo"]);
+
+        let result = find_dead_exports(&[importer, exporter], false, None);
+        assert!(
+            result.is_empty(),
+            "dynamic import should mark module as used"
+        );
+    }
+
+    #[test]
+    fn test_find_dead_exports_counts_default_import_usage() {
+        let mut importer = mock_file("src/app.ts");
+        importer.imports = vec![{
+            let mut imp = ImportEntry::new("./utils".to_string(), ImportKind::Static);
+            imp.resolved_path = Some("src/utils.ts".to_string());
+            imp.symbols = vec![ImportSymbol {
+                name: "AliasDefault".to_string(),
+                alias: None,
+                is_default: true,
+            }];
+            imp
+        }];
+
+        let mut exporter = mock_file_with_exports("src/utils.ts", vec!["default"]);
+        exporter.exports[0].kind = "default".to_string();
+        exporter.exports[0].export_type = "default".to_string();
+
+        let result = find_dead_exports(&[importer, exporter], false, None);
+        assert!(
+            result.is_empty(),
+            "default import should mark export as used"
+        );
+    }
+
+    #[test]
+    fn test_find_dead_exports_skips_reexport_bindings() {
+        let mut barrel = mock_file_with_exports("src/index.ts", vec!["Foo"]);
+        if let Some(first) = barrel.exports.first_mut() {
+            first.kind = "reexport".to_string();
+        }
+        barrel.reexports.push(ReexportEntry {
+            source: "./foo".to_string(),
+            kind: ReexportKind::Named(vec!["Foo".to_string()]),
+            resolved: Some("src/foo.ts".to_string()),
+        });
+
+        let result = find_dead_exports(&[barrel], false, None);
+        assert!(
+            result.is_empty(),
+            "reexport-only barrels should not be reported as dead exports"
+        );
     }
 
     #[test]
@@ -700,6 +1256,8 @@ mod tests {
             symbol: "unused".to_string(),
             line: Some(10),
             confidence: "high".to_string(),
+            reason: "No imports found for 'unused'. Checked: resolved imports (0 matches), star re-exports (none), local references (none)".to_string(),
+            open_url: Some("loctree://open?f=src%2Futils.ts&l=10".to_string()),
         }];
         // Should not panic
         print_dead_exports(&dead, OutputMode::Json, false, 20);
@@ -712,6 +1270,8 @@ mod tests {
             symbol: "unused".to_string(),
             line: None,
             confidence: "high".to_string(),
+            reason: "No imports found for 'unused'. Checked: resolved imports (0 matches), star re-exports (none), local references (none)".to_string(),
+            open_url: None,
         }];
         // Should not panic
         print_dead_exports(&dead, OutputMode::Human, false, 20);
@@ -726,6 +1286,8 @@ mod tests {
                 symbol: format!("unused{}", i),
                 line: Some(i),
                 confidence: "high".to_string(),
+                reason: format!("No imports found for 'unused{}'. Checked: resolved imports (0 matches), star re-exports (none), local references (none)", i),
+                open_url: Some(format!("loctree://open?f=src%2Ffile{}.ts&l={}", i, i)),
             })
             .collect();
         // Should truncate to limit and show "... and N more"
@@ -749,6 +1311,13 @@ mod tests {
     }
 
     #[test]
+    fn test_paths_match_normalizes_index_and_extension() {
+        assert!(paths_match("src/utils/index.ts", "./utils"));
+        assert!(paths_match("src/components/Foo.tsx", "src/components/Foo"));
+        assert!(paths_match("components/Foo.tsx", "components/Foo.jsx"));
+    }
+
+    #[test]
     fn test_paths_match_suffix() {
         // Should match when one is a suffix of another at component boundary
         assert!(paths_match("src/App.tsx", "App.tsx"));
@@ -766,5 +1335,48 @@ mod tests {
         // Should NOT match when substring is in the middle
         assert!(!paths_match("App.tsx", "src/MyApp.tsx"));
         assert!(!paths_match("Button.tsx", "src/BigButton.tsx"));
+    }
+}
+
+#[cfg(test)]
+mod integration_tests {
+    use super::*;
+    use crate::types::{ExportSymbol, ImportEntry, ImportKind, ImportSymbol};
+
+    #[test]
+    fn test_recommendations_pdf_not_dead() {
+        let mut importer = FileAnalysis {
+            path: "src/services/recommendationsExportService.ts".to_string(),
+            ..Default::default()
+        };
+        let mut imp = ImportEntry::new(
+            "../components/pdf/RecommendationsPDFTemplate".to_string(),
+            ImportKind::Static,
+        );
+        imp.resolved_path = Some("src/components/pdf/RecommendationsPDFTemplate.tsx".to_string());
+        imp.symbols.push(ImportSymbol {
+            name: "RecommendationsPDFTemplate".to_string(),
+            alias: None,
+            is_default: false,
+        });
+        importer.imports.push(imp);
+
+        let exporter = FileAnalysis {
+            path: "src/components/pdf/RecommendationsPDFTemplate.tsx".to_string(),
+            exports: vec![ExportSymbol {
+                name: "RecommendationsPDFTemplate".to_string(),
+                kind: "function".to_string(),
+                export_type: "named".to_string(),
+                line: Some(25),
+            }],
+            ..Default::default()
+        };
+
+        let result = find_dead_exports(&[importer, exporter], false, None);
+        assert!(
+            result.is_empty(),
+            "RecommendationsPDFTemplate should NOT be dead. Found: {:?}",
+            result
+        );
     }
 }

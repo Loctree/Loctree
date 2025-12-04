@@ -17,10 +17,6 @@ if [ -n "$STAGED_RS" ]; then
   (cd loctree_rs && cargo fmt)
   (cd reports && cargo fmt)
   (cd landing && cargo fmt)
-  (cd loctree_memex && cargo fmt)
-  (cd loctree_server && cargo fmt)
-  (cd rmcp_memex && cargo fmt)
-  (cd rmcp_mux && cargo fmt)
 
   # Re-add formatted files
   echo "$STAGED_RS" | xargs -I {} git add "{}" 2>/dev/null || true
@@ -64,34 +60,6 @@ if [ -n "$STAGED_RS" ]; then
   if echo "$STAGED_RS" | grep -q "^landing/"; then
     (cd landing && cargo check --quiet) || {
       echo "❌ landing compilation errors. Fix before committing."
-      exit 1
-    }
-  fi
-
-  if echo "$STAGED_RS" | grep -q "^loctree_memex/"; then
-    (cd loctree_memex && cargo check --quiet) || {
-      echo "❌ loctree_memex compilation errors. Fix before committing."
-      exit 1
-    }
-  fi
-
-  if echo "$STAGED_RS" | grep -q "^loctree_server/"; then
-    (cd loctree_server && cargo check --quiet) || {
-      echo "❌ loctree_server compilation errors. Fix before committing."
-      exit 1
-    }
-  fi
-
-  if echo "$STAGED_RS" | grep -q "^rmcp_memex/"; then
-    (cd rmcp_memex && cargo check --quiet) || {
-      echo "❌ rmcp_memex compilation errors. Fix before committing."
-      exit 1
-    }
-  fi
-
-  if echo "$STAGED_RS" | grep -q "^rmcp_mux/"; then
-    (cd rmcp_mux && cargo check --quiet) || {
-      echo "❌ rmcp_mux compilation errors. Fix before committing."
       exit 1
     }
   fi
