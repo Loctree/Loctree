@@ -391,42 +391,55 @@ fn extract_quick_wins(sections: &[ReportSection]) -> Vec<QuickWin> {
     for section in sections {
         let mut seen_cycles = std::collections::HashSet::new();
 
-        for (from, to) in section.cascades.iter().take(5) {
+        for cycle in section.circular_imports.iter().take(5) {
             if priority > 35 {
                 break;
             }
-
-            // Normalize cycle representation to avoid duplicates (A->B == B->A)
-            let cycle_key = if from < to {
-                (from.clone(), to.clone())
-            } else {
-                (to.clone(), from.clone())
-            };
-
-            if seen_cycles.contains(&cycle_key) {
+            if cycle.is_empty() {
                 continue;
             }
-            seen_cycles.insert(cycle_key);
+
+            let mut key_nodes = cycle.clone();
+            key_nodes.sort();
+            if !seen_cycles.insert(key_nodes) {
+                continue;
+            }
+
+            let mut path = cycle.clone();
+            if path.len() > 1 {
+                path.push(path[0].clone());
+            }
+
+            let target = if path.len() > 8 {
+                let head = path[..3].join(" -> ");
+                let tail = path[path.len() - 3..].join(" -> ");
+                format!("{} -> ... -> {}", head, tail)
+            } else {
+                path.join(" -> ")
+            };
+
+            let location = cycle
+                .first()
+                .cloned()
+                .unwrap_or_else(|| section.root.clone());
 
             wins.push(QuickWin {
                 priority,
                 kind: "circular_import".to_string(),
                 action: "Break circular import".to_string(),
-                target: format!("{} ↔ {}", from, to),
-                location: from.clone(),
+                target,
+                location: location.clone(),
                 impact:
                     "Circular imports can cause runtime errors and make code harder to understand"
                         .to_string(),
-                why: format!(
-                    "File {} imports {} and vice versa, creating a dependency cycle",
-                    from, to
-                ),
+                why: format!("Dependency cycle detected: {}", cycle.join(" → ")),
                 fix_hint:
                     "Extract shared code into a third module, or make the dependency unidirectional"
                         .to_string(),
                 complexity: "medium".to_string(),
                 trace_cmd: None,
-                open_url: super::build_open_url(from, None, section.open_base.as_deref()).into(),
+                open_url: super::build_open_url(&location, None, section.open_base.as_deref())
+                    .into(),
             });
             priority += 1;
         }
@@ -511,7 +524,7 @@ pub fn print_for_ai_json(report: &ForAiReport) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analyzer::report::CommandGap;
+    use crate::analyzer::report::{CommandGap, DupLocation, RankedDup};
     use crate::types::{CommandRef, ImportEntry, ImportKind};
 
     fn mock_file(path: &str, loc: usize) -> FileAnalysis {
@@ -531,6 +544,7 @@ mod tests {
             dynamic_imports_count: 0,
             ranked_dups: vec![],
             cascades: vec![],
+            circular_imports: vec![],
             dynamic: vec![],
             analyze_limit: 50,
             missing_handlers: vec![],
@@ -789,8 +803,6 @@ mod tests {
 
     #[test]
     fn test_extract_quick_wins_dead_exports() {
-        use crate::analyzer::report::{DupLocation, RankedDup};
-
         let mut section = mock_section("src", 10);
         section.ranked_dups = vec![RankedDup {
             name: "UserType".to_string(),
@@ -839,10 +851,14 @@ mod tests {
     #[test]
     fn test_extract_quick_wins_circular_imports() {
         let mut section = mock_section("src", 10);
-        section.cascades = vec![
-            ("src/a.ts".to_string(), "src/b.ts".to_string()),
-            ("src/b.ts".to_string(), "src/a.ts".to_string()),
-            ("src/c.ts".to_string(), "src/d.ts".to_string()),
+        section.circular_imports = vec![
+            vec!["src/a.ts".to_string(), "src/b.ts".to_string()],
+            vec!["src/b.ts".to_string(), "src/a.ts".to_string()],
+            vec![
+                "src/c.ts".to_string(),
+                "src/d.ts".to_string(),
+                "src/e.ts".to_string(),
+            ],
         ];
 
         let sections = vec![section];
@@ -865,7 +881,7 @@ mod tests {
         let win = &cycle_wins[0];
         assert_eq!(win.kind, "circular_import");
         assert_eq!(win.complexity, "medium");
-        assert!(win.why.contains("dependency cycle"));
+        assert!(win.why.contains("Dependency cycle"));
         assert!(
             win.fix_hint
                 .contains("Extract shared code into a third module")
@@ -874,8 +890,6 @@ mod tests {
 
     #[test]
     fn test_extract_quick_wins_all_priorities() {
-        use crate::analyzer::report::{DupLocation, RankedDup};
-
         let mut section = mock_section("src", 10);
 
         // Priority 1: Missing handler
@@ -919,7 +933,7 @@ mod tests {
         }];
 
         // Priority 5: Circular import
-        section.cascades = vec![("x.ts".to_string(), "y.ts".to_string())];
+        section.circular_imports = vec![vec!["x.ts".to_string(), "y.ts".to_string()]];
 
         let sections = vec![section];
         let wins = extract_quick_wins(&sections);

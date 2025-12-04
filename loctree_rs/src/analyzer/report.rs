@@ -151,6 +151,9 @@ pub struct ReportSection {
     pub dynamic_imports_count: usize,
     pub ranked_dups: Vec<RankedDup>,
     pub cascades: Vec<(String, String)>,
+    /// Actual circular import components (normalized)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub circular_imports: Vec<Vec<String>>,
     pub dynamic: Vec<(String, Vec<String>)>,
     pub analyze_limit: usize,
     pub missing_handlers: Vec<CommandGap>,
