@@ -13,8 +13,8 @@ use super::coverage::{
     CommandUsage, compute_command_gaps_with_confidence, compute_unregistered_handlers,
 };
 use super::dead_parrots::{
-    analyze_impact, find_dead_exports, find_similar, print_dead_exports, print_impact_results,
-    print_similarity_results, print_symbol_results, search_symbol,
+    DeadFilterConfig, analyze_impact, find_dead_exports, find_similar, print_dead_exports,
+    print_impact_results, print_similarity_results, print_symbol_results, search_symbol,
 };
 use super::open_server::{open_in_browser, start_open_server};
 use super::output::{RootArtifacts, process_root_context, write_report};
@@ -368,7 +368,15 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
 
     if parsed.dead_exports {
         let high_confidence = parsed.dead_confidence.as_deref() == Some("high");
-        let dead_exports = find_dead_exports(&global_analyses, high_confidence, None);
+        let dead_exports = find_dead_exports(
+            &global_analyses,
+            high_confidence,
+            None,
+            DeadFilterConfig {
+                include_tests: parsed.with_tests,
+                include_helpers: parsed.with_helpers,
+            },
+        );
         // Apply --focus and --exclude-report filters to dead exports
         let filtered_dead: Vec<_> = dead_exports
             .into_iter()
@@ -478,7 +486,15 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
 
         // Get dead exports
         let high_confidence = parsed.dead_confidence.as_deref() == Some("high");
-        let dead_exports = find_dead_exports(&global_analyses, high_confidence, None);
+        let dead_exports = find_dead_exports(
+            &global_analyses,
+            high_confidence,
+            None,
+            DeadFilterConfig {
+                include_tests: parsed.with_tests,
+                include_helpers: parsed.with_helpers,
+            },
+        );
 
         // Get circular imports
         let circular_imports = super::cycles::find_cycles(&all_graph_edges);
@@ -490,7 +506,8 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             dead_exports: &dead_exports,
             circular_imports: &circular_imports,
             pipeline_summary: &pipeline_summary,
-        });
+        })
+        .map_err(|err| io::Error::other(format!("Failed to serialize SARIF: {err}")))?;
         return Ok(());
     }
 
@@ -639,8 +656,15 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
     // Threshold-based CI policy checks
     if let Some(max_dead) = parsed.max_dead {
         let high_confidence = parsed.dead_confidence.as_deref() == Some("high");
-        let dead_exports =
-            super::dead_parrots::find_dead_exports(&global_analyses, high_confidence, None);
+        let dead_exports = super::dead_parrots::find_dead_exports(
+            &global_analyses,
+            high_confidence,
+            None,
+            DeadFilterConfig {
+                include_tests: parsed.with_tests,
+                include_helpers: parsed.with_helpers,
+            },
+        );
         let dead_count = dead_exports.len();
         if dead_count > max_dead {
             fail_reasons.push(format!(

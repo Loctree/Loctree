@@ -538,6 +538,9 @@ pub struct ReportSection {
     pub ranked_dups: Vec<RankedDup>,
     /// Cascade import pairs (source, target)
     pub cascades: Vec<(String, String)>,
+    /// Circular import components
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub circular_imports: Vec<Vec<String>>,
     /// Dynamic imports per file
     pub dynamic: Vec<(String, Vec<String>)>,
     /// Maximum files to analyze (0 = unlimited)

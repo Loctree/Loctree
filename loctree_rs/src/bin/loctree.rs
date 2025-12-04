@@ -3,6 +3,7 @@ use std::panic;
 use std::path::PathBuf;
 
 use loctree::args::{self, parse_args};
+use loctree::cli::{self, Command, DispatchResult};
 use loctree::config::LoctreeConfig;
 use loctree::types::{GitSubcommand, Mode};
 use loctree::{OutputMode, analyzer, detect, diff, fs_utils, git, slicer, snapshot, tree};
@@ -166,8 +167,51 @@ loctree git compare HEAD~5                 # What changed in last 5 commits\n"
 fn main() -> std::io::Result<()> {
     install_broken_pipe_handler();
 
-    let mut parsed = match parse_args() {
-        Ok(args) => args,
+    // Get raw args for the new parser
+    // nosemgrep: rust.lang.security.args.args
+    // SECURITY: args() is used only for CLI flag parsing (paths, --json, etc.),
+    // not for security decisions. The executable path (args[0]) is skipped.
+    let raw_args: Vec<String> = std::env::args().skip(1).collect();
+
+    // Preserve legacy full help output expected by CI/tests
+    if raw_args.iter().any(|a| a == "--help-full") {
+        println!("{}", format_usage_full());
+        return Ok(());
+    }
+
+    // Try new subcommand parser first
+    let mut parsed = match cli::parse_command(&raw_args) {
+        Ok(Some(parsed_cmd)) => {
+            // New syntax detected - dispatch through new system
+            match cli::dispatch_command(&parsed_cmd) {
+                DispatchResult::ShowHelp => {
+                    println!("{}", Command::format_help());
+                    return Ok(());
+                }
+                DispatchResult::ShowLegacyHelp => {
+                    println!("{}", Command::format_legacy_help());
+                    return Ok(());
+                }
+                DispatchResult::ShowVersion => {
+                    println!("loctree {}", env!("CARGO_PKG_VERSION"));
+                    return Ok(());
+                }
+                DispatchResult::Exit(code) => {
+                    std::process::exit(code);
+                }
+                DispatchResult::Continue(args) => *args,
+            }
+        }
+        Ok(None) => {
+            // Legacy syntax - fall back to old parser
+            match parse_args() {
+                Ok(args) => args,
+                Err(err) => {
+                    eprintln!("{}", err);
+                    std::process::exit(1);
+                }
+            }
+        }
         Err(err) => {
             eprintln!("{}", err);
             std::process::exit(1);
@@ -196,6 +240,8 @@ fn main() -> std::io::Result<()> {
             parsed.ignore_patterns.extend(loctreeignore_patterns);
         }
     }
+
+    // Handle help/version for legacy path (new path handles these above)
     if parsed.show_help {
         println!("{}", format_usage());
         return Ok(());
@@ -265,6 +311,9 @@ fn main() -> std::io::Result<()> {
         Mode::ForAi => {
             run_for_ai(&root_list, &parsed)?;
         }
+        Mode::Git(ref subcommand) => {
+            run_git(subcommand, &parsed)?;
+        }
         Mode::Search => {
             let query = parsed.search_query.as_ref().ok_or_else(|| {
                 std::io::Error::new(
@@ -273,9 +322,6 @@ fn main() -> std::io::Result<()> {
                 )
             })?;
             run_search(&root_list, query, &parsed)?;
-        }
-        Mode::Git(ref subcommand) => {
-            run_git(subcommand, &parsed)?;
         }
     }
 
@@ -453,6 +499,7 @@ fn run_for_ai(root_list: &[PathBuf], parsed: &args::ParsedArgs) -> std::io::Resu
         &exclude_set,
     );
 
+    // Build report sections
     let pipeline_summary = analyzer::pipelines::build_pipeline_summary(
         &global_analyses,
         &focus_set,
@@ -464,7 +511,6 @@ fn run_for_ai(root_list: &[PathBuf], parsed: &args::ParsedArgs) -> std::io::Resu
     );
     let git_ctx = snapshot::Snapshot::current_git_context();
 
-    // Build report sections
     let mut report_sections = Vec::new();
     for (idx, ctx) in contexts.into_iter().enumerate() {
         let artifacts = process_root_context(

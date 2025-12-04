@@ -60,6 +60,9 @@ pub const REPORT_CSS: &str = r#"
     /* Scrollbar (Light) */
     --theme-scrollbar: rgba(0, 0, 0, 0.15);
     --theme-scrollbar-hover: rgba(0, 0, 0, 0.25);
+    /* Fallbacks for theme-aware scrollbars */
+    --scrollbar-bg: var(--theme-scrollbar, rgba(0, 0, 0, 0.15));
+    --scrollbar-bg-hover: var(--theme-scrollbar-hover, rgba(0, 0, 0, 0.25));
 
     /* Gradients (Light) */
     --gradient-nav: linear-gradient(135deg, rgba(255,255,255,0.98) 0%, rgba(245,247,250,0.95) 100%);
@@ -78,6 +81,11 @@ pub const REPORT_CSS: &str = r#"
     --font-mono: 'JetBrains Mono', monospace;
     
     color-scheme: light dark;
+}
+
+/* Tooltip safety layer */
+.tooltip-floating {
+    z-index: 9999 !important;
 }
 
 /* ============================================
@@ -105,6 +113,8 @@ html.dark {
     /* Scrollbar (Dark) */
     --theme-scrollbar: rgba(255, 255, 255, 0.15);
     --theme-scrollbar-hover: rgba(255, 255, 255, 0.25);
+    --scrollbar-bg: var(--theme-scrollbar, rgba(255, 255, 255, 0.15));
+    --scrollbar-bg-hover: var(--theme-scrollbar-hover, rgba(255, 255, 255, 0.25));
 
     /* Gradients (Dark) */
     --gradient-nav: linear-gradient(135deg, rgba(10,10,14,0.95) 0%, rgba(32,36,44,0.85) 40%, rgba(120,132,144,0.15) 100%);

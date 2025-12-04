@@ -23,7 +23,7 @@ use super::resolvers::{
 use super::scan::{
     analyze_file, matches_focus, resolve_event_constants_across_files, strip_excluded,
 };
-use super::{RankedDup, coverage::CommandUsage};
+use super::{DupLocation, RankedDup, coverage::CommandUsage};
 
 pub struct ScanConfig<'a> {
     pub roots: &'a [PathBuf],
@@ -145,16 +145,40 @@ pub fn scan_roots(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
             for (handle, root_path) in handles.into_iter().zip(chunk.iter()) {
                 match handle.join() {
                     Ok(Ok(result)) => {
-                        results.lock().unwrap().push(result);
+                        let mut guard = match results.lock() {
+                            Ok(g) => g,
+                            Err(poisoned) => {
+                                eprintln!(
+                                    "[loctree][warn] result mutex poisoned; salvaging partial data"
+                                );
+                                poisoned.into_inner()
+                            }
+                        };
+                        guard.push(result);
                     }
                     Ok(Err(e)) => {
-                        errors.lock().unwrap().push((root_path.clone(), e));
+                        let mut guard = match errors.lock() {
+                            Ok(g) => g,
+                            Err(poisoned) => {
+                                eprintln!(
+                                    "[loctree][warn] error mutex poisoned; salvaging partial errors"
+                                );
+                                poisoned.into_inner()
+                            }
+                        };
+                        guard.push((root_path.clone(), e));
                     }
                     Err(_) => {
-                        errors
-                            .lock()
-                            .unwrap()
-                            .push((root_path.clone(), io::Error::other("thread panic")));
+                        let mut guard = match errors.lock() {
+                            Ok(g) => g,
+                            Err(poisoned) => {
+                                eprintln!(
+                                    "[loctree][warn] error mutex poisoned; salvaging partial errors"
+                                );
+                                poisoned.into_inner()
+                            }
+                        };
+                        guard.push((root_path.clone(), io::Error::other("thread panic")));
                     }
                 }
             }
@@ -162,7 +186,15 @@ pub fn scan_roots(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
     });
 
     // Check for errors
-    let errors = errors.into_inner().unwrap();
+    let errors = match errors.into_inner() {
+        Ok(v) => v,
+        Err(poisoned) => {
+            eprintln!(
+                "[loctree][warn] error mutex poisoned during unwrap; returning partial errors"
+            );
+            poisoned.into_inner()
+        }
+    };
     if !errors.is_empty() {
         let first_err = errors.into_iter().next().unwrap();
         return Err(io::Error::new(
@@ -172,7 +204,15 @@ pub fn scan_roots(cfg: ScanConfig<'_>) -> io::Result<ScanResults> {
     }
 
     // Merge results from all roots
-    let all_results = results.into_inner().unwrap();
+    let all_results = match results.into_inner() {
+        Ok(v) => v,
+        Err(poisoned) => {
+            eprintln!(
+                "[loctree][warn] result mutex poisoned during unwrap; returning partial results"
+            );
+            poisoned.into_inner()
+        }
+    };
     let mut contexts: Vec<RootContext> = Vec::new();
     let mut global_fe_commands: CommandUsage = HashMap::new();
     let mut global_be_commands: CommandUsage = HashMap::new();
@@ -707,6 +747,16 @@ fn scan_single_root(
         }
     }
 
+    // Build lookup map for export line numbers: (file_path, export_name) -> line
+    let export_lines: std::collections::HashMap<(String, String), Option<usize>> = analyses
+        .iter()
+        .flat_map(|a| {
+            a.exports
+                .iter()
+                .map(|e| ((a.path.clone(), e.name.clone()), e.line))
+        })
+        .collect();
+
     let mut ranked_dups: Vec<RankedDup> = Vec::new();
     for (name, files) in &duplicate_exports {
         let all_rs = files.iter().all(|f| f.ends_with(".rs"));
@@ -727,16 +777,32 @@ fn scan_single_root(
             .find(|f| !is_dev_file(f))
             .cloned()
             .unwrap_or_else(|| files[0].clone());
+        let canonical_line = export_lines
+            .get(&(canonical.clone(), name.clone()))
+            .copied()
+            .flatten();
+        let locations: Vec<DupLocation> = files
+            .iter()
+            .map(|f| DupLocation {
+                file: f.clone(),
+                line: export_lines
+                    .get(&(f.clone(), name.clone()))
+                    .copied()
+                    .flatten(),
+            })
+            .collect();
         let mut refactors: Vec<String> =
             files.iter().filter(|f| *f != &canonical).cloned().collect();
         refactors.sort();
         ranked_dups.push(RankedDup {
             name: name.clone(),
             files: files.clone(),
+            locations,
             score,
             prod_count,
             dev_count,
             canonical,
+            canonical_line,
             refactors,
         });
     }
@@ -767,6 +833,16 @@ fn scan_single_root(
         let dev_count = kept_files.iter().filter(|f| is_dev_file(f)).count();
         let prod_count = kept_files.len().saturating_sub(dev_count);
         let score = prod_count * 2 + dev_count;
+        // Filter locations to only kept files
+        let locations: Vec<DupLocation> = dup
+            .locations
+            .into_iter()
+            .filter(|loc| kept_files.contains(&loc.file))
+            .collect();
+        let canonical_line = locations
+            .iter()
+            .find(|loc| loc.file == canonical)
+            .and_then(|loc| loc.line);
         let mut refactors: Vec<String> = kept_files
             .iter()
             .filter(|f| *f != &canonical)
@@ -776,10 +852,12 @@ fn scan_single_root(
         filtered_ranked.push(RankedDup {
             name: dup.name,
             files: kept_files,
+            locations,
             score,
             prod_count,
             dev_count,
             canonical,
+            canonical_line,
             refactors,
         });
     }
@@ -1155,11 +1233,21 @@ pub fn scan_results_from_snapshot(snapshot: &Snapshot) -> ScanResults {
 /// Rank duplicates by severity (helper for snapshot conversion)
 fn rank_duplicates(
     export_index: &ExportIndex,
-    _analyses: &[FileAnalysis],
+    analyses: &[FileAnalysis],
     ignore_exact: &HashSet<String>,
     ignore_prefixes: &[String],
 ) -> Vec<RankedDup> {
     use super::classify::is_dev_file;
+
+    // Build lookup map for export line numbers
+    let export_lines: std::collections::HashMap<(String, String), Option<usize>> = analyses
+        .iter()
+        .flat_map(|a| {
+            a.exports
+                .iter()
+                .map(|e| ((a.path.clone(), e.name.clone()), e.line))
+        })
+        .collect();
 
     let mut ranked = Vec::new();
     for (name, files) in export_index {
@@ -1191,6 +1279,22 @@ fn rank_duplicates(
 
         let score = files.len() + prod_count;
         let canonical = files.first().cloned().unwrap_or_default();
+        let canonical_line = export_lines
+            .get(&(canonical.clone(), name.clone()))
+            .copied()
+            .flatten();
+
+        // Build locations with line numbers
+        let locations: Vec<DupLocation> = files
+            .iter()
+            .map(|f| DupLocation {
+                file: f.clone(),
+                line: export_lines
+                    .get(&(f.clone(), name.clone()))
+                    .copied()
+                    .flatten(),
+            })
+            .collect();
 
         // Refactor targets = all files except canonical
         let refactors: Vec<String> = files.iter().filter(|f| *f != &canonical).cloned().collect();
@@ -1199,9 +1303,11 @@ fn rank_duplicates(
             name: name.clone(),
             score,
             files: files.clone(),
+            locations,
             prod_count,
             dev_count,
             canonical,
+            canonical_line,
             refactors,
         });
     }

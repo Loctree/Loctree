@@ -209,14 +209,19 @@ pub fn generate_sarif(inputs: SarifInputs) -> serde_json::Value {
 }
 
 /// Generate SARIF report as a pretty-printed JSON string
-pub fn generate_sarif_string(inputs: SarifInputs) -> String {
+pub fn generate_sarif_string(inputs: SarifInputs) -> Result<String, serde_json::Error> {
     serde_json::to_string_pretty(&build_sarif(inputs))
-        .expect("Failed to serialize SARIF report to JSON")
 }
 
 /// Print SARIF report to stdout
-pub fn print_sarif(inputs: SarifInputs) {
-    println!("{}", generate_sarif_string(inputs));
+pub fn print_sarif(inputs: SarifInputs) -> Result<(), serde_json::Error> {
+    match generate_sarif_string(inputs) {
+        Ok(json) => {
+            println!("{}", json);
+            Ok(())
+        }
+        Err(err) => Err(err),
+    }
 }
 
 #[cfg(test)]
@@ -229,9 +234,11 @@ mod tests {
             name: name.to_string(),
             canonical: name.to_lowercase(),
             files: files.into_iter().map(|s| s.to_string()).collect(),
+            locations: vec![],
             score: 1,
             prod_count: 0,
             dev_count: 0,
+            canonical_line: None,
             refactors: vec![],
         }
     }
@@ -273,8 +280,7 @@ mod tests {
             circular_imports: &[],
             pipeline_summary: &json!({}),
         };
-        // Should not panic
-        print_sarif(inputs);
+        assert!(print_sarif(inputs).is_ok());
     }
 
     #[test]
@@ -288,7 +294,7 @@ mod tests {
             circular_imports: &[],
             pipeline_summary: &json!({}),
         };
-        print_sarif(inputs);
+        assert!(print_sarif(inputs).is_ok());
     }
 
     #[test]
@@ -302,7 +308,7 @@ mod tests {
             circular_imports: &[],
             pipeline_summary: &json!({}),
         };
-        print_sarif(inputs);
+        assert!(print_sarif(inputs).is_ok());
     }
 
     #[test]
@@ -316,7 +322,7 @@ mod tests {
             circular_imports: &[],
             pipeline_summary: &json!({}),
         };
-        print_sarif(inputs);
+        assert!(print_sarif(inputs).is_ok());
     }
 
     #[test]
@@ -333,7 +339,7 @@ mod tests {
             circular_imports: &[],
             pipeline_summary: &json!({}),
         };
-        print_sarif(inputs);
+        assert!(print_sarif(inputs).is_ok());
     }
 
     #[test]
@@ -351,7 +357,7 @@ mod tests {
             circular_imports: &cycles,
             pipeline_summary: &json!({}),
         };
-        print_sarif(inputs);
+        assert!(print_sarif(inputs).is_ok());
     }
 
     #[test]
@@ -371,7 +377,7 @@ mod tests {
             circular_imports: &[],
             pipeline_summary: &summary,
         };
-        print_sarif(inputs);
+        assert!(print_sarif(inputs).is_ok());
     }
 
     #[test]
@@ -391,7 +397,7 @@ mod tests {
             circular_imports: &[],
             pipeline_summary: &summary,
         };
-        print_sarif(inputs);
+        assert!(print_sarif(inputs).is_ok());
     }
 
     #[test]
@@ -416,7 +422,7 @@ mod tests {
             circular_imports: &cycles,
             pipeline_summary: &summary,
         };
-        print_sarif(inputs);
+        assert!(print_sarif(inputs).is_ok());
     }
 
     #[test]
@@ -437,6 +443,6 @@ mod tests {
             circular_imports: &[],
             pipeline_summary: &json!({}),
         };
-        print_sarif(inputs);
+        assert!(print_sarif(inputs).is_ok());
     }
 }

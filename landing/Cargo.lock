@@ -877,7 +877,7 @@ dependencies = [
 
 [[package]]
 name = "loctree-landing"
-version = "0.1.2"
+version = "0.1.4"
 dependencies = [
  "console_error_panic_hook",
  "js-sys",

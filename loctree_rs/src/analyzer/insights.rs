@@ -233,10 +233,12 @@ mod tests {
             .map(|i| RankedDup {
                 name: format!("dup{}", i),
                 files: vec![format!("file{}.ts", i)],
+                locations: vec![],
                 score: i,
                 prod_count: 1,
                 dev_count: 0,
                 canonical: format!("file{}.ts", i),
+                canonical_line: None,
                 refactors: vec![],
             })
             .collect();

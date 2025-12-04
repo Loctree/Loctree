@@ -6,7 +6,7 @@ pub fn ForAgents() -> impl IntoView {
 
     let agent_prompt = r#"## loct Quick Reference
 
-**Install:** `curl -fsSL https://loctree.io/install.sh | sh`
+**Install:** `cargo install loctree`
 
 ### Before creating components
 ```bash

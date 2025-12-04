@@ -487,6 +487,7 @@ pub(crate) fn analyze_py_file(
     let mut type_check_stack: Vec<usize> = Vec::new();
     let mut pending_callback_decorator = false;
     let mut pending_framework_decorator = false;
+    let mut in_docstring = false;
 
     // Set Python-specific metadata
     analysis.is_test = is_python_test_file(path, content);
@@ -495,6 +496,29 @@ pub(crate) fn analyze_py_file(
 
     for (idx, line) in content.lines().enumerate() {
         let line_num = idx + 1;
+        let trimmed_leading = line.trim_start();
+
+        if in_docstring {
+            // End docstring on closing triple quotes
+            if trimmed_leading.contains("\"\"\"") || trimmed_leading.contains("'''") {
+                in_docstring = false;
+            }
+            continue;
+        }
+
+        // Skip docstring/comment blocks at the start of a line
+        if trimmed_leading.starts_with("\"\"\"") || trimmed_leading.starts_with("'''") {
+            // If closing appears on the same line, exit docstring immediately
+            let mut occurrences = 0;
+            for token in ["\"\"\"", "'''"] {
+                occurrences += trimmed_leading.matches(token).count();
+            }
+            if occurrences < 2 {
+                in_docstring = true;
+            }
+            continue;
+        }
+
         let without_comment = line.split('#').next().unwrap_or("").trim_end();
         let indent = without_comment
             .chars()
@@ -1023,6 +1047,27 @@ import sys
         assert_eq!(imp.symbols[0].name, "Foo");
         assert_eq!(imp.symbols[0].alias.as_deref(), Some("Bar"));
         assert_eq!(imp.symbols[1].name, "Baz");
+    }
+
+    #[test]
+    fn ignores_imports_inside_docstrings() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path();
+        let content = "\"\"\"\nExample:\n    from app.middlewares.request_id import get_request_id\n\"\"\"\n\ndef real():\n    return 1\n";
+        let path = root.join("main.py");
+        let analysis = analyze_py_file(
+            content,
+            &path,
+            root,
+            Some(&py_exts()),
+            "main.py".to_string(),
+            &[root.to_path_buf()],
+            python_stdlib_set(),
+        );
+        assert!(
+            analysis.imports.is_empty(),
+            "docstring-only import should be ignored"
+        );
     }
 
     #[test]
