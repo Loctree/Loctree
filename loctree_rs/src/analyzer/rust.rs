@@ -169,6 +169,91 @@ fn find_balanced_bracket(s: &str) -> usize {
     0
 }
 
+/// Strip `use` statements from inside function bodies to avoid false positive cycles.
+/// Inline imports (inside `fn`) are lazy-resolved and shouldn't contribute to module cycles.
+fn strip_function_body_uses(content: &str) -> String {
+    let mut result = String::new();
+    let bytes = content.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+    let mut fn_brace_depth: i32 = 0; // Track depth only when inside a function body
+
+    while i < len {
+        // Look for 'fn ' keyword (must be preceded by whitespace or start of file)
+        if i + 3 <= len
+            && &bytes[i..i + 3] == b"fn "
+            && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric())
+        {
+            // Found 'fn ', now skip to the opening brace '{'
+            result.push_str("fn ");
+            i += 3;
+
+            // Skip until we find '{' (the function body start)
+            while i < len {
+                let ch = bytes[i] as char;
+                result.push(ch);
+                i += 1;
+                if ch == '{' {
+                    fn_brace_depth = 1;
+                    break;
+                }
+            }
+            continue;
+        }
+
+        // If we're inside a function body
+        if fn_brace_depth > 0 {
+            let ch = bytes[i] as char;
+
+            // Track brace depth
+            match ch {
+                '{' => {
+                    fn_brace_depth += 1;
+                    result.push(ch);
+                    i += 1;
+                }
+                '}' => {
+                    fn_brace_depth -= 1;
+                    result.push(ch);
+                    i += 1;
+                }
+                _ => {
+                    // Check for 'use ' at start of statement (after whitespace/newline)
+                    if i + 4 <= len
+                        && &bytes[i..i + 4] == b"use "
+                        && (i == 0
+                            || bytes[i - 1] == b'\n'
+                            || bytes[i - 1] == b' '
+                            || bytes[i - 1] == b'\t'
+                            || bytes[i - 1] == b'{')
+                    {
+                        // Skip the entire use statement until ';'
+                        while i < len && bytes[i] != b';' {
+                            i += 1;
+                        }
+                        // Skip the ';' too
+                        if i < len {
+                            i += 1;
+                        }
+                        // Skip trailing whitespace/newline
+                        while i < len && (bytes[i] == b' ' || bytes[i] == b'\n') {
+                            i += 1;
+                        }
+                    } else {
+                        result.push(ch);
+                        i += 1;
+                    }
+                }
+            }
+        } else {
+            result.push(bytes[i] as char);
+            i += 1;
+        }
+    }
+
+    result
+}
+
 /// Strip `#[cfg(test)]` annotated modules from content to avoid false positive cycles.
 /// This removes test-only imports from dependency analysis.
 fn strip_cfg_test_modules(content: &str) -> String {
@@ -312,8 +397,8 @@ pub(crate) fn analyze_rust_file(
     let mut event_emits = Vec::new();
     let mut event_listens = Vec::new();
 
-    // Strip #[cfg(test)] modules to avoid false positive cycles from test-only imports
-    let production_content = strip_cfg_test_modules(content);
+    // Strip #[cfg(test)] modules and inline function-body imports to avoid false positive cycles
+    let production_content = strip_function_body_uses(&strip_cfg_test_modules(content));
 
     for caps in regex_rust_use().captures_iter(&production_content) {
         let source = caps.get(1).map(|m| m.as_str()).unwrap_or("").trim();
@@ -1059,5 +1144,82 @@ mod tests {
             !sources.iter().any(|s| s.contains("test_only")),
             "Should NOT have test-only import"
         );
+    }
+
+    #[test]
+    fn strip_function_body_uses_excludes_inline_imports() {
+        // This is the exact pattern that caused false positive cycles in snapshot.rs
+        let content = r#"
+use crate::types::FileAnalysis;
+
+pub fn run_init() {
+    use crate::analyzer::root_scan::{ScanConfig, scan_roots};
+    use crate::analyzer::runner::default_analyzer_exts;
+
+    let _x = 1;
+}
+
+pub fn another_fn() {}
+"#;
+        let analysis = analyze_rust_file(content, "snapshot.rs".to_string(), &[]);
+
+        // Should only have the module-level import, NOT the inline imports
+        assert_eq!(
+            analysis.imports.len(),
+            1,
+            "Should have 1 module-level import, got {:?}",
+            analysis.imports
+        );
+        assert!(
+            analysis.imports[0].source.contains("types::FileAnalysis"),
+            "Should have FileAnalysis import"
+        );
+        // Should NOT contain the inline imports
+        assert!(
+            !analysis
+                .imports
+                .iter()
+                .any(|i| i.source.contains("root_scan")),
+            "Should NOT contain inline root_scan import"
+        );
+        assert!(
+            !analysis.imports.iter().any(|i| i.source.contains("runner")),
+            "Should NOT contain inline runner import"
+        );
+    }
+
+    #[test]
+    fn strip_function_body_preserves_module_level_imports() {
+        let content = r#"
+use crate::one::A;
+use crate::two::B;
+
+fn helper() {
+    use crate::inline::C;
+}
+
+use crate::three::D;
+"#;
+        let analysis = analyze_rust_file(content, "test.rs".to_string(), &[]);
+
+        // Should have 3 module-level imports (A, B, D), NOT the inline one (C)
+        let sources: Vec<&str> = analysis.imports.iter().map(|i| i.source.as_str()).collect();
+        assert!(
+            sources.iter().any(|s| s.contains("one::A")),
+            "Should have A"
+        );
+        assert!(
+            sources.iter().any(|s| s.contains("two::B")),
+            "Should have B"
+        );
+        assert!(
+            sources.iter().any(|s| s.contains("three::D")),
+            "Should have D"
+        );
+        assert!(
+            !sources.iter().any(|s| s.contains("inline::C")),
+            "Should NOT have inline C"
+        );
+        assert_eq!(sources.len(), 3, "Should have exactly 3 imports");
     }
 }
