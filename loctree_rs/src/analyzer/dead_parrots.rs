@@ -19,6 +19,16 @@ use crate::types::{FileAnalysis, OutputMode, ReexportKind};
 
 use super::root_scan::{RootContext, normalize_module_id};
 
+fn strip_alias_prefix(path: &str) -> &str {
+    // Drop leading alias markers like @core/... -> core/...
+    let without_at = path.trim_start_matches('@');
+    if let Some(idx) = without_at.find('/') {
+        &without_at[idx + 1..]
+    } else {
+        without_at
+    }
+}
+
 use serde::Serialize;
 
 /// Compare two paths for equality using proper path matching
@@ -33,16 +43,30 @@ fn paths_match(a: &str, b: &str) -> bool {
     let a_norm = a.replace('\\', "/");
     let b_norm = b.replace('\\', "/");
     // Trim leading "./" to align relative specs with normalized paths
-    let a_clean = a_norm.trim_start_matches("./");
-    let b_clean = b_norm.trim_start_matches("./");
+    let a_clean = a_norm.trim_start_matches("./").to_string();
+    let b_clean = b_norm.trim_start_matches("./").to_string();
+
+    // On Windows, compare case-insensitively to avoid false mismatches on case variants
+    let (a_clean, b_clean) = if cfg!(windows) {
+        (a_clean.to_lowercase(), b_clean.to_lowercase())
+    } else {
+        (a_clean, b_clean)
+    };
 
     if a_clean == b_clean {
         return true;
     }
 
+    // Also allow alias-stripped comparisons (e.g., @core/utils vs src/core/utils)
+    let a_alias = strip_alias_prefix(&a_clean);
+    let b_alias = strip_alias_prefix(&b_clean);
+    if a_alias == b_clean || b_alias == a_clean || a_alias == b_alias {
+        return true;
+    }
+
     // Normalize to module ids (collapse extensions/index) and compare paths
-    let mod_a = normalize_module_id(a_clean);
-    let mod_b = normalize_module_id(b_clean);
+    let mod_a = normalize_module_id(&a_clean);
+    let mod_b = normalize_module_id(&b_clean);
     if mod_a.path == mod_b.path || mod_a.as_key() == mod_b.as_key() {
         return true;
     }
@@ -51,7 +75,7 @@ fn paths_match(a: &str, b: &str) -> bool {
     // This handles "src/App.tsx" vs "App.tsx" but prevents "foo.ts" matching "foo.test.ts"
     if a_clean.len() > b_clean.len() {
         // Check if a ends with b at a component boundary
-        if let Some(suffix_start) = a_clean.rfind(b_clean) {
+        if let Some(suffix_start) = a_clean.rfind(&b_clean) {
             // Valid if b is at the start OR preceded by a separator
             if suffix_start == 0 || a_clean.chars().nth(suffix_start - 1) == Some('/') {
                 return true;
@@ -59,7 +83,7 @@ fn paths_match(a: &str, b: &str) -> bool {
         }
     } else if b_clean.len() > a_clean.len() {
         // Check if b ends with a at a component boundary
-        if let Some(suffix_start) = b_clean.rfind(a_clean) {
+        if let Some(suffix_start) = b_clean.rfind(&a_clean) {
             // Valid if a is at the start OR preceded by a separator
             if suffix_start == 0 || b_clean.chars().nth(suffix_start - 1) == Some('/') {
                 return true;
@@ -120,6 +144,15 @@ pub struct DeadExport {
     /// IDE integration URL (loctree://open?f={file}&l={line})
     #[serde(skip_serializing_if = "Option::is_none")]
     pub open_url: Option<String>,
+}
+
+/// Controls which files are considered during dead-export detection.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DeadFilterConfig {
+    /// Include tests and fixtures (default: false)
+    pub include_tests: bool,
+    /// Include helper/scripts/docs files (default: false)
+    pub include_helpers: bool,
 }
 
 /// Search for symbol occurrences across analyzed files
@@ -345,11 +378,11 @@ pub fn print_similarity_results(
 /// Check if a file should be skipped from dead export detection.
 /// These are files whose exports are consumed by external tools/frameworks,
 /// not by regular imports in the codebase.
-fn should_skip_dead_export_check(analysis: &FileAnalysis) -> bool {
+fn should_skip_dead_export_check(analysis: &FileAnalysis, config: DeadFilterConfig) -> bool {
     let path = &analysis.path;
 
     // Test files and fixtures
-    if analysis.is_test {
+    if analysis.is_test && !config.include_tests {
         return true;
     }
 
@@ -366,7 +399,7 @@ fn should_skip_dead_export_check(analysis: &FileAnalysis) -> bool {
         "/tests/",
         "/spec/",
     ];
-    if TEST_DIRS.iter().any(|d| path.contains(d)) {
+    if TEST_DIRS.iter().any(|d| path.contains(d)) && !config.include_tests {
         return true;
     }
 
@@ -378,6 +411,18 @@ fn should_skip_dead_export_check(analysis: &FileAnalysis) -> bool {
     // Config files loaded dynamically by build tools (Vite, Jest, Cypress, etc.)
     if path.contains(".config.") || path.ends_with(".config.ts") || path.ends_with(".config.js") {
         return true;
+    }
+
+    if !config.include_helpers {
+        const HELPER_DIRS: &[&str] = &["/scripts/", "/script/", "/tools/", "/docs/"];
+        if HELPER_DIRS.iter().any(|d| path.contains(d))
+            || path.starts_with("scripts/")
+            || path.starts_with("script/")
+            || path.starts_with("tools/")
+            || path.starts_with("docs/")
+        {
+            return true;
+        }
     }
 
     // Framework routing/entry point conventions
@@ -574,6 +619,7 @@ pub fn find_dead_exports(
     analyses: &[FileAnalysis],
     high_confidence: bool,
     open_base: Option<&str>,
+    config: DeadFilterConfig,
 ) -> Vec<DeadExport> {
     // Build usage set: (resolved_path, symbol_name)
     let mut used_exports: HashSet<(String, String)> = HashSet::new();
@@ -662,17 +708,29 @@ pub fn find_dead_exports(
         let mut reachable: HashSet<String> = HashSet::new();
         for analysis in analyses {
             for dyn_imp in &analysis.dynamic_imports {
-                let dyn_norm = normalize_module_id(dyn_imp).as_key();
+                let dyn_norm = normalize_module_id(dyn_imp);
+                let dyn_key = dyn_norm.as_key();
+                let dyn_alias = strip_alias_prefix(&dyn_norm.path).to_string();
                 // Find matching file in analyses
                 for a in analyses {
-                    let a_norm = normalize_module_id(&a.path).as_key();
-                    if paths_match(dyn_imp, &a_norm) || paths_match(dyn_imp, &a.path) {
-                        reachable.insert(a_norm);
+                    let a_norm = normalize_module_id(&a.path);
+                    let a_key = a_norm.as_key();
+                    if paths_match(dyn_imp, &a_norm.path)
+                        || paths_match(dyn_imp, &a.path)
+                        || a_norm.path.starts_with(&dyn_norm.path)
+                        || a_norm.path.starts_with(&dyn_alias)
+                        || a_norm.path.ends_with(&dyn_alias)
+                    {
+                        reachable.insert(a_key);
                         break;
                     }
                 }
                 // Also add the normalized dynamic import path itself
-                reachable.insert(dyn_norm);
+                reachable.insert(dyn_key.clone());
+                // Alias-prefix fallback for unresolvable module ids (e.g., @core/foo)
+                if !dyn_alias.is_empty() {
+                    reachable.insert(dyn_alias.clone());
+                }
             }
         }
 
@@ -697,7 +755,7 @@ pub fn find_dead_exports(
 
     for analysis in analyses {
         // Skip files that should be excluded from dead export detection
-        if should_skip_dead_export_check(analysis) {
+        if should_skip_dead_export_check(analysis, config) {
             continue;
         }
 
@@ -996,7 +1054,12 @@ mod tests {
         });
         importer.imports.push(imp);
 
-        let result = find_dead_exports(&[importer, exporter], false, None);
+        let result = find_dead_exports(
+            &[importer, exporter],
+            false,
+            None,
+            DeadFilterConfig::default(),
+        );
         assert!(
             result.is_empty(),
             "export imported with explicit symbol should not be dead"
@@ -1007,7 +1070,7 @@ mod tests {
     fn test_find_dead_exports_respects_local_usage() {
         let mut file = mock_file_with_exports("app.py", vec!["refresh"]);
         file.local_uses.push("refresh".to_string());
-        let result = find_dead_exports(&[file], false, None);
+        let result = find_dead_exports(&[file], false, None, DeadFilterConfig::default());
         assert!(
             result.is_empty(),
             "locally referenced export should not be marked dead"
@@ -1027,7 +1090,12 @@ mod tests {
         });
         importer.imports.push(imp);
 
-        let result = find_dead_exports(&[importer, exporter], true, None);
+        let result = find_dead_exports(
+            &[importer, exporter],
+            true,
+            None,
+            DeadFilterConfig::default(),
+        );
         assert!(
             result.is_empty(),
             "type-only import should count as usage for dead export detection"
@@ -1047,7 +1115,12 @@ mod tests {
         });
         importer.imports.push(imp);
 
-        let result = find_dead_exports(&[importer, exporter], false, None);
+        let result = find_dead_exports(
+            &[importer, exporter],
+            false,
+            None,
+            DeadFilterConfig::default(),
+        );
         assert!(
             result.is_empty(),
             "imports across JS/TSX extensions should prevent dead export marking"
@@ -1134,7 +1207,7 @@ mod tests {
     #[test]
     fn test_find_dead_exports_empty() {
         let analyses: Vec<FileAnalysis> = vec![];
-        let result = find_dead_exports(&analyses, false, None);
+        let result = find_dead_exports(&analyses, false, None, DeadFilterConfig::default());
         assert!(result.is_empty());
     }
 
@@ -1155,7 +1228,7 @@ mod tests {
         let exporter = mock_file_with_exports("src/utils.ts", vec!["helper"]);
 
         let analyses = vec![importer, exporter];
-        let result = find_dead_exports(&analyses, false, None);
+        let result = find_dead_exports(&analyses, false, None, DeadFilterConfig::default());
         assert!(result.is_empty());
     }
 
@@ -1165,7 +1238,7 @@ mod tests {
             mock_file("src/app.ts"),
             mock_file_with_exports("src/utils.ts", vec!["unusedHelper"]),
         ];
-        let result = find_dead_exports(&analyses, false, None);
+        let result = find_dead_exports(&analyses, false, None, DeadFilterConfig::default());
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].symbol, "unusedHelper");
     }
@@ -1177,8 +1250,36 @@ mod tests {
         test_file.is_test = true;
 
         let analyses = vec![mock_file("src/app.ts"), test_file];
-        let result = find_dead_exports(&analyses, false, None);
+        let result = find_dead_exports(&analyses, false, None, DeadFilterConfig::default());
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_find_dead_exports_includes_tests_when_requested() {
+        let mut test_file =
+            mock_file_with_exports("src/__tests__/utils.test.ts", vec!["testHelper"]);
+        test_file.is_test = true;
+
+        let analyses = vec![mock_file("src/app.ts"), test_file];
+        let result = find_dead_exports(
+            &analyses,
+            false,
+            None,
+            DeadFilterConfig {
+                include_tests: true,
+                include_helpers: false,
+            },
+        );
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].symbol, "testHelper");
+    }
+
+    #[test]
+    fn test_find_dead_exports_skips_helpers_by_default() {
+        let helper = mock_file_with_exports("scripts/cleanup.py", vec!["orphan"]);
+        let analyses = vec![mock_file("src/app.ts"), helper];
+        let result = find_dead_exports(&analyses, false, None, DeadFilterConfig::default());
+        assert!(result.is_empty(), "helper scripts should be skipped");
     }
 
     #[test]
@@ -1187,7 +1288,7 @@ mod tests {
             mock_file("src/app.ts"),
             mock_file_with_exports("src/utils.ts", vec!["default", "helper"]),
         ];
-        let result = find_dead_exports(&analyses, true, None);
+        let result = find_dead_exports(&analyses, true, None, DeadFilterConfig::default());
         assert!(!result.iter().any(|d| d.symbol == "default"));
     }
 
@@ -1198,10 +1299,34 @@ mod tests {
 
         let exporter = mock_file_with_exports("src/utils/index.ts", vec!["foo"]);
 
-        let result = find_dead_exports(&[importer, exporter], false, None);
+        let result = find_dead_exports(
+            &[importer, exporter],
+            false,
+            None,
+            DeadFilterConfig::default(),
+        );
         assert!(
             result.is_empty(),
             "dynamic import should mark module as used"
+        );
+    }
+
+    #[test]
+    fn test_dynamic_import_with_alias_prefix_marks_reachable() {
+        let mut importer = mock_file("src/app.ts");
+        importer.dynamic_imports = vec!["@core/utils".to_string()];
+
+        let exporter = mock_file_with_exports("src/core/utils/index.ts", vec!["helper"]);
+
+        let result = find_dead_exports(
+            &[importer, exporter],
+            false,
+            None,
+            DeadFilterConfig::default(),
+        );
+        assert!(
+            result.is_empty(),
+            "alias-prefixed dynamic import should keep target reachable"
         );
     }
 
@@ -1223,7 +1348,12 @@ mod tests {
         exporter.exports[0].kind = "default".to_string();
         exporter.exports[0].export_type = "default".to_string();
 
-        let result = find_dead_exports(&[importer, exporter], false, None);
+        let result = find_dead_exports(
+            &[importer, exporter],
+            false,
+            None,
+            DeadFilterConfig::default(),
+        );
         assert!(
             result.is_empty(),
             "default import should mark export as used"
@@ -1242,7 +1372,7 @@ mod tests {
             resolved: Some("src/foo.ts".to_string()),
         });
 
-        let result = find_dead_exports(&[barrel], false, None);
+        let result = find_dead_exports(&[barrel], false, None, DeadFilterConfig::default());
         assert!(
             result.is_empty(),
             "reexport-only barrels should not be reported as dead exports"
@@ -1372,7 +1502,12 @@ mod integration_tests {
             ..Default::default()
         };
 
-        let result = find_dead_exports(&[importer, exporter], false, None);
+        let result = find_dead_exports(
+            &[importer, exporter],
+            false,
+            None,
+            DeadFilterConfig::default(),
+        );
         assert!(
             result.is_empty(),
             "RecommendationsPDFTemplate should NOT be dead. Found: {:?}",

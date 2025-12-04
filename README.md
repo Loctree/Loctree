@@ -16,11 +16,8 @@
 ## Quick Start
 
 ```bash
-# Install from crates.io
+# Install from crates.io (preferred)
 cargo install loctree
-
-# Or via install script
-curl -fsSL https://raw.githubusercontent.com/Loctree/Loctree/main/tools/install.sh | sh
 
 # Scan your project (auto-detects stack)
 cd your-project
@@ -289,10 +286,10 @@ cd loctree/loctree_rs
 cargo install --path .
 ```
 
-### Install script
+### Crates.io install (recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Loctree/Loctree/main/tools/install.sh | sh
+cargo install loctree
 ```
 
 ## Project Structure

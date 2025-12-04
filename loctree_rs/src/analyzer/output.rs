@@ -13,7 +13,8 @@ use super::CommandGap;
 use super::RankedDup;
 use super::ReportSection;
 use super::classify::language_from_path;
-use super::dead_parrots::find_dead_exports;
+use super::cycles;
+use super::dead_parrots::{DeadFilterConfig, find_dead_exports};
 use super::graph::{MAX_GRAPH_EDGES, MAX_GRAPH_NODES, build_graph_data};
 use super::html::render_html_report;
 use super::insights::collect_ai_insights;
@@ -76,6 +77,45 @@ fn build_tree(analyses: &[FileAnalysis], root_path: &std::path::Path) -> Vec<Tre
         .iter()
         .map(|(k, v)| finalize(Some(k.clone()), v))
         .collect()
+}
+
+/// Build edges for cycle detection even when graph collection is disabled.
+/// Falls back to resolved imports/re-exports in analyses.
+fn build_cycle_edges(
+    graph_edges: &[(String, String, String)],
+    analyses: &[FileAnalysis],
+) -> Vec<(String, String, String)> {
+    if !graph_edges.is_empty() {
+        return graph_edges.to_vec();
+    }
+
+    let mut edges = Vec::new();
+    for analysis in analyses {
+        for imp in &analysis.imports {
+            if let Some(target) = &imp.resolved_path {
+                edges.push((
+                    analysis.path.clone(),
+                    target.clone(),
+                    match imp.kind {
+                        ImportKind::Dynamic => "dynamic_import".to_string(),
+                        _ => "import".to_string(),
+                    },
+                ));
+            }
+        }
+
+        for reexport in &analysis.reexports {
+            if let Some(target) = &reexport.resolved {
+                edges.push((
+                    analysis.path.clone(),
+                    target.clone(),
+                    "reexport".to_string(),
+                ));
+            }
+        }
+    }
+
+    edges
 }
 
 pub struct RootArtifacts {
@@ -155,6 +195,9 @@ pub fn process_root_context(
     } else {
         (None, None)
     };
+
+    let cycle_edges = build_cycle_edges(&graph_edges, &analyses);
+    let circular_imports = cycles::find_cycles(&cycle_edges);
 
     let mut sorted_paths: Vec<String> = analyses.iter().map(|a| a.path.clone()).collect();
     sorted_paths.sort();
@@ -592,7 +635,15 @@ pub fn process_root_context(
     let mut dead_symbols = Vec::new();
     if !parsed.skip_dead_symbols {
         let open_base = current_open_base();
-        let dead_exports = find_dead_exports(global_analyses, true, open_base.as_deref());
+        let dead_exports = find_dead_exports(
+            global_analyses,
+            true,
+            open_base.as_deref(),
+            DeadFilterConfig {
+                include_tests: parsed.with_tests,
+                include_helpers: parsed.with_helpers,
+            },
+        );
 
         // Convert DeadExport results to the JSON format expected by -A mode
         // Group by symbol name since old algorithm grouped by name
@@ -751,6 +802,11 @@ pub fn process_root_context(
                     "duplicateExports": filtered_ranked.iter().take(top_limit).map(|dup| json!({
                         "name": dup.name,
                         "canonical": dup.canonical,
+                        "canonicalLine": dup.canonical_line,
+                        "locations": dup.locations.iter().map(|loc| json!({
+                            "file": loc.file,
+                            "line": loc.line,
+                        })).collect::<Vec<_>>(),
                         "refactorTargets": dup.refactors,
                         "score": dup.score,
                     })).collect::<Vec<_>>(),
@@ -812,17 +868,23 @@ pub fn process_root_context(
                 "filesAnalyzed": analyses.len(),
                 "duplicateExports": filtered_ranked
                     .iter()
-                    .map(|dup| json!({"name": dup.name, "files": dup.files}))
+                    .map(|dup| json!({
+                        "name": dup.name,
+                        "files": dup.files,
+                        "locations": dup.locations,
+                    }))
                     .collect::<Vec<_>>(),
                 "duplicateExportsRanked": filtered_ranked
                     .iter()
                     .map(|dup| json!({
                         "name": dup.name,
                         "files": dup.files,
+                        "locations": dup.locations,
                         "score": dup.score,
                         "nonDevCount": dup.prod_count,
                         "devCount": dup.dev_count,
                         "canonical": dup.canonical,
+                        "canonicalLine": dup.canonical_line,
                         "refactorTargets": dup.refactors,
                     }))
                     .collect::<Vec<_>>(),
@@ -938,6 +1000,21 @@ Top duplicate exports (showing up to {}):",
                 parsed.analyze_limit
             );
             for dup in filtered_ranked.iter().take(parsed.analyze_limit) {
+                // Format canonical with line number if available
+                let canonical_str = match dup.canonical_line {
+                    Some(line) => format!("{}:{}", dup.canonical, line),
+                    None => dup.canonical.clone(),
+                };
+                // Format refs with line numbers
+                let refs_str: Vec<String> = dup
+                    .locations
+                    .iter()
+                    .filter(|loc| loc.file != dup.canonical)
+                    .map(|loc| match loc.line {
+                        Some(line) => format!("{}:{}", loc.file, line),
+                        None => loc.file.clone(),
+                    })
+                    .collect();
                 println!(
                     "  - {} (score {}, {} files: {} prod, {} dev) canonical: {} | refs: {}",
                     dup.name,
@@ -945,8 +1022,8 @@ Top duplicate exports (showing up to {}):",
                     dup.files.len(),
                     dup.prod_count,
                     dup.dev_count,
-                    dup.canonical,
-                    dup.refactors.join(", ")
+                    canonical_str,
+                    refs_str.join(", ")
                 );
             }
         }
@@ -1070,6 +1147,7 @@ Top duplicate exports (showing up to {}):",
             dynamic_imports_count: dynamic_summary.len(),
             ranked_dups: filtered_ranked.clone(),
             cascades: cascades.clone(),
+            circular_imports: circular_imports.clone(),
             dynamic: sorted_dyn,
             analyze_limit: parsed.analyze_limit,
             missing_handlers: missing_sorted,

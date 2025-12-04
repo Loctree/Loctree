@@ -63,7 +63,7 @@ pub struct ForAiSectionRef {
 #[derive(Serialize, Clone)]
 pub struct QuickWin {
     pub priority: u8, // 1=highest
-    /// Kind of issue: missing_handler, unused_handler, unregistered_handler, dead_export
+    /// Kind of issue: missing_handler, unregistered_handler, unused_handler, dead_export, circular_import
     pub kind: String,
     pub action: String,
     pub target: String,
@@ -328,14 +328,135 @@ fn extract_quick_wins(sections: &[ReportSection]) -> Vec<QuickWin> {
         }
     }
 
+    // Priority 4: Dead exports (duplicate exports across files)
+    for section in sections {
+        for dup in section
+            .ranked_dups
+            .iter()
+            .filter(|d| d.score > 10) // Only high-score duplicates
+            .take(10)
+        // Limit to top 10
+        {
+            if priority > 30 {
+                break;
+            }
+
+            // Get primary location from canonical file
+            let (location, open_url) = if let Some(canon_line) = dup.canonical_line {
+                let loc = format!("{}:{}", dup.canonical, canon_line);
+                let url = super::build_open_url(
+                    &dup.canonical,
+                    Some(canon_line),
+                    section.open_base.as_deref(),
+                );
+                (loc, Some(url))
+            } else {
+                (dup.canonical.clone(), None)
+            };
+
+            let refactor_hint = if !dup.refactors.is_empty() {
+                dup.refactors.join(", ")
+            } else {
+                format!(
+                    "Consolidate {} into canonical file {}",
+                    dup.name, dup.canonical
+                )
+            };
+
+            wins.push(QuickWin {
+                priority,
+                kind: "dead_export".to_string(),
+                action: "Consolidate duplicate exports".to_string(),
+                target: dup.name.clone(),
+                location,
+                impact: format!(
+                    "Duplicate export across {} files - causes confusion and maintenance burden",
+                    dup.files.len()
+                ),
+                why: format!(
+                    "Export '{}' is defined in {} files, creating ambiguity for importers",
+                    dup.name,
+                    dup.files.len()
+                ),
+                fix_hint: refactor_hint,
+                complexity: "easy".to_string(),
+                trace_cmd: Some(format!("loct trace {}", dup.name)),
+                open_url,
+            });
+            priority += 1;
+        }
+    }
+
+    // Priority 5: Circular imports (import cycles)
+    for section in sections {
+        let mut seen_cycles = std::collections::HashSet::new();
+
+        for cycle in section.circular_imports.iter().take(5) {
+            if priority > 35 {
+                break;
+            }
+            if cycle.is_empty() {
+                continue;
+            }
+
+            let mut key_nodes = cycle.clone();
+            key_nodes.sort();
+            if !seen_cycles.insert(key_nodes) {
+                continue;
+            }
+
+            let mut path = cycle.clone();
+            if path.len() > 1 {
+                path.push(path[0].clone());
+            }
+
+            let why_path = path.join(" → ");
+
+            let target = if path.len() > 8 {
+                let head = path[..3].join(" -> ");
+                let tail = path[path.len() - 3..].join(" -> ");
+                format!("{} -> ... -> {}", head, tail)
+            } else {
+                path.join(" -> ")
+            };
+
+            let location = cycle
+                .first()
+                .cloned()
+                .unwrap_or_else(|| section.root.clone());
+
+            wins.push(QuickWin {
+                priority,
+                kind: "circular_import".to_string(),
+                action: "Break circular import".to_string(),
+                target,
+                location: location.clone(),
+                impact:
+                    "Circular imports can cause runtime errors and make code harder to understand"
+                        .to_string(),
+                why: format!("Dependency cycle detected: {}", why_path),
+                fix_hint:
+                    "Extract shared code into a third module, or make the dependency unidirectional"
+                        .to_string(),
+                complexity: "medium".to_string(),
+                trace_cmd: None,
+                open_url: super::build_open_url(&location, None, section.open_base.as_deref())
+                    .into(),
+            });
+            priority += 1;
+        }
+    }
+
     wins
 }
 
 /// Print quick wins as JSONL (one JSON object per line) for agent consumption
 pub fn print_agent_feed_jsonl(report: &ForAiReport) {
     for win in &report.quick_wins {
-        let json = serde_json::to_string(win).expect("serialize QuickWin");
-        println!("{}", json);
+        match serde_json::to_string(win) {
+            Ok(json) => println!("{}", json),
+            Err(err) => eprintln!("[loctree][warn] could not serialize quick win: {err}"),
+        }
     }
 }
 
@@ -407,7 +528,7 @@ pub fn print_for_ai_json(report: &ForAiReport) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analyzer::report::CommandGap;
+    use crate::analyzer::report::{CommandGap, DupLocation, RankedDup};
     use crate::types::{CommandRef, ImportEntry, ImportKind};
 
     fn mock_file(path: &str, loc: usize) -> FileAnalysis {
@@ -427,6 +548,7 @@ mod tests {
             dynamic_imports_count: 0,
             ranked_dups: vec![],
             cascades: vec![],
+            circular_imports: vec![],
             dynamic: vec![],
             analyze_limit: 50,
             missing_handlers: vec![],
@@ -681,5 +803,159 @@ mod tests {
         assert!(summary.health_score <= 100);
         // With 10 missing handlers (20 points each = 200), should be 0
         assert_eq!(summary.health_score, 0);
+    }
+
+    #[test]
+    fn test_extract_quick_wins_dead_exports() {
+        let mut section = mock_section("src", 10);
+        section.ranked_dups = vec![RankedDup {
+            name: "UserType".to_string(),
+            files: vec![
+                "src/types/user.ts".to_string(),
+                "src/models/user.ts".to_string(),
+                "src/api/user.ts".to_string(),
+            ],
+            locations: vec![
+                DupLocation {
+                    file: "src/types/user.ts".to_string(),
+                    line: Some(10),
+                },
+                DupLocation {
+                    file: "src/models/user.ts".to_string(),
+                    line: Some(20),
+                },
+            ],
+            score: 50,
+            prod_count: 3,
+            dev_count: 0,
+            canonical: "src/types/user.ts".to_string(),
+            canonical_line: Some(10),
+            refactors: vec!["Move all imports to src/types/user.ts".to_string()],
+        }];
+
+        let sections = vec![section];
+        let wins = extract_quick_wins(&sections);
+
+        // Should include dead export quick win
+        let dead_export_wins: Vec<_> = wins.iter().filter(|w| w.kind == "dead_export").collect();
+        assert!(!dead_export_wins.is_empty());
+
+        let win = dead_export_wins[0];
+        assert_eq!(win.target, "UserType");
+        assert_eq!(win.kind, "dead_export");
+        assert_eq!(win.complexity, "easy");
+        assert!(win.location.contains("src/types/user.ts:10"));
+        assert!(win.why.contains("defined in 3 files"));
+        assert!(
+            win.fix_hint
+                .contains("Move all imports to src/types/user.ts")
+        );
+    }
+
+    #[test]
+    fn test_extract_quick_wins_circular_imports() {
+        let mut section = mock_section("src", 10);
+        section.circular_imports = vec![
+            vec!["src/a.ts".to_string(), "src/b.ts".to_string()],
+            vec!["src/b.ts".to_string(), "src/a.ts".to_string()],
+            vec![
+                "src/c.ts".to_string(),
+                "src/d.ts".to_string(),
+                "src/e.ts".to_string(),
+            ],
+        ];
+
+        let sections = vec![section];
+        let wins = extract_quick_wins(&sections);
+
+        // Should include circular import quick wins
+        let cycle_wins: Vec<_> = wins
+            .iter()
+            .filter(|w| w.kind == "circular_import")
+            .collect();
+        assert!(!cycle_wins.is_empty());
+
+        // Should deduplicate bidirectional cycles (a↔b)
+        assert!(
+            cycle_wins
+                .iter()
+                .any(|w| w.target.contains("src/a.ts") && w.target.contains("src/b.ts"))
+        );
+
+        let win = &cycle_wins[0];
+        assert_eq!(win.kind, "circular_import");
+        assert_eq!(win.complexity, "medium");
+        assert!(win.why.contains("Dependency cycle"));
+        assert!(
+            win.fix_hint
+                .contains("Extract shared code into a third module")
+        );
+    }
+
+    #[test]
+    fn test_extract_quick_wins_all_priorities() {
+        let mut section = mock_section("src", 10);
+
+        // Priority 1: Missing handler
+        section.missing_handlers = vec![CommandGap {
+            name: "missing_cmd".to_string(),
+            implementation_name: None,
+            locations: vec![("src/app.ts".to_string(), 1)],
+            confidence: None,
+            string_literal_matches: vec![],
+        }];
+
+        // Priority 2: Unregistered handler
+        section.unregistered_handlers = vec![CommandGap {
+            name: "unreg_cmd".to_string(),
+            implementation_name: Some("unregHandler".to_string()),
+            locations: vec![("src-tauri/src/main.rs".to_string(), 2)],
+            confidence: None,
+            string_literal_matches: vec![],
+        }];
+
+        // Priority 3: Unused handler
+        section.unused_handlers = vec![CommandGap {
+            name: "unused_cmd".to_string(),
+            implementation_name: Some("unusedHandler".to_string()),
+            locations: vec![("src-tauri/src/commands.rs".to_string(), 3)],
+            confidence: Some(Confidence::High),
+            string_literal_matches: vec![],
+        }];
+
+        // Priority 4: Dead export
+        section.ranked_dups = vec![RankedDup {
+            name: "DupType".to_string(),
+            files: vec!["a.ts".to_string(), "b.ts".to_string()],
+            locations: vec![],
+            score: 20,
+            prod_count: 2,
+            dev_count: 0,
+            canonical: "a.ts".to_string(),
+            canonical_line: Some(10),
+            refactors: vec![],
+        }];
+
+        // Priority 5: Circular import
+        section.circular_imports = vec![vec!["x.ts".to_string(), "y.ts".to_string()]];
+
+        let sections = vec![section];
+        let wins = extract_quick_wins(&sections);
+
+        // Should have all 5 priorities represented
+        assert!(wins.len() >= 5);
+
+        // Verify we have each kind
+        assert!(wins.iter().any(|w| w.kind == "missing_handler"));
+        assert!(wins.iter().any(|w| w.kind == "unregistered_handler"));
+        assert!(wins.iter().any(|w| w.kind == "unused_handler"));
+        assert!(wins.iter().any(|w| w.kind == "dead_export"));
+        assert!(wins.iter().any(|w| w.kind == "circular_import"));
+
+        // Verify priority ordering
+        let priorities: Vec<u8> = wins.iter().map(|w| w.priority).collect();
+        let mut sorted_priorities = priorities.clone();
+        sorted_priorities.sort();
+        assert_eq!(priorities, sorted_priorities, "Priorities should be sorted");
     }
 }

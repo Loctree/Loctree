@@ -131,6 +131,7 @@ pub struct ReportSection {
     pub files_analyzed: usize,     // File count
     pub ranked_dups: Vec<RankedDup>,  // Duplicate exports
     pub cascades: Vec<(String, String)>,  // Cascade imports
+    pub circular_imports: Vec<Vec<String>>, // Dependency cycles
     pub dynamic: Vec<(String, Vec<String>)>,  // Dynamic imports
     pub missing_handlers: Vec<CommandGap>,  // Tauri gaps
     pub graph: Option<GraphData>,  // Dependency graph
