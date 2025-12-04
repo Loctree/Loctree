@@ -13,6 +13,7 @@ use super::CommandGap;
 use super::RankedDup;
 use super::ReportSection;
 use super::classify::language_from_path;
+use super::dead_parrots::find_dead_exports;
 use super::graph::{MAX_GRAPH_EDGES, MAX_GRAPH_NODES, build_graph_data};
 use super::html::render_html_report;
 use super::insights::collect_ai_insights;
@@ -155,6 +156,7 @@ pub fn process_root_context(
     git: Option<&GitContext>,
     schema_name: &str,
     schema_version: &str,
+    global_analyses: &[FileAnalysis],
 ) -> RootArtifacts {
     let mut json_items = Vec::new();
     let RootContext {
@@ -288,7 +290,12 @@ pub fn process_root_context(
                 "imports": imports.iter().map(|i| json!({
                     "source": i.source,
                     "sourceRaw": i.source_raw,
-                    "kind": match i.kind { ImportKind::Static => "static", ImportKind::SideEffect => "side-effect", ImportKind::Dynamic => "dynamic" },
+                    "kind": match i.kind {
+                        ImportKind::Static => "static",
+                        ImportKind::Type => "type",
+                        ImportKind::SideEffect => "side-effect",
+                        ImportKind::Dynamic => "dynamic",
+                    },
                     "resolvedPath": i.resolved_path,
                     "isBareModule": i.is_bare,
                     "resolutionKind": match i.resolution {
@@ -637,25 +644,38 @@ pub fn process_root_context(
         a_path.cmp(b_path)
     });
 
+    // Use the canonical find_dead_exports() which includes:
+    // - Transitive reachability from dynamic imports (React.lazy, Next.js dynamic)
+    // - imported_by_name fallback for $lib/, @scope/ aliases
+    // - Skip patterns for framework entry points, .d.ts, configs, tests
     let mut dead_symbols = Vec::new();
     if !parsed.skip_dead_symbols {
-        for (name, occs) in &symbol_occurrences {
-            if occs.iter().all(|(path, _, _, _, norm)| {
-                !imports_targeted.contains(path) && !imports_targeted.contains(norm)
-            }) {
-                let mut paths: Vec<_> = occs.iter().map(|(p, _, _, _, _)| p.clone()).collect();
-                paths.sort();
-                paths.dedup();
-                let public_surface = paths.iter().any(|p| {
-                    p.ends_with("index.ts")
-                        || p.ends_with("index.tsx")
-                        || p.ends_with("mod.rs")
-                        || p.ends_with("lib.rs")
-                });
-                dead_symbols
-                    .push(json!({"name": name, "paths": paths, "publicSurface": public_surface}));
-            }
+        let open_base = current_open_base();
+        let dead_exports = find_dead_exports(global_analyses, true, open_base.as_deref());
+
+        // Convert DeadExport results to the JSON format expected by -A mode
+        // Group by symbol name since old algorithm grouped by name
+        let mut by_name: HashMap<String, Vec<String>> = HashMap::new();
+        for de in &dead_exports {
+            by_name
+                .entry(de.symbol.clone())
+                .or_default()
+                .push(de.file.clone());
         }
+
+        for (name, mut paths) in by_name {
+            paths.sort();
+            paths.dedup();
+            let public_surface = paths.iter().any(|p| {
+                p.ends_with("index.ts")
+                    || p.ends_with("index.tsx")
+                    || p.ends_with("mod.rs")
+                    || p.ends_with("lib.rs")
+            });
+            dead_symbols
+                .push(json!({"name": name, "paths": paths, "publicSurface": public_surface}));
+        }
+
         dead_symbols.sort_by(|a, b| {
             let a_name = a["name"].as_str().unwrap_or("");
             let b_name = b["name"].as_str().unwrap_or("");

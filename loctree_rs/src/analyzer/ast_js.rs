@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use oxc_allocator::Allocator;
+use oxc_ast::ast::ImportOrExportKind;
 use oxc_ast::ast::*;
 use oxc_ast_visit::{Visit, walk::walk_expression};
 use oxc_parser::Parser;
@@ -352,6 +353,9 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
         let mut entry = ImportEntry::new(source.clone(), ImportKind::Static);
         entry.resolved_path = self.resolve_path(&source);
         entry.is_bare = !source.starts_with('.') && !source.starts_with('/');
+        if matches!(decl.import_kind, ImportOrExportKind::Type) {
+            entry.kind = ImportKind::Type;
+        }
 
         if let Some(specifiers) = &decl.specifiers {
             for spec in specifiers {

@@ -380,7 +380,7 @@ fn should_skip_dead_export_check(analysis: &FileAnalysis) -> bool {
     }
 
     // Framework routing/entry point conventions
-    // SvelteKit: +page.ts, +layout.ts, +server.ts, +page.server.ts
+    // SvelteKit: +page.ts, +layout.ts, +server.ts, +page.server.ts, hooks.*.ts
     // Next.js: page.tsx, layout.tsx, route.ts (in app/ directory)
     const FRAMEWORK_ENTRY_PATTERNS: &[&str] = &[
         "+page.",
@@ -396,6 +396,10 @@ fn should_skip_dead_export_check(analysis: &FileAnalysis) -> bool {
         "/error.tsx",
         "/loading.tsx",
         "/not-found.tsx",
+        // SvelteKit hooks (auto-loaded by framework)
+        "hooks.client.",
+        "hooks.server.",
+        "/hooks.",
     ];
     if FRAMEWORK_ENTRY_PATTERNS.iter().any(|p| path.contains(p)) {
         return true;
@@ -413,8 +417,9 @@ fn should_skip_dead_export_check(analysis: &FileAnalysis) -> bool {
 /// These are NOT imported via ES imports, so they appear as "dead" in static analysis.
 /// Common patterns: show/hide/open/close for modals, focus/blur for inputs, scroll* for containers.
 fn is_svelte_component_api(file_path: &str, export_name: &str) -> bool {
-    // Only applies to .svelte files
-    if !file_path.ends_with(".svelte") {
+    // Only applies to .svelte and .svelte.ts files (Svelte modules)
+    let is_svelte_file = file_path.ends_with(".svelte") || file_path.ends_with(".svelte.ts");
+    if !is_svelte_file {
         return false;
     }
 
@@ -469,6 +474,12 @@ fn is_svelte_component_api(file_path: &str, export_name: &str) -> bool {
         "refresh",
         "update",
         "reload",
+        // Svelte reactive getter object patterns (exposed via bind:this)
+        "imports",
+        "exports",
+        "getters",
+        "state",
+        "values",
     ];
 
     // Check exact match
@@ -516,6 +527,31 @@ fn is_svelte_component_api(file_path: &str, export_name: &str) -> bool {
         "calculate",
         "render",
         "draw",
+        // CRUD patterns
+        "create",
+        "update",
+        "edit",
+        "reset",
+        "clear",
+        "refresh",
+        "submit",
+        // Navigation/UI patterns
+        "show",
+        "hide",
+        "open",
+        "close",
+        "toggle",
+        "select",
+        "click",
+        "press",
+        // Validation patterns
+        "validate",
+        "sanitize",
+        "normalize",
+        "format",
+        "parse",
+        "serialize",
+        "deserialize",
     ];
     for prefix in API_PREFIXES {
         if export_name.starts_with(prefix)
@@ -593,6 +629,14 @@ pub fn find_dead_exports(
     let tauri_handlers: HashSet<String> = analyses
         .iter()
         .flat_map(|a| a.tauri_registered_handlers.iter().cloned())
+        .collect();
+
+    // Build set of all path-qualified symbols from Rust files
+    // These are calls like `command::branch::handle()` that don't use `use` imports
+    let rust_path_qualified_symbols: HashSet<String> = analyses
+        .iter()
+        .filter(|a| a.path.ends_with(".rs"))
+        .flat_map(|a| a.local_uses.iter().cloned())
         .collect();
 
     // Build transitive closure of files reachable from dynamic imports.
@@ -706,6 +750,9 @@ pub fn find_dead_exports(
             let imported_by_name = all_imported_symbols.contains(&exp.name);
             // Check if this is likely a Svelte component API method (called via bind:this)
             let is_svelte_api = is_svelte_component_api(&analysis.path, &exp.name);
+            // Check if this Rust symbol is called via path qualification (e.g., `module::func()`)
+            let is_rust_path_qualified =
+                analysis.path.ends_with(".rs") && rust_path_qualified_symbols.contains(&exp.name);
 
             if !is_used
                 && !star_used
@@ -713,6 +760,7 @@ pub fn find_dead_exports(
                 && !is_tauri_handler
                 && !imported_by_name
                 && !is_svelte_api
+                && !is_rust_path_qualified
             {
                 let open_url = super::build_open_url(&analysis.path, exp.line, open_base);
                 let is_rust_file = analysis.path.ends_with(".rs");
@@ -916,6 +964,46 @@ mod tests {
         assert!(
             result.is_empty(),
             "locally referenced export should not be marked dead"
+        );
+    }
+
+    #[test]
+    fn test_find_dead_exports_respects_type_imports() {
+        let exporter = mock_file_with_exports("client/actions.ts", vec!["Action"]);
+        let mut importer = mock_file("client/state.ts");
+        let mut imp = ImportEntry::new("client/actions".to_string(), ImportKind::Type);
+        imp.resolved_path = Some("client/actions.ts".to_string());
+        imp.symbols.push(ImportSymbol {
+            name: "Action".to_string(),
+            alias: None,
+            is_default: false,
+        });
+        importer.imports.push(imp);
+
+        let result = find_dead_exports(&[importer, exporter], true, None);
+        assert!(
+            result.is_empty(),
+            "type-only import should count as usage for dead export detection"
+        );
+    }
+
+    #[test]
+    fn test_find_dead_exports_cross_extension_match() {
+        let exporter = mock_file_with_exports("src/ComboBox.tsx", vec!["ComboBox"]);
+        let mut importer = mock_file("src/app.js");
+        let mut imp = ImportEntry::new("./ComboBox".to_string(), ImportKind::Static);
+        imp.resolved_path = Some("src/ComboBox.tsx".to_string());
+        imp.symbols.push(ImportSymbol {
+            name: "ComboBox".to_string(),
+            alias: None,
+            is_default: false,
+        });
+        importer.imports.push(imp);
+
+        let result = find_dead_exports(&[importer, exporter], false, None);
+        assert!(
+            result.is_empty(),
+            "imports across JS/TSX extensions should prevent dead export marking"
         );
     }
 

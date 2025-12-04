@@ -260,6 +260,8 @@ pub struct ImportEntry {
 pub enum ImportKind {
     /// `import X from 'y'` or `from x import y`
     Static,
+    /// `import type { X } from 'y'` (TypeScript-only, still a real dependency)
+    Type,
     /// `import 'styles.css'` (no bindings)
     SideEffect,
     /// `import('module')` or `React.lazy(() => import(...))`
