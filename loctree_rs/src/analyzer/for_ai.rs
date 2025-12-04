@@ -410,6 +410,8 @@ fn extract_quick_wins(sections: &[ReportSection]) -> Vec<QuickWin> {
                 path.push(path[0].clone());
             }
 
+            let why_path = path.join(" → ");
+
             let target = if path.len() > 8 {
                 let head = path[..3].join(" -> ");
                 let tail = path[path.len() - 3..].join(" -> ");
@@ -432,7 +434,7 @@ fn extract_quick_wins(sections: &[ReportSection]) -> Vec<QuickWin> {
                 impact:
                     "Circular imports can cause runtime errors and make code harder to understand"
                         .to_string(),
-                why: format!("Dependency cycle detected: {}", cycle.join(" → ")),
+                why: format!("Dependency cycle detected: {}", why_path),
                 fix_hint:
                     "Extract shared code into a third module, or make the dependency unidirectional"
                         .to_string(),
