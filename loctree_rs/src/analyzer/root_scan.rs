@@ -6,6 +6,7 @@ use std::thread;
 
 use globset::GlobSet;
 use serde_json::json;
+use toml::Value;
 
 use crate::args::ParsedArgs;
 use crate::fs_utils::{GitIgnoreChecker, gather_files, normalise_ignore_patterns};
@@ -318,23 +319,7 @@ fn scan_single_root(
     };
 
     let ts_resolver = TsPathResolver::from_tsconfig(&root_canon);
-    let mut py_roots: Vec<PathBuf> = vec![root_canon.clone()];
-    for extra in &cfg.parsed.py_roots {
-        let candidate = if extra.is_absolute() {
-            extra.clone()
-        } else {
-            root_canon.join(extra)
-        };
-        if candidate.exists() {
-            py_roots.push(candidate.canonicalize().unwrap_or(candidate));
-        } else {
-            eprintln!(
-                "[loctree][warn] --py-root '{}' not found under {}; skipping",
-                extra.display(),
-                root_canon.display()
-            );
-        }
-    }
+    let py_roots: Vec<PathBuf> = build_py_roots(&root_canon, &cfg.parsed.py_roots);
 
     // Extract resolver config for caching in snapshot
     let extracted_ts_config = ts_resolver.as_ref().map(|r| r.extract_config());
@@ -1225,6 +1210,92 @@ fn rank_duplicates(
     ranked
 }
 
+fn build_py_roots(root_canon: &PathBuf, extra_roots: &[PathBuf]) -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = Vec::new();
+
+    // Always include project root
+    let root_canon = root_canon
+        .canonicalize()
+        .unwrap_or_else(|_| root_canon.clone());
+    roots.push(root_canon.clone());
+
+    // Common src/ layout
+    let src = root_canon.join("src");
+    if src.is_dir() {
+        roots.push(src.canonicalize().unwrap_or(src));
+    }
+
+    // Discover from pyproject.toml (poetry/setuptools)
+    let pyproject = root_canon.join("pyproject.toml");
+    if pyproject.exists() {
+        if let Ok(text) = std::fs::read_to_string(&pyproject) {
+            if let Ok(val) = text.parse::<Value>() {
+                // tool.poetry.packages = [{ include = "...", from = "src" }]
+                if let Some(packages) = val
+                    .get("tool")
+                    .and_then(|t| t.get("poetry"))
+                    .and_then(|p| p.get("packages"))
+                    .and_then(|p| p.as_array())
+                {
+                    for pkg in packages {
+                        if let Some(include) = pkg.get("include").and_then(|i| i.as_str()) {
+                            let from = pkg.get("from").and_then(|f| f.as_str());
+                            let base = from
+                                .map(|f| root_canon.join(f))
+                                .unwrap_or_else(|| root_canon.clone());
+                            let candidate = base.join(include);
+                            if candidate.exists() {
+                                roots.push(candidate.canonicalize().unwrap_or(candidate));
+                            }
+                        }
+                    }
+                }
+
+                // tool.setuptools.packages.find.where = ["src", ...]
+                if let Some(where_arr) = val
+                    .get("tool")
+                    .and_then(|t| t.get("setuptools"))
+                    .and_then(|s| s.get("packages"))
+                    .and_then(|p| p.get("find"))
+                    .and_then(|f| f.get("where"))
+                    .and_then(|w| w.as_array())
+                {
+                    for entry in where_arr {
+                        if let Some(path_str) = entry.as_str() {
+                            let candidate = root_canon.join(path_str);
+                            if candidate.exists() {
+                                roots.push(candidate.canonicalize().unwrap_or(candidate));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // User-provided overrides
+    for extra in extra_roots {
+        let candidate = if extra.is_absolute() {
+            extra.clone()
+        } else {
+            root_canon.join(extra)
+        };
+        if candidate.exists() {
+            roots.push(candidate.canonicalize().unwrap_or(candidate));
+        } else {
+            eprintln!(
+                "[loctree][warn] --py-root '{}' not found under {}; skipping",
+                extra.display(),
+                root_canon.display()
+            );
+        }
+    }
+
+    roots.sort();
+    roots.dedup();
+    roots
+}
+
 /// Build cascades (re-export chains) from analyses
 fn build_cascades(analyses: &[FileAnalysis]) -> Vec<(String, String)> {
     let mut cascades = Vec::new();
@@ -1241,6 +1312,7 @@ fn build_cascades(analyses: &[FileAnalysis]) -> Vec<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
 
     #[test]
     fn test_normalize_module_id_preserves_language() {
@@ -1262,6 +1334,46 @@ mod tests {
         assert_ne!(rust_module.as_key(), ts_module.as_key());
         assert_ne!(rust_module.as_key(), tsx_module.as_key());
         assert_eq!(ts_module.as_key(), tsx_module.as_key());
+    }
+
+    #[test]
+    fn detects_common_python_roots_and_pyproject() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path();
+        let root_canon = root.canonicalize().unwrap();
+
+        // src layout
+        std::fs::create_dir_all(root.join("src/app")).unwrap();
+        // setuptools style
+        std::fs::create_dir_all(root.join("services")).unwrap();
+        // poetry package from "src"
+        let pyproject = r#"
+[tool.poetry]
+name = "example"
+version = "0.1.0"
+packages = [
+    { include = "app", from = "src" }
+]
+
+[tool.setuptools.packages.find]
+where = ["services"]
+"#;
+        std::fs::write(root.join("pyproject.toml"), pyproject).unwrap();
+        // extra user provided
+        let extra_dir = root.join("custom");
+        std::fs::create_dir_all(&extra_dir).unwrap();
+        let extra_dir_canon = extra_dir.canonicalize().unwrap();
+
+        let roots = build_py_roots(
+            &root.to_path_buf(),
+            &[PathBuf::from("custom"), PathBuf::from("missing")],
+        );
+
+        assert!(roots.contains(&root_canon));
+        assert!(roots.contains(&root_canon.join("src")));
+        assert!(roots.contains(&root_canon.join("src/app")));
+        assert!(roots.contains(&root_canon.join("services")));
+        assert!(roots.contains(&extra_dir_canon));
     }
 
     #[test]

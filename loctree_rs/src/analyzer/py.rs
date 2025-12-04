@@ -102,10 +102,45 @@ pub(crate) fn python_stdlib_set() -> &'static HashSet<String> {
 }
 
 fn parse_all_list(content: &str) -> Vec<String> {
+    fn strip_line_comment(line: &str) -> String {
+        let mut out = String::new();
+        let mut in_single = false;
+        let mut in_double = false;
+        let mut chars = line.chars().peekable();
+        while let Some(c) = chars.next() {
+            match c {
+                '\\' => {
+                    out.push(c);
+                    if let Some(next) = chars.next() {
+                        out.push(next);
+                    }
+                }
+                '\'' if !in_double => {
+                    in_single = !in_single;
+                    out.push(c);
+                }
+                '"' if !in_single => {
+                    in_double = !in_double;
+                    out.push(c);
+                }
+                '#' if !in_single && !in_double => {
+                    break;
+                }
+                _ => out.push(c),
+            }
+        }
+        out
+    }
+
     let mut names = Vec::new();
     for caps in regex_py_all().captures_iter(content) {
         let body = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-        for item in body.split(',') {
+        let cleaned: String = body
+            .lines()
+            .map(|l| strip_line_comment(l).trim_end().to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        for item in cleaned.split(',') {
             let trimmed = item.trim();
             let name = trimmed
                 .trim_matches(|c| c == '\'' || c == '"')
@@ -964,6 +999,36 @@ def _private():
         assert!(export_names.contains(&"bar"));
         // Private _private should not be in exports
         assert!(!export_names.contains(&"_private"));
+    }
+
+    #[test]
+    fn parses_all_list_with_comments() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path();
+
+        let content = r#"
+__all__ = [
+    "foo",  # inline comment
+    "bar",
+    # "baz" is intentionally excluded
+]
+"#;
+
+        let analysis = analyze_py_file(
+            content,
+            &root.join("module.py"),
+            root,
+            Some(&py_exts()),
+            "module.py".to_string(),
+            &[root.to_path_buf()],
+            &HashSet::new(),
+        );
+
+        let export_names: Vec<_> = analysis.exports.iter().map(|e| e.name.as_str()).collect();
+        assert!(export_names.contains(&"foo"));
+        assert!(export_names.contains(&"bar"));
+        assert!(!export_names.iter().any(|n| n.contains('#')));
+        assert!(!export_names.contains(&"baz"));
     }
 
     #[test]

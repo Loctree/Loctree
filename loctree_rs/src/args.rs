@@ -98,7 +98,7 @@ impl Default for ParsedArgs {
             focus_patterns: Vec::new(),
             exclude_report_patterns: Vec::new(),
             graph: false,
-            use_gitignore: false,
+            use_gitignore: true,
             max_depth: None,
             color: ColorMode::Auto,
             output: OutputMode::Human,
@@ -367,6 +367,10 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
             }
             "--gitignore" | "-g" => {
                 parsed.use_gitignore = true;
+                i += 1;
+            }
+            "--no-gitignore" => {
+                parsed.use_gitignore = false;
                 i += 1;
             }
             "--graph" => {
@@ -1320,7 +1324,7 @@ mod tests {
         assert!(args.extensions.is_none());
         assert!(args.ignore_patterns.is_empty());
         assert!(!args.graph);
-        assert!(!args.use_gitignore);
+        assert!(args.use_gitignore); // Default: respect gitignore
         assert!(args.max_depth.is_none());
         assert_eq!(args.color, ColorMode::Auto);
         assert_eq!(args.output, OutputMode::Human);
