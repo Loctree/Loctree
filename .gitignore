@@ -37,3 +37,4 @@ loctree-*.min.js
 /assets/Icon Exports
 /loctree_rs/tests/fixtures/tauri_app/src/.loctree
 .replit
+/.tools

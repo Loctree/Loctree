@@ -1363,10 +1363,7 @@ where = ["services"]
         std::fs::create_dir_all(&extra_dir).unwrap();
         let extra_dir_canon = extra_dir.canonicalize().unwrap();
 
-        let roots = build_py_roots(
-            &root.to_path_buf(),
-            &[PathBuf::from("custom"), PathBuf::from("missing")],
-        );
+        let roots = build_py_roots(root, &[PathBuf::from("custom"), PathBuf::from("missing")]);
 
         assert!(roots.contains(&root_canon));
         assert!(roots.contains(&root_canon.join("src")));
