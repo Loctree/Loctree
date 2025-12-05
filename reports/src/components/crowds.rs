@@ -51,19 +51,15 @@ fn issue_severity_class(issue: &CrowdIssue) -> &'static str {
 /// Format match reason for display
 fn format_match_reason(reason: &MatchReason) -> String {
     match reason {
-        MatchReason::NameSimilarity {
-            pattern,
-            similarity,
-        } => {
-            format!("Name: {} ({:.0}%)", pattern, similarity * 100.0)
+        MatchReason::NameMatch { matched } => {
+            format!("Name: {}", matched)
         }
-        MatchReason::PathProximity { distance } => {
-            format!("Path proximity ({})", distance)
+        MatchReason::ImportSimilarity { similarity } => {
+            format!("Import similarity ({:.0}%)", similarity * 100.0)
         }
-        MatchReason::ExportOverlap { count } => {
-            format!("{} shared exports", count)
+        MatchReason::ExportSimilarity { similar_to } => {
+            format!("Similar exports to {}", similar_to)
         }
-        MatchReason::Combined => "Combined signals".to_string(),
     }
 }
 

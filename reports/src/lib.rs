@@ -83,6 +83,7 @@ use types::ReportSection;
 ///
 /// * `sections` - Slice of report sections to render
 /// * `js_assets` - Paths to JavaScript assets for graph visualization
+/// * `has_tauri` - Whether to show Tauri coverage tab (only for Tauri projects)
 ///
 /// # Returns
 ///
@@ -99,12 +100,12 @@ use types::ReportSection;
 ///     ..Default::default()
 /// };
 ///
-/// let html = render_report(&[section], &JsAssets::default());
+/// let html = render_report(&[section], &JsAssets::default(), false);
 /// assert!(html.starts_with("<!DOCTYPE html>"));
 /// ```
-pub fn render_report(sections: &[ReportSection], js_assets: &JsAssets) -> String {
+pub fn render_report(sections: &[ReportSection], js_assets: &JsAssets, has_tauri: bool) -> String {
     let doc = view! {
-        <ReportDocument sections=sections.to_vec() js_assets=js_assets.clone() />
+        <ReportDocument sections=sections.to_vec() js_assets=js_assets.clone() has_tauri=has_tauri />
     };
 
     let html = doc.to_html();

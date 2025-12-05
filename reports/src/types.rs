@@ -504,65 +504,53 @@ pub struct RankedDup {
     pub refactors: Vec<String>,
 }
 
-/// Match reason for crowd membership.
+/// Match reason for crowd membership (mirrors loctree_rs::analyzer::crowd::MatchReason).
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "type")]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum MatchReason {
-    /// Name similarity match
-    #[serde(rename = "name_similarity")]
-    NameSimilarity {
-        /// Matched pattern
-        pattern: String,
+    /// File/export name matches pattern
+    NameMatch {
+        /// The matched string (filename, export name, etc.)
+        matched: String,
+    },
+    /// High import similarity with other crowd members
+    ImportSimilarity {
         /// Similarity score (0.0-1.0)
         similarity: f32,
     },
-    /// Path proximity match
-    #[serde(rename = "path_proximity")]
-    PathProximity {
-        /// Directory distance
-        distance: usize,
+    /// Exports similar types/functions
+    ExportSimilarity {
+        /// File this one is similar to
+        similar_to: String,
     },
-    /// Export overlap match
-    #[serde(rename = "export_overlap")]
-    ExportOverlap {
-        /// Number of shared exports
-        count: usize,
-    },
-    /// Multiple signals combined
-    #[serde(rename = "combined")]
-    Combined,
 }
 
-/// Issue detected in a crowd.
+/// Issue detected in a crowd (mirrors loctree_rs::analyzer::crowd::CrowdIssue).
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "type")]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum CrowdIssue {
-    /// Files with identical or near-identical names
-    #[serde(rename = "name_collision")]
+    /// Multiple files with very similar names
     NameCollision {
         /// Files with colliding names
         files: Vec<String>,
     },
-    /// Some members heavily used, others underutilized
-    #[serde(rename = "usage_asymmetry")]
+    /// Some files have much lower usage than others
     UsageAsymmetry {
-        /// Primary (heavily used) file
+        /// The primary/most-used file
         primary: String,
-        /// Underused files
+        /// Underused files that might be redundant
         underused: Vec<String>,
     },
-    /// Files exporting the same symbols
-    #[serde(rename = "export_overlap")]
+    /// Files export similar things
     ExportOverlap {
         /// Files with overlapping exports
         files: Vec<String>,
         /// Overlapping export names
         overlap: Vec<String>,
     },
-    /// Pattern spans unrelated categories
-    #[serde(rename = "fragmentation")]
+    /// Related functionality is scattered
     Fragmentation {
-        /// Categories detected
+        /// Categories/themes found scattered across crowd
         categories: Vec<String>,
     },
 }

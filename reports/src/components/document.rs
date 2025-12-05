@@ -3,26 +3,32 @@
 //! Implements the App Shell layout with Sidebar and Main Content areas.
 
 use super::{
-    Icon, ReportSectionView, ICON_COPY, ICON_GHOST, ICON_GRAPH, ICON_LIGHTNING, ICON_SQUARES_FOUR,
-    ICON_TERMINAL, ICON_USERS, ICON_WARNING_CIRCLE,
+    Icon, ReportSectionView, ICON_ARROWS_CLOCKWISE, ICON_COPY, ICON_GHOST, ICON_GRAPH,
+    ICON_LIGHTNING, ICON_PLUG, ICON_SQUARES_FOUR, ICON_TREE_STRUCTURE, ICON_USERS,
 };
 use crate::styles::{CSP, REPORT_CSS};
 use crate::types::ReportSection;
 use crate::JsAssets;
 use leptos::prelude::*;
 
-// Inline data URI for the loctree badge (ensures logo renders offline in reports)
-const LOGO_DATA_URI: &str = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMzAiIGhlaWdodD0iMjAiIHJvbGU9ImltZyIgYXJpYS1sYWJlbD0iYW5hbHl6ZWQgd2l0aDogbG9jdHJlZSI+CiAgPHRpdGxlPmFuYWx5emVkIHdpdGg6IGxvY3RyZWU8L3RpdGxlPgogIDxsaW5lYXJHcmFkaWVudCBpZD0icyIgeDI9IjAiIHkyPSIxMDAlIj4KICAgIDxzdG9wIG9mZnNldD0iMCIgc3RvcC1jb2xvcj0iI2JiYiIgc3RvcC1vcGFjaXR5PSIuMSIvPgogICAgPHN0b3Agb2Zmc2V0PSIxIiBzdG9wLW9wYWNpdHk9Ii4xIi8+CiAgPC9saW5lYXJHcmFkaWVudD4KICA8Y2xpcFBhdGggaWQ9InIiPgogICAgPHJlY3Qgd2lkdGg9IjEzMCIgaGVpZ2h0PSIyMCIgcng9IjMiIGZpbGw9IiNmZmYiLz4KICA8L2NsaXBQYXRoPgogIDxnIGNsaXAtcGF0aD0idXJsKCNyKSI+CiAgICA8cmVjdCB3aWR0aD0iODUiIGhlaWdodD0iMjAiIGZpbGw9IiM1NTUiLz4KICAgIDxyZWN0IHg9Ijg1IiB3aWR0aD0iNDUiIGhlaWdodD0iMjAiIGZpbGw9IiMwYTBhMGEiLz4KICAgIDxyZWN0IHdpZHRoPSIxMzAiIGhlaWdodD0iMjAiIGZpbGw9InVybCgjcykiLz4KICA8L2c+CiAgPGcgZmlsbD0iI2ZmZiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IlZlcmRhbmEsR2VuZXZhLERlamFWdSBTYW5zLHNhbnMtc2VyaWYiIHRleHQtcmVuZGVyaW5nPSJnZW9tZXRyaWNQcmVjaXNpb24iIGZvbnQtc2l6ZT0iMTEwIj4KICAgIDx0ZXh0IGFyaWEtaGlkZGVuPSJ0cnVlIiB4PSI0MzUiIHk9IjE1MCIgZmlsbD0iIzAxMDEwMSIgZmlsbC1vcGFjaXR5PSIuMyIgdHJhbnNmb3JtPSJzY2FsZSguMSkiIHRleHRMZW5ndGg9Ijc1MCI+YW5hbHl6ZWQgd2l0aDwvdGV4dD4KICAgIDx0ZXh0IHg9IjQzNSIgeT0iMTQwIiB0cmFuc2Zvcm09InNjYWxlKC4xKSIgZmlsbD0iI2ZmZiIgdGV4dExlbmd0aD0iNzUwIj5hbmFseXplZCB3aXRoPC90ZXh0PgogICAgPHRleHQgYXJpYS1oaWRkZW49InRydWUiIHg9IjEwNjUiIHk9IjE1MCIgZmlsbD0iIzAxMDEwMSIgZmlsbC1vcGFjaXR5PSIuMyIgdHJhbnNmb3JtPSJzY2FsZSguMSkiIHRleHRMZW5ndGg9IjM1MCI+bG9jdHJlZTwvdGV4dD4KICAgIDx0ZXh0IHg9IjEwNjUiIHk9IjE0MCIgdHJhbnNmb3JtPSJzY2FsZSguMSkiIGZpbGw9IiNhOGE4YTgiIHRleHRMZW5ndGg9IjM1MCI+bG9jdHJlZTwvdGV4dD4KICA8L2c+Cjwvc3ZnPgo=";
+// Inline data URI for the loctree logo (ensures logo renders offline in reports)
+const LOGO_DATA_URI: &str = "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzYwIiBoZWlnaHQ9IjM2MCIgdmlld0JveD0iMCAwIDM2MCAzNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsbGVkYnk9InRpdGxlIGRlc2MiPgogIDx0aXRsZSBpZD0idGl0bGUiPkxvY3RyZWUgTG9nbzwvdGl0bGU+CiAgPGRlc2MgaWQ9ImRlc2MiPk1pbmltYWxpc3Qgbm9kZSB0cmVlIC0gZHluYW1pYyBhbmQgc2xpZ2h0bHkgdW5zZXR0bGluZzwvZGVzYz4KCiAgPGRlZnM+CiAgICA8c3R5bGU+CiAgICAgIC5ub2RlIHsgZmlsbDogI2UwZTBlMDsgfQogICAgICAuc3RlbSB7IHN0cm9rZTogI2UwZTBlMDsgc3Ryb2tlLXdpZHRoOiAxMDsgc3Ryb2tlLWxpbmVjYXA6IHJvdW5kOyB9CiAgICA8L3N0eWxlPgogIDwvZGVmcz4KCiAgPCEtLSBSb3cgMSAtIDMgbm9kZXMgKHRvcCwgc3ltbWV0cmljLCB0aWdodGVuZWQgMjBweCkgLS0+CiAgPGNpcmNsZSBjbGFzcz0ibm9kZSIgY3g9Ijc1IiBjeT0iNTAiIHI9IjE2Ii8+CiAgPGNpcmNsZSBjbGFzcz0ibm9kZSIgY3g9IjE4MCIgY3k9IjUwIiByPSIxNiIvPgogIDxjaXJjbGUgY2xhc3M9Im5vZGUiIGN4PSIyODUiIGN5PSI1MCIgcj0iMTYiLz4KCiAgPCEtLSBSb3cgMiAtIDEgbm9kZSAodW5zZXR0bGluZ2x5IG9mZi1jZW50ZXIgdG8gbGVmdCkgLS0+CiAgPGNpcmNsZSBjbGFzcz0ibm9kZSIgY3g9IjE0MCIgY3k9IjEyMCIgcj0iMTYiLz4KCiAgPCEtLSBSb3cgMyAtIDMgbm9kZXMgKHN5bW1ldHJpYywgdGlnaHRlbmVkIDIwcHgpIC0tPgogIDxjaXJjbGUgY2xhc3M9Im5vZGUiIGN4PSI3NSIgY3k9IjE5MCIgcj0iMTYiLz4KICA8Y2lyY2xlIGNsYXNzPSJub2RlIiBjeD0iMTgwIiBjeT0iMTkwIiByPSIxNiIvPgogIDxjaXJjbGUgY2xhc3M9Im5vZGUiIGN4PSIyODUiIGN5PSIxOTAiIHI9IjE2Ii8+CgogIDwhLS0gU3RlbSAodmVydGljYWwsIHNoaWZ0ZWQgcmlnaHQsIHRoaWNrZXIpIC0tPgogIDxsaW5lIGNsYXNzPSJzdGVtIiB4MT0iMjEwIiB5MT0iMjIwIiB4Mj0iMjEwIiB5Mj0iMjc1Ii8+CgogIDwhLS0gUm9vdCBub2RlIGF0IGJvdHRvbSAtLT4KICA8Y2lyY2xlIGNsYXNzPSJub2RlIiBjeD0iMjA1IiBjeT0iMzEwIiByPSIxNiIvPgo8L3N2Zz4K";
 
 /// The complete HTML document for the report
 #[component]
-pub fn ReportDocument(sections: Vec<ReportSection>, js_assets: JsAssets) -> impl IntoView {
+pub fn ReportDocument(
+    sections: Vec<ReportSection>,
+    js_assets: JsAssets,
+    /// Whether to show Tauri coverage tab (only for Tauri projects)
+    #[prop(default = false)]
+    has_tauri: bool,
+) -> impl IntoView {
     view! {
         <html>
             <head>
                 <meta charset="UTF-8" />
                 <meta http-equiv="Content-Security-Policy" content=CSP />
-                <title>"loctree report"</title>
+                <title>"Loctree Report"</title>
                 <style>{REPORT_CSS}</style>
             </head>
             <body>
@@ -32,8 +38,8 @@ pub fn ReportDocument(sections: Vec<ReportSection>, js_assets: JsAssets) -> impl
                             <div class="logo-box">
                                 <img class="logo-img" src=LOGO_DATA_URI alt="loctree logo" />
                                 <div class="logo-text">
-                                    <span style="color:var(--theme-accent)">"loctree"</span>
-                                    <span style="opacity:0.5">"report"</span>
+                                    <span style="color:var(--theme-accent)">"Loctree"</span>
+                                    <span style="opacity:0.5">"Report"</span>
                                 </div>
                             </div>
                             <button class="theme-toggle" data-role="theme-toggle" title="Toggle light/dark mode">
@@ -59,16 +65,22 @@ pub fn ReportDocument(sections: Vec<ReportSection>, js_assets: JsAssets) -> impl
                                 <Icon path=ICON_LIGHTNING class="icon-sm" />
                                 "Dynamic imports"
                             </button>
-                            <button class="nav-item" data-tab="commands">
-                                <Icon path=ICON_TERMINAL class="icon-sm" />
-                                "Tauri coverage"
-                            </button>
+                            {if has_tauri {
+                                view! {
+                                    <button class="nav-item" data-tab="commands">
+                                        <Icon path=ICON_PLUG class="icon-sm" />
+                                        "Tauri coverage"
+                                    </button>
+                                }.into_any()
+                            } else {
+                                view! { "" }.into_any()
+                            }}
                             <button class="nav-item" data-tab="crowds">
                                 <Icon path=ICON_USERS class="icon-sm" />
                                 "Crowds"
                             </button>
                             <button class="nav-item" data-tab="cycles">
-                                <Icon path=ICON_WARNING_CIRCLE class="icon-sm" />
+                                <Icon path=ICON_ARROWS_CLOCKWISE class="icon-sm" />
                                 "Cycles"
                             </button>
                             <button class="nav-item" data-tab="dead">
@@ -80,7 +92,7 @@ pub fn ReportDocument(sections: Vec<ReportSection>, js_assets: JsAssets) -> impl
                                 "Graph"
                             </button>
                             <button class="nav-item" data-tab="tree">
-                                <Icon path=ICON_SQUARES_FOUR class="icon-sm" />
+                                <Icon path=ICON_TREE_STRUCTURE class="icon-sm" />
                                 "Tree"
                             </button>
                         </nav>
