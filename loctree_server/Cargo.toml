@@ -1,6 +1,6 @@
 [package]
 name = "loctree_server"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "MCP server for loctree - hot codebase analysis for AI agents"
 license = "MIT"

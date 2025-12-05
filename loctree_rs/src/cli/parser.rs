@@ -12,7 +12,7 @@ use crate::types::ColorMode;
 /// Known subcommand names for the new CLI interface.
 const SUBCOMMANDS: &[&str] = &[
     "auto", "scan", "tree", "slice", "find", "dead", "unused", "cycles", "commands", "events",
-    "info", "lint", "report", "help", "query", "diff", "memex",
+    "info", "lint", "report", "help", "query", "diff", "memex", "crowd",
 ];
 
 /// Check if an argument looks like a new-style subcommand.
@@ -174,6 +174,7 @@ pub fn parse_command(args: &[String]) -> Result<Option<ParsedCommand>, String> {
         Some("query") => parse_query_command(&remaining_args)?,
         Some("diff") => parse_diff_command(&remaining_args)?,
         Some("memex") => parse_memex_command(&remaining_args)?,
+        Some("crowd") => parse_crowd_command(&remaining_args)?,
         Some(unknown) => {
             return Err(format!(
                 "Unknown command '{}'. Run 'loct --help' for available commands.",
@@ -882,6 +883,84 @@ fn parse_memex_command(args: &[String]) -> Result<Command, String> {
     Ok(Command::Memex(opts))
 }
 
+fn parse_crowd_command(args: &[String]) -> Result<Command, String> {
+    // Check for help flag first
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        return Err(
+            "loct crowd - Detect functional crowds (similar files clustering)
+
+USAGE:
+    loct crowd [PATTERN] [OPTIONS]
+
+ARGUMENTS:
+    [PATTERN]    Pattern to detect crowd around (e.g., \"message\", \"patient\")
+                 If not specified, auto-detects all crowds
+
+OPTIONS:
+    --auto, -a       Detect all crowds automatically
+    --min-size <N>   Minimum crowd size to report (default: 2)
+    --limit <N>      Maximum crowds to show (default: 10)
+    --help, -h       Show this help message
+
+EXAMPLES:
+    loct crowd                  # Auto-detect all crowds
+    loct crowd message          # Find files clustering around \"message\"
+    loct crowd --limit 5        # Show top 5 crowds"
+                .to_string(),
+        );
+    }
+
+    let mut opts = CrowdOptions::default();
+    let mut i = 0;
+
+    while i < args.len() {
+        let arg = &args[i];
+        match arg.as_str() {
+            "--auto" | "-a" => {
+                opts.auto_detect = true;
+                i += 1;
+            }
+            "--min-size" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--min-size requires a number".to_string())?;
+                opts.min_size = Some(value.parse().map_err(|_| "--min-size requires a number")?);
+                i += 2;
+            }
+            "--limit" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--limit requires a number".to_string())?;
+                opts.limit = Some(value.parse().map_err(|_| "--limit requires a number")?);
+                i += 2;
+            }
+            _ if !arg.starts_with('-') => {
+                // Positional argument is the pattern (if not a root path)
+                if opts.pattern.is_none() && !std::path::Path::new(arg).exists() {
+                    opts.pattern = Some(arg.clone());
+                } else {
+                    opts.roots.push(PathBuf::from(arg));
+                }
+                i += 1;
+            }
+            _ => {
+                return Err(format!("Unknown option '{}' for 'crowd' command.", arg));
+            }
+        }
+    }
+
+    // If no pattern and no auto flag, enable auto-detect
+    if opts.pattern.is_none() && !opts.auto_detect {
+        opts.auto_detect = true;
+    }
+
+    if opts.roots.is_empty() {
+        opts.roots.push(PathBuf::from("."));
+    }
+
+    Ok(Command::Crowd(opts))
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -1015,6 +1094,30 @@ mod tests {
             assert_eq!(opts.lang, Some("ts".into()));
         } else {
             panic!("Expected Find command");
+        }
+    }
+
+    #[test]
+    fn test_parse_crowd_command() {
+        let args = vec!["crowd".into(), "message".into()];
+        let result = parse_command(&args).unwrap().unwrap();
+        assert_eq!(result.command.name(), "crowd");
+        if let Command::Crowd(opts) = result.command {
+            assert_eq!(opts.pattern, Some("message".into()));
+        } else {
+            panic!("Expected Crowd command");
+        }
+    }
+
+    #[test]
+    fn test_parse_crowd_auto_detect() {
+        let args = vec!["crowd".into(), "--auto".into()];
+        let result = parse_command(&args).unwrap().unwrap();
+        if let Command::Crowd(opts) = result.command {
+            assert!(opts.auto_detect);
+            assert!(opts.pattern.is_none());
+        } else {
+            panic!("Expected Crowd command");
         }
     }
 }

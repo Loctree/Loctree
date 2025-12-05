@@ -136,6 +136,12 @@ pub enum Command {
     /// Converts loctree analysis (dead code, duplications) into semantic
     /// vectors and stores them in LanceDB for AI agent queries.
     Memex(MemexOptions),
+
+    /// Detect functional crowds (similar files clustering).
+    ///
+    /// Identifies groups of files that cluster around the same functionality,
+    /// suggesting potential consolidation or refactoring opportunities.
+    Crowd(CrowdOptions),
 }
 
 impl Default for Command {
@@ -407,6 +413,26 @@ impl Default for MemexOptions {
     }
 }
 
+/// Options for the `crowd` command.
+/// Detects functional crowds - multiple files clustering around same functionality.
+#[derive(Debug, Clone, Default)]
+pub struct CrowdOptions {
+    /// Pattern to detect crowd around (e.g., "message", "patient", "auth")
+    pub pattern: Option<String>,
+
+    /// Root directories to analyze
+    pub roots: Vec<PathBuf>,
+
+    /// Detect all crowds automatically (if no pattern specified)
+    pub auto_detect: bool,
+
+    /// Minimum crowd size to report (default: 2)
+    pub min_size: Option<usize>,
+
+    /// Maximum crowds to show in auto-detect mode (default: 10)
+    pub limit: Option<usize>,
+}
+
 /// Options for the `help` command.
 #[derive(Debug, Clone, Default)]
 pub struct HelpOptions {
@@ -533,6 +559,7 @@ impl Command {
             Command::Query(_) => "query",
             Command::Diff(_) => "diff",
             Command::Memex(_) => "memex",
+            Command::Crowd(_) => "crowd",
         }
     }
 
@@ -556,6 +583,7 @@ impl Command {
             Command::Query(_) => "Query snapshot data (who-imports, where-symbol, component-of)",
             Command::Diff(_) => "Compare snapshots and show semantic delta",
             Command::Memex(_) => "Index analysis into AI memory (vector DB)",
+            Command::Crowd(_) => "Detect functional crowds (similar files clustering)",
         }
     }
 
@@ -579,6 +607,10 @@ impl Command {
                 "Query snapshot (who-imports, where-symbol, component-of)",
             ),
             ("memex", "Index analysis into AI memory (vector DB)"),
+            (
+                "crowd [pattern]",
+                "Detect functional crowds around a pattern",
+            ),
         ];
 
         let mut help = String::new();

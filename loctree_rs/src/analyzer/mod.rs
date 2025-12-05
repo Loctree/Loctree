@@ -25,6 +25,7 @@ pub mod assets;
 pub mod ast_js;
 pub mod classify;
 pub mod coverage;
+pub mod crowd;
 mod css;
 pub mod cycles;
 pub mod dead_parrots;

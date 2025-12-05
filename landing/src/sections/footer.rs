@@ -18,7 +18,7 @@ pub fn Footer() -> impl IntoView {
                     <a href="https://github.com/Loctree/Loctree/blob/main/LICENSE" target="_blank" class="footer-link">"MIT License"</a>
                 </div>
                 <p class="footer-copyright">
-                    "Developed with 💀 by The Loctree Team (c)2025 "
+                    "Developed with 💀 by Loctree Team (c)2025"
                 </p>
             </div>
         </footer>

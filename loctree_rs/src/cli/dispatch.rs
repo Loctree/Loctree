@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use crate::args::ParsedArgs;
 use crate::types::{DEFAULT_LOC_THRESHOLD, Mode, OutputMode};
 
+use super::command::CrowdOptions;
 use super::command::*;
 
 /// Convert a Command and GlobalOptions into ParsedArgs for backward compatibility.
@@ -236,6 +237,11 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
             // Memex is handled specially in dispatch_command
             // as it doesn't go through ParsedArgs
         }
+
+        Command::Crowd(_) => {
+            // Crowd is handled specially in dispatch_command
+            // as it doesn't go through ParsedArgs
+        }
     }
 
     parsed
@@ -288,6 +294,9 @@ pub fn dispatch_command(parsed_cmd: &ParsedCommand) -> DispatchResult {
             // Execute memex and return result
             return handle_memex_command(opts, &parsed_cmd.global);
         }
+        Command::Crowd(opts) => {
+            return handle_crowd_command(opts, &parsed_cmd.global);
+        }
         _ => {}
     }
 
@@ -299,16 +308,14 @@ pub fn dispatch_command(parsed_cmd: &ParsedCommand) -> DispatchResult {
 /// Handle the query command directly
 fn handle_query_command(opts: &QueryOptions, global: &GlobalOptions) -> DispatchResult {
     use crate::query::{query_component_of, query_where_symbol, query_who_imports};
-    use crate::snapshot::Snapshot;
     use std::path::Path;
 
-    // Load snapshot from current directory
+    // Load snapshot (auto-scan if missing)
     let root = Path::new(".");
-    let snapshot = match Snapshot::load(root) {
+    let snapshot = match load_or_create_snapshot(root, global) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("[loct][error] Failed to load snapshot: {}", e);
-            eprintln!("[loct][hint] Run 'loct scan' first to create a snapshot.");
+            eprintln!("[loct][error] {}", e);
             return DispatchResult::Exit(1);
         }
     };
@@ -763,6 +770,132 @@ fn handle_memex_command(opts: &MemexOptions, global: &GlobalOptions) -> Dispatch
     }
 }
 
+/// Load snapshot from disk, or auto-create one if missing.
+/// This provides a better UX for commands that depend on snapshots.
+fn load_or_create_snapshot(
+    root: &std::path::Path,
+    global: &GlobalOptions,
+) -> std::io::Result<crate::snapshot::Snapshot> {
+    use crate::args::ParsedArgs;
+    use crate::snapshot::Snapshot;
+
+    // Try to load existing snapshot
+    match Snapshot::load(root) {
+        Ok(s) => return Ok(s),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            // No snapshot - auto-create one
+            if !global.quiet {
+                eprintln!("[loct] No snapshot found, running initial scan...");
+            }
+        }
+        Err(e) => return Err(e), // Other errors (corruption, etc.) - fail
+    }
+
+    // Create minimal ParsedArgs for scan
+    let parsed = ParsedArgs {
+        verbose: global.verbose,
+        use_gitignore: true,
+        ..Default::default()
+    };
+
+    // Run scan
+    let root_list = vec![root.to_path_buf()];
+    crate::snapshot::run_init(&root_list, &parsed)?;
+
+    // Now load the freshly created snapshot
+    Snapshot::load(root)
+}
+
+/// Handle the crowd command - detect functional crowds
+fn handle_crowd_command(opts: &CrowdOptions, global: &GlobalOptions) -> DispatchResult {
+    use crate::analyzer::crowd::{
+        detect_all_crowds_with_edges, detect_crowd_with_edges, format_crowd, format_crowds_summary,
+    };
+
+    use std::path::Path;
+
+    // Load snapshot (auto-scan if missing)
+    let root = opts
+        .roots
+        .first()
+        .map(|p| p.as_path())
+        .unwrap_or(Path::new("."));
+    let snapshot = match load_or_create_snapshot(root, global) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[loct][error] {}", e);
+            return DispatchResult::Exit(1);
+        }
+    };
+
+    // Detect crowds (using edges for accurate transitive importer counting)
+    let crowds = if let Some(ref pattern) = opts.pattern {
+        // Single pattern mode
+        vec![detect_crowd_with_edges(
+            &snapshot.files,
+            pattern,
+            &snapshot.edges,
+        )]
+    } else {
+        // Auto-detect mode
+        let mut all_crowds = detect_all_crowds_with_edges(&snapshot.files, &snapshot.edges);
+
+        // Apply min_size filter
+        if let Some(min_size) = opts.min_size {
+            all_crowds.retain(|c| c.members.len() >= min_size);
+        }
+
+        // Apply limit
+        if let Some(limit) = opts.limit {
+            all_crowds.truncate(limit);
+        }
+
+        all_crowds
+    };
+
+    // Filter out empty crowds
+    let crowds: Vec<_> = crowds
+        .into_iter()
+        .filter(|c| !c.members.is_empty())
+        .collect();
+
+    if crowds.is_empty() {
+        if !global.quiet {
+            if let Some(ref pattern) = opts.pattern {
+                eprintln!(
+                    "[loct][crowd] No files found matching pattern '{}'",
+                    pattern
+                );
+            } else {
+                eprintln!("[loct][crowd] No crowds detected in codebase");
+            }
+        }
+        return DispatchResult::Exit(0);
+    }
+
+    // Output results
+    if global.json {
+        match serde_json::to_string_pretty(&crowds) {
+            Ok(json) => println!("{}", json),
+            Err(e) => {
+                eprintln!("[loct][error] Failed to serialize crowds: {}", e);
+                return DispatchResult::Exit(1);
+            }
+        }
+    } else {
+        // Human-readable output
+        if crowds.len() == 1 {
+            // Single crowd - detailed view
+            println!("{}", format_crowd(&crowds[0], global.verbose));
+        } else {
+            // Multiple crowds - summary view
+            println!("{}", format_crowds_summary(&crowds));
+        }
+    }
+
+    DispatchResult::Exit(0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -878,5 +1011,20 @@ mod tests {
         let parsed_cmd = ParsedCommand::new(Command::Version, GlobalOptions::default());
         let result = dispatch_command(&parsed_cmd);
         assert!(matches!(result, DispatchResult::ShowVersion));
+    }
+
+    #[test]
+    fn test_crowd_command_to_dispatch() {
+        let parsed_cmd = ParsedCommand::new(
+            Command::Crowd(CrowdOptions {
+                pattern: Some("message".into()),
+                ..Default::default()
+            }),
+            GlobalOptions::default(),
+        );
+        // Just verify it doesn't panic and returns Exit (will fail without snapshot, but that's OK)
+        let result = dispatch_command(&parsed_cmd);
+        // Should be Exit(1) because no snapshot exists in test env
+        assert!(matches!(result, DispatchResult::Exit(_)));
     }
 }

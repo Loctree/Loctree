@@ -1,4 +1,4 @@
-# loct — AI Agent Quick Reference (v0.5.12)
+# loct — AI Agent Quick Reference (v0.5.14)
 
 Static analysis for AI agents: scan once, slice many. Default `loct` writes `.loctree/<branch@sha>/snapshot.json`; use `loct report --serve` (or `loct lint --sarif`) when you need full artifacts (`analysis.json`, `report.html`, `report.sarif`, etc.).
 
@@ -32,10 +32,15 @@ loct events --json        # Emit/listen, ghost/orphan/races
 loct dead --confidence high  # unused exports (alias-aware)
 loct cycles                  # circular imports
 
-# 7) Delta / diff (new!)
+# 7) Crowd detection (functional duplicates)
+loct crowd                   # auto-detect all crowds
+loct crowd message           # files clustering around "message"
+loct crowd --json            # JSON for AI agents
+
+# 8) Delta / diff
 loct diff --since main       # compare against another snapshot
 
-# 8) CI / policy
+# 9) CI / policy
 loct lint --fail --sarif > results.sarif
 ```
 
@@ -43,7 +48,7 @@ loct lint --fail --sarif > results.sarif
 
 ```bash
 cargo install loctree
-loct --version   # expect 0.5.9+
+loct --version   # expect 0.5.14+
 ```
 
 ## Auto-Detect Stack
@@ -64,6 +69,7 @@ loct --version   # expect 0.5.9+
 - **Impact**: `loct impact <file>`
 - **Dead code**: `loct dead --confidence high`
 - **Circular imports**: `loct cycles`
+- **Functional crowds**: `loct crowd` (find similar files clustering around same functionality)
 - **Tauri FE↔BE**: `loct commands --missing`, `loct commands --unused`, `loct events --json`
 - **Delta between scans**: `loct diff --since <snapshot_id>`
 - **CI guardrails**: `loct lint --fail --sarif > results.sarif`
