@@ -5,7 +5,7 @@
   <defs>
     <style>
       .node { fill: #e0e0e0; }
-      .stem { stroke: #e0e0e0; stroke-width: 7; stroke-linecap: round; }
+      .stem { stroke: #e0e0e0; stroke-width: 10; stroke-linecap: round; }
     </style>
   </defs>
 
@@ -22,9 +22,9 @@
   <circle class="node" cx="180" cy="190" r="16"/>
   <circle class="node" cx="285" cy="190" r="16"/>
 
-  <!-- Stem (vertical, shifted right, thicker, longer) -->
-  <line class="stem" x1="200" y1="215" x2="200" y2="280"/>
+  <!-- Stem (vertical, shifted right, thicker) -->
+  <line class="stem" x1="210" y1="220" x2="210" y2="275"/>
 
   <!-- Root node at bottom -->
-  <circle class="node" cx="200" cy="310" r="16"/>
+  <circle class="node" cx="205" cy="310" r="16"/>
 </svg>
