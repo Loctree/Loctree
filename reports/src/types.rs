@@ -504,6 +504,177 @@ pub struct RankedDup {
     pub refactors: Vec<String>,
 }
 
+/// Match reason for crowd membership.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum MatchReason {
+    /// Name similarity match
+    #[serde(rename = "name_similarity")]
+    NameSimilarity {
+        /// Matched pattern
+        pattern: String,
+        /// Similarity score (0.0-1.0)
+        similarity: f32,
+    },
+    /// Path proximity match
+    #[serde(rename = "path_proximity")]
+    PathProximity {
+        /// Directory distance
+        distance: usize,
+    },
+    /// Export overlap match
+    #[serde(rename = "export_overlap")]
+    ExportOverlap {
+        /// Number of shared exports
+        count: usize,
+    },
+    /// Multiple signals combined
+    #[serde(rename = "combined")]
+    Combined,
+}
+
+/// Issue detected in a crowd.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum CrowdIssue {
+    /// Files with identical or near-identical names
+    #[serde(rename = "name_collision")]
+    NameCollision {
+        /// Files with colliding names
+        files: Vec<String>,
+    },
+    /// Some members heavily used, others underutilized
+    #[serde(rename = "usage_asymmetry")]
+    UsageAsymmetry {
+        /// Primary (heavily used) file
+        primary: String,
+        /// Underused files
+        underused: Vec<String>,
+    },
+    /// Files exporting the same symbols
+    #[serde(rename = "export_overlap")]
+    ExportOverlap {
+        /// Files with overlapping exports
+        files: Vec<String>,
+        /// Overlapping export names
+        overlap: Vec<String>,
+    },
+    /// Pattern spans unrelated categories
+    #[serde(rename = "fragmentation")]
+    Fragmentation {
+        /// Categories detected
+        categories: Vec<String>,
+    },
+}
+
+/// A member of a crowd.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CrowdMember {
+    /// File path
+    pub file: String,
+    /// Why this file matched the crowd
+    pub match_reason: MatchReason,
+    /// Number of files importing this one
+    pub importer_count: usize,
+    /// Similarity scores with other members (file, score)
+    #[serde(default)]
+    pub similarity_scores: Vec<(String, f32)>,
+}
+
+/// A group of files with similar names/patterns.
+///
+/// Crowds indicate potential naming collisions, fragmentation,
+/// or copy-paste duplication across the codebase.
+///
+/// # Scoring
+///
+/// - 0-4: Low severity (acceptable naming patterns)
+/// - 4-7: Medium severity (worth reviewing)
+/// - 7-10: High severity (likely problematic)
+///
+/// # Example
+///
+/// ```rust
+/// use report_leptos::types::{Crowd, CrowdMember, MatchReason, CrowdIssue};
+///
+/// let crowd = Crowd {
+///     pattern: "message".into(),
+///     members: vec![
+///         CrowdMember {
+///             file: "src/message.ts".into(),
+///             match_reason: MatchReason::NameSimilarity {
+///                 pattern: "message".into(),
+///                 similarity: 1.0,
+///             },
+///             importer_count: 15,
+///             similarity_scores: vec![],
+///         },
+///         CrowdMember {
+///             file: "src/components/Message.tsx".into(),
+///             match_reason: MatchReason::NameSimilarity {
+///                 pattern: "message".into(),
+///                 similarity: 1.0,
+///             },
+///             importer_count: 8,
+///             similarity_scores: vec![],
+///         },
+///     ],
+///     score: 6.5,
+///     issues: vec![
+///         CrowdIssue::NameCollision {
+///             files: vec!["src/message.ts".into(), "src/components/Message.tsx".into()],
+///         },
+///     ],
+/// };
+/// ```
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Crowd {
+    /// Pattern name (e.g., "message", "chat")
+    pub pattern: String,
+    /// Files matching this pattern
+    pub members: Vec<CrowdMember>,
+    /// Severity score (0-10, higher = worse)
+    pub score: f32,
+    /// Issues detected in this crowd
+    #[serde(default)]
+    pub issues: Vec<CrowdIssue>,
+}
+
+/// A dead export (symbol exported but never imported).
+///
+/// Represents code that appears to be unused - exported from a file
+/// but never imported anywhere in the analyzed codebase.
+///
+/// # Example
+///
+/// ```rust
+/// use report_leptos::types::DeadExport;
+///
+/// let dead = DeadExport {
+///     file: "src/utils/legacy.ts".into(),
+///     symbol: "formatOldDate".into(),
+///     line: Some(42),
+///     confidence: "very-high".into(),
+///     reason: "No imports found in codebase".into(),
+///     open_url: Some("loctree://open?f=src/utils/legacy.ts&l=42".into()),
+/// };
+/// ```
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct DeadExport {
+    /// File path containing the dead export
+    pub file: String,
+    /// Symbol name (function, class, type, etc.)
+    pub symbol: String,
+    /// Line number where symbol is defined (1-indexed)
+    pub line: Option<usize>,
+    /// Confidence level: "high", "very-high"
+    pub confidence: String,
+    /// Human-readable reason why this is considered dead
+    pub reason: String,
+    /// Optional URL for opening in editor (loctree://open protocol)
+    pub open_url: Option<String>,
+}
+
 /// A complete report section for one analyzed directory.
 ///
 /// This is the main data structure passed to [`crate::render_report`].
@@ -538,9 +709,12 @@ pub struct ReportSection {
     pub ranked_dups: Vec<RankedDup>,
     /// Cascade import pairs (source, target)
     pub cascades: Vec<(String, String)>,
-    /// Circular import components
+    /// Circular import components (strict cycles)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub circular_imports: Vec<Vec<String>>,
+    /// Lazy circular imports (cycles only via dynamic/lazy imports)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lazy_circular_imports: Vec<Vec<String>>,
     /// Dynamic imports per file
     pub dynamic: Vec<(String, Vec<String>)>,
     /// Maximum files to analyze (0 = unlimited)
@@ -571,4 +745,10 @@ pub struct ReportSection {
     pub git_branch: Option<String>,
     /// Git commit hash (if available)
     pub git_commit: Option<String>,
+    /// Crowd analysis results (naming collision detection)
+    #[serde(default)]
+    pub crowds: Vec<Crowd>,
+    /// Dead exports (exported but never imported)
+    #[serde(default)]
+    pub dead_exports: Vec<DeadExport>,
 }

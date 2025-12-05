@@ -3,8 +3,8 @@
 //! Implements the App Shell layout with Sidebar and Main Content areas.
 
 use super::{
-    Icon, ReportSectionView, ICON_COPY, ICON_GRAPH, ICON_LIGHTNING, ICON_SQUARES_FOUR,
-    ICON_TERMINAL,
+    Icon, ReportSectionView, ICON_COPY, ICON_GHOST, ICON_GRAPH, ICON_LIGHTNING, ICON_SQUARES_FOUR,
+    ICON_TERMINAL, ICON_USERS, ICON_WARNING_CIRCLE,
 };
 use crate::styles::{CSP, REPORT_CSS};
 use crate::types::ReportSection;
@@ -62,6 +62,18 @@ pub fn ReportDocument(sections: Vec<ReportSection>, js_assets: JsAssets) -> impl
                             <button class="nav-item" data-tab="commands">
                                 <Icon path=ICON_TERMINAL class="icon-sm" />
                                 "Tauri coverage"
+                            </button>
+                            <button class="nav-item" data-tab="crowds">
+                                <Icon path=ICON_USERS class="icon-sm" />
+                                "Crowds"
+                            </button>
+                            <button class="nav-item" data-tab="cycles">
+                                <Icon path=ICON_WARNING_CIRCLE class="icon-sm" />
+                                "Cycles"
+                            </button>
+                            <button class="nav-item" data-tab="dead">
+                                <Icon path=ICON_GHOST class="icon-sm" />
+                                "Dead Code"
                             </button>
                             <button class="nav-item" data-tab="graph">
                                 <Icon path=ICON_GRAPH class="icon-sm" />

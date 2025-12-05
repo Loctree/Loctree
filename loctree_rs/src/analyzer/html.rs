@@ -139,6 +139,8 @@ mod tests {
             }],
             git_branch: None,
             git_commit: None,
+            crowds: Vec::new(),
+            dead_exports: Vec::new(),
         };
 
         render_html_report(&out_path, &[section]).expect("render html");
@@ -183,6 +185,8 @@ mod tests {
             insights: Vec::new(),
             git_branch: None,
             git_commit: None,
+            crowds: Vec::new(),
+            dead_exports: Vec::new(),
         };
 
         render_html_report(&out_path, &[section]).expect("render html");

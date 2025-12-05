@@ -1,5 +1,8 @@
 use serde::Serialize;
 
+use super::crowd::types::Crowd;
+use super::dead_parrots::DeadExport;
+
 /// Confidence level for unused handler detection.
 /// HIGH = no string literal matches found (likely truly unused)
 /// LOW = string literal matches found (may be used dynamically)
@@ -200,6 +203,12 @@ pub struct ReportSection {
     pub insights: Vec<AiInsight>,
     pub git_branch: Option<String>,
     pub git_commit: Option<String>,
+    /// Crowd analysis results (naming collision detection)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub crowds: Vec<Crowd>,
+    /// Dead exports (exported but never imported)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dead_exports: Vec<DeadExport>,
 }
 
 #[cfg(test)]

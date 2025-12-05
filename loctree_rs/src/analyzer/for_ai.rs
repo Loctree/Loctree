@@ -787,6 +787,8 @@ mod tests {
             graph_warning: None,
             git_branch: None,
             git_commit: None,
+            crowds: vec![],
+            dead_exports: vec![],
         }
     }
 

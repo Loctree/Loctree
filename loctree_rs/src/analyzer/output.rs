@@ -12,6 +12,7 @@ use crate::types::{FileAnalysis, ImportKind, ImportResolutionKind, OutputMode, R
 use super::CommandGap;
 use super::ReportSection;
 use super::classify::language_from_path;
+use super::crowd::detect_all_crowds_with_edges;
 use super::cycles;
 use super::dead_parrots::{DeadFilterConfig, find_dead_exports};
 use super::graph::{MAX_GRAPH_EDGES, MAX_GRAPH_NODES, build_graph_data};
@@ -203,6 +204,18 @@ pub fn process_root_context(
 
     let cycle_edges = build_cycle_edges(&graph_edges, &analyses);
     let (circular_imports, lazy_circular_imports) = cycles::find_cycles_with_lazy(&cycle_edges);
+
+    // Detect crowds (naming collision patterns)
+    // Convert cycle_edges to GraphEdge format for crowd detection
+    let graph_edges_for_crowd: Vec<crate::snapshot::GraphEdge> = cycle_edges
+        .iter()
+        .map(|(from, to, label)| crate::snapshot::GraphEdge {
+            from: from.clone(),
+            to: to.clone(),
+            label: label.clone(),
+        })
+        .collect();
+    let crowds = detect_all_crowds_with_edges(&analyses, &graph_edges_for_crowd);
 
     let mut sorted_paths: Vec<String> = analyses.iter().map(|a| a.path.clone()).collect();
     sorted_paths.sort();
@@ -638,7 +651,7 @@ pub fn process_root_context(
     // - imported_by_name fallback for $lib/, @scope/ aliases
     // - Skip patterns for framework entry points, .d.ts, configs, tests
     let mut dead_symbols = Vec::new();
-    if !parsed.skip_dead_symbols {
+    let dead_exports_for_report = if !parsed.skip_dead_symbols {
         let open_base = current_open_base();
         let dead_exports = find_dead_exports(
             global_analyses,
@@ -680,7 +693,12 @@ pub fn process_root_context(
         });
         dead_symbols_total = dead_symbols.len();
         dead_symbols.truncate(parsed.top_dead_symbols);
-    }
+
+        // Keep the original dead_exports for the report
+        dead_exports
+    } else {
+        Vec::new()
+    };
 
     let duplicate_clusters_count = clusters_json.len();
     let max_cluster_size = symbol_occurrences
@@ -1194,6 +1212,8 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
             graph_warning: graph_warning.clone(),
             git_branch: git.and_then(|g| g.branch.clone()),
             git_commit: git.and_then(|g| g.commit.clone()),
+            crowds: crowds.clone(),
+            dead_exports: dead_exports_for_report.clone(),
         });
     }
 

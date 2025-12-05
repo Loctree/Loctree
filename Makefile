@@ -17,10 +17,16 @@ build: setup-protoc
 build-core:
 	cargo build --release -p loctree -p loctree_server -p reports
 
-# Install loctree binaries
+# Determine cargo bin dir
+CARGO_BIN ?= $(if $(CARGO_HOME),$(CARGO_HOME)/bin,$(HOME)/.cargo/bin)
+
+# Install loctree binaries (reuses incremental build; avoids reinstalling deps each time)
 install: setup-protoc
-	cargo install --path loctree_rs --force
-	@echo "Installed: loct, loctree"
+	cargo build --release -p loctree
+	mkdir -p "$(CARGO_BIN)"
+	install -m 755 target/release/loctree "$(CARGO_BIN)/loctree"
+	install -m 755 target/release/loct "$(CARGO_BIN)/loct"
+	@echo "Installed: loct, loctree → $(CARGO_BIN)"
 
 # Install everything including memex
 install-all: setup-protoc
