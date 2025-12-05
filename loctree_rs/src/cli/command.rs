@@ -431,6 +431,10 @@ pub struct CrowdOptions {
 
     /// Maximum crowds to show in auto-detect mode (default: 10)
     pub limit: Option<usize>,
+
+    /// Include test files in crowd detection (default: false)
+    /// Tests are entry points by design - they have 0 importers and create noise
+    pub include_tests: bool,
 }
 
 /// Options for the `help` command.

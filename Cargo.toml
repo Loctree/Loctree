@@ -10,6 +10,11 @@ members = [
     "landing",
 ]
 
+# Note: rmcp_memex requires protobuf for lancedb
+# Use `make build` to auto-install protobuf, or run:
+#   brew install protobuf (macOS)
+#   apt install protobuf-compiler (Linux)
+
 [workspace.package]
 edition = "2024"
 license = "MIT"
@@ -38,3 +43,13 @@ futures = "0.3"
 
 # The local crates (for inter-crate dependencies)
 loctree = { path = "loctree_rs" }
+
+# Release profile - good defaults for all crates
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+# WASM crates need size optimization - override when building with trunk/wasm-pack
+# trunk uses its own Trunk.toml for wasm-opt settings

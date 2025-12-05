@@ -130,13 +130,13 @@ pub fn AiSummaryPanel(sections: Vec<ReportSection>) -> impl IntoView {
 
             <div class=format!("health-badge {}", health_class)>
                 {if missing > 0 {
-                    format!("🚨 {} CRITICAL issues", missing)
+                    format!("{} CRITICAL issues", missing)
                 } else if unregistered > 0 {
-                    format!("⚠️ {} warnings", unregistered)
+                    format!("{} warnings", unregistered)
                 } else if has_issues {
-                    format!("📋 {} items to review", unused + duplicates)
+                    format!("{} items to review", unused + duplicates)
                 } else {
-                    "✅ Healthy".to_string()
+                    "Healthy".to_string()
                 }}
             </div>
 

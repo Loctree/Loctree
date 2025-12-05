@@ -824,7 +824,7 @@ pub fn find_dead_exports(
             if python_framework_magic {
                 continue;
             }
-            if is_python_test_export(analysis, exp) {
+            if is_python_test_export(analysis, exp) || is_python_test_path(&analysis.path) {
                 continue;
             }
 
@@ -1519,7 +1519,7 @@ mod integration_tests {
     }
 }
 fn is_python_test_export(analysis: &FileAnalysis, exp: &ExportSymbol) -> bool {
-    if !analysis.path.ends_with(".py") || !analysis.is_test {
+    if !analysis.path.ends_with(".py") {
         return false;
     }
     if exp.kind == "class" && exp.name.starts_with("Test") {
@@ -1529,4 +1529,16 @@ fn is_python_test_export(analysis: &FileAnalysis, exp: &ExportSymbol) -> bool {
         return true;
     }
     false
+}
+
+fn is_python_test_path(path: &str) -> bool {
+    let lower = path.replace('\\', "/").to_lowercase();
+    lower.contains("/tests/")
+        || lower.contains("/test/")
+        || lower.ends_with("_test.py")
+        || lower.ends_with("_tests.py")
+        || lower
+            .rsplit('/')
+            .next()
+            .is_some_and(|name| name.starts_with("test_"))
 }

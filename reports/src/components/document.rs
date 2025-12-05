@@ -132,7 +132,7 @@ const APP_SCRIPT: &str = r#"
           const text = btn.dataset.copy;
           navigator.clipboard.writeText(text).then(() => {
               const orig = btn.textContent;
-              btn.textContent = '✓';
+              btn.textContent = 'Copied';
               setTimeout(() => btn.textContent = orig, 1500);
           });
       });

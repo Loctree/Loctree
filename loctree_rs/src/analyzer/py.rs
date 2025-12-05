@@ -487,6 +487,7 @@ pub(crate) fn analyze_py_file(
     let mut type_check_stack: Vec<usize> = Vec::new();
     let mut pending_callback_decorator = false;
     let mut pending_framework_decorator = false;
+    let mut pending_fixture_decorator = false;
     let mut in_docstring = false;
 
     // Set Python-specific metadata
@@ -554,6 +555,10 @@ pub(crate) fn analyze_py_file(
             // Track framework decorators that mark functions as "used"
             if is_framework_decorator(trimmed) {
                 pending_framework_decorator = true;
+            }
+            // pytest fixtures: treat next def as used
+            if trimmed.contains("pytest.fixture") {
+                pending_fixture_decorator = true;
             }
             continue;
         }
@@ -702,8 +707,12 @@ pub(crate) fn analyze_py_file(
                 if (pending_callback_decorator || pending_framework_decorator) && !name.is_empty() {
                     analysis.local_uses.push(name.to_string());
                 }
+                if pending_fixture_decorator && !name.is_empty() {
+                    analysis.local_uses.push(name.to_string());
+                }
                 pending_callback_decorator = false;
                 pending_framework_decorator = false;
+                pending_fixture_decorator = false;
             } else if !trimmed.is_empty()
                 && !trimmed.starts_with('#')
                 && !trimmed.starts_with("class ")
@@ -1667,6 +1676,35 @@ def process(items: List[Session]) -> None:
             analysis.local_uses.contains(&"Session".to_string()),
             "Session not found in local_uses: {:?}",
             analysis.local_uses
+        );
+    }
+
+    #[test]
+    fn marks_pytest_fixture_as_used() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path();
+
+        let content = r#"
+import pytest
+
+@pytest.fixture
+def client():
+    return object()
+"#;
+
+        let analysis = analyze_py_file(
+            content,
+            &root.join("conftest.py"),
+            root,
+            Some(&py_exts()),
+            "conftest.py".to_string(),
+            &[root.to_path_buf()],
+            &HashSet::new(),
+        );
+
+        assert!(
+            analysis.local_uses.contains(&"client".to_string()),
+            "pytest fixture should be marked as used"
         );
     }
 

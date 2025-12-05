@@ -1706,3 +1706,82 @@ body::after {
 .blog-note a:hover {
     color: var(--text-bright);
 }
+
+/* ============================================
+   Page-level styles for subpages
+   Developed with 💀 (c)2025
+   ============================================ */
+
+/* Page header (used on Features, Docs, Blog) */
+.page-header {
+    padding: 8rem 0 4rem;
+    background: var(--bg-dark);
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.page-title {
+    font-size: clamp(2rem, 4vw, 3rem);
+    font-weight: 700;
+    margin-bottom: 1rem;
+    color: var(--text-bright);
+}
+
+.page-description {
+    font-size: 1.1rem;
+    color: var(--text-dim);
+    max-width: 600px;
+}
+
+/* 404 Not Found */
+.not-found {
+    min-height: 60vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 4rem 0;
+}
+
+.not-found h1 {
+    font-size: 8rem;
+    font-weight: 700;
+    color: var(--text-bright);
+    margin-bottom: 1rem;
+    line-height: 1;
+}
+
+.not-found p {
+    font-size: 1.25rem;
+    color: var(--text-dim);
+    margin-bottom: 2rem;
+}
+
+/* Active link styling for router */
+.nav-link[aria-current="page"],
+.nav-link.active {
+    color: var(--text-bright);
+}
+
+/* Ensure main content has proper spacing */
+main {
+    padding-top: 60px;
+    min-height: calc(100vh - 80px);
+}
+
+@media (max-width: 768px) {
+    .page-header {
+        padding: 6rem 0 3rem;
+    }
+
+    .page-title {
+        font-size: 2rem;
+    }
+
+    .page-description {
+        font-size: 1rem;
+    }
+
+    .not-found h1 {
+        font-size: 5rem;
+    }
+}

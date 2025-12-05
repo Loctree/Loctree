@@ -806,6 +806,43 @@ fn load_or_create_snapshot(
     Snapshot::load(root)
 }
 
+/// Check if a file path looks like a test file
+fn is_test_file(path: &str) -> bool {
+    let path_lower = path.to_lowercase();
+    let filename = std::path::Path::new(path)
+        .file_name()
+        .and_then(|f| f.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    // Directory patterns: tests/, __tests__/, test/, spec/
+    if path_lower.contains("/tests/")
+        || path_lower.contains("/__tests__/")
+        || path_lower.contains("/test/")
+        || path_lower.contains("/spec/")
+        || path_lower.contains("/fixtures/")
+        || path_lower.contains("/mocks/")
+    {
+        return true;
+    }
+
+    // File patterns: *_test.*, *.test.*, *_spec.*, *.spec.*, test_*, tests.*
+    if filename.contains("_test.")
+        || filename.contains(".test.")
+        || filename.contains("_spec.")
+        || filename.contains(".spec.")
+        || filename.contains("_tests.")  // Rust: module_tests.rs
+        || filename.starts_with("test_")
+        || filename.starts_with("spec_")
+        || filename.starts_with("tests.")  // tests.rs
+        || filename == "conftest.py"
+    {
+        return true;
+    }
+
+    false
+}
+
 /// Handle the crowd command - detect functional crowds
 fn handle_crowd_command(opts: &CrowdOptions, global: &GlobalOptions) -> DispatchResult {
     use crate::analyzer::crowd::{
@@ -828,17 +865,25 @@ fn handle_crowd_command(opts: &CrowdOptions, global: &GlobalOptions) -> Dispatch
         }
     };
 
+    // Filter out test files unless --include-tests is specified
+    let files: Vec<_> = if opts.include_tests {
+        snapshot.files.clone()
+    } else {
+        snapshot
+            .files
+            .iter()
+            .filter(|f| !is_test_file(&f.path))
+            .cloned()
+            .collect()
+    };
+
     // Detect crowds (using edges for accurate transitive importer counting)
     let crowds = if let Some(ref pattern) = opts.pattern {
         // Single pattern mode
-        vec![detect_crowd_with_edges(
-            &snapshot.files,
-            pattern,
-            &snapshot.edges,
-        )]
+        vec![detect_crowd_with_edges(&files, pattern, &snapshot.edges)]
     } else {
         // Auto-detect mode
-        let mut all_crowds = detect_all_crowds_with_edges(&snapshot.files, &snapshot.edges);
+        let mut all_crowds = detect_all_crowds_with_edges(&files, &snapshot.edges);
 
         // Apply min_size filter
         if let Some(min_size) = opts.min_size {

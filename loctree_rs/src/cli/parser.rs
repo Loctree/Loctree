@@ -489,6 +489,10 @@ fn parse_dead_command(args: &[String]) -> Result<Command, String> {
                 opts.with_tests = true;
                 i += 1;
             }
+            "--exclude-tests" => {
+                opts.with_tests = false;
+                i += 1;
+            }
             "--with-helpers" => {
                 opts.with_helpers = true;
                 i += 1;
@@ -897,10 +901,11 @@ ARGUMENTS:
                  If not specified, auto-detects all crowds
 
 OPTIONS:
-    --auto, -a       Detect all crowds automatically
-    --min-size <N>   Minimum crowd size to report (default: 2)
-    --limit <N>      Maximum crowds to show (default: 10)
-    --help, -h       Show this help message
+    --auto, -a         Detect all crowds automatically
+    --min-size <N>     Minimum crowd size to report (default: 2)
+    --limit <N>        Maximum crowds to show (default: 10)
+    --include-tests    Include test files (excluded by default)
+    --help, -h         Show this help message
 
 EXAMPLES:
     loct crowd                  # Auto-detect all crowds
@@ -933,6 +938,10 @@ EXAMPLES:
                     .ok_or_else(|| "--limit requires a number".to_string())?;
                 opts.limit = Some(value.parse().map_err(|_| "--limit requires a number")?);
                 i += 2;
+            }
+            "--include-tests" => {
+                opts.include_tests = true;
+                i += 1;
             }
             _ if !arg.starts_with('-') => {
                 // Positional argument is the pattern (if not a root path)

@@ -1,5 +1,6 @@
 use super::VERSION;
 use leptos::prelude::*;
+use leptos_router::components::A;
 
 #[component]
 pub fn Nav() -> impl IntoView {
@@ -107,19 +108,17 @@ loct lint --fail --sarif > results.sarif
     view! {
         <nav class="nav">
             <div class="nav-inner">
-                <a href="/" class="nav-brand">
-                <div class="nav-logo">
-                    <img src="assets/loctree-logo.png" alt="loctree" />
-                </div>
+                <A href="/" attr:class="nav-brand">
+                    <div class="nav-logo">
+                        <img src="/assets/loctree-logo.png" alt="loctree" />
+                    </div>
                     <span class="nav-title">"loctree"</span>
                     <span class="nav-version">{VERSION}</span>
-                </a>
+                </A>
                 <div class="nav-links">
-                    <a href="#features" class="nav-link">"Features"</a>
-                    <a href="#slice" class="nav-link">"Slice"</a>
-                    <a href="#cli" class="nav-link">"CLI"</a>
-                    <a href="#blog" class="nav-link">"Blog"</a>
-                    <a href="https://docs.rs/loctree" target="_blank" class="nav-link">"Docs"</a>
+                    <A href="/features" attr:class="nav-link">"Features"</A>
+                    <A href="/docs" attr:class="nav-link">"Docs"</A>
+                    <A href="/blog" attr:class="nav-link">"Blog"</A>
                     <a href="https://github.com/Loctree/Loctree" target="_blank" class="nav-link">"GitHub"</a>
                     <button
                         class=move || if drawer_open.get() { "nav-cta active" } else { "nav-cta" }

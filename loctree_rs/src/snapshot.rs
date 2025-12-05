@@ -569,8 +569,16 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
 
     let start_time = Instant::now();
 
-    // Snapshot always saves to CWD (one snapshot per repo)
-    let snapshot_root = std::env::current_dir()?;
+    // Snapshot root defaults to the first provided root (common UX: keep artifacts near target),
+    // falling back to CWD if multiple roots are provided.
+    let snapshot_root = if root_list.len() == 1 {
+        root_list
+            .first()
+            .cloned()
+            .unwrap_or_else(|| std::env::current_dir().expect("current dir"))
+    } else {
+        std::env::current_dir()?
+    };
 
     // Validate at least one root was specified
     if root_list.is_empty() {

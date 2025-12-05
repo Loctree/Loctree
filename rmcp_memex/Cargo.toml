@@ -57,8 +57,4 @@ crossterm = "0.29"
 [build-dependencies]
 protoc-bin-vendored = "3"
 
-[profile.release]
-opt-level = 3
-lto = true
-strip = true
-codegen-units = 1
+# Note: Release profile is in workspace root Cargo.toml
