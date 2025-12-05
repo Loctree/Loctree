@@ -130,6 +130,12 @@ pub enum Command {
     /// Analyzes semantic changes between commits: files changed, imports added/removed,
     /// exports changed, and impact on consumers.
     Diff(DiffOptions),
+
+    /// Index analysis into AI memory (vector database).
+    ///
+    /// Converts loctree analysis (dead code, duplications) into semantic
+    /// vectors and stores them in LanceDB for AI agent queries.
+    Memex(MemexOptions),
 }
 
 impl Default for Command {
@@ -373,6 +379,34 @@ pub struct DiffOptions {
     pub problems_only: bool,
 }
 
+/// Options for the `memex` command.
+/// Indexes loctree analysis into AI memory (vector database).
+#[derive(Debug, Clone)]
+pub struct MemexOptions {
+    /// Path to the .loctree directory or analysis.json file
+    pub report_path: PathBuf,
+
+    /// Unique project identifier (e.g., "github.com/org/repo")
+    pub project_id: Option<String>,
+
+    /// Namespace for the memory index (default: "loctree")
+    pub namespace: String,
+
+    /// Path to the LanceDB storage directory
+    pub db_path: Option<String>,
+}
+
+impl Default for MemexOptions {
+    fn default() -> Self {
+        Self {
+            report_path: PathBuf::from(".loctree"),
+            project_id: None,
+            namespace: "loctree".to_string(),
+            db_path: None,
+        }
+    }
+}
+
 /// Options for the `help` command.
 #[derive(Debug, Clone, Default)]
 pub struct HelpOptions {
@@ -498,6 +532,7 @@ impl Command {
             Command::Version => "version",
             Command::Query(_) => "query",
             Command::Diff(_) => "diff",
+            Command::Memex(_) => "memex",
         }
     }
 
@@ -520,6 +555,7 @@ impl Command {
             Command::Version => "Show version information",
             Command::Query(_) => "Query snapshot data (who-imports, where-symbol, component-of)",
             Command::Diff(_) => "Compare snapshots and show semantic delta",
+            Command::Memex(_) => "Index analysis into AI memory (vector DB)",
         }
     }
 
@@ -542,6 +578,7 @@ impl Command {
                 "query <kind> <target>",
                 "Query snapshot (who-imports, where-symbol, component-of)",
             ),
+            ("memex", "Index analysis into AI memory (vector DB)"),
         ];
 
         let mut help = String::new();

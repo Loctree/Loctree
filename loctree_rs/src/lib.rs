@@ -258,6 +258,11 @@ pub mod diff;
 /// ```
 pub mod query;
 
+/// Memex module for AI agent context management.
+///
+/// Provides semantic codebase exploration and context extraction for AI agents.
+pub mod memex;
+
 // ============================================================================
 // Re-exports for convenience
 // ============================================================================

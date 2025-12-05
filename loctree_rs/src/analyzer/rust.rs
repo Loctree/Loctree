@@ -1,7 +1,10 @@
 use crate::types::{
     CommandRef, EventRef, ExportSymbol, FileAnalysis, ImportEntry, ImportKind, ReexportEntry,
-    ReexportKind,
+    ReexportKind, SignatureUse, SignatureUseKind,
 };
+use regex::Regex;
+use std::collections::HashSet;
+use std::sync::OnceLock;
 
 use super::offset_to_line;
 use super::regexes::{
@@ -41,6 +44,74 @@ fn split_words_lower(name: &str) -> Vec<String> {
 
     words.retain(|w| !w.is_empty());
     words
+}
+
+fn regex_rust_pub_fn_signature() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r#"(?m)^\s*pub\s*(?:\([^)]*\)\s*)?(?:async\s+)?fn\s+([A-Za-z0-9_]+)\s*\((?P<params>[^)]*)\)\s*(?:->\s*(?P<ret>[^{;]+))?"#,
+        )
+        .expect("valid pub fn regex")
+    })
+}
+
+fn extract_rust_type_tokens(segment: &str) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut types = Vec::new();
+    for token in segment.split(|c: char| !c.is_ascii_alphanumeric() && c != '_' && c != ':') {
+        if token.is_empty() {
+            continue;
+        }
+        let first = token.chars().next().unwrap_or('_');
+        let looks_like_type = first.is_ascii_uppercase() || token.contains("::");
+        if !looks_like_type {
+            continue;
+        }
+        const SKIP: &[&str] = &["Self", "String", "Vec", "Option", "Result"];
+        if SKIP.contains(&token) {
+            continue;
+        }
+        if seen.insert(token.to_string()) {
+            types.push(token.to_string());
+        }
+    }
+    types
+}
+
+fn collect_rust_signature_uses(content: &str, analysis: &mut FileAnalysis) {
+    for caps in regex_rust_pub_fn_signature().captures_iter(content) {
+        let fn_name = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+        if fn_name.is_empty() {
+            continue;
+        }
+        let params = caps.name("params").map(|m| m.as_str()).unwrap_or("");
+        let ret = caps.name("ret").map(|m| m.as_str()).unwrap_or("");
+        let line = offset_to_line(content, caps.get(0).map(|m| m.start()).unwrap_or(0));
+
+        for ty in extract_rust_type_tokens(params) {
+            analysis.signature_uses.push(SignatureUse {
+                function: fn_name.to_string(),
+                usage: SignatureUseKind::Parameter,
+                type_name: ty.clone(),
+                line: Some(line),
+            });
+            if !analysis.local_uses.contains(&ty) {
+                analysis.local_uses.push(ty);
+            }
+        }
+        for ty in extract_rust_type_tokens(ret) {
+            analysis.signature_uses.push(SignatureUse {
+                function: fn_name.to_string(),
+                usage: SignatureUseKind::Return,
+                type_name: ty.clone(),
+                line: Some(line),
+            });
+            if !analysis.local_uses.contains(&ty) {
+                analysis.local_uses.push(ty);
+            }
+        }
+    }
 }
 
 fn capitalize(word: &str) -> String {
@@ -531,6 +602,8 @@ pub(crate) fn analyze_rust_file(
             }
         }
     }
+
+    collect_rust_signature_uses(&production_content, &mut analysis);
 
     for caps in regex_event_const_rust().captures_iter(content) {
         if let (Some(name), Some(val)) = (caps.get(1), caps.get(2)) {

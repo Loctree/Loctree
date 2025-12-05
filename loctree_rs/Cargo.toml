@@ -45,6 +45,14 @@ oxc_ast_visit = "0.100.0"
 oxc_semantic = "0.100.0"
 tempfile = "3"
 
+# AI Memory integration (memex command) - now part of monorepo
+rmcp-memex = { path = "../rmcp_memex" }
+tokio = { version = "1.0", features = ["rt-multi-thread"] }
+anyhow = "1.0"
+walkdir = "2.4"
+uuid = { version = "1.0", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+
 [dev-dependencies]
 assert_cmd = "2.0"
 predicates = "3.1"

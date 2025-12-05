@@ -253,6 +253,9 @@ pub struct ImportEntry {
     pub resolution: ImportResolutionKind,
     /// True if inside TYPE_CHECKING block (Python).
     pub is_type_checking: bool,
+    /// True if placed inside a function/method (lazy import to break cycles).
+    #[serde(default)]
+    pub is_lazy: bool,
 }
 
 /// Type of import statement.
@@ -478,6 +481,9 @@ pub struct FileAnalysis {
     /// Locally-referenced symbols (for dead-code suppression).
     #[serde(default)]
     pub local_uses: Vec<String>,
+    /// Type usages that appear in function signatures (parameters/returns).
+    #[serde(default)]
+    pub signature_uses: Vec<SignatureUse>,
 }
 
 impl ImportEntry {
@@ -492,6 +498,7 @@ impl ImportEntry {
             symbols: Vec::new(),
             resolution: ImportResolutionKind::Unknown,
             is_type_checking: false,
+            is_lazy: false,
         }
     }
 }
@@ -536,8 +543,31 @@ impl FileAnalysis {
             is_typed_package: false,
             is_namespace_package: false,
             local_uses: Vec::new(),
+            signature_uses: Vec::new(),
         }
     }
+}
+
+/// How a type is used in a function signature.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SignatureUseKind {
+    Parameter,
+    Return,
+}
+
+/// A single mention of a type in a function signature.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SignatureUse {
+    /// Function or method name where the type appears.
+    pub function: String,
+    /// Kind of usage: parameter or return type.
+    pub usage: SignatureUseKind,
+    /// The referenced type name (as parsed).
+    pub type_name: String,
+    /// Line number for traceability.
+    #[serde(default)]
+    pub line: Option<usize>,
 }
 
 // Convenience type aliases reused across modules

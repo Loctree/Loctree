@@ -86,7 +86,7 @@ fn write_js_assets(dir: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::render_html_report;
-    use crate::analyzer::report::{AiInsight, RankedDup, ReportSection};
+    use crate::analyzer::report::{AiInsight, DupSeverity, RankedDup, ReportSection};
     use std::fs;
     use tempfile::tempdir;
 
@@ -105,6 +105,10 @@ mod tests {
             canonical: "a.ts".into(),
             canonical_line: None,
             refactors: vec!["b.ts".into()],
+            severity: DupSeverity::SamePackage,
+            is_cross_lang: false,
+            packages: vec![],
+            reason: String::new(),
         };
 
         let section = ReportSection {
@@ -116,6 +120,7 @@ mod tests {
             ranked_dups: vec![dup],
             cascades: vec![("a.ts".into(), "b.ts".into())],
             circular_imports: vec![],
+            lazy_circular_imports: vec![],
             dynamic: vec![("dyn.ts".into(), vec!["./lazy".into()])],
             analyze_limit: 5,
             missing_handlers: Vec::new(),
@@ -163,6 +168,7 @@ mod tests {
             ranked_dups: Vec::new(),
             cascades: Vec::new(),
             circular_imports: Vec::new(),
+            lazy_circular_imports: Vec::new(),
             dynamic: Vec::new(),
             analyze_limit: 1,
             missing_handlers: Vec::new(),

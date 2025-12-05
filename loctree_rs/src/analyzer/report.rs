@@ -101,6 +101,19 @@ pub struct DupLocation {
     pub line: Option<usize>,
 }
 
+/// Severity levels for duplicate exports
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DupSeverity {
+    /// Cross-language expected (Rust↔TS DTOs) - noise
+    CrossLangExpected = 0,
+    /// Same-package TS duplicate - potential issue
+    #[default]
+    SamePackage = 1,
+    /// Semantic conflict (different meanings) - needs attention
+    SemanticConflict = 2,
+}
+
 #[derive(Clone, Serialize)]
 pub struct RankedDup {
     pub name: String,
@@ -116,6 +129,18 @@ pub struct RankedDup {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub canonical_line: Option<usize>,
     pub refactors: Vec<String>,
+    /// Severity level: 0=cross-lang expected, 1=same-package, 2=semantic conflict
+    #[serde(default)]
+    pub severity: DupSeverity,
+    /// True if duplicate spans multiple languages (Rust↔TS)
+    #[serde(default)]
+    pub is_cross_lang: bool,
+    /// Distinct packages/directories containing this symbol
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub packages: Vec<String>,
+    /// Explanation for the severity classification
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub reason: String,
 }
 
 /// Full command bridge for FE↔BE comparison table.
@@ -154,6 +179,9 @@ pub struct ReportSection {
     /// Actual circular import components (normalized)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub circular_imports: Vec<Vec<String>>,
+    /// Lazy circular imports (broken by lazy imports inside functions)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lazy_circular_imports: Vec<Vec<String>>,
     pub dynamic: Vec<(String, Vec<String>)>,
     pub analyze_limit: usize,
     pub missing_handlers: Vec<CommandGap>,

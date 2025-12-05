@@ -10,7 +10,6 @@ use crate::snapshot::GitContext;
 use crate::types::{FileAnalysis, ImportKind, ImportResolutionKind, OutputMode, ReexportKind};
 
 use super::CommandGap;
-use super::RankedDup;
 use super::ReportSection;
 use super::classify::language_from_path;
 use super::cycles;
@@ -23,6 +22,7 @@ use super::report::CommandBridge;
 use super::report::TreeNode;
 use super::root_scan::{RootContext, normalize_module_id};
 use super::scan::resolve_event_constants_across_files;
+use super::{DupSeverity, RankedDup};
 
 fn build_tree(analyses: &[FileAnalysis], root_path: &std::path::Path) -> Vec<TreeNode> {
     #[derive(Default)]
@@ -93,14 +93,19 @@ fn build_cycle_edges(
     for analysis in analyses {
         for imp in &analysis.imports {
             if let Some(target) = &imp.resolved_path {
-                edges.push((
-                    analysis.path.clone(),
-                    target.clone(),
+                let kind = if imp.is_type_checking {
+                    "type_import"
+                } else if imp.is_lazy {
+                    "lazy_import"
+                } else {
                     match imp.kind {
-                        ImportKind::Dynamic => "dynamic_import".to_string(),
-                        _ => "import".to_string(),
-                    },
-                ));
+                        ImportKind::Dynamic => "dynamic_import",
+                        _ => "import",
+                    }
+                };
+                if kind != "type_import" {
+                    edges.push((analysis.path.clone(), target.clone(), kind.to_string()));
+                }
             }
         }
 
@@ -197,7 +202,7 @@ pub fn process_root_context(
     };
 
     let cycle_edges = build_cycle_edges(&graph_edges, &analyses);
-    let circular_imports = cycles::find_cycles(&cycle_edges);
+    let (circular_imports, lazy_circular_imports) = cycles::find_cycles_with_lazy(&cycle_edges);
 
     let mut sorted_paths: Vec<String> = analyses.iter().map(|a| a.path.clone()).collect();
     sorted_paths.sort();
@@ -886,6 +891,10 @@ pub fn process_root_context(
                         "canonical": dup.canonical,
                         "canonicalLine": dup.canonical_line,
                         "refactorTargets": dup.refactors,
+                        "severity": dup.severity,
+                        "isCrossLang": dup.is_cross_lang,
+                        "packages": dup.packages,
+                        "reason": dup.reason,
                     }))
                     .collect::<Vec<_>>(),
                 "reexportCascades": cascades
@@ -994,12 +1003,23 @@ pub fn process_root_context(
         }
 
         if !duplicate_exports.is_empty() {
+            // Count silenced (cross-lang) duplicates
+            let cross_lang_count = filtered_ranked
+                .iter()
+                .filter(|d| d.severity == DupSeverity::CrossLangExpected)
+                .count();
+            let actionable: Vec<_> = filtered_ranked
+                .iter()
+                .filter(|d| d.severity != DupSeverity::CrossLangExpected)
+                .collect();
+
             println!(
                 "
-Top duplicate exports (showing up to {}):",
-                parsed.analyze_limit
+Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
+                actionable.len().min(parsed.analyze_limit),
+                cross_lang_count
             );
-            for dup in filtered_ranked.iter().take(parsed.analyze_limit) {
+            for dup in actionable.iter().take(parsed.analyze_limit) {
                 // Format canonical with line number if available
                 let canonical_str = match dup.canonical_line {
                     Some(line) => format!("{}:{}", dup.canonical, line),
@@ -1015,13 +1035,21 @@ Top duplicate exports (showing up to {}):",
                         None => loc.file.clone(),
                     })
                     .collect();
+                // Severity label
+                let severity_label = match dup.severity {
+                    DupSeverity::SemanticConflict => "[CONFLICT]",
+                    DupSeverity::SamePackage => "[SAME_PKG]",
+                    DupSeverity::CrossLangExpected => "[CROSS_LANG]",
+                };
+                // Cross-lang indicator
+                let cross_lang_str = if dup.is_cross_lang { " cross-lang" } else { "" };
                 println!(
-                    "  - {} (score {}, {} files: {} prod, {} dev) canonical: {} | refs: {}",
+                    "  - {} {} (score {},{} {} files) canonical: {} | import from: {}",
+                    severity_label,
                     dup.name,
                     dup.score,
+                    cross_lang_str,
                     dup.files.len(),
-                    dup.prod_count,
-                    dup.dev_count,
                     canonical_str,
                     refs_str.join(", ")
                 );
@@ -1148,6 +1176,7 @@ Top duplicate exports (showing up to {}):",
             ranked_dups: filtered_ranked.clone(),
             cascades: cascades.clone(),
             circular_imports: circular_imports.clone(),
+            lazy_circular_imports: lazy_circular_imports.clone(),
             dynamic: sorted_dyn,
             analyze_limit: parsed.analyze_limit,
             missing_handlers: missing_sorted,

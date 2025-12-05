@@ -1,0 +1,5 @@
+/.fastembed_cache
+/target
+Cargo.lock
+/.ai-agents
+/.loctree

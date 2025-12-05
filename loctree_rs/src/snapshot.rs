@@ -528,10 +528,21 @@ impl Snapshot {
             println!("Barrels: {} detected", barrel_count);
         }
 
+        // Count duplicate exports (symbols exported from multiple files)
+        let duplicate_count = self
+            .export_index
+            .values()
+            .filter(|files| files.len() > 1)
+            .count();
+        if duplicate_count > 0 {
+            println!("Duplicates: {} export groups", duplicate_count);
+        }
+
         println!("Status: OK");
         println!();
         println!("Next steps:");
         println!("  loct dead                    # Find unused exports");
+        println!("  loct -A --report report.html # Full analysis with duplicates");
         println!("  loct commands                # Show Tauri FE↔BE command bridges");
         println!("  loct slice <file> --json     # Extract context for AI agent");
     }
@@ -887,7 +898,7 @@ fn write_auto_artifacts(
     use crate::analyzer::coverage::{
         CommandUsage, compute_command_gaps_with_confidence, compute_unregistered_handlers,
     };
-    use crate::analyzer::cycles::find_cycles;
+    use crate::analyzer::cycles::find_cycles_with_lazy;
     use crate::analyzer::dead_parrots::find_dead_exports;
     use crate::analyzer::output::{RootArtifacts, process_root_context, write_report};
     use crate::analyzer::pipelines::build_pipeline_summary;
@@ -1023,11 +1034,14 @@ fn write_auto_artifacts(
         .iter()
         .flat_map(|ctx| ctx.graph_edges.clone())
         .collect();
-    let cycles = find_cycles(&all_graph_edges);
+    let (cycles, lazy_cycles) = find_cycles_with_lazy(&all_graph_edges);
     write_atomic(
         &circular_json_path,
-        serde_json::to_string_pretty(&json!({ "circularImports": cycles }))
-            .map_err(io::Error::other)?,
+        serde_json::to_string_pretty(&json!({
+            "circularImports": cycles,
+            "lazyCircularImports": lazy_cycles
+        }))
+        .map_err(io::Error::other)?,
     )?;
     created.push(format!(
         "./{}",

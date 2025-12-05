@@ -1,0 +1,50 @@
+#!/bin/bash
+set -euo pipefail
+REPO_ROOT=$(git rev-parse --show-toplevel)
+cd "$REPO_ROOT"
+
+echo "🔍 [Pre-push] Running quality gate..."
+echo ""
+
+echo "[1/4] 🦀 cargo fmt --check..."
+if cargo fmt -- --check; then
+  echo "    ✓ formatting OK"
+else
+  echo "❌ Run 'cargo fmt' before pushing."
+  exit 1
+fi
+echo ""
+
+echo "[2/4] 🦀 cargo clippy..."
+if cargo clippy --all-targets -- -D warnings; then
+  echo "    ✓ clippy OK"
+else
+  echo "❌ Clippy errors. Fix before pushing."
+  exit 1
+fi
+echo ""
+
+echo "[3/4] 🧪 cargo test..."
+if cargo test --quiet; then
+  echo "    ✓ tests OK"
+else
+  echo "❌ Tests failed!"
+  exit 1
+fi
+echo ""
+
+echo "[4/4] 🔒 semgrep scan..."
+if command -v semgrep >/dev/null 2>&1; then
+  if semgrep --config .semgrep.yaml --error --metrics=off \
+      --exclude target --exclude lancedb --exclude .lancedb --exclude .fastembed_cache 2>/dev/null; then
+    echo "    ✓ semgrep OK"
+  else
+    echo "❌ Semgrep found issues. Fix before pushing."
+    exit 1
+  fi
+else
+  echo "    ⚠️  semgrep not installed; skipping (install via 'pipx install semgrep')"
+fi
+echo ""
+
+echo "✅ Quality gate passed — push allowed."

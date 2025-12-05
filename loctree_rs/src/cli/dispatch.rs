@@ -231,6 +231,11 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
             // Diff is handled specially in dispatch_command
             // as it doesn't go through ParsedArgs
         }
+
+        Command::Memex(_) => {
+            // Memex is handled specially in dispatch_command
+            // as it doesn't go through ParsedArgs
+        }
     }
 
     parsed
@@ -278,6 +283,10 @@ pub fn dispatch_command(parsed_cmd: &ParsedCommand) -> DispatchResult {
         Command::Diff(opts) => {
             // Execute diff and return result
             return handle_diff_command(opts, &parsed_cmd.global);
+        }
+        Command::Memex(opts) => {
+            // Execute memex and return result
+            return handle_memex_command(opts, &parsed_cmd.global);
         }
         _ => {}
     }
@@ -526,7 +535,7 @@ fn handle_problems_only_diff(
     opts: &DiffOptions,
     global: &GlobalOptions,
 ) -> DispatchResult {
-    use crate::analyzer::cycles::find_cycles;
+    use crate::analyzer::cycles::find_cycles_with_lazy;
     use crate::analyzer::dead_parrots::{DeadFilterConfig, find_dead_exports};
     use serde_json::json;
     use std::collections::HashSet;
@@ -560,8 +569,8 @@ fn handle_problems_only_diff(
         .map(|e| (e.from.clone(), e.to.clone(), e.label.clone()))
         .collect();
 
-    let from_cycles = find_cycles(&from_edges);
-    let to_cycles = find_cycles(&to_edges);
+    let from_cycles = find_cycles_with_lazy(&from_edges).0;
+    let to_cycles = find_cycles_with_lazy(&to_edges).0;
 
     // Build cycle signature sets for comparison
     let from_cycle_sigs: HashSet<String> = from_cycles
@@ -715,6 +724,43 @@ fn handle_problems_only_diff(
 
     // For JSON output, exit with non-zero if problems found
     DispatchResult::Exit(if total_problems > 0 { 1 } else { 0 })
+}
+
+/// Handle the memex command - index analysis into AI memory
+fn handle_memex_command(opts: &MemexOptions, global: &GlobalOptions) -> DispatchResult {
+    use crate::memex;
+
+    // Run the async memex indexer using a blocking runtime
+    let result = tokio::runtime::Runtime::new()
+        .map_err(|e| format!("Failed to create async runtime: {}", e))
+        .and_then(|rt| {
+            rt.block_on(async { memex::run_memex(opts, global.json, global.verbose).await })
+        });
+
+    match result {
+        Ok(indexed_count) => {
+            if !global.quiet {
+                if global.json {
+                    let json = serde_json::json!({
+                        "status": "success",
+                        "indexed_documents": indexed_count,
+                        "namespace": &opts.namespace,
+                    });
+                    println!("{}", serde_json::to_string_pretty(&json).unwrap());
+                } else {
+                    eprintln!(
+                        "[loct][memex] Successfully indexed {} documents into namespace '{}'",
+                        indexed_count, opts.namespace
+                    );
+                }
+            }
+            DispatchResult::Exit(0)
+        }
+        Err(e) => {
+            eprintln!("[loct][memex][error] {}", e);
+            DispatchResult::Exit(1)
+        }
+    }
 }
 
 #[cfg(test)]

@@ -15,7 +15,7 @@ use std::fs;
 use serde_json::json;
 
 use crate::similarity::similarity;
-use crate::types::{FileAnalysis, OutputMode, ReexportKind};
+use crate::types::{ExportSymbol, FileAnalysis, OutputMode, ReexportKind};
 
 use super::root_scan::{RootContext, normalize_module_id};
 
@@ -824,6 +824,9 @@ pub fn find_dead_exports(
             if python_framework_magic {
                 continue;
             }
+            if is_python_test_export(analysis, exp) {
+                continue;
+            }
 
             if exp.name == "default"
                 && (analysis.path.ends_with("page.tsx") || analysis.path.ends_with("layout.tsx"))
@@ -1514,4 +1517,16 @@ mod integration_tests {
             result
         );
     }
+}
+fn is_python_test_export(analysis: &FileAnalysis, exp: &ExportSymbol) -> bool {
+    if !analysis.path.ends_with(".py") || !analysis.is_test {
+        return false;
+    }
+    if exp.kind == "class" && exp.name.starts_with("Test") {
+        return true;
+    }
+    if exp.kind == "def" && exp.name.starts_with("test_") {
+        return true;
+    }
+    false
 }

@@ -571,6 +571,7 @@ pub(crate) fn analyze_py_file(
                     entry.resolution = resolution;
                     entry.resolved_path = resolved;
                     entry.is_type_checking = in_type_checking;
+                    entry.is_lazy = indent > 0;
                     analysis.imports.push(entry);
                 }
             }
@@ -587,6 +588,7 @@ pub(crate) fn analyze_py_file(
                 entry.resolution = resolution;
                 entry.resolved_path = resolved.clone();
                 entry.is_type_checking = in_type_checking;
+                entry.is_lazy = indent > 0;
                 entry.source_raw = format!("from {} import {}", module, names_clean);
 
                 if names_clean != "*" {

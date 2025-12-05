@@ -439,6 +439,7 @@ mod tests {
                     }],
                     resolution: crate::types::ImportResolutionKind::Local,
                     is_type_checking: false,
+                    is_lazy: false,
                 }],
                 event_listens: vec![crate::types::EventRef {
                     raw_name: Some("EVENT_NAME".to_string()),
@@ -531,6 +532,7 @@ mod tests {
                     }],
                     resolution: crate::types::ImportResolutionKind::Local,
                     is_type_checking: false,
+                    is_lazy: false,
                 }],
                 event_emits: vec![crate::types::EventRef {
                     raw_name: Some("ALIASED".to_string()),

@@ -227,7 +227,7 @@ pub fn print_sarif(inputs: SarifInputs) -> Result<(), serde_json::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analyzer::report::Confidence;
+    use crate::analyzer::report::{Confidence, DupSeverity};
 
     fn mock_dup(name: &str, files: Vec<&str>) -> RankedDup {
         RankedDup {
@@ -240,6 +240,10 @@ mod tests {
             dev_count: 0,
             canonical_line: None,
             refactors: vec![],
+            severity: DupSeverity::SamePackage,
+            is_cross_lang: false,
+            packages: vec![],
+            reason: String::new(),
         }
     }
 

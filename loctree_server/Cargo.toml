@@ -1,0 +1,43 @@
+[package]
+name = "loctree_server"
+version = "0.1.0"
+edition = "2024"
+description = "MCP server for loctree - hot codebase analysis for AI agents"
+license = "MIT"
+repository = "https://github.com/Loctree/Loctree"
+keywords = ["mcp", "loctree", "ai", "code-analysis", "agents"]
+categories = ["development-tools", "command-line-utilities"]
+
+[dependencies]
+# MCP Protocol
+rmcp = { version = "0.10", features = ["server"] }
+
+# Loctree core (path for now, will be version after publish)
+loctree = { path = "../loctree_rs" }
+
+# Async runtime
+tokio = { version = "1.0", features = ["full"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Regex for symbol search
+regex = "1.10"
+
+# Schema generation for MCP tools
+schemars = "1.1"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+[dev-dependencies]
+tempfile = "3"

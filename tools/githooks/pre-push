@@ -19,83 +19,155 @@ echo "Pushing to: $remote ($url)"
 # loctree_rs (main crate)
 # ============================================
 echo ""
-echo "[1/11] loctree_rs: format check..."
+echo "[1/23] loctree_rs: format check..."
 (cd loctree_rs && cargo fmt -- --check) || {
   echo "❌ loctree_rs formatting issues. Run: cd loctree_rs && cargo fmt"
   exit 1
 }
 
 echo ""
-echo "[2/11] loctree_rs: clippy..."
+echo "[2/23] loctree_rs: clippy..."
 (cd loctree_rs && cargo clippy -- -D warnings)
 
 echo ""
-echo "[3/11] loctree_rs: tests..."
+echo "[3/23] loctree_rs: tests..."
 (cd loctree_rs && cargo test --quiet)
 
 # ============================================
 # reports (report-leptos crate)
 # ============================================
 echo ""
-echo "[4/11] reports: format check..."
+echo "[4/23] reports: format check..."
 (cd reports && cargo fmt -- --check) || {
   echo "❌ reports formatting issues. Run: cd reports && cargo fmt"
   exit 1
 }
 
 echo ""
-echo "[5/11] reports: clippy..."
+echo "[5/23] reports: clippy..."
 (cd reports && cargo clippy -- -D warnings)
 
 echo ""
-echo "[6/11] reports: tests..."
+echo "[6/23] reports: tests..."
 (cd reports && cargo test --quiet)
 
 # ============================================
 # landing (landing page crate)
 # ============================================
 echo ""
-echo "[7/11] landing: format check..."
+echo "[7/23] landing: format check..."
 (cd landing && cargo fmt -- --check) || {
   echo "❌ landing formatting issues. Run: cd landing && cargo fmt"
   exit 1
 }
 
 echo ""
-echo "[8/11] landing: clippy..."
+echo "[8/23] landing: clippy..."
 (cd landing && cargo clippy -- -D warnings)
 
 # Note: landing may not have tests, so we just check compilation
 echo ""
-echo "[8b/11] landing: check..."
+echo "[8b/23] landing: check..."
 (cd landing && cargo check --quiet)
+
+# ============================================
+# loctree_memex (AI memory integration)
+# ============================================
+echo ""
+echo "[9/23] loctree_memex: format check..."
+(cd loctree_memex && cargo fmt -- --check) || {
+  echo "❌ loctree_memex formatting issues. Run: cd loctree_memex && cargo fmt"
+  exit 1
+}
+
+echo ""
+echo "[10/23] loctree_memex: clippy..."
+(cd loctree_memex && cargo clippy -- -D warnings)
+
+echo ""
+echo "[11/23] loctree_memex: tests..."
+(cd loctree_memex && cargo test --quiet)
+
+# ============================================
+# loctree_server (MCP server)
+# ============================================
+echo ""
+echo "[12/23] loctree_server: format check..."
+(cd loctree_server && cargo fmt -- --check) || {
+  echo "❌ loctree_server formatting issues. Run: cd loctree_server && cargo fmt"
+  exit 1
+}
+
+echo ""
+echo "[13/23] loctree_server: clippy..."
+(cd loctree_server && cargo clippy -- -D warnings)
+
+echo ""
+echo "[14/23] loctree_server: build..."
+(cd loctree_server && cargo build --quiet)
+
+# ============================================
+# rmcp_memex (RAG/memory core)
+# ============================================
+echo ""
+echo "[15/23] rmcp_memex: format check..."
+(cd rmcp_memex && cargo fmt -- --check) || {
+  echo "❌ rmcp_memex formatting issues. Run: cd rmcp_memex && cargo fmt"
+  exit 1
+}
+
+echo ""
+echo "[16/23] rmcp_memex: clippy..."
+(cd rmcp_memex && cargo clippy -- -D warnings)
+
+echo ""
+echo "[17/23] rmcp_memex: build..."
+(cd rmcp_memex && cargo build --quiet)
+
+# ============================================
+# rmcp_mux (MCP multiplexer)
+# ============================================
+echo ""
+echo "[18/23] rmcp_mux: format check..."
+(cd rmcp_mux && cargo fmt -- --check) || {
+  echo "❌ rmcp_mux formatting issues. Run: cd rmcp_mux && cargo fmt"
+  exit 1
+}
+
+echo ""
+echo "[19/23] rmcp_mux: clippy..."
+(cd rmcp_mux && cargo clippy -- -D warnings)
+
+echo ""
+echo "[20/23] rmcp_mux: tests..."
+(cd rmcp_mux && cargo test --quiet)
 
 # ============================================
 # Node & Python tests
 # ============================================
 echo ""
-echo "[9/11] Node.js tests..."
+echo "[21/23] Node.js tests..."
 node tools/tests/test_loctree_node_unit.mjs
 node tools/tests/loctree-node.test.mjs
 
 echo ""
-echo "[10/11] Python tests..."
+echo "[22/23] Python tests..."
 python3 tools/tests/test_loctree_py_unit.py
 node tools/tests/loctree-py.test.mjs
 
 # Run Rust integration tests
 echo ""
-echo "[10b/11] Rust integration tests..."
+echo "[22b/23] Rust integration tests..."
 node tools/tests/loctree-rs.test.mjs
 
 # ============================================
 # Loctree dogfooding
 # ============================================
 echo ""
-echo "[11/11] Loctree dogfooding..."
-(cd loctree_rs && cargo build --release --quiet)
+echo "[23/23] Loctree dogfooding..."
+cargo build -p loctree --release --quiet
 # Note: --dead skipped for lib crate (exports used by CLI binary outside src/)
-"$REPO_ROOT/loctree_rs/target/release/loctree" "$REPO_ROOT/loctree_rs/src" -A --ext rs --circular || {
+"$REPO_ROOT/target/release/loctree" "$REPO_ROOT/loctree_rs/src" -A --ext rs --circular || {
   echo "❌ Loctree dogfooding failed!"
   exit 1
 }
@@ -111,7 +183,7 @@ if command -v semgrep >/dev/null 2>&1; then
     --config p/owasp-top-ten \
     --config p/r2c-security-audit \
     --error --metrics=off \
-    --exclude tests/fixtures --exclude loctree_rs/target --exclude reports/target --exclude landing/target \
+    --exclude tests/fixtures --exclude target --exclude loctree_rs/target --exclude reports/target --exclude landing/target \
     --quiet || {
       echo "Semgrep found issues. Fix them before pushing."
       exit 1

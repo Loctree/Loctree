@@ -12,7 +12,8 @@ use regex::Regex;
 
 use crate::types::{
     CommandPayloadCasing, CommandRef, EventRef, ExportSymbol, FileAnalysis, ImportEntry,
-    ImportKind, ImportSymbol, ReexportEntry, ReexportKind, StringLiteral,
+    ImportKind, ImportSymbol, ReexportEntry, ReexportKind, SignatureUse, SignatureUseKind,
+    StringLiteral,
 };
 
 use super::resolvers::{TsPathResolver, resolve_reexport_target};
@@ -323,6 +324,76 @@ impl<'a> JsVisitor<'a> {
             TSTypeName::ThisExpression(_) => "This".to_string(),
         }
     }
+
+    fn record_type_use(
+        &mut self,
+        fn_name: &str,
+        usage: SignatureUseKind,
+        ty: &TSType<'a>,
+        span: Span,
+    ) {
+        let type_name = JsVisitor::type_to_string(ty);
+        if type_name.is_empty() || type_name == "Type" {
+            return;
+        }
+        let line = self.get_line(span);
+        if !self.analysis.local_uses.contains(&type_name) {
+            self.analysis.local_uses.push(type_name.clone());
+        }
+        self.analysis.signature_uses.push(SignatureUse {
+            function: fn_name.to_string(),
+            usage,
+            type_name,
+            line: Some(line),
+        });
+    }
+
+    fn record_param_types(&mut self, fn_name: &str, params: &FormalParameters<'a>) {
+        for param in params.items.iter() {
+            if let Some(ann) = &param.pattern.type_annotation {
+                self.record_type_use(
+                    fn_name,
+                    SignatureUseKind::Parameter,
+                    &ann.type_annotation,
+                    ann.span,
+                );
+            }
+        }
+        if let Some(rest) = &params.rest
+            && let Some(ann) = &rest.argument.type_annotation
+        {
+            self.record_type_use(
+                fn_name,
+                SignatureUseKind::Parameter,
+                &ann.type_annotation,
+                ann.span,
+            );
+        }
+    }
+
+    fn record_function_signature(&mut self, fn_name: &str, func: &Function<'a>) {
+        if let Some(ret) = &func.return_type {
+            self.record_type_use(
+                fn_name,
+                SignatureUseKind::Return,
+                &ret.type_annotation,
+                ret.span,
+            );
+        }
+        self.record_param_types(fn_name, &func.params);
+    }
+
+    fn record_arrow_signature(&mut self, fn_name: &str, func: &ArrowFunctionExpression<'a>) {
+        if let Some(ret) = &func.return_type {
+            self.record_type_use(
+                fn_name,
+                SignatureUseKind::Return,
+                &ret.type_annotation,
+                ret.span,
+            );
+        }
+        self.record_param_types(fn_name, &func.params);
+    }
 }
 
 impl<'a> Visit<'a> for JsVisitor<'a> {
@@ -452,6 +523,13 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                                     "named",
                                     Some(line),
                                 ));
+                                if let Some(init) = &d.init {
+                                    if let Expression::FunctionExpression(fun) = init {
+                                        self.record_function_signature(id.name.as_str(), fun);
+                                    } else if let Expression::ArrowFunctionExpression(fun) = init {
+                                        self.record_arrow_signature(id.name.as_str(), fun);
+                                    }
+                                }
                             }
                         }
                         // Continue traversal
@@ -466,6 +544,7 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                                 "named",
                                 Some(line),
                             ));
+                            self.record_function_signature(id.name.as_str(), f);
                         }
                         // Continue traversal
                         if let Some(body) = &f.body {
@@ -539,11 +618,12 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                         .map(|i| i.name.to_string())
                         .unwrap_or("default".to_string());
                 self.analysis.exports.push(ExportSymbol::new(
-                    name,
+                    name.clone(),
                     "default",
                     "default",
                     Some(line),
                 ));
+                self.record_function_signature(&name, f);
 
                 // Continue traversal
                 if let Some(body) = &f.body {

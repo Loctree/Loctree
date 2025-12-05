@@ -12,7 +12,7 @@ use crate::types::ColorMode;
 /// Known subcommand names for the new CLI interface.
 const SUBCOMMANDS: &[&str] = &[
     "auto", "scan", "tree", "slice", "find", "dead", "unused", "cycles", "commands", "events",
-    "info", "lint", "report", "help", "query", "diff",
+    "info", "lint", "report", "help", "query", "diff", "memex",
 ];
 
 /// Check if an argument looks like a new-style subcommand.
@@ -173,6 +173,7 @@ pub fn parse_command(args: &[String]) -> Result<Option<ParsedCommand>, String> {
         Some("help") => parse_help_command(&remaining_args)?,
         Some("query") => parse_query_command(&remaining_args)?,
         Some("diff") => parse_diff_command(&remaining_args)?,
+        Some("memex") => parse_memex_command(&remaining_args)?,
         Some(unknown) => {
             return Err(format!(
                 "Unknown command '{}'. Run 'loct --help' for available commands.",
@@ -830,6 +831,55 @@ fn parse_diff_command(args: &[String]) -> Result<Command, String> {
     }
 
     Ok(Command::Diff(opts))
+}
+
+fn parse_memex_command(args: &[String]) -> Result<Command, String> {
+    let mut opts = MemexOptions::default();
+    let mut i = 0;
+
+    while i < args.len() {
+        let arg = &args[i];
+        match arg.as_str() {
+            "--report-path" | "-r" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--report-path requires a path".to_string())?;
+                opts.report_path = PathBuf::from(value);
+                i += 2;
+            }
+            "--project-id" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--project-id requires a value".to_string())?;
+                opts.project_id = Some(value.clone());
+                i += 2;
+            }
+            "--namespace" | "-n" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--namespace requires a value".to_string())?;
+                opts.namespace = value.clone();
+                i += 2;
+            }
+            "--db-path" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--db-path requires a path".to_string())?;
+                opts.db_path = Some(value.clone());
+                i += 2;
+            }
+            _ if !arg.starts_with('-') => {
+                // Positional argument is report path
+                opts.report_path = PathBuf::from(arg);
+                i += 1;
+            }
+            _ => {
+                return Err(format!("Unknown option '{}' for 'memex' command.", arg));
+            }
+        }
+    }
+
+    Ok(Command::Memex(opts))
 }
 
 // ============================================================================
