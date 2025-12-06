@@ -1241,7 +1241,7 @@ pub fn write_report(
     if verbose {
         eprintln!("[loctree][debug] wrote HTML to {}", display_path);
     } else {
-        eprintln!("[loctree] HTML report written to {}", display_path);
+        crate::progress::success(&format!("Report → {}", display_path));
     }
     Ok(())
 }

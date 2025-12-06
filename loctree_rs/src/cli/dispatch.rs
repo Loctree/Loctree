@@ -734,6 +734,7 @@ fn handle_problems_only_diff(
 }
 
 /// Handle the memex command - index analysis into AI memory
+#[cfg(feature = "memex")]
 fn handle_memex_command(opts: &MemexOptions, global: &GlobalOptions) -> DispatchResult {
     use crate::memex;
 
@@ -768,6 +769,15 @@ fn handle_memex_command(opts: &MemexOptions, global: &GlobalOptions) -> Dispatch
             DispatchResult::Exit(1)
         }
     }
+}
+
+/// Handle the memex command - stub when feature not enabled
+#[cfg(not(feature = "memex"))]
+fn handle_memex_command(_opts: &MemexOptions, _global: &GlobalOptions) -> DispatchResult {
+    eprintln!(
+        "[loct][memex][error] memex feature not enabled. Rebuild with: cargo build --features memex"
+    );
+    DispatchResult::Exit(1)
 }
 
 /// Load snapshot from disk, or auto-create one if missing.

@@ -155,19 +155,20 @@ pub struct DeadFilterConfig {
     pub include_helpers: bool,
 }
 
-/// Search for symbol occurrences across analyzed files
-/// Note: The actual symbol search is performed during file scanning (in `analyze_file`).
-/// This function only collects the pre-computed matches from analyses.
-pub fn search_symbol(_symbol: &str, analyses: &[FileAnalysis]) -> SymbolSearchResult {
+/// Search for symbol occurrences across analyzed files (case-insensitive, substring).
+/// Falls back to export list so it works even without `--symbol` pre-scan.
+pub fn search_symbol(symbol: &str, analyses: &[FileAnalysis]) -> SymbolSearchResult {
+    let needle = symbol.to_lowercase();
     let mut files = Vec::new();
     let mut total_matches = 0;
 
     for analysis in analyses {
-        if !analysis.matches.is_empty() {
-            let mut matches = Vec::new();
-            for m in &analysis.matches {
-                // Infer if it's a definition from context keywords
-                let ctx_lower = m.context.to_lowercase();
+        let mut matches = Vec::new();
+
+        // 1) Recorded line matches (only present if scan was run with --symbol)
+        for m in &analysis.matches {
+            let ctx_lower = m.context.to_lowercase();
+            if ctx_lower.contains(&needle) {
                 let is_def = ctx_lower.contains("export ")
                     || ctx_lower.contains("pub ")
                     || ctx_lower.contains("function ")
@@ -182,6 +183,20 @@ pub fn search_symbol(_symbol: &str, analyses: &[FileAnalysis]) -> SymbolSearchRe
                     is_definition: is_def,
                 });
             }
+        }
+
+        // 2) Exports list (always available) - substring / case-insensitive
+        for exp in &analysis.exports {
+            if exp.name.to_lowercase().contains(&needle) {
+                matches.push(SymbolMatch {
+                    line: exp.line.unwrap_or(0),
+                    context: format!("export {} {}", exp.kind, exp.name),
+                    is_definition: true,
+                });
+            }
+        }
+
+        if !matches.is_empty() {
             total_matches += matches.len();
             files.push(SymbolFileMatch {
                 file: analysis.path.clone(),

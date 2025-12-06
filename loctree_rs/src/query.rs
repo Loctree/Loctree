@@ -213,7 +213,13 @@ mod tests {
             line: Some(10),
         });
 
-        let file2 = FileAnalysis::new("src/app.ts".into());
+        let mut file2 = FileAnalysis::new("src/app.ts".into());
+        file2.exports.push(crate::types::ExportSymbol {
+            name: "PostAuthBootstrapOverlay".to_string(),
+            kind: "class".to_string(),
+            export_type: "named".to_string(),
+            line: Some(42),
+        });
 
         snapshot.files.push(file1);
         snapshot.files.push(file2);
@@ -245,6 +251,19 @@ mod tests {
 
         assert_eq!(result.kind, "where-symbol");
         assert_eq!(result.target, "helper");
+    }
+
+    #[test]
+    fn test_query_where_symbol_substring_case_insensitive() {
+        let snapshot = mock_snapshot();
+        let result = query_where_symbol(&snapshot, "bootstrap");
+
+        assert_eq!(result.kind, "where-symbol");
+        assert_eq!(result.target, "bootstrap");
+        assert!(
+            result.results.iter().any(|r| r.file == "src/app.ts"),
+            "Should find substring matches in exports"
+        );
     }
 
     #[test]

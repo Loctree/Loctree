@@ -376,15 +376,17 @@ impl Snapshot {
         {
             let dirty = is_git_dirty(root).unwrap_or(false);
             if dirty {
-                eprintln!(
-                    "[loctree] snapshot for {}@{} exists; worktree dirty → commit changes to refresh snapshot",
-                    branch, commit
-                );
+                crate::progress::warning(&format!(
+                    "Snapshot {}@{} exists; worktree dirty → commit to refresh",
+                    branch,
+                    &commit[..7.min(commit.len())]
+                ));
             } else {
-                eprintln!(
-                    "[loctree] snapshot for {}@{} already exists; skipping write (no changes detected)",
-                    branch, commit
-                );
+                crate::progress::info(&format!(
+                    "Snapshot {}@{} up-to-date, skipping",
+                    branch,
+                    &commit[..7.min(commit.len())]
+                ));
             }
             return Ok(());
         }
@@ -466,17 +468,12 @@ impl Snapshot {
 
     /// Print summary of the snapshot
     pub fn print_summary(&self, root: &Path) {
-        println!(
-            "Scanned {} files in {:.2}s",
-            self.metadata.file_count,
-            self.metadata.scan_duration_ms as f64 / 1000.0
-        );
         let snapshot_path = Self::snapshot_path(root);
         let pretty_path = snapshot_path
             .strip_prefix(root)
             .map(|p| format!("./{}", p.display()))
             .unwrap_or_else(|_| snapshot_path.display().to_string());
-        println!("Graph saved to {}", pretty_path);
+        crate::progress::info(&format!("Saved to {}", pretty_path));
 
         let languages: Vec<_> = self.metadata.languages.iter().collect();
         if !languages.is_empty() {
@@ -623,7 +620,9 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
     } else {
         "fresh (no existing snapshot)"
     };
-    eprintln!("[loctree] Scan mode: {}", scan_mode);
+
+    // Show spinner during scan (Black-style feedback)
+    let spinner = crate::progress::Spinner::new(&format!("Scanning ({})...", scan_mode));
 
     // Prepare scan configuration (reusing existing infrastructure)
     let py_stdlib = python_stdlib();
@@ -664,6 +663,14 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
 
     // Perform the scan
     let scan_results = scan_roots(scan_config)?;
+
+    // Finish spinner with file count
+    let file_count: usize = scan_results.contexts.iter().map(|c| c.analyses.len()).sum();
+    spinner.finish_success(&format!(
+        "Scanned {} in {:.2}s",
+        crate::progress::format_count(file_count, "file", "files"),
+        start_time.elapsed().as_secs_f64()
+    ));
 
     // Build the snapshot from scan results
     let mut snapshot = Snapshot::new(root_list.iter().map(|p| p.display().to_string()).collect());

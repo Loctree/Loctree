@@ -45,9 +45,13 @@ oxc_ast_visit = "0.100.0"
 oxc_semantic = "0.100.0"
 tempfile = "3"
 
-# AI Memory integration (memex command) - now part of monorepo
-rmcp-memex = { path = "../rmcp_memex" }
+# AI Memory integration (memex command) - optional, pulls heavy deps (datafusion)
+rmcp-memex = { path = "../rmcp_memex", optional = true }
 tokio = { version = "1.0", features = ["rt-multi-thread"] }
+
+# Progress UI (spinners, progress bars)
+indicatif = "0.17"
+console = "0.15"
 anyhow = "1.0"
 walkdir = "2.4"
 uuid = { version = "1.0", features = ["v4"] }
@@ -58,3 +62,7 @@ colored = "2.1"
 assert_cmd = "2.0"
 predicates = "3.1"
 regex = "1.12"
+
+[features]
+default = []
+memex = ["rmcp-memex"]

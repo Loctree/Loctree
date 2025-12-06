@@ -261,7 +261,14 @@ pub mod query;
 /// Memex module for AI agent context management.
 ///
 /// Provides semantic codebase exploration and context extraction for AI agents.
+/// Requires the `memex` feature flag (heavy dependencies).
+#[cfg(feature = "memex")]
 pub mod memex;
+
+/// Progress UI utilities (spinners, status messages).
+///
+/// Provides Black-style visual feedback for CLI operations.
+pub mod progress;
 
 // ============================================================================
 // Re-exports for convenience

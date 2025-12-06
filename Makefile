@@ -20,20 +20,38 @@ build-core:
 # Determine cargo bin dir
 CARGO_BIN ?= $(if $(CARGO_HOME),$(CARGO_HOME)/bin,$(HOME)/.cargo/bin)
 
-# Install loctree binaries (reuses incremental build; avoids reinstalling deps each time)
-install: setup-protoc
-	cargo build --release -p loctree
-	mkdir -p "$(CARGO_BIN)"
-	install -m 755 target/release/loctree "$(CARGO_BIN)/loctree"
-	install -m 755 target/release/loct "$(CARGO_BIN)/loct"
-	@echo "Installed: loct, loctree → $(CARGO_BIN)"
+LOCKDIR ?= /tmp/loctree-make.lock.d
+
+# Install loctree binaries (core only - no memex, no protobuf needed)
+install:
+	@echo "==> Acquiring build lock at $(LOCKDIR)..."
+	@if mkdir "$(LOCKDIR)" 2>/dev/null; then \
+		trap 'rmdir "$(LOCKDIR)"' EXIT INT TERM; \
+		set -e; \
+		cargo build --release -p loctree; \
+		mkdir -p "$(CARGO_BIN)"; \
+		install -m 755 target/release/loctree "$(CARGO_BIN)/loctree"; \
+		install -m 755 target/release/loct "$(CARGO_BIN)/loct"; \
+		echo "Installed: loct, loctree → $(CARGO_BIN)"; \
+	else \
+		echo "Another loctree build/install is running (lock: $(LOCKDIR)). Aborting."; \
+		exit 1; \
+	fi
 
 # Install everything including memex
 install-all: setup-protoc
-	cargo install --path loctree_rs --force
-	cargo install --path loctree_server --force
-	cargo install --path rmcp_memex --force
-	@echo "Installed: loct, loctree, loctree-server, rmcp_memex"
+	@echo "==> Acquiring build lock at $(LOCKDIR)..."
+	@if mkdir "$(LOCKDIR)" 2>/dev/null; then \
+		trap 'rmdir "$(LOCKDIR)"' EXIT INT TERM; \
+		set -e; \
+		cargo install --path loctree_rs --force; \
+		cargo install --path loctree_server --force; \
+		cargo install --path rmcp_memex --force; \
+		echo "Installed: loct, loctree, loctree-server, rmcp_memex"; \
+	else \
+		echo "Another loctree build/install is running (lock: $(LOCKDIR)). Aborting."; \
+		exit 1; \
+	fi
 
 # Setup protoc - check system or use Homebrew
 setup-protoc:
@@ -57,6 +75,10 @@ fmt:
 # Clean build artifacts
 clean:
 	cargo clean
+
+# Remove stale build lock
+unlock:
+	@rm -rf "$(LOCKDIR)" && echo "Lock removed" || echo "No lock"
 
 # Help
 help:
