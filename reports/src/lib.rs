@@ -30,7 +30,7 @@
 //! let js_assets = JsAssets::default();
 //!
 //! // Render to HTML string
-//! let html = render_report(&[section], &js_assets);
+//! let html = render_report(&[section], &js_assets, false);
 //!
 //! // Write to file
 //! std::fs::write("report.html", html).unwrap();
@@ -170,7 +170,7 @@ mod tests {
     fn renders_empty_report() {
         let sections: Vec<ReportSection> = vec![];
         let assets = JsAssets::default();
-        let html = render_report(&sections, &assets);
+        let html = render_report(&sections, &assets, false);
 
         assert!(html.starts_with("<!DOCTYPE html>"));
         assert!(html.contains("<html"));
@@ -185,7 +185,7 @@ mod tests {
             ..Default::default()
         };
         let assets = JsAssets::default();
-        let html = render_report(&[section], &assets);
+        let html = render_report(&[section], &assets, false);
 
         assert!(html.contains("test-root"));
         assert!(html.contains("42"));

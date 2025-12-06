@@ -590,18 +590,16 @@ pub struct CrowdMember {
 ///     members: vec![
 ///         CrowdMember {
 ///             file: "src/message.ts".into(),
-///             match_reason: MatchReason::NameSimilarity {
-///                 pattern: "message".into(),
-///                 similarity: 1.0,
+///             match_reason: MatchReason::NameMatch {
+///                 matched: "message".into(),
 ///             },
 ///             importer_count: 15,
 ///             similarity_scores: vec![],
 ///         },
 ///         CrowdMember {
 ///             file: "src/components/Message.tsx".into(),
-///             match_reason: MatchReason::NameSimilarity {
-///                 pattern: "message".into(),
-///                 similarity: 1.0,
+///             match_reason: MatchReason::NameMatch {
+///                 matched: "Message".into(),
 ///             },
 ///             importer_count: 8,
 ///             similarity_scores: vec![],
