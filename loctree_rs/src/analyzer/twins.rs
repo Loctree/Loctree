@@ -52,19 +52,10 @@ pub struct TwinsResult {
 ///
 /// Counts how many times each symbol is imported across the codebase.
 pub fn build_symbol_registry(analyses: &[FileAnalysis]) -> HashMap<(String, String), SymbolEntry> {
-    use crate::analyzer::classify::should_exclude_from_reports;
     let mut registry: HashMap<(String, String), SymbolEntry> = HashMap::new();
 
     // First pass: Register all exports
     for analysis in analyses {
-        // Skip test files to avoid pytest/Jest fixtures being treated as dead parrots
-        if analysis.is_test {
-            continue;
-        }
-        // Skip test fixtures and mock files
-        if should_exclude_from_reports(&analysis.path) {
-            continue;
-        }
         for export in &analysis.exports {
             let key = (analysis.path.clone(), export.name.clone());
             registry.insert(
@@ -105,74 +96,6 @@ pub fn build_symbol_registry(analyses: &[FileAnalysis]) -> HashMap<(String, Stri
     registry
 }
 
-/// Check if a file is an entry point that shouldn't have dead parrot warnings
-fn is_entry_point(path: &str) -> bool {
-    // Rust crate roots
-    path == "lib.rs"
-        || path == "main.rs"
-        || path.ends_with("/lib.rs")
-        || path.ends_with("/main.rs")
-        // TypeScript/JavaScript entry points
-        || path.ends_with("/index.ts")
-        || path.ends_with("/index.tsx")
-        || path.ends_with("/index.js")
-        || path.ends_with("/index.jsx")
-        || path.ends_with("/index.mjs")
-        // Python package roots
-        || path.ends_with("/__init__.py")
-        // Go package main
-        || (path.ends_with(".go") && path.contains("/cmd/"))
-}
-
-/// Check if a file is a mod.rs (Rust module declaration file)
-fn is_mod_rs(path: &str) -> bool {
-    path == "mod.rs" || path.ends_with("/mod.rs")
-}
-
-/// Check if export is a common framework magic pattern
-fn is_framework_magic(name: &str, kind: &str) -> bool {
-    // Python dunder methods
-    if name.starts_with("__") && name.ends_with("__") {
-        return true;
-    }
-    // React/Svelte component conventions (PascalCase default exports)
-    if kind == "default"
-        && name
-            .chars()
-            .next()
-            .map(|c| c.is_uppercase())
-            .unwrap_or(false)
-    {
-        return true;
-    }
-    // Common framework hooks
-    if name.starts_with("use")
-        && name.len() > 3
-        && name
-            .chars()
-            .nth(3)
-            .map(|c| c.is_uppercase())
-            .unwrap_or(false)
-    {
-        return true;
-    }
-    // Django/Python mixins
-    if kind == "class" && name.ends_with("Mixin") {
-        return true;
-    }
-    // Rust trait implementations often not directly imported
-    if kind == "impl" || kind == "trait" {
-        return true;
-    }
-    false
-}
-
-/// Check if symbol name is a common re-export pattern (barrel exports)
-fn is_barrel_reexport(_name: &str, kind: &str) -> bool {
-    // Re-exports are not dead - they're forwarding from another module
-    kind == "re-export" || kind == "reexport"
-}
-
 /// Find dead parrots - symbols with 0 imports
 pub fn find_dead_parrots(analyses: &[FileAnalysis], _dead_only: bool) -> TwinsResult {
     let registry = build_symbol_registry(analyses);
@@ -189,56 +112,12 @@ pub fn find_dead_parrots(analyses: &[FileAnalysis], _dead_only: bool) -> TwinsRe
         .flat_map(|a| a.local_uses.iter().cloned())
         .collect();
 
-    // Build set of all imported symbol names (fallback for unresolved paths)
-    let all_imported_names: std::collections::HashSet<String> = analyses
-        .iter()
-        .flat_map(|a| a.imports.iter())
-        .flat_map(|imp| imp.symbols.iter())
-        .map(|sym| {
-            if sym.is_default {
-                "default".to_string()
-            } else {
-                sym.name.clone()
-            }
-        })
-        .collect();
-
     let mut dead_parrots: Vec<SymbolEntry> = registry
         .values()
         .filter(|entry| {
-            // Skip if has imports
-            if entry.import_count > 0 {
-                return false;
-            }
-            // Skip Tauri commands
-            if tauri_handlers.contains(&entry.name) {
-                return false;
-            }
-            // Skip locally used symbols
-            if all_local_uses.contains(&entry.name) {
-                return false;
-            }
-            // Skip if imported by name anywhere (handles unresolved paths)
-            if all_imported_names.contains(&entry.name) {
-                return false;
-            }
-            // Skip entry points (lib.rs, index.ts, __init__.py, etc.)
-            if is_entry_point(&entry.file_path) {
-                return false;
-            }
-            // Skip mod.rs files (Rust module declarations)
-            if is_mod_rs(&entry.file_path) {
-                return false;
-            }
-            // Skip framework magic patterns
-            if is_framework_magic(&entry.name, &entry.kind) {
-                return false;
-            }
-            // Skip barrel re-exports
-            if is_barrel_reexport(&entry.name, &entry.kind) {
-                return false;
-            }
-            true
+            entry.import_count == 0
+                && !tauri_handlers.contains(&entry.name)  // Exclude Tauri commands
+                && !all_local_uses.contains(&entry.name) // Exclude locally used symbols
         })
         .cloned()
         .collect();
@@ -264,7 +143,7 @@ pub fn print_twins_human(result: &TwinsResult) {
         return;
     }
 
-    println!("DEAD PARROTS ({} found)", result.dead_parrots.len());
+    println!("🦜 DEAD PARROTS ({} found)", result.dead_parrots.len());
     println!();
 
     // Group by file for cleaner output
@@ -355,51 +234,6 @@ pub struct ExactTwin {
     pub locations: Vec<TwinLocation>,
 }
 
-/// Generic method names that should be excluded from twin detection
-const GENERIC_METHOD_NAMES: &[&str] = &[
-    "new",
-    "default",
-    "from",
-    "into",
-    "clone",
-    "process",
-    "load",
-    "save",
-    "run",
-    "init",
-    "build",
-    "execute",
-    "create",
-    "update",
-    "delete",
-    "get",
-    "set",
-    "handle",
-    "render",
-    "parse",
-    "format",
-    "serialize",
-    "deserialize",
-    "start",
-    "stop",
-    "reset",
-    "clear",
-    "close",
-    "open",
-    "read",
-    "write",
-    "send",
-    "receive",
-    "connect",
-    "disconnect",
-    "validate",
-    "configure",
-];
-
-fn is_generic_method(name: &str) -> bool {
-    GENERIC_METHOD_NAMES.contains(&name)
-}
-
 /// Detect exact twins: symbols with the same name exported from different files
 pub fn detect_exact_twins(analyses: &[FileAnalysis]) -> Vec<ExactTwin> {
     let registry = build_symbol_registry(analyses);
@@ -408,10 +242,6 @@ pub fn detect_exact_twins(analyses: &[FileAnalysis]) -> Vec<ExactTwin> {
     let mut symbol_map: HashMap<String, Vec<(String, usize, String, usize)>> = HashMap::new();
 
     for ((file_path, symbol_name), entry) in &registry {
-        // Skip re-exports - they're intentional API design, not duplicates
-        if entry.kind == "reexport" || entry.kind == "re-export" {
-            continue;
-        }
         symbol_map.entry(symbol_name.clone()).or_default().push((
             file_path.clone(),
             entry.line,
@@ -424,12 +254,7 @@ pub fn detect_exact_twins(analyses: &[FileAnalysis]) -> Vec<ExactTwin> {
     let mut twins: Vec<ExactTwin> = Vec::new();
 
     for (name, locations_raw) in symbol_map {
-        // Skip generic method names (new, from, clone, etc.)
-        if is_generic_method(&name) {
-            continue;
-        }
-
-        // Skip if only one location (not a duplicate)
+        // Skip if only one location
         if locations_raw.len() <= 1 {
             continue;
         }
@@ -602,34 +427,12 @@ mod tests {
         });
         importer.imports.push(import);
 
-        let registry = build_symbol_registry(&[exporter, importer]);
+        let registry = build_symbol_registry(&vec![exporter, importer]);
 
         let helper_entry = registry
             .get(&("utils.ts".to_string(), "helper".to_string()))
             .unwrap();
         assert_eq!(helper_entry.import_count, 1);
-    }
-
-    #[test]
-    fn test_build_symbol_registry_skips_tests() {
-        let test_file = FileAnalysis {
-            path: "tests/test_api_integration.py".to_string(),
-            is_test: true,
-            exports: vec![ExportSymbol {
-                name: "TestHealthEndpoints".to_string(),
-                kind: "class".to_string(),
-                export_type: "named".to_string(),
-                line: Some(10),
-            }],
-            ..Default::default()
-        };
-        let normal_file = mock_file_with_exports("app.py", vec![("App", "class")]);
-
-        let registry = build_symbol_registry(&[test_file, normal_file]);
-
-        // Only the non-test export should remain
-        assert_eq!(registry.len(), 1);
-        assert!(registry.contains_key(&("app.py".to_string(), "App".to_string())));
     }
 
     #[test]
@@ -651,7 +454,7 @@ mod tests {
         });
         importer.imports.push(import);
 
-        let result = find_dead_parrots(&[used_file, dead_file, importer], true);
+        let result = find_dead_parrots(&vec![used_file, dead_file, importer], true);
 
         assert_eq!(result.dead_parrots.len(), 1);
         assert_eq!(result.dead_parrots[0].name, "unused");
@@ -717,7 +520,7 @@ mod tests {
         });
         importer.imports.push(import);
 
-        let twins = detect_exact_twins(&[a, b, importer]);
+        let twins = detect_exact_twins(&vec![a, b, importer]);
         assert_eq!(twins.len(), 1);
 
         // Canonical should be the one with imports (a.ts)

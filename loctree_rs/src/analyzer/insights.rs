@@ -139,6 +139,7 @@ pub fn collect_ai_insights(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::analyzer::report::DupSeverity;
 
     fn mock_file(path: &str, language: &str, loc: usize) -> FileAnalysis {
         FileAnalysis {
@@ -240,6 +241,10 @@ mod tests {
                 canonical: format!("file{}.ts", i),
                 canonical_line: None,
                 refactors: vec![],
+                severity: DupSeverity::SamePackage,
+                is_cross_lang: false,
+                packages: vec![],
+                reason: String::new(),
             })
             .collect();
 

@@ -23,7 +23,7 @@ use super::resolvers::{
 use super::scan::{
     analyze_file, matches_focus, resolve_event_constants_across_files, strip_excluded,
 };
-use super::{DupLocation, RankedDup, coverage::CommandUsage};
+use super::{DupLocation, DupSeverity, RankedDup, coverage::CommandUsage};
 
 pub struct ScanConfig<'a> {
     pub roots: &'a [PathBuf],
@@ -552,7 +552,7 @@ fn scan_single_root(
                     resolve_js_relative(&file, root_path, spec, options.extensions.as_ref())
                 } else if matches!(
                     ext.as_str(),
-                    "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "svelte"
+                    "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "svelte" | "vue"
                 ) {
                     ts_resolver
                         .as_ref()
@@ -605,7 +605,7 @@ fn scan_single_root(
                             )
                         }
                     }
-                    "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "css" | "svelte" => {
+                    "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "css" | "svelte" | "vue" => {
                         if imp.source.starts_with('.') {
                             resolve_js_relative(
                                 &file,
@@ -622,18 +622,24 @@ fn scan_single_root(
                     _ => None,
                 });
                 if let Some(target) = resolved {
-                    // Use full paths for edges (slice module needs exact paths)
-                    // Note: normalize_module_id strips /index suffix which breaks slice lookups
-                    graph_edges.push((
-                        analysis.path.clone(),
-                        target,
+                    let label = if imp.is_type_checking {
+                        "type_import"
+                    } else if imp.is_lazy {
+                        "lazy_import"
+                    } else {
                         match imp.kind {
                             ImportKind::Static | ImportKind::Type | ImportKind::SideEffect => {
-                                "import".to_string()
+                                "import"
                             }
-                            ImportKind::Dynamic => "dynamic_import".to_string(),
-                        },
-                    ));
+                            ImportKind::Dynamic => "dynamic_import",
+                        }
+                    };
+                    if label == "type_import" {
+                        continue;
+                    }
+                    // Use full paths for edges (slice module needs exact paths)
+                    // Note: normalize_module_id strips /index suffix which breaks slice lookups
+                    graph_edges.push((analysis.path.clone(), target, label.to_string()));
                 }
             }
         }
@@ -794,6 +800,17 @@ fn scan_single_root(
         let mut refactors: Vec<String> =
             files.iter().filter(|f| *f != &canonical).cloned().collect();
         refactors.sort();
+
+        // Extract packages for severity
+        let packages: Vec<String> = files
+            .iter()
+            .map(|f| extract_package(f))
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        let cross_lang = is_cross_lang(files);
+        let (severity, reason) = compute_severity(name, files, &packages);
+
         ranked_dups.push(RankedDup {
             name: name.clone(),
             files: files.clone(),
@@ -804,6 +821,10 @@ fn scan_single_root(
             canonical,
             canonical_line,
             refactors,
+            severity,
+            is_cross_lang: cross_lang,
+            packages,
+            reason,
         });
     }
     ranked_dups.sort_by(|a, b| {
@@ -849,6 +870,17 @@ fn scan_single_root(
             .cloned()
             .collect();
         refactors.sort();
+
+        // Recompute severity for filtered files
+        let packages: Vec<String> = kept_files
+            .iter()
+            .map(|f| extract_package(f))
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        let cross_lang = is_cross_lang(&kept_files);
+        let (severity, reason) = compute_severity(&dup.name, &kept_files, &packages);
+
         filtered_ranked.push(RankedDup {
             name: dup.name,
             files: kept_files,
@@ -859,12 +891,22 @@ fn scan_single_root(
             canonical,
             canonical_line,
             refactors,
+            severity,
+            is_cross_lang: cross_lang,
+            packages,
+            reason,
         });
     }
+    // Sort by severity (descending), then by score
     filtered_ranked.sort_by(|a, b| {
-        b.score
-            .cmp(&a.score)
-            .then(b.files.len().cmp(&a.files.len()))
+        let sev_cmp = (b.severity as u8).cmp(&(a.severity as u8));
+        if sev_cmp != std::cmp::Ordering::Equal {
+            sev_cmp
+        } else {
+            b.score
+                .cmp(&a.score)
+                .then(b.files.len().cmp(&a.files.len()))
+        }
     });
 
     let tsconfig_summary = super::tsconfig::summarize_tsconfig(root_path, &analyses);
@@ -946,6 +988,8 @@ fn is_index_like(path: &str) -> bool {
         || lowered.ends_with("/index.mjs")
         || lowered.ends_with("/index.cjs")
         || lowered.ends_with("/index.rs")
+        || lowered.ends_with("/index.svelte")
+        || lowered.ends_with("/index.vue")
 }
 
 /// Normalized module identifier with language context
@@ -991,12 +1035,14 @@ pub(crate) fn normalize_module_id(path: &str) -> NormalizedModule {
 
     // Extract language family from extension (collapse TS/JS variants)
     for ext in [
-        ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".rs", ".py", ".css", ".svelte",
+        ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".rs", ".py", ".css", ".svelte", ".vue",
     ] {
         if let Some(stripped) = p.strip_suffix(ext) {
             p = stripped.to_string();
             lang = match ext {
-                ".ts" | ".tsx" | ".js" | ".jsx" | ".mjs" | ".cjs" | ".svelte" => "ts".to_string(),
+                ".ts" | ".tsx" | ".js" | ".jsx" | ".mjs" | ".cjs" | ".svelte" | ".vue" => {
+                    "ts".to_string()
+                }
                 ".rs" => "rs".to_string(),
                 ".py" => "py".to_string(),
                 ".css" => "css".to_string(),
@@ -1230,6 +1276,186 @@ pub fn scan_results_from_snapshot(snapshot: &Snapshot) -> ScanResults {
     }
 }
 
+// ============================================================================
+// Duplicate severity detection helpers
+// ============================================================================
+
+/// Known DTO type names that are expected to be duplicated across Rust↔TS
+const DTO_WHITELIST: &[&str] = &[
+    "visit",
+    "task",
+    "chatmessage",
+    "attachment",
+    "patient",
+    "message",
+    "user",
+    "config",
+    "settings",
+    "response",
+    "request",
+    "error",
+    "result",
+    "event",
+    "state",
+    "status",
+    "payload",
+    "data",
+];
+
+/// System constants expected across languages
+const SYSTEM_CONSTANTS: &[&str] = &["touch_id", "keychain", "app_name", "version", "default"];
+
+/// Detect language family from file path
+fn detect_language(path: &str) -> &'static str {
+    let ext = path.rsplit('.').next().unwrap_or("");
+    match ext {
+        "rs" => "rust",
+        "ts" | "tsx" | "js" | "jsx" | "mjs" | "mts" => "typescript",
+        "py" | "pyi" => "python",
+        "css" | "scss" | "less" => "css",
+        _ => "unknown",
+    }
+}
+
+/// Extract package/directory context from path
+fn extract_package(path: &str) -> String {
+    // Extract first meaningful directory after src/ or src-tauri/
+    let parts: Vec<&str> = path.split('/').collect();
+
+    // Find src or src-tauri, take next directory
+    for (i, part) in parts.iter().enumerate() {
+        if (*part == "src" || *part == "src-tauri") && i + 1 < parts.len() {
+            return parts[i + 1].to_string();
+        }
+    }
+
+    // Fallback: use parent directory
+    parts
+        .iter()
+        .rev()
+        .nth(1)
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "root".to_string())
+}
+
+/// Check if symbol name matches DTO whitelist
+fn is_whitelisted_dto(name: &str) -> bool {
+    let lc = name.to_lowercase();
+    DTO_WHITELIST.iter().any(|dto| lc.contains(dto))
+        || SYSTEM_CONSTANTS.iter().any(|c| lc.contains(c))
+}
+
+/// Check if files span multiple languages
+fn is_cross_lang(files: &[String]) -> bool {
+    let langs: HashSet<_> = files.iter().map(|f| detect_language(f)).collect();
+    langs.len() > 1
+}
+
+/// Check if path is in src-tauri (backend)
+fn is_backend_path(path: &str) -> bool {
+    path.contains("src-tauri") || path.contains("src-rs") || path.ends_with(".rs")
+}
+
+/// Config file patterns that export "default" or common utilities
+const CONFIG_PATTERNS: &[&str] = &[
+    "eslint",
+    "vite.config",
+    "vitest.config",
+    "playwright.config",
+    "postcss.config",
+    "tailwind.config",
+    "jest.config",
+    "webpack.config",
+    "rollup.config",
+    "babel.config",
+    "tsconfig",
+    ".d.ts",
+];
+
+/// Check if file is a config file (expected to have default exports)
+fn is_config_file(path: &str) -> bool {
+    let lower = path.to_lowercase();
+    CONFIG_PATTERNS.iter().any(|p| lower.contains(p))
+}
+
+/// Compute severity for a duplicate export
+fn compute_severity(name: &str, files: &[String], packages: &[String]) -> (DupSeverity, String) {
+    let cross_lang = is_cross_lang(files);
+    let whitelisted = is_whitelisted_dto(name);
+
+    // Count config files
+    let config_count = files.iter().filter(|f| is_config_file(f)).count();
+    let all_config = config_count == files.len();
+    let mostly_config = files.len() > 1 && config_count as f64 / files.len() as f64 > 0.5;
+
+    // Severity 0: Config file exports (default, new, etc.)
+    // These are expected to be duplicated across config files
+    if all_config || (mostly_config && (name == "default" || name == "new")) {
+        return (
+            DupSeverity::CrossLangExpected,
+            "Config file export".to_string(),
+        );
+    }
+
+    // Check for src-tauri vs src split (expected for Tauri apps)
+    let has_backend = files.iter().any(|f| is_backend_path(f));
+    let has_frontend = files.iter().any(|f| !is_backend_path(f));
+    let fe_be_split = has_backend && has_frontend;
+
+    // Severity 0: Cross-language expected duplicates
+    if cross_lang && (whitelisted || fe_be_split) {
+        return (
+            DupSeverity::CrossLangExpected,
+            format!(
+                "Cross-lang DTO ({})",
+                if whitelisted {
+                    "whitelisted"
+                } else {
+                    "FE↔BE"
+                }
+            ),
+        );
+    }
+
+    // Severity 2: Semantic conflict - same name in different semantic contexts
+    // e.g., Attachment in icons/ vs hooks/
+    if packages.len() >= 3 {
+        return (
+            DupSeverity::SemanticConflict,
+            format!("Symbol in {} different packages", packages.len()),
+        );
+    }
+
+    // Check for potentially conflicting contexts
+    let contexts: Vec<_> = packages.iter().map(|p| p.to_lowercase()).collect();
+    let has_ui = contexts
+        .iter()
+        .any(|c| c.contains("icon") || c.contains("component") || c.contains("ui"));
+    let has_logic = contexts.iter().any(|c| {
+        c.contains("hook")
+            || c.contains("service")
+            || c.contains("util")
+            || c.contains("context")
+            || c.contains("store")
+    });
+    if has_ui && has_logic && !whitelisted {
+        return (
+            DupSeverity::SemanticConflict,
+            "UI vs logic context mismatch".to_string(),
+        );
+    }
+
+    // Severity 1: Same-package or expected structure
+    (
+        DupSeverity::SamePackage,
+        if cross_lang {
+            "Cross-lang (not whitelisted)".to_string()
+        } else {
+            "Same language duplicate".to_string()
+        },
+    )
+}
+
 /// Rank duplicates by severity (helper for snapshot conversion)
 fn rank_duplicates(
     export_index: &ExportIndex,
@@ -1299,6 +1525,18 @@ fn rank_duplicates(
         // Refactor targets = all files except canonical
         let refactors: Vec<String> = files.iter().filter(|f| *f != &canonical).cloned().collect();
 
+        // Extract unique packages for severity calculation
+        let packages: Vec<String> = files
+            .iter()
+            .map(|f| extract_package(f))
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+
+        // Compute severity and reason
+        let cross_lang = is_cross_lang(files);
+        let (severity, reason) = compute_severity(name, files, &packages);
+
         ranked.push(RankedDup {
             name: name.clone(),
             score,
@@ -1309,10 +1547,22 @@ fn rank_duplicates(
             canonical,
             canonical_line,
             refactors,
+            severity,
+            is_cross_lang: cross_lang,
+            packages,
+            reason,
         });
     }
 
-    ranked.sort_by(|a, b| b.score.cmp(&a.score));
+    // Sort by severity (descending), then by score
+    ranked.sort_by(|a, b| {
+        let sev_cmp = (b.severity as u8).cmp(&(a.severity as u8));
+        if sev_cmp != std::cmp::Ordering::Equal {
+            sev_cmp
+        } else {
+            b.score.cmp(&a.score)
+        }
+    });
     ranked
 }
 
@@ -1554,6 +1804,8 @@ where = ["services"]
             ("file.rs", "rs"),
             ("file.py", "py"),
             ("file.css", "css"),
+            ("file.svelte", "ts"),
+            ("file.vue", "ts"),
         ];
 
         for (input, expected_lang) in extensions {
@@ -1617,5 +1869,25 @@ where = ["services"]
         // Different language should be different
         set.insert(mod3.clone());
         assert_eq!(set.len(), 2);
+    }
+
+    #[test]
+    fn test_is_index_like_vue_files() {
+        // Test that Vue index files are recognized
+        assert!(is_index_like("src/components/index.vue"));
+        assert!(is_index_like("components/index.vue"));
+        assert!(is_index_like("/absolute/path/index.vue"));
+
+        // Test case insensitivity
+        assert!(is_index_like("src/components/INDEX.VUE"));
+
+        // Non-index Vue files should return false
+        assert!(!is_index_like("src/components/Button.vue"));
+        assert!(!is_index_like("src/App.vue"));
+
+        // Other index files should still work
+        assert!(is_index_like("src/index.ts"));
+        assert!(is_index_like("src/index.js"));
+        assert!(is_index_like("src/index.svelte"));
     }
 }

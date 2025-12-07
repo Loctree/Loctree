@@ -3,17 +3,8 @@ resolver = "2"
 members = [
     "loctree_rs",
     "loctree_server",
-    "loctree_memex",
-    "rmcp_memex",
-    "rmcp_mux",
     "reports",
-    "landing",
 ]
-
-# Note: rmcp_memex requires protobuf for lancedb
-# Use `make build` to auto-install protobuf, or run:
-#   brew install protobuf (macOS)
-#   apt install protobuf-compiler (Linux)
 
 [workspace.package]
 edition = "2024"
