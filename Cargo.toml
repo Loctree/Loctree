@@ -2,22 +2,13 @@
 resolver = "2"
 members = [
     "loctree_rs",
-    "loctree-mcp",
-    "loctree_lsp",
-    "rmcp-common",
+    "loctree_server",
     "reports",
-    "reports/wasm",
-    # landing - excluded from public repo (development only in loctree-suite)
 ]
-
-# Removed from workspace:
-# - rmcp-memex: use crates.io version (0.3.2+), standalone: ~/Libraxis/rmcp-memex
-# - rmcp-mux: deprecated (dead end approach)
-# - rmcp-config-ui: moved to ~/Libraxis/rmcp-config-ui
 
 [workspace.package]
 edition = "2024"
-license = "MIT OR Apache-2.0"
+license = "MIT"
 authors = ["Loctree <loct@loctree.io>"]
 
 [workspace.dependencies]
@@ -36,7 +27,7 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 
 # MCP
-rmcp = { version = "0.12", features = ["server"] }
+rmcp = { version = "0.10", features = ["server"] }
 
 # Async
 futures = "0.3"

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Flexible version bump script with scoped targets.
-# Usage: ./scripts/version-bump.sh [--patch|--minor|--major] [--all|--loctree|--report|--landing] [--dev] [--dry-run]
-# Defaults: --patch --all (unless --dev with no bump flag → keep version, add -dev)
+# Usage: ./scripts/version-bump.sh [--patch|--minor|--major] [--all|--loctree|--report|--landing|--memex|--server] [--dev|--rc] [--dry-run]
+# Defaults: --patch --all (unless --dev/--rc with no bump flag → keep version, add suffix)
 # Rules:
 #   - --all / --loctree update UI occurrences (reports footer, landing easter egg/version) via sync-version
 #   - --report / --landing do NOT touch UI occurrences
@@ -16,6 +16,7 @@ bump_type="patch"
 bump_flag_set=false
 scope="all"
 dev_suffix=false
+rc_suffix=false
 dry_run=false
 
 while [[ $# -gt 0 ]]; do
@@ -25,12 +26,16 @@ while [[ $# -gt 0 ]]; do
       bump_flag_set=true
       shift
       ;;
-    --all|--loctree|--report|--landing)
+    --all|--loctree|--report|--landing|--memex|--server)
       scope="${1#--}"
       shift
       ;;
     --dev)
       dev_suffix=true
+      shift
+      ;;
+    --rc)
+      rc_suffix=true
       shift
       ;;
     --dry-run)
@@ -44,23 +49,32 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# If --dev is set without an explicit bump flag, keep current numeric version and just add -dev
+# If --dev or --rc is set without an explicit bump flag, keep current numeric version and just add suffix
 if $dev_suffix && ! $bump_flag_set; then
+  bump_type="none"
+fi
+if $rc_suffix && ! $bump_flag_set; then
   bump_type="none"
 fi
 
 include_loctree=false
 include_report=false
 include_landing=false
+include_memex=false
+include_server=false
 case "$scope" in
   all)
     include_loctree=true
     include_report=true
     include_landing=true
+    include_memex=true
+    include_server=true
     ;;
   loctree) include_loctree=true ;;
   report) include_report=true ;;
   landing) include_landing=true ;;
+  memex) include_memex=true ;;
+  server) include_server=true ;;
 esac
 
 if [[ ! -f "$ROOT_DIR/loctree_rs/Cargo.toml" ]]; then
@@ -77,6 +91,7 @@ fi
 bump_version() {
   local current="$1" kind="$2"
   current="${current%-dev}" # strip existing -dev if present
+  current="${current%-rc}"  # strip existing -rc if present
   if [[ "$kind" == "none" ]]; then
     echo "$current"
     return
@@ -109,10 +124,14 @@ update_sed() {
 loctree_ver="$(read_version "$ROOT_DIR/loctree_rs/Cargo.toml")"
 report_ver="$(read_version "$ROOT_DIR/reports/Cargo.toml")"
 landing_ver="$(read_version "$ROOT_DIR/landing/Cargo.toml")"
+memex_ver="$(read_version "$ROOT_DIR/loctree_memex/Cargo.toml")"
+server_ver="$(read_version "$ROOT_DIR/loctree_server/Cargo.toml")"
 
 new_loctree_ver="$loctree_ver"
 new_report_ver="$report_ver"
 new_landing_ver="$landing_ver"
+new_memex_ver="$memex_ver"
+new_server_ver="$server_ver"
 
 if $include_loctree; then
   new_loctree_ver="$(bump_version "$loctree_ver" "$bump_type")"
@@ -123,15 +142,31 @@ fi
 if $include_landing; then
   new_landing_ver="$(bump_version "$landing_ver" "$bump_type")"
 fi
+if $include_memex; then
+  new_memex_ver="$(bump_version "$memex_ver" "$bump_type")"
+fi
+if $include_server; then
+  new_server_ver="$(bump_version "$server_ver" "$bump_type")"
+fi
 
 echo "Bump type: $bump_type"
 echo "Scope: $scope"
-echo "Versions -> loctree: $new_loctree_ver | report: $new_report_ver | landing: $new_landing_ver"
+echo "Versions -> loctree: $new_loctree_ver | report: $new_report_ver | landing: $new_landing_ver | memex: $new_memex_ver | server: $new_server_ver"
 if $dev_suffix; then
   new_loctree_ver="${new_loctree_ver%-dev}-dev"
   new_report_ver="${new_report_ver%-dev}-dev"
   new_landing_ver="${new_landing_ver%-dev}-dev"
+  new_memex_ver="${new_memex_ver%-dev}-dev"
+  new_server_ver="${new_server_ver%-dev}-dev"
   echo "Applying -dev suffix"
+fi
+if $rc_suffix; then
+  new_loctree_ver="${new_loctree_ver%-rc}-rc"
+  new_report_ver="${new_report_ver%-rc}-rc"
+  new_landing_ver="${new_landing_ver%-rc}-rc"
+  new_memex_ver="${new_memex_ver%-rc}-rc"
+  new_server_ver="${new_server_ver%-rc}-rc"
+  echo "Applying -rc suffix"
 fi
 if $dry_run; then
   echo "Dry-run: will skip publish/commit"
@@ -152,20 +187,36 @@ if $include_landing; then
   update_sed "$ROOT_DIR/landing/Cargo.toml" 's/^version = ".*"/version = "'$new_landing_ver'"/'
 fi
 
+# Update memex Cargo
+if $include_memex; then
+  update_sed "$ROOT_DIR/loctree_memex/Cargo.toml" 's/^version = ".*"/version = "'$new_memex_ver'"/'
+fi
+
+# Update server Cargo
+if $include_server; then
+  update_sed "$ROOT_DIR/loctree_server/Cargo.toml" 's/^version = ".*"/version = "'$new_server_ver'"/'
+fi
+
 echo "==> Formatting"
 $include_loctree && cargo fmt --manifest-path "$ROOT_DIR/loctree_rs/Cargo.toml"
 $include_report && cargo fmt --manifest-path "$ROOT_DIR/reports/Cargo.toml"
 $include_landing && cargo fmt --manifest-path "$ROOT_DIR/landing/Cargo.toml"
+$include_memex && cargo fmt --manifest-path "$ROOT_DIR/loctree_memex/Cargo.toml"
+$include_server && cargo fmt --manifest-path "$ROOT_DIR/loctree_server/Cargo.toml"
 
 echo "==> Clippy"
 $include_loctree && cargo clippy --manifest-path "$ROOT_DIR/loctree_rs/Cargo.toml" --all-targets -- -D warnings
 $include_report && cargo clippy --manifest-path "$ROOT_DIR/reports/Cargo.toml" --all-targets -- -D warnings
 $include_landing && cargo clippy --manifest-path "$ROOT_DIR/landing/Cargo.toml" --all-targets -- -D warnings
+$include_memex && cargo clippy --manifest-path "$ROOT_DIR/loctree_memex/Cargo.toml" --all-targets -- -D warnings
+$include_server && cargo clippy --manifest-path "$ROOT_DIR/loctree_server/Cargo.toml" --all-targets -- -D warnings
 
-echo "==> Tests"
+echo "==> Tests/Build"
 $include_loctree && cargo test --manifest-path "$ROOT_DIR/loctree_rs/Cargo.toml"
 $include_report && cargo test --manifest-path "$ROOT_DIR/reports/Cargo.toml"
 $include_landing && cargo test --manifest-path "$ROOT_DIR/landing/Cargo.toml"
+$include_memex && cargo test --manifest-path "$ROOT_DIR/loctree_memex/Cargo.toml"
+$include_server && cargo build --manifest-path "$ROOT_DIR/loctree_server/Cargo.toml"
 
 if $include_loctree; then
   echo "==> Build release (loctree_rs)"
@@ -188,7 +239,7 @@ if $dry_run; then
 else
   echo "==> Git commit (no push)"
   git -C "$ROOT_DIR" add -A
-  git -C "$ROOT_DIR" commit -m "Bump versions: loctree=$new_loctree_ver report=$new_report_ver landing=$new_landing_ver"
+  git -C "$ROOT_DIR" commit -m "Bump versions: loctree=$new_loctree_ver report=$new_report_ver landing=$new_landing_ver memex=$new_memex_ver server=$new_server_ver"
 fi
 
 # Generate changelog entry from conventional commits

@@ -1,6 +1,6 @@
 [package]
 name = "loctree"
-version = "0.5.13"
+version = "0.5.18-dev"
 edition = "2024"
 default-run = "loctree"
 authors = ["Loctree <loct@loctree.io>"]
@@ -45,7 +45,21 @@ oxc_ast_visit = "0.100.0"
 oxc_semantic = "0.100.0"
 tempfile = "3"
 
+tokio = { version = "1.0", features = ["rt-multi-thread"] }
+
+# Progress UI (spinners, progress bars)
+indicatif = "0.17"
+console = "0.15"
+anyhow = "1.0"
+walkdir = "2.4"
+uuid = { version = "1.0", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+colored = "2.1"
+
 [dev-dependencies]
 assert_cmd = "2.0"
 predicates = "3.1"
 regex = "1.12"
+
+[features]
+default = []

@@ -8,9 +8,11 @@
 //! Developed with 💀 by The Loctree Team (c)2025
 
 use serde::Serialize;
+use std::collections::{HashMap, HashSet};
 
 use super::report::{Confidence, ReportSection};
-use crate::types::FileAnalysis;
+use super::root_scan::normalize_module_id;
+use crate::types::{FileAnalysis, SignatureUse, SignatureUseKind};
 
 /// Top-level AI summary - the entry point for agents
 #[derive(Serialize)]
@@ -63,7 +65,7 @@ pub struct ForAiSectionRef {
 #[derive(Serialize, Clone)]
 pub struct QuickWin {
     pub priority: u8, // 1=highest
-    /// Kind of issue: missing_handler, unregistered_handler, unused_handler, dead_export, circular_import
+    /// Kind of issue: missing_handler, unregistered_handler, unused_handler, dead_export, circular_import, opaque_passthrough
     pub kind: String,
     pub action: String,
     pub target: String,
@@ -108,7 +110,7 @@ pub fn generate_for_ai_report(
 
     let summary = compute_summary(sections, analyses);
     let section_refs = build_section_refs(sections);
-    let quick_wins = extract_quick_wins(sections);
+    let quick_wins = extract_quick_wins(sections, analyses);
     let hub_files = find_hub_files(analyses);
 
     ForAiReport {
@@ -211,7 +213,7 @@ fn build_section_refs(sections: &[ReportSection]) -> Vec<ForAiSectionRef> {
         .collect()
 }
 
-fn extract_quick_wins(sections: &[ReportSection]) -> Vec<QuickWin> {
+fn extract_quick_wins(sections: &[ReportSection], analyses: &[FileAnalysis]) -> Vec<QuickWin> {
     let mut wins = Vec::new();
     let mut priority = 1u8;
 
@@ -447,7 +449,225 @@ fn extract_quick_wins(sections: &[ReportSection]) -> Vec<QuickWin> {
         }
     }
 
+    // Priority 6: Opaque passthrough types (types only seen in signatures of used functions)
+    let default_open_base = sections.iter().find_map(|s| s.open_base.as_deref());
+
+    for opaque in detect_opaque_passthrough_types(analyses)
+        .into_iter()
+        .take(10)
+    {
+        if priority > 45 {
+            break;
+        }
+        let location = if let Some(line) = opaque.line {
+            format!("{}:{}", opaque.file, line)
+        } else {
+            opaque.file.clone()
+        };
+        let open_url = super::build_open_url(&opaque.file, opaque.line, default_open_base);
+        let used_fns: Vec<String> = opaque
+            .uses
+            .iter()
+            .map(|u| {
+                let usage = match u.usage {
+                    SignatureUseKind::Parameter => "param",
+                    SignatureUseKind::Return => "return",
+                };
+                format!("{} ({usage})", u.function)
+            })
+            .take(4)
+            .collect();
+        let fix_hint = match opaque.severity.as_str() {
+            "info" => "Document or re-export intentionally, or remove if unused".to_string(),
+            "low" => {
+                "Consider making the type private if it is only an internal carrier".to_string()
+            }
+            _ => "Either make the type private, or re-export it in the public API if intentional"
+                .to_string(),
+        };
+        let impact = format!(
+            "Severity: {}. Type is only flowing through function signatures; callers cannot import it directly",
+            opaque.severity
+        );
+        wins.push(QuickWin {
+            priority,
+            kind: "opaque_passthrough".to_string(),
+            action: "Harden opaque passthrough type".to_string(),
+            target: opaque.symbol.clone(),
+            location,
+            impact,
+            why: format!(
+                "'{}' is never imported directly but is used in signatures of {}",
+                opaque.symbol,
+                used_fns.join(", ")
+            ),
+            fix_hint,
+            complexity: "medium".to_string(),
+            trace_cmd: Some(format!("loct trace {}", opaque.symbol)),
+            open_url: Some(open_url),
+        });
+        priority += 1;
+    }
+
     wins
+}
+
+#[derive(Clone)]
+struct OpaquePassthroughFinding {
+    symbol: String,
+    file: String,
+    line: Option<usize>,
+    uses: Vec<SignatureUse>,
+    severity: String,
+}
+
+fn build_used_exports(analyses: &[FileAnalysis]) -> HashSet<(String, String)> {
+    let mut used_exports: HashSet<(String, String)> = HashSet::new();
+    for analysis in analyses {
+        for imp in &analysis.imports {
+            let target_norm = if let Some(target) = &imp.resolved_path {
+                normalize_module_id(target).as_key()
+            } else {
+                normalize_module_id(&imp.source).as_key()
+            };
+            if imp.symbols.is_empty() {
+                continue;
+            }
+            for sym in &imp.symbols {
+                let name = if sym.is_default {
+                    "default".to_string()
+                } else {
+                    sym.name.clone()
+                };
+                used_exports.insert((target_norm.clone(), name.clone()));
+                if sym.name == "*" {
+                    used_exports.insert((target_norm.clone(), "*".to_string()));
+                }
+            }
+        }
+        for re in &analysis.reexports {
+            let target_norm = re
+                .resolved
+                .as_ref()
+                .map(|t| normalize_module_id(t).as_key())
+                .unwrap_or_else(|| normalize_module_id(&re.source).as_key());
+            match &re.kind {
+                crate::types::ReexportKind::Star => {
+                    used_exports.insert((target_norm, "*".to_string()));
+                }
+                crate::types::ReexportKind::Named(names) => {
+                    for name in names {
+                        used_exports.insert((target_norm.clone(), name.clone()));
+                    }
+                }
+            }
+        }
+    }
+    used_exports
+}
+
+fn build_reexport_map(analyses: &[FileAnalysis]) -> HashMap<String, HashSet<String>> {
+    let mut map: HashMap<String, HashSet<String>> = HashMap::new();
+    for analysis in analyses {
+        for re in &analysis.reexports {
+            let target_norm = re
+                .resolved
+                .as_ref()
+                .map(|t| normalize_module_id(t).as_key())
+                .unwrap_or_else(|| normalize_module_id(&re.source).as_key());
+            let entry = map.entry(target_norm).or_default();
+            match &re.kind {
+                crate::types::ReexportKind::Star => {
+                    entry.insert("*".to_string());
+                }
+                crate::types::ReexportKind::Named(names) => {
+                    for name in names {
+                        entry.insert(name.clone());
+                    }
+                }
+            }
+        }
+    }
+    map
+}
+
+fn is_type_like_export(exp: &crate::types::ExportSymbol, path: &str) -> bool {
+    match exp.kind.as_str() {
+        "type" | "interface" | "enum" => true,
+        "class" => true,
+        _ if path.ends_with(".rs") => exp.name.chars().next().is_some_and(|c| c.is_uppercase()),
+        _ => false,
+    }
+}
+
+fn should_exclude_passthrough(exp: &crate::types::ExportSymbol) -> bool {
+    let name = exp.name.as_str();
+    // Common marker/ZST and doc-hidden-style prefixes
+    matches!(
+        name,
+        "PhantomData" | "PhantomPinned" | "Never" | "Infallible"
+    ) || name.starts_with('_')
+}
+
+fn detect_opaque_passthrough_types(analyses: &[FileAnalysis]) -> Vec<OpaquePassthroughFinding> {
+    let used_exports = build_used_exports(analyses);
+    let reexport_map = build_reexport_map(analyses);
+    let mut findings = Vec::new();
+
+    for analysis in analyses {
+        let module_key = normalize_module_id(&analysis.path).as_key();
+        let module_star = used_exports.contains(&(module_key.clone(), "*".to_string()));
+
+        for exp in &analysis.exports {
+            if !is_type_like_export(exp, &analysis.path) {
+                continue;
+            }
+            if should_exclude_passthrough(exp) {
+                continue;
+            }
+            if module_star || used_exports.contains(&(module_key.clone(), exp.name.clone())) {
+                continue;
+            }
+
+            let sigs: Vec<SignatureUse> = analysis
+                .signature_uses
+                .iter()
+                .filter(|s| s.type_name == exp.name)
+                .cloned()
+                .collect();
+            if sigs.is_empty() {
+                continue;
+            }
+
+            let mut used_sigs: Vec<SignatureUse> = Vec::new();
+            for sig in sigs {
+                if module_star || used_exports.contains(&(module_key.clone(), sig.function.clone()))
+                {
+                    used_sigs.push(sig);
+                }
+            }
+            if used_sigs.is_empty() {
+                continue;
+            }
+
+            let reexported = reexport_map
+                .get(&module_key)
+                .map(|names| names.contains("*") || names.contains(&exp.name))
+                .unwrap_or(false);
+
+            let severity = if reexported { "info" } else { "medium" }.to_string();
+
+            findings.push(OpaquePassthroughFinding {
+                symbol: exp.name.clone(),
+                file: analysis.path.clone(),
+                line: exp.line,
+                uses: used_sigs,
+                severity,
+            });
+        }
+    }
+
+    findings
 }
 
 /// Print quick wins as JSONL (one JSON object per line) for agent consumption
@@ -528,8 +748,11 @@ pub fn print_for_ai_json(report: &ForAiReport) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analyzer::report::{CommandGap, DupLocation, RankedDup};
-    use crate::types::{CommandRef, ImportEntry, ImportKind};
+    use crate::analyzer::report::{CommandGap, DupLocation, DupSeverity, RankedDup};
+    use crate::types::{
+        CommandRef, ExportSymbol, ImportEntry, ImportKind, ImportResolutionKind, ImportSymbol,
+        SignatureUse, SignatureUseKind,
+    };
 
     fn mock_file(path: &str, loc: usize) -> FileAnalysis {
         FileAnalysis {
@@ -549,6 +772,7 @@ mod tests {
             ranked_dups: vec![],
             cascades: vec![],
             circular_imports: vec![],
+            lazy_circular_imports: vec![],
             dynamic: vec![],
             analyze_limit: 50,
             missing_handlers: vec![],
@@ -563,6 +787,9 @@ mod tests {
             graph_warning: None,
             git_branch: None,
             git_commit: None,
+            crowds: vec![],
+            dead_exports: vec![],
+            twins_data: None,
         }
     }
 
@@ -675,7 +902,7 @@ mod tests {
         }];
 
         let sections = vec![section];
-        let wins = extract_quick_wins(&sections);
+        let wins = extract_quick_wins(&sections, &[]);
 
         assert!(!wins.is_empty());
         assert_eq!(wins[0].priority, 1);
@@ -710,7 +937,7 @@ mod tests {
         }];
 
         let sections = vec![section];
-        let wins = extract_quick_wins(&sections);
+        let wins = extract_quick_wins(&sections, &[]);
 
         // Should have all 3 with priority order: missing < unregistered < unused
         assert!(wins.len() >= 3);
@@ -831,10 +1058,14 @@ mod tests {
             canonical: "src/types/user.ts".to_string(),
             canonical_line: Some(10),
             refactors: vec!["Move all imports to src/types/user.ts".to_string()],
+            severity: DupSeverity::SemanticConflict,
+            is_cross_lang: false,
+            packages: vec!["types".to_string(), "models".to_string(), "api".to_string()],
+            reason: "Symbol in 3 different packages".to_string(),
         }];
 
         let sections = vec![section];
-        let wins = extract_quick_wins(&sections);
+        let wins = extract_quick_wins(&sections, &[]);
 
         // Should include dead export quick win
         let dead_export_wins: Vec<_> = wins.iter().filter(|w| w.kind == "dead_export").collect();
@@ -866,7 +1097,7 @@ mod tests {
         ];
 
         let sections = vec![section];
-        let wins = extract_quick_wins(&sections);
+        let wins = extract_quick_wins(&sections, &[]);
 
         // Should include circular import quick wins
         let cycle_wins: Vec<_> = wins
@@ -934,13 +1165,17 @@ mod tests {
             canonical: "a.ts".to_string(),
             canonical_line: Some(10),
             refactors: vec![],
+            severity: DupSeverity::SamePackage,
+            is_cross_lang: false,
+            packages: vec![],
+            reason: String::new(),
         }];
 
         // Priority 5: Circular import
         section.circular_imports = vec![vec!["x.ts".to_string(), "y.ts".to_string()]];
 
         let sections = vec![section];
-        let wins = extract_quick_wins(&sections);
+        let wins = extract_quick_wins(&sections, &[]);
 
         // Should have all 5 priorities represented
         assert!(wins.len() >= 5);
@@ -957,5 +1192,60 @@ mod tests {
         let mut sorted_priorities = priorities.clone();
         sorted_priorities.sort();
         assert_eq!(priorities, sorted_priorities, "Priorities should be sorted");
+    }
+
+    #[test]
+    fn test_detects_opaque_passthrough_quick_win() {
+        // Producer with a type and a function that uses it in signature
+        let mut producer = FileAnalysis {
+            path: "src/tray.rs".to_string(),
+            exports: vec![
+                ExportSymbol::new("LoadedIcon".to_string(), "decl", "named", Some(18)),
+                ExportSymbol::new("spawn_tray".to_string(), "decl", "named", Some(24)),
+            ],
+            ..Default::default()
+        };
+        producer.signature_uses.push(SignatureUse {
+            function: "spawn_tray".to_string(),
+            usage: SignatureUseKind::Parameter,
+            type_name: "LoadedIcon".to_string(),
+            line: Some(24),
+        });
+
+        // Consumer imports the function (not the type)
+        let mut consumer = FileAnalysis {
+            path: "src/main.rs".to_string(),
+            ..Default::default()
+        };
+        consumer.imports.push(ImportEntry {
+            source: "src/tray.rs".to_string(),
+            source_raw: "src/tray.rs".to_string(),
+            kind: ImportKind::Static,
+            resolved_path: Some("src/tray.rs".to_string()),
+            is_bare: false,
+            symbols: vec![ImportSymbol {
+                name: "spawn_tray".to_string(),
+                alias: None,
+                is_default: false,
+            }],
+            resolution: ImportResolutionKind::Local,
+            is_type_checking: false,
+            is_lazy: false,
+            is_crate_relative: false,
+            is_super_relative: false,
+            is_self_relative: false,
+            raw_path: String::new(),
+        });
+
+        let findings = detect_opaque_passthrough_types(&[producer.clone(), consumer.clone()]);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].symbol, "LoadedIcon");
+
+        // Quick win emitted when analyses are provided
+        let wins = extract_quick_wins(&[mock_section("root", 2)], &[producer, consumer]);
+        assert!(
+            wins.iter().any(|w| w.kind == "opaque_passthrough"),
+            "Opaque passthrough quick win should be emitted"
+        );
     }
 }
