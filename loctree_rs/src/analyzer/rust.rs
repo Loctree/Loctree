@@ -1,7 +1,11 @@
 use crate::types::{
     CommandRef, EventRef, ExportSymbol, FileAnalysis, ImportEntry, ImportKind, ReexportEntry,
-    ReexportKind,
+    ReexportKind, SignatureUse, SignatureUseKind,
 };
+use regex::Regex;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use super::offset_to_line;
 use super::regexes::{
@@ -41,6 +45,74 @@ fn split_words_lower(name: &str) -> Vec<String> {
 
     words.retain(|w| !w.is_empty());
     words
+}
+
+fn regex_rust_pub_fn_signature() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r#"(?m)^\s*pub\s*(?:\([^)]*\)\s*)?(?:async\s+)?fn\s+([A-Za-z0-9_]+)\s*\((?P<params>[^)]*)\)\s*(?:->\s*(?P<ret>[^{;]+))?"#,
+        )
+        .expect("valid pub fn regex")
+    })
+}
+
+fn extract_rust_type_tokens(segment: &str) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut types = Vec::new();
+    for token in segment.split(|c: char| !c.is_ascii_alphanumeric() && c != '_' && c != ':') {
+        if token.is_empty() {
+            continue;
+        }
+        let first = token.chars().next().unwrap_or('_');
+        let looks_like_type = first.is_ascii_uppercase() || token.contains("::");
+        if !looks_like_type {
+            continue;
+        }
+        const SKIP: &[&str] = &["Self", "String", "Vec", "Option", "Result"];
+        if SKIP.contains(&token) {
+            continue;
+        }
+        if seen.insert(token.to_string()) {
+            types.push(token.to_string());
+        }
+    }
+    types
+}
+
+fn collect_rust_signature_uses(content: &str, analysis: &mut FileAnalysis) {
+    for caps in regex_rust_pub_fn_signature().captures_iter(content) {
+        let fn_name = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+        if fn_name.is_empty() {
+            continue;
+        }
+        let params = caps.name("params").map(|m| m.as_str()).unwrap_or("");
+        let ret = caps.name("ret").map(|m| m.as_str()).unwrap_or("");
+        let line = offset_to_line(content, caps.get(0).map(|m| m.start()).unwrap_or(0));
+
+        for ty in extract_rust_type_tokens(params) {
+            analysis.signature_uses.push(SignatureUse {
+                function: fn_name.to_string(),
+                usage: SignatureUseKind::Parameter,
+                type_name: ty.clone(),
+                line: Some(line),
+            });
+            if !analysis.local_uses.contains(&ty) {
+                analysis.local_uses.push(ty);
+            }
+        }
+        for ty in extract_rust_type_tokens(ret) {
+            analysis.signature_uses.push(SignatureUse {
+                function: fn_name.to_string(),
+                usage: SignatureUseKind::Return,
+                type_name: ty.clone(),
+                line: Some(line),
+            });
+            if !analysis.local_uses.contains(&ty) {
+                analysis.local_uses.push(ty);
+            }
+        }
+    }
 }
 
 fn capitalize(word: &str) -> String {
@@ -388,6 +460,282 @@ fn strip_cfg_attributes(s: &str) -> String {
     result
 }
 
+/// Maps Rust module paths (like `crate::foo::bar`) to their corresponding file paths.
+/// This is needed to resolve crate-internal imports for dead code detection.
+#[derive(Debug, Clone)]
+pub struct CrateModuleMap {
+    /// Map from module path (e.g., "foo::bar") to file path relative to crate root
+    modules: HashMap<String, PathBuf>,
+    /// Crate root directory
+    crate_root: PathBuf,
+}
+
+impl CrateModuleMap {
+    /// Build a module map by scanning the crate starting from lib.rs or main.rs
+    pub fn build(crate_root: &Path) -> std::io::Result<Self> {
+        let mut map = CrateModuleMap {
+            modules: HashMap::new(),
+            crate_root: crate_root.to_path_buf(),
+        };
+
+        // Find the crate entry point (lib.rs or main.rs)
+        let lib_rs = crate_root.join("src").join("lib.rs");
+        let main_rs = crate_root.join("src").join("main.rs");
+
+        let entry_point = if lib_rs.exists() {
+            lib_rs
+        } else if main_rs.exists() {
+            main_rs
+        } else {
+            return Ok(map); // No entry point found, return empty map
+        };
+
+        // Parse the entry point to build the module tree
+        map.scan_module(&entry_point, "")?;
+
+        Ok(map)
+    }
+
+    /// Recursively scan a module file and register its submodules
+    fn scan_module(&mut self, file_path: &Path, module_prefix: &str) -> std::io::Result<()> {
+        // nosemgrep:rust.actix.path-traversal.tainted-path.tainted-path - file_path from internal module scan, not user input
+        let content = std::fs::read_to_string(file_path)?;
+
+        // Find all `mod foo;` declarations
+        // Regex pattern: `pub mod name;` or `mod name;`
+        let mod_regex = regex::Regex::new(r"(?m)^\s*(?:pub\s+)?mod\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*;")
+            .expect("valid mod regex");
+
+        for caps in mod_regex.captures_iter(&content) {
+            if let Some(mod_name) = caps.get(1) {
+                let mod_name = mod_name.as_str();
+                let module_path = if module_prefix.is_empty() {
+                    mod_name.to_string()
+                } else {
+                    format!("{}::{}", module_prefix, mod_name)
+                };
+
+                // Determine where to look for the module file based on the current file's structure:
+                // 1. If current file is foo.rs -> look in foo/ directory
+                // 2. If current file is foo/mod.rs -> look in foo/ directory
+                // 3. Otherwise (lib.rs, main.rs) -> look in same directory
+
+                let parent = file_path.parent().unwrap_or(file_path);
+                let file_name = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+
+                let search_dirs: Vec<PathBuf> = if file_name.ends_with(".rs")
+                    && file_name != "mod.rs"
+                    && file_name != "lib.rs"
+                    && file_name != "main.rs"
+                {
+                    // For foo.rs, submodules can be in foo/ directory
+                    let module_dir = parent.join(file_name.strip_suffix(".rs").unwrap());
+                    vec![module_dir, parent.to_path_buf()]
+                } else {
+                    // For mod.rs, lib.rs, main.rs, submodules are in the same directory
+                    vec![parent.to_path_buf()]
+                };
+
+                let mut found = false;
+                for search_dir in search_dirs {
+                    // Try to find the module file - Rust supports two conventions:
+                    // 1. foo.rs (in search directory)
+                    // 2. foo/mod.rs (subdirectory with mod.rs)
+                    let mod_file = search_dir.join(format!("{}.rs", mod_name));
+                    let mod_dir_file = search_dir.join(mod_name).join("mod.rs");
+
+                    if mod_file.exists() {
+                        // Register the module and scan it recursively
+                        if let Ok(relative) = mod_file.strip_prefix(&self.crate_root) {
+                            self.modules
+                                .insert(module_path.clone(), relative.to_path_buf());
+                        }
+                        // Recursively scan the module file
+                        let _ = self.scan_module(&mod_file, &module_path);
+                        found = true;
+                        break;
+                    } else if mod_dir_file.exists() {
+                        // Register the module directory and scan it recursively
+                        if let Ok(relative) = mod_dir_file.strip_prefix(&self.crate_root) {
+                            self.modules
+                                .insert(module_path.clone(), relative.to_path_buf());
+                        }
+                        // Recursively scan the module file
+                        let _ = self.scan_module(&mod_dir_file, &module_path);
+                        found = true;
+                        break;
+                    }
+                }
+
+                if !found {
+                    // Module file not found - this is okay, might be in a different workspace or conditional
+                    // Just skip it
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Resolve a module path to a file path.
+    /// Handles:
+    /// - `crate::foo::bar` - absolute from crate root
+    /// - `super::bar` - relative to parent module
+    /// - `self::bar` - relative to current module
+    /// - `foo::bar` (no prefix) - relative to current module
+    pub fn resolve_module_path(&self, from_file: &Path, import_path: &str) -> Option<PathBuf> {
+        // Handle `crate::` prefix - absolute from crate root
+        if let Some(rest) = import_path.strip_prefix("crate::") {
+            return self.resolve_absolute(rest);
+        }
+
+        // Get the current module path from the file path
+        let current_module = self.file_to_module_path(from_file)?;
+
+        // Handle `super::` prefix - go up one level
+        if let Some(rest) = import_path.strip_prefix("super::") {
+            let parent_module = self.parent_module(&current_module)?;
+            let target_path = if rest.is_empty() {
+                parent_module
+            } else {
+                format!("{}::{}", parent_module, rest)
+            };
+            return self.resolve_absolute(&target_path);
+        }
+
+        // Handle `self::` prefix - same module
+        if let Some(rest) = import_path.strip_prefix("self::") {
+            let target_path = format!("{}::{}", current_module, rest);
+            return self.resolve_absolute(&target_path);
+        }
+
+        // No prefix - try current module first, then parent modules (Rust 2015 style)
+        // In Rust 2018+, bare imports must use crate:: prefix, but we're lenient for analysis
+
+        // Build list of paths to try, from most specific to least specific
+        let mut paths_to_try = Vec::new();
+
+        if !current_module.is_empty() {
+            paths_to_try.push(format!("{}::{}", current_module, import_path));
+
+            // Walk up parent modules
+            let mut current = current_module.to_string();
+            while !current.is_empty() {
+                if let Some(parent) = self.parent_module(&current) {
+                    if parent.is_empty() {
+                        paths_to_try.push(import_path.to_string());
+                    } else {
+                        paths_to_try.push(format!("{}::{}", parent, import_path));
+                    }
+                    current = parent;
+                } else {
+                    paths_to_try.push(import_path.to_string());
+                    break;
+                }
+            }
+        } else {
+            // Already at root
+            paths_to_try.push(import_path.to_string());
+        }
+
+        // Try each path in order
+        for path in paths_to_try {
+            if let Some(resolved) = self.resolve_absolute_exact(&path) {
+                return Some(resolved);
+            }
+        }
+
+        // If still not found, try with segment stripping (for type/function resolution)
+        self.resolve_absolute(import_path)
+    }
+
+    /// Resolve an absolute module path with exact match only (no segment stripping)
+    fn resolve_absolute_exact(&self, module_path: &str) -> Option<PathBuf> {
+        self.modules.get(module_path).cloned()
+    }
+
+    /// Resolve an absolute module path (without crate:: prefix)
+    /// This version strips segments to find containing modules (for type/function resolution)
+    fn resolve_absolute(&self, module_path: &str) -> Option<PathBuf> {
+        self.modules.get(module_path).cloned().or_else(|| {
+            // If exact match not found, try to find by stripping last segment
+            // (e.g., `foo::Bar` -> `foo.rs` where Bar is a type/fn in foo)
+            let mut parts: Vec<&str> = module_path.split("::").collect();
+            while !parts.is_empty() {
+                parts.pop();
+                let partial = parts.join("::");
+                if let Some(path) = self.modules.get(&partial) {
+                    return Some(path.clone());
+                }
+            }
+            None
+        })
+    }
+
+    /// Convert a file path to its module path
+    fn file_to_module_path(&self, file_path: &Path) -> Option<String> {
+        let relative = file_path.strip_prefix(&self.crate_root).ok()?;
+
+        // Convert path to module path: src/foo/bar.rs -> foo::bar
+        let mut parts = Vec::new();
+        let path_components: Vec<_> = relative.components().collect();
+
+        for (i, component) in path_components.iter().enumerate() {
+            let component_str = component.as_os_str().to_str()?;
+            if component_str == "src" {
+                continue;
+            }
+
+            // Check if this is the last component (the file itself)
+            let is_last = i == path_components.len() - 1;
+
+            if is_last {
+                // For lib.rs or main.rs, this is the root module
+                if component_str == "lib.rs" || component_str == "main.rs" {
+                    break; // Root module
+                }
+                // For mod.rs, don't add it (parent dir is the module)
+                if component_str == "mod.rs" {
+                    break;
+                }
+                // For foo.rs, add "foo"
+                if component_str.ends_with(".rs") {
+                    let name = component_str.strip_suffix(".rs").unwrap_or(component_str);
+                    parts.push(name);
+                }
+            } else {
+                // Directory component - add it
+                parts.push(component_str);
+            }
+        }
+
+        if parts.is_empty() {
+            Some(String::new()) // Root module
+        } else {
+            Some(parts.join("::"))
+        }
+    }
+
+    /// Get parent module path (e.g., "foo::bar::baz" -> "foo::bar")
+    fn parent_module(&self, module_path: &str) -> Option<String> {
+        if module_path.is_empty() {
+            return None; // Root module has no parent
+        }
+
+        let mut parts: Vec<&str> = module_path.split("::").collect();
+        if parts.is_empty() {
+            return None;
+        }
+
+        parts.pop();
+        if parts.is_empty() {
+            Some(String::new()) // Parent is root
+        } else {
+            Some(parts.join("::"))
+        }
+    }
+}
+
 pub(crate) fn analyze_rust_file(
     content: &str,
     relative: String,
@@ -407,6 +755,12 @@ pub(crate) fn analyze_rust_file(
         }
 
         let mut imp = ImportEntry::new(source.to_string(), ImportKind::Static);
+
+        // Track crate-internal import patterns for dead code detection
+        imp.raw_path = source.to_string();
+        imp.is_crate_relative = source.starts_with("crate::");
+        imp.is_super_relative = source.starts_with("super::");
+        imp.is_self_relative = source.starts_with("self::");
 
         // Parse symbols from use statements like `use foo::{Bar, Baz}`
         if source.contains('{') && source.contains('}') {
@@ -531,6 +885,8 @@ pub(crate) fn analyze_rust_file(
             }
         }
     }
+
+    collect_rust_signature_uses(&production_content, &mut analysis);
 
     for caps in regex_event_const_rust().captures_iter(content) {
         if let (Some(name), Some(val)) = (caps.get(1), caps.get(2)) {
@@ -720,7 +1076,143 @@ pub(crate) fn analyze_rust_file(
     // This catches local function calls without path qualification
     extract_bare_function_calls(&production_content, &mut analysis.local_uses);
 
+    // Detect type names used in struct/enum field definitions
+    // This catches types like Vec<DiffEdge>, Option<HubFile>, etc. that are used
+    // as field types within the same file - they count as "local uses" of those types
+    extract_struct_field_types(content, &mut analysis.local_uses);
+
+    // Detect identifiers used in expressions and variable declarations
+    // This catches const/static usage like `create_buffer::<BUFFER_SIZE>()`
+    // and type usage in let bindings like `let x: SomeType = ...`
+    // NOTE: Use full `content` here, not `production_content`, because we need to
+    // scan function bodies for usages of exported symbols (constants, types, etc.)
+    extract_identifier_usages(content, &mut analysis.local_uses);
+
+    // Detect identifiers used as function arguments like `func(CONST_NAME)`
+    // This catches const/static usage passed as arguments to functions
+    extract_function_arguments(content, &mut analysis.local_uses);
+
     analysis
+}
+
+/// Extract identifiers used in expressions and variable declarations.
+/// This catches:
+/// - Constants in generic parameters: `foo::<BUFFER_SIZE, _>`
+/// - Constants in array sizes: `[0; BUFFER_SIZE]`
+/// - Types in let bindings: `let x: Config = ...`
+/// - Types in struct literals: `Config { ... }`
+fn extract_identifier_usages(content: &str, local_uses: &mut Vec<String>) {
+    let bytes = content.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+
+    // Skip Rust keywords that look like identifiers
+    const KEYWORDS: &[&str] = &[
+        "if", "else", "while", "for", "loop", "match", "return", "break", "continue", "fn", "let",
+        "const", "static", "pub", "use", "mod", "struct", "enum", "impl", "trait", "type", "where",
+        "unsafe", "async", "await", "move", "ref", "mut", "self", "super", "crate", "dyn", "as",
+        "in", "true", "false", "Some", "None", "Ok", "Err", "bool", "char", "str", "u8", "u16",
+        "u32", "u64", "u128", "usize", "i8", "i16", "i32", "i64", "i128", "isize", "f32", "f64",
+    ];
+
+    fn add_if_uppercase(ident: &str, uses: &mut Vec<String>) {
+        if ident.is_empty() {
+            return;
+        }
+        let first_char = ident.chars().next().unwrap_or('_');
+        if first_char.is_ascii_uppercase() && !uses.contains(&ident.to_string()) {
+            uses.push(ident.to_string());
+        }
+    }
+
+    while i < len {
+        // Look for `<` which could be start of generic parameters
+        if bytes[i] == b'<' {
+            i += 1;
+            // Skip whitespace after `<`
+            while i < len && bytes[i].is_ascii_whitespace() {
+                i += 1;
+            }
+
+            // Now look for identifier inside the generic
+            if i < len && (bytes[i].is_ascii_alphabetic() || bytes[i] == b'_') {
+                let start = i;
+                while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                    i += 1;
+                }
+                let ident = &content[start..i];
+                if !KEYWORDS.contains(&ident) {
+                    add_if_uppercase(ident, local_uses);
+                }
+            }
+            continue;
+        }
+
+        // Look for `: Type` patterns (type annotations)
+        if bytes[i] == b':' {
+            i += 1;
+            // Skip whitespace and possible second `:` (for `::`)
+            while i < len && (bytes[i].is_ascii_whitespace() || bytes[i] == b':') {
+                i += 1;
+            }
+
+            // Now look for identifier after `:`
+            if i < len && (bytes[i].is_ascii_alphabetic() || bytes[i] == b'_') {
+                let start = i;
+                while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                    i += 1;
+                }
+                let ident = &content[start..i];
+                if !KEYWORDS.contains(&ident) {
+                    add_if_uppercase(ident, local_uses);
+                }
+            }
+            continue;
+        }
+
+        // Look for struct literals or other identifiers: `TypeName {` or `CONST.method()`
+        if bytes[i].is_ascii_alphabetic() || bytes[i] == b'_' {
+            let start = i;
+            while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                i += 1;
+            }
+            let ident = &content[start..i];
+
+            // Skip whitespace
+            let saved_i = i;
+            while i < len && bytes[i].is_ascii_whitespace() {
+                i += 1;
+            }
+
+            // Check what follows the identifier:
+            // - `{` = struct literal (e.g., `Config { ... }`)
+            // - `.` = method call on const/static (e.g., `CONST.as_bytes()`)
+            // - `(` = handled by bare_function_calls
+            if i < len && !KEYWORDS.contains(&ident) {
+                if bytes[i] == b'{' {
+                    // Struct literal
+                    add_if_uppercase(ident, local_uses);
+                    i += 1; // Move past `{`
+                } else if bytes[i] == b'.' {
+                    // Method call on identifier (likely a const/static)
+                    add_if_uppercase(ident, local_uses);
+                    i += 1; // Move past `.`
+                } else {
+                    // Not a special pattern, restore position
+                    i = saved_i;
+                    i += 1;
+                }
+            } else {
+                // Keyword or end of content
+                i = saved_i;
+                if i < len {
+                    i += 1;
+                }
+            }
+        } else {
+            i += 1;
+        }
+    }
 }
 
 /// Extract identifiers that are followed by `(` indicating a function call.
@@ -756,6 +1248,64 @@ fn extract_bare_function_calls(content: &str, local_uses: &mut Vec<String>) {
                 if !KEYWORDS.contains(&ident) && !local_uses.contains(&ident.to_string()) {
                     local_uses.push(ident.to_string());
                 }
+            }
+        } else {
+            i += 1;
+        }
+    }
+}
+
+/// Extract uppercase identifiers used as function arguments.
+/// This catches constants passed to functions like `.timer(COPILOT_DEBOUNCE_TIMEOUT)`
+/// or `advance_clock(BUFFER_SIZE)`.
+fn extract_function_arguments(content: &str, local_uses: &mut Vec<String>) {
+    let bytes = content.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+
+    // Rust keywords that look like identifiers but aren't values
+    const KEYWORDS: &[&str] = &[
+        "if", "else", "while", "for", "loop", "match", "return", "break", "continue", "fn", "let",
+        "const", "static", "pub", "use", "mod", "struct", "enum", "impl", "trait", "type", "where",
+        "unsafe", "async", "await", "move", "ref", "mut", "self", "super", "crate", "dyn", "as",
+        "in", "true", "false", "Some", "None", "Ok", "Err", "bool", "char", "str", "u8", "u16",
+        "u32", "u64", "u128", "usize", "i8", "i16", "i32", "i64", "i128", "isize", "f32", "f64",
+    ];
+
+    fn add_if_uppercase(ident: &str, uses: &mut Vec<String>, keywords: &[&str]) {
+        if ident.is_empty() || keywords.contains(&ident) {
+            return;
+        }
+        // Only add if ALL characters are uppercase/underscore/digits (like CONST_NAME)
+        // This avoids false positives from regular identifiers
+        let is_const_style = ident
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c == '_' || c.is_ascii_digit());
+        if is_const_style
+            && ident.chars().any(|c| c.is_ascii_uppercase())
+            && !uses.contains(&ident.to_string())
+        {
+            uses.push(ident.to_string());
+        }
+    }
+
+    while i < len {
+        // Look for `(` or `,` which could precede a function argument
+        if bytes[i] == b'(' || bytes[i] == b',' {
+            i += 1;
+            // Skip whitespace after `(` or `,`
+            while i < len && bytes[i].is_ascii_whitespace() {
+                i += 1;
+            }
+
+            // Check if we have an identifier starting with uppercase
+            if i < len && bytes[i].is_ascii_uppercase() {
+                let start = i;
+                while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                    i += 1;
+                }
+                let ident = &content[start..i];
+                add_if_uppercase(ident, local_uses, KEYWORDS);
             }
         } else {
             i += 1;
@@ -819,6 +1369,280 @@ fn extract_path_qualified_calls(content: &str, local_uses: &mut Vec<String>) {
                         i += 1;
                     }
                 }
+            }
+        } else {
+            i += 1;
+        }
+    }
+}
+
+/// Strip both line comments (//) and block comments (/* */) from Rust source code.
+/// This prevents false positives where type names are mentioned in comments.
+fn strip_comments(content: &str) -> String {
+    let bytes = content.as_bytes();
+    let len = bytes.len();
+    let mut result = String::with_capacity(len);
+    let mut i = 0;
+
+    while i < len {
+        // Check for line comment //
+        if i + 1 < len && bytes[i] == b'/' && bytes[i + 1] == b'/' {
+            // Skip to end of line
+            i += 2;
+            while i < len && bytes[i] != b'\n' {
+                i += 1;
+            }
+            if i < len {
+                result.push('\n'); // Preserve line breaks
+                i += 1;
+            }
+            continue;
+        }
+
+        // Check for block comment /* */
+        if i + 1 < len && bytes[i] == b'/' && bytes[i + 1] == b'*' {
+            // Skip to closing */
+            i += 2;
+            while i + 1 < len {
+                if bytes[i] == b'*' && bytes[i + 1] == b'/' {
+                    i += 2;
+                    break;
+                }
+                // Preserve newlines within comments to maintain line structure
+                if bytes[i] == b'\n' {
+                    result.push('\n');
+                }
+                i += 1;
+            }
+            continue;
+        }
+
+        // Regular character
+        if let Some(ch) = content[i..].chars().next() {
+            result.push(ch);
+            i += ch.len_utf8();
+        } else {
+            i += 1;
+        }
+    }
+
+    result
+}
+
+/// Extract type names used in struct/enum field definitions.
+/// This catches types like `Vec<DiffEdge>`, `Option<HubFile>`, `HashMap<K, V>` etc.
+/// that are used as field types within the same file.
+///
+/// Patterns handled:
+/// - `pub struct Foo { field: SomeType, ... }`
+/// - `pub struct Foo { field: Vec<SomeType>, ... }`
+/// - `pub enum Foo { Variant { field: SomeType }, ... }`
+/// - Tuple structs: `pub struct Foo(SomeType, AnotherType);`
+fn extract_struct_field_types(content: &str, local_uses: &mut Vec<String>) {
+    // Strip comments first to avoid false positives from type names in comments
+    let content_no_comments = strip_comments(content);
+
+    // Helper to add identifier if not already present and looks like a type name
+    fn add_type_if_valid(name: &str, uses: &mut Vec<String>) {
+        if name.is_empty() {
+            return;
+        }
+        // Type names typically start with uppercase
+        let first_char = name.chars().next().unwrap_or('_');
+        if !first_char.is_ascii_uppercase() {
+            return;
+        }
+        // Skip common standard library types (they're not local exports)
+        const STD_TYPES: &[&str] = &[
+            "Vec",
+            "Option",
+            "Result",
+            "String",
+            "Box",
+            "Rc",
+            "Arc",
+            "Cell",
+            "RefCell",
+            "HashMap",
+            "HashSet",
+            "BTreeMap",
+            "BTreeSet",
+            "VecDeque",
+            "LinkedList",
+            "Mutex",
+            "RwLock",
+            "Cow",
+            "PathBuf",
+            "OsString",
+            "CString",
+            "Duration",
+            "Instant",
+            "SystemTime",
+            "NonZeroU8",
+            "NonZeroU16",
+            "NonZeroU32",
+            "NonZeroU64",
+            "NonZeroUsize",
+            "NonZeroI8",
+            "NonZeroI16",
+            "NonZeroI32",
+            "NonZeroI64",
+            "NonZeroIsize",
+            "PhantomData",
+            "Pin",
+            "ManuallyDrop",
+            "MaybeUninit",
+            "Self",
+        ];
+        if STD_TYPES.contains(&name) {
+            return;
+        }
+        if !uses.contains(&name.to_string()) {
+            uses.push(name.to_string());
+        }
+    }
+
+    // Extract type tokens from a type annotation string
+    fn extract_types_from_annotation(annotation: &str, uses: &mut Vec<String>) {
+        let bytes = annotation.as_bytes();
+        let len = bytes.len();
+        let mut i = 0;
+        while i < len {
+            if bytes[i].is_ascii_alphabetic() || bytes[i] == b'_' {
+                let start = i;
+                while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                    i += 1;
+                }
+                let ident = &annotation[start..i];
+                add_type_if_valid(ident, uses);
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+    // Inner function to parse struct block content for type annotations
+    fn parse_struct_block_for_types(block: &str, uses: &mut Vec<String>) {
+        let bytes = block.as_bytes();
+        let len = bytes.len();
+        let mut i = 0;
+        while i < len {
+            while i < len && bytes[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            if i >= len {
+                break;
+            }
+            if bytes[i] == b':' {
+                i += 1;
+                while i < len && bytes[i].is_ascii_whitespace() {
+                    i += 1;
+                }
+                let type_start = i;
+                let mut depth = 0;
+                while i < len {
+                    match bytes[i] {
+                        b'<' | b'(' | b'[' | b'{' => depth += 1,
+                        b'>' | b')' | b']' | b'}' => {
+                            if depth > 0 {
+                                depth -= 1;
+                            } else if bytes[i] == b'}' {
+                                break;
+                            }
+                        }
+                        b',' if depth == 0 => break,
+                        _ => {}
+                    }
+                    i += 1;
+                }
+                if type_start < i {
+                    let type_annotation = &block[type_start..i];
+                    extract_types_from_annotation(type_annotation, uses);
+                }
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+    // Find struct/enum blocks and extract field types from comment-stripped content
+    let bytes = content_no_comments.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+
+    while i < len {
+        // Skip multi-byte UTF-8 characters (non-ASCII) since keywords are ASCII
+        if bytes[i] >= 0x80 {
+            i += 1;
+            continue;
+        }
+
+        // Check for 'struct' or 'enum' keyword by looking at bytes directly
+        let is_struct = i + 7 <= len
+            && bytes[i] == b's'
+            && bytes[i + 1] == b't'
+            && bytes[i + 2] == b'r'
+            && bytes[i + 3] == b'u'
+            && bytes[i + 4] == b'c'
+            && bytes[i + 5] == b't'
+            && (bytes[i + 6] == b' ' || bytes[i + 6] == b'\t' || bytes[i + 6] == b'\n');
+        let is_enum = !is_struct
+            && i + 5 <= len
+            && bytes[i] == b'e'
+            && bytes[i + 1] == b'n'
+            && bytes[i + 2] == b'u'
+            && bytes[i + 3] == b'm'
+            && (bytes[i + 4] == b' ' || bytes[i + 4] == b'\t' || bytes[i + 4] == b'\n');
+
+        if is_struct || is_enum {
+            let keyword_len = if is_struct { 6 } else { 4 };
+            i += keyword_len;
+
+            while i < len {
+                let ch = bytes[i];
+                if ch == b'{' {
+                    i += 1;
+                    let mut depth = 1;
+                    let block_start = i;
+                    while i < len && depth > 0 {
+                        match bytes[i] {
+                            b'{' => depth += 1,
+                            b'}' => depth -= 1,
+                            _ => {}
+                        }
+                        if depth > 0 {
+                            i += 1;
+                        }
+                    }
+                    // Safe to slice since we're tracking ASCII braces
+                    if let Some(block) = content_no_comments.get(block_start..i) {
+                        parse_struct_block_for_types(block, local_uses);
+                    }
+                    break;
+                } else if ch == b'(' {
+                    i += 1;
+                    let paren_start = i;
+                    let mut depth = 1;
+                    while i < len && depth > 0 {
+                        match bytes[i] {
+                            b'(' => depth += 1,
+                            b')' => depth -= 1,
+                            _ => {}
+                        }
+                        if depth > 0 {
+                            i += 1;
+                        }
+                    }
+                    // Safe to slice since we're tracking ASCII parens
+                    if let Some(tuple_content) = content_no_comments.get(paren_start..i) {
+                        extract_types_from_annotation(tuple_content, local_uses);
+                    }
+                    break;
+                } else if ch == b';' {
+                    i += 1;
+                    break;
+                }
+                i += 1;
             }
         } else {
             i += 1;
@@ -1221,5 +2045,727 @@ use crate::three::D;
             "Should NOT have inline C"
         );
         assert_eq!(sources.len(), 3, "Should have exactly 3 imports");
+    }
+
+    #[test]
+    fn detects_struct_field_types_as_local_uses() {
+        // This is the exact pattern that caused false positives in dead export detection:
+        // DiffEdge is defined and then used as Vec<DiffEdge> in GraphDiff's field
+        let content = r#"
+pub struct DiffEdge {
+    pub from: PathBuf,
+    pub to: PathBuf,
+}
+
+pub struct GraphDiff {
+    pub edges_added: Vec<DiffEdge>,
+    pub edges_removed: Vec<DiffEdge>,
+}
+"#;
+        let analysis = analyze_rust_file(content, "diff.rs".to_string(), &[]);
+
+        // DiffEdge should be detected as a local use because it's used in GraphDiff's fields
+        assert!(
+            analysis.local_uses.contains(&"DiffEdge".to_string()),
+            "DiffEdge should be in local_uses when used as struct field type. Got: {:?}",
+            analysis.local_uses
+        );
+    }
+
+    #[test]
+    fn detects_generic_wrapped_types_in_struct_fields() {
+        let content = r#"
+pub struct HubFile {
+    pub path: String,
+}
+
+pub struct ForAiSummary {
+    pub hubs: Vec<HubFile>,
+    pub warnings: Option<WarningItem>,
+    pub cache: HashMap<String, CacheEntry>,
+}
+
+pub struct WarningItem {
+    pub msg: String,
+}
+
+pub struct CacheEntry {
+    pub value: u32,
+}
+"#;
+        let analysis = analyze_rust_file(content, "for_ai.rs".to_string(), &[]);
+
+        // All custom types used in generic wrappers should be in local_uses
+        assert!(
+            analysis.local_uses.contains(&"HubFile".to_string()),
+            "HubFile should be in local_uses. Got: {:?}",
+            analysis.local_uses
+        );
+        assert!(
+            analysis.local_uses.contains(&"WarningItem".to_string()),
+            "WarningItem should be in local_uses. Got: {:?}",
+            analysis.local_uses
+        );
+        assert!(
+            analysis.local_uses.contains(&"CacheEntry".to_string()),
+            "CacheEntry should be in local_uses. Got: {:?}",
+            analysis.local_uses
+        );
+    }
+
+    #[test]
+    fn detects_tuple_struct_types() {
+        let content = r#"
+pub struct Point(i32, i32);
+pub struct Container(InnerType, Option<AnotherType>);
+
+pub struct InnerType {
+    pub value: u32,
+}
+
+pub struct AnotherType {
+    pub name: String,
+}
+"#;
+        let analysis = analyze_rust_file(content, "tuple.rs".to_string(), &[]);
+
+        assert!(
+            analysis.local_uses.contains(&"InnerType".to_string()),
+            "InnerType from tuple struct should be in local_uses. Got: {:?}",
+            analysis.local_uses
+        );
+        assert!(
+            analysis.local_uses.contains(&"AnotherType".to_string()),
+            "AnotherType from tuple struct should be in local_uses. Got: {:?}",
+            analysis.local_uses
+        );
+    }
+
+    #[test]
+    fn detects_enum_variant_types() {
+        let content = r#"
+pub enum Message {
+    Data { payload: CustomPayload },
+    Error { code: ErrorCode, details: Vec<ErrorDetail> },
+    Empty,
+}
+
+pub struct CustomPayload {
+    pub data: Vec<u8>,
+}
+
+pub struct ErrorCode(u32);
+
+pub struct ErrorDetail {
+    pub msg: String,
+}
+"#;
+        let analysis = analyze_rust_file(content, "message.rs".to_string(), &[]);
+
+        assert!(
+            analysis.local_uses.contains(&"CustomPayload".to_string()),
+            "CustomPayload should be in local_uses. Got: {:?}",
+            analysis.local_uses
+        );
+        assert!(
+            analysis.local_uses.contains(&"ErrorCode".to_string()),
+            "ErrorCode should be in local_uses. Got: {:?}",
+            analysis.local_uses
+        );
+        assert!(
+            analysis.local_uses.contains(&"ErrorDetail".to_string()),
+            "ErrorDetail should be in local_uses. Got: {:?}",
+            analysis.local_uses
+        );
+    }
+
+    #[test]
+    fn detects_const_usage_in_generic_parameters() {
+        // This is the exact pattern that caused false positives in Zed codebase:
+        // pub const BUFFER_SIZE is used in the same file as `<BUFFER_SIZE, _>`
+        let content = r#"
+pub const BUFFER_SIZE: usize = 480;
+
+pub fn process() {
+    let source = source.inspect_buffer::<BUFFER_SIZE, _>(move |buffer| {
+        // process buffer
+    });
+}
+"#;
+        let analysis = analyze_rust_file(content, "audio.rs".to_string(), &[]);
+
+        assert!(
+            analysis.local_uses.contains(&"BUFFER_SIZE".to_string()),
+            "BUFFER_SIZE should be in local_uses when used in generic parameter. Got: {:?}",
+            analysis.local_uses
+        );
+    }
+
+    #[test]
+    fn detects_type_usage_in_struct_literal() {
+        let content = r#"
+pub struct Config {
+    pub name: String,
+}
+
+pub fn setup() {
+    let config = Config {
+        name: "test".to_string(),
+    };
+}
+"#;
+        let analysis = analyze_rust_file(content, "config.rs".to_string(), &[]);
+
+        assert!(
+            analysis.local_uses.contains(&"Config".to_string()),
+            "Config should be in local_uses when used in struct literal. Got: {:?}",
+            analysis.local_uses
+        );
+    }
+
+    #[test]
+    fn detects_type_usage_in_type_annotation() {
+        let content = r#"
+pub struct MyType {
+    pub value: u32,
+}
+
+pub fn create() -> MyType {
+    let result: MyType = MyType { value: 42 };
+    result
+}
+"#;
+        let analysis = analyze_rust_file(content, "types.rs".to_string(), &[]);
+
+        assert!(
+            analysis.local_uses.contains(&"MyType".to_string()),
+            "MyType should be in local_uses when used in type annotation. Got: {:?}",
+            analysis.local_uses
+        );
+    }
+
+    #[test]
+    fn detects_const_usage_with_method_call() {
+        let content = r#"
+pub const CLEAR_INPUT: &str = "\x15";
+
+pub fn undo() {
+    terminal.input(CLEAR_INPUT.as_bytes());
+}
+"#;
+        let analysis = analyze_rust_file(content, "terminal.rs".to_string(), &[]);
+
+        assert!(
+            analysis.local_uses.contains(&"CLEAR_INPUT".to_string()),
+            "CLEAR_INPUT should be in local_uses when used with method call. Got: {:?}",
+            analysis.local_uses
+        );
+    }
+
+    #[test]
+    fn skips_lowercase_identifiers_in_generic_params() {
+        // Should NOT track lowercase identifiers like `move` or `self`
+        let content = r#"
+pub const MY_CONST: usize = 10;
+
+pub fn process() {
+    let closure = move |x| x + 1;
+}
+"#;
+        let analysis = analyze_rust_file(content, "test.rs".to_string(), &[]);
+
+        assert!(
+            !analysis.local_uses.contains(&"move".to_string()),
+            "Keyword 'move' should NOT be in local_uses"
+        );
+    }
+
+    #[test]
+    fn skips_standard_library_types_in_struct_fields() {
+        let content = r#"
+pub struct MyStruct {
+    pub items: Vec<String>,
+    pub mapping: HashMap<String, u32>,
+    pub optional: Option<bool>,
+    pub custom: CustomType,
+}
+
+pub struct CustomType {
+    pub value: u32,
+}
+"#;
+        let analysis = analyze_rust_file(content, "types.rs".to_string(), &[]);
+
+        // Should NOT include Vec, HashMap, Option, String (std types)
+        assert!(
+            !analysis.local_uses.contains(&"Vec".to_string()),
+            "Vec should NOT be in local_uses"
+        );
+        assert!(
+            !analysis.local_uses.contains(&"HashMap".to_string()),
+            "HashMap should NOT be in local_uses"
+        );
+        assert!(
+            !analysis.local_uses.contains(&"Option".to_string()),
+            "Option should NOT be in local_uses"
+        );
+        assert!(
+            !analysis.local_uses.contains(&"String".to_string()),
+            "String should NOT be in local_uses"
+        );
+
+        // But SHOULD include CustomType
+        assert!(
+            analysis.local_uses.contains(&"CustomType".to_string()),
+            "CustomType should be in local_uses. Got: {:?}",
+            analysis.local_uses
+        );
+    }
+
+    #[test]
+    fn crate_module_map_resolves_crate_prefix() {
+        // Create a temporary directory structure for testing
+        let temp_dir = std::env::temp_dir().join("loctree_test_crate");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir.join("src/foo")).unwrap();
+
+        // Create lib.rs with module declarations
+        std::fs::write(temp_dir.join("src/lib.rs"), "pub mod foo;\npub mod bar;\n").unwrap();
+
+        // Create foo.rs
+        std::fs::write(
+            temp_dir.join("src/foo.rs"),
+            "pub struct FooStruct;\npub mod nested;\n",
+        )
+        .unwrap();
+
+        // Create foo/nested.rs
+        std::fs::write(
+            temp_dir.join("src/foo/nested.rs"),
+            "pub struct NestedStruct;\n",
+        )
+        .unwrap();
+
+        // Create bar.rs
+        std::fs::write(temp_dir.join("src/bar.rs"), "pub struct BarStruct;\n").unwrap();
+
+        // Build the module map
+        let map = super::CrateModuleMap::build(&temp_dir).unwrap();
+
+        // Test resolving crate::foo from lib.rs
+        let lib_path = temp_dir.join("src/lib.rs");
+        let resolved = map.resolve_module_path(&lib_path, "crate::foo");
+        assert_eq!(
+            resolved.as_ref().map(|p| p.to_str().unwrap()),
+            Some("src/foo.rs")
+        );
+
+        // Test resolving crate::bar
+        let resolved = map.resolve_module_path(&lib_path, "crate::bar");
+        assert_eq!(
+            resolved.as_ref().map(|p| p.to_str().unwrap()),
+            Some("src/bar.rs")
+        );
+
+        // Test resolving crate::foo::nested
+        let resolved = map.resolve_module_path(&lib_path, "crate::foo::nested");
+        assert_eq!(
+            resolved.as_ref().map(|p| p.to_str().unwrap()),
+            Some("src/foo/nested.rs")
+        );
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn crate_module_map_resolves_super() {
+        let temp_dir = std::env::temp_dir().join("loctree_test_super");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir.join("src/foo")).unwrap();
+
+        // Create lib.rs
+        std::fs::write(temp_dir.join("src/lib.rs"), "pub mod foo;\n").unwrap();
+
+        // Create foo.rs with nested module
+        std::fs::write(
+            temp_dir.join("src/foo.rs"),
+            "pub mod nested;\npub struct FooStruct;\n",
+        )
+        .unwrap();
+
+        // Create foo/nested.rs
+        std::fs::write(
+            temp_dir.join("src/foo/nested.rs"),
+            "use super::FooStruct;\n",
+        )
+        .unwrap();
+
+        let map = super::CrateModuleMap::build(&temp_dir).unwrap();
+
+        // From nested.rs, super:: should resolve to foo.rs
+        let nested_path = temp_dir.join("src/foo/nested.rs");
+        let resolved = map.resolve_module_path(&nested_path, "super::FooStruct");
+        assert_eq!(
+            resolved.as_ref().map(|p| p.to_str().unwrap()),
+            Some("src/foo.rs")
+        );
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn crate_module_map_resolves_self() {
+        let temp_dir = std::env::temp_dir().join("loctree_test_self");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir.join("src/foo")).unwrap();
+
+        // Create lib.rs
+        std::fs::write(temp_dir.join("src/lib.rs"), "pub mod foo;\n").unwrap();
+
+        // Create foo.rs with nested module
+        std::fs::write(
+            temp_dir.join("src/foo.rs"),
+            "pub mod bar;\npub struct FooStruct;\n",
+        )
+        .unwrap();
+
+        // Create foo/bar.rs
+        std::fs::write(temp_dir.join("src/foo/bar.rs"), "pub struct BarStruct;\n").unwrap();
+
+        let map = super::CrateModuleMap::build(&temp_dir).unwrap();
+
+        // From foo.rs, self::bar should resolve to foo/bar.rs
+        let foo_path = temp_dir.join("src/foo.rs");
+        let resolved = map.resolve_module_path(&foo_path, "self::bar");
+        assert_eq!(
+            resolved.as_ref().map(|p| p.to_str().unwrap()),
+            Some("src/foo/bar.rs")
+        );
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn crate_module_map_resolves_relative_imports() {
+        let temp_dir = std::env::temp_dir().join("loctree_test_relative");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir.join("src")).unwrap();
+
+        // Create lib.rs
+        std::fs::write(temp_dir.join("src/lib.rs"), "pub mod foo;\npub mod bar;\n").unwrap();
+
+        // Create foo.rs
+        std::fs::write(temp_dir.join("src/foo.rs"), "use bar::BarStruct;\n").unwrap();
+
+        // Create bar.rs
+        std::fs::write(temp_dir.join("src/bar.rs"), "pub struct BarStruct;\n").unwrap();
+
+        let map = super::CrateModuleMap::build(&temp_dir).unwrap();
+
+        // From foo.rs, bare `bar` should resolve relative to root
+        let foo_path = temp_dir.join("src/foo.rs");
+        let resolved = map.resolve_module_path(&foo_path, "bar");
+        assert_eq!(
+            resolved.as_ref().map(|p| p.to_str().unwrap()),
+            Some("src/bar.rs")
+        );
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn crate_module_map_handles_mod_dir_structure() {
+        // Test the foo/mod.rs convention
+        let temp_dir = std::env::temp_dir().join("loctree_test_mod_dir");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir.join("src/foo")).unwrap();
+
+        // Create lib.rs
+        std::fs::write(temp_dir.join("src/lib.rs"), "pub mod foo;\n").unwrap();
+
+        // Create foo/mod.rs
+        std::fs::write(temp_dir.join("src/foo/mod.rs"), "pub struct FooStruct;\n").unwrap();
+
+        let map = super::CrateModuleMap::build(&temp_dir).unwrap();
+
+        // Resolve crate::foo
+        let lib_path = temp_dir.join("src/lib.rs");
+        let resolved = map.resolve_module_path(&lib_path, "crate::foo");
+        assert_eq!(
+            resolved.as_ref().map(|p| p.to_str().unwrap()),
+            Some("src/foo/mod.rs")
+        );
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn crate_module_map_handles_type_imports() {
+        // Test that we can resolve imports with type names (last segment)
+        let temp_dir = std::env::temp_dir().join("loctree_test_types");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir.join("src")).unwrap();
+
+        // Create lib.rs
+        std::fs::write(temp_dir.join("src/lib.rs"), "pub mod types;\n").unwrap();
+
+        // Create types.rs with struct
+        std::fs::write(
+            temp_dir.join("src/types.rs"),
+            "pub struct MyType { pub value: u32 }\n",
+        )
+        .unwrap();
+
+        let map = super::CrateModuleMap::build(&temp_dir).unwrap();
+
+        // Resolve crate::types::MyType - should resolve to types.rs
+        // (stripping the type name segment)
+        let lib_path = temp_dir.join("src/lib.rs");
+        let resolved = map.resolve_module_path(&lib_path, "crate::types::MyType");
+        assert_eq!(
+            resolved.as_ref().map(|p| p.to_str().unwrap()),
+            Some("src/types.rs")
+        );
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn detects_crate_relative_imports() {
+        let content = r#"
+use crate::types::FileAnalysis;
+use crate::analyzer::{rust, typescript};
+use std::path::PathBuf;
+"#;
+        let analysis = analyze_rust_file(content, "module.rs".to_string(), &[]);
+
+        // Check that crate:: imports are detected
+        let crate_imports: Vec<_> = analysis
+            .imports
+            .iter()
+            .filter(|i| i.is_crate_relative)
+            .collect();
+        assert_eq!(
+            crate_imports.len(),
+            2,
+            "Should have 2 crate:: imports, got {:?}",
+            analysis.imports
+        );
+
+        // Check raw_path is preserved
+        let file_analysis_import = analysis
+            .imports
+            .iter()
+            .find(|i| i.raw_path.contains("FileAnalysis"));
+        assert!(
+            file_analysis_import.is_some(),
+            "Should find FileAnalysis import"
+        );
+        assert!(
+            file_analysis_import.unwrap().is_crate_relative,
+            "FileAnalysis import should be marked as crate_relative"
+        );
+        assert_eq!(
+            file_analysis_import.unwrap().raw_path,
+            "crate::types::FileAnalysis",
+            "raw_path should preserve full import path"
+        );
+    }
+
+    #[test]
+    fn detects_super_relative_imports() {
+        let content = r#"
+use super::models::Patient;
+use super::super::config::Config;
+use super::*;
+"#;
+        let analysis = analyze_rust_file(content, "handlers.rs".to_string(), &[]);
+
+        // All imports should be super:: relative
+        assert_eq!(
+            analysis.imports.len(),
+            3,
+            "Should have 3 imports, got {:?}",
+            analysis.imports
+        );
+        for imp in &analysis.imports {
+            assert!(
+                imp.is_super_relative,
+                "All imports should be super:: relative, got: {:?}",
+                imp
+            );
+        }
+
+        // Check star import is handled
+        let star_import = analysis
+            .imports
+            .iter()
+            .find(|i| i.symbols.iter().any(|s| s.name == "*"));
+        assert!(star_import.is_some(), "Should have star import");
+        assert!(
+            star_import.unwrap().is_super_relative,
+            "Star import should be super:: relative"
+        );
+    }
+
+    #[test]
+    fn detects_self_relative_imports() {
+        let content = r#"
+use self::utils::Helper;
+use self::constants::MAX_SIZE;
+"#;
+        let analysis = analyze_rust_file(content, "lib.rs".to_string(), &[]);
+
+        assert_eq!(analysis.imports.len(), 2, "Should have 2 imports");
+        for imp in &analysis.imports {
+            assert!(
+                imp.is_self_relative,
+                "All imports should be self:: relative, got: {:?}",
+                imp
+            );
+            assert!(
+                imp.raw_path.starts_with("self::"),
+                "raw_path should start with self::"
+            );
+        }
+    }
+
+    #[test]
+    fn handles_brace_imports_with_relative_paths() {
+        let content = r#"
+use crate::types::{FileAnalysis, ImportEntry, ExportSymbol};
+use super::models::{Patient, Visit};
+use self::helpers::{parse, validate};
+"#;
+        let analysis = analyze_rust_file(content, "module.rs".to_string(), &[]);
+
+        assert_eq!(analysis.imports.len(), 3, "Should have 3 imports");
+
+        // Check crate:: import
+        let crate_import = analysis.imports.iter().find(|i| i.is_crate_relative);
+        assert!(crate_import.is_some(), "Should have crate:: import");
+        let crate_import = crate_import.unwrap();
+        assert_eq!(crate_import.symbols.len(), 3, "Should have 3 symbols");
+        assert!(
+            crate_import
+                .symbols
+                .iter()
+                .any(|s| s.name == "FileAnalysis")
+        );
+        assert!(crate_import.symbols.iter().any(|s| s.name == "ImportEntry"));
+        assert!(
+            crate_import
+                .symbols
+                .iter()
+                .any(|s| s.name == "ExportSymbol")
+        );
+        assert_eq!(
+            crate_import.raw_path, "crate::types::{FileAnalysis, ImportEntry, ExportSymbol}",
+            "raw_path should preserve full import with braces"
+        );
+
+        // Check super:: import
+        let super_import = analysis.imports.iter().find(|i| i.is_super_relative);
+        assert!(super_import.is_some(), "Should have super:: import");
+        assert_eq!(super_import.unwrap().symbols.len(), 2);
+
+        // Check self:: import
+        let self_import = analysis.imports.iter().find(|i| i.is_self_relative);
+        assert!(self_import.is_some(), "Should have self:: import");
+        assert_eq!(self_import.unwrap().symbols.len(), 2);
+    }
+
+    #[test]
+    fn distinguishes_relative_from_external_imports() {
+        let content = r#"
+use crate::internal::Module;
+use super::parent::Module2;
+use self::current::Module3;
+use std::collections::HashMap;
+use serde::Serialize;
+"#;
+        let analysis = analyze_rust_file(content, "mixed.rs".to_string(), &[]);
+
+        assert_eq!(analysis.imports.len(), 5, "Should have 5 imports");
+
+        // Count relative vs external
+        let relative_count = analysis
+            .imports
+            .iter()
+            .filter(|i| i.is_crate_relative || i.is_super_relative || i.is_self_relative)
+            .count();
+        assert_eq!(relative_count, 3, "Should have 3 relative imports");
+
+        let external_count = analysis
+            .imports
+            .iter()
+            .filter(|i| !i.is_crate_relative && !i.is_super_relative && !i.is_self_relative)
+            .count();
+        assert_eq!(external_count, 2, "Should have 2 external imports");
+
+        // External imports should not have relative flags set
+        let std_import = analysis
+            .imports
+            .iter()
+            .find(|i| i.raw_path.contains("std::"));
+        assert!(std_import.is_some());
+        assert!(!std_import.unwrap().is_crate_relative);
+        assert!(!std_import.unwrap().is_super_relative);
+        assert!(!std_import.unwrap().is_self_relative);
+    }
+
+    #[test]
+    fn preserves_raw_path_for_all_imports() {
+        let content = r#"
+use crate::foo::Bar;
+use super::baz::Qux;
+use std::path::PathBuf;
+"#;
+        let analysis = analyze_rust_file(content, "test.rs".to_string(), &[]);
+
+        for imp in &analysis.imports {
+            assert!(
+                !imp.raw_path.is_empty(),
+                "raw_path should be set for all imports"
+            );
+        }
+
+        // Verify raw_path matches original import source
+        let paths: Vec<&str> = analysis
+            .imports
+            .iter()
+            .map(|i| i.raw_path.as_str())
+            .collect();
+        assert!(paths.contains(&"crate::foo::Bar"));
+        assert!(paths.contains(&"super::baz::Qux"));
+        assert!(paths.contains(&"std::path::PathBuf"));
+    }
+
+    #[test]
+    fn handles_nested_module_paths() {
+        let content = r#"
+use crate::foo::bar::baz::Qux;
+use super::super::super::root::Type;
+"#;
+        let analysis = analyze_rust_file(content, "deep.rs".to_string(), &[]);
+
+        assert_eq!(analysis.imports.len(), 2);
+
+        let crate_import = analysis.imports.iter().find(|i| i.is_crate_relative);
+        assert!(crate_import.is_some());
+        assert_eq!(crate_import.unwrap().raw_path, "crate::foo::bar::baz::Qux");
+
+        let super_import = analysis.imports.iter().find(|i| i.is_super_relative);
+        assert!(super_import.is_some());
+        assert_eq!(
+            super_import.unwrap().raw_path,
+            "super::super::super::root::Type"
+        );
     }
 }

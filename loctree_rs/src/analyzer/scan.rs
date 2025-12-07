@@ -212,11 +212,13 @@ pub(crate) fn analyze_file(
         if imp.resolved_path.is_none() && imp.source.starts_with('.') {
             let resolved = match ext.as_str() {
                 "py" => resolve_python_relative(&imp.source, &canonical, root_canon, extensions),
-                "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "css" => ts_resolver
-                    .and_then(|r| r.resolve(&imp.source, extensions))
-                    .or_else(|| {
-                        resolve_js_relative(&canonical, root_canon, &imp.source, extensions)
-                    }),
+                "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "css" | "svelte" | "vue" => {
+                    ts_resolver
+                        .and_then(|r| r.resolve(&imp.source, extensions))
+                        .or_else(|| {
+                            resolve_js_relative(&canonical, root_canon, &imp.source, extensions)
+                        })
+                }
                 _ => None,
             };
             imp.resolved_path = resolved;
@@ -439,6 +441,11 @@ mod tests {
                     }],
                     resolution: crate::types::ImportResolutionKind::Local,
                     is_type_checking: false,
+                    is_lazy: false,
+                    is_crate_relative: false,
+                    is_super_relative: false,
+                    is_self_relative: false,
+                    raw_path: String::new(),
                 }],
                 event_listens: vec![crate::types::EventRef {
                     raw_name: Some("EVENT_NAME".to_string()),
@@ -531,6 +538,11 @@ mod tests {
                     }],
                     resolution: crate::types::ImportResolutionKind::Local,
                     is_type_checking: false,
+                    is_lazy: false,
+                    is_crate_relative: false,
+                    is_super_relative: false,
+                    is_self_relative: false,
+                    raw_path: String::new(),
                 }],
                 event_emits: vec![crate::types::EventRef {
                     raw_name: Some("ALIASED".to_string()),

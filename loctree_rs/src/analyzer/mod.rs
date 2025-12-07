@@ -23,8 +23,10 @@
 
 pub mod assets;
 pub mod ast_js;
+pub mod barrels;
 pub mod classify;
 pub mod coverage;
+pub mod crowd;
 mod css;
 pub mod cycles;
 pub mod dead_parrots;
@@ -49,6 +51,7 @@ pub mod scan;
 pub mod search;
 pub mod trace;
 mod tsconfig;
+pub mod twins;
 
 pub(super) fn offset_to_line(content: &str, offset: usize) -> usize {
     content[..offset].bytes().filter(|b| *b == b'\n').count() + 1
@@ -76,7 +79,7 @@ pub fn build_open_url(file: &str, line: Option<usize>, open_base: Option<&str>) 
 
 #[allow(unused_imports)]
 pub use report::{
-    AiInsight, CommandGap, DupLocation, GraphComponent, GraphData, GraphNode, RankedDup,
-    ReportSection,
+    AiInsight, CommandGap, DupLocation, DupSeverity, GraphComponent, GraphData, GraphNode,
+    RankedDup, ReportSection,
 };
 pub use runner::run_import_analyzer;

@@ -12,7 +12,7 @@ use crate::types::ColorMode;
 /// Known subcommand names for the new CLI interface.
 const SUBCOMMANDS: &[&str] = &[
     "auto", "scan", "tree", "slice", "find", "dead", "unused", "cycles", "commands", "events",
-    "info", "lint", "report", "help", "query", "diff",
+    "info", "lint", "report", "help", "query", "diff", "memex", "crowd", "twins",
 ];
 
 /// Check if an argument looks like a new-style subcommand.
@@ -173,6 +173,9 @@ pub fn parse_command(args: &[String]) -> Result<Option<ParsedCommand>, String> {
         Some("help") => parse_help_command(&remaining_args)?,
         Some("query") => parse_query_command(&remaining_args)?,
         Some("diff") => parse_diff_command(&remaining_args)?,
+        Some("memex") => parse_memex_command(&remaining_args)?,
+        Some("crowd") => parse_crowd_command(&remaining_args)?,
+        Some("twins") => parse_twins_command(&remaining_args)?,
         Some(unknown) => {
             return Err(format!(
                 "Unknown command '{}'. Run 'loct --help' for available commands.",
@@ -201,6 +204,43 @@ fn parse_color_mode(value: &str) -> Result<ColorMode, String> {
 }
 
 fn parse_auto_command(args: &[String]) -> Result<Command, String> {
+    // Check for help flag first
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        return Err(
+            "loct auto - Full auto-scan with stack detection (default command)
+
+USAGE:
+    loct auto [OPTIONS] [PATHS...]
+    loct [OPTIONS] [PATHS...]    # 'auto' is the default command
+
+DESCRIPTION:
+    Performs a comprehensive analysis of your codebase:
+    - Detects project type and language stack automatically
+    - Builds dependency graph and import relationships
+    - Analyzes code structure and exports
+    - Identifies potential issues (dead code, cycles, etc.)
+
+    This is the default command when no subcommand is specified.
+
+OPTIONS:
+    --full-scan          Force full rescan (ignore cache)
+    --scan-all           Scan all files including hidden/ignored
+    --for-agent-feed     Output optimized format for AI agents
+    --help, -h           Show this help message
+
+ARGUMENTS:
+    [PATHS...]           Root directories to scan (default: current directory)
+
+EXAMPLES:
+    loct                         # Auto-scan current directory
+    loct auto                    # Explicit auto command
+    loct auto --full-scan        # Force full rescan
+    loct auto src/ lib/          # Scan specific directories
+    loct --for-agent-feed        # AI-optimized output"
+                .to_string(),
+        );
+    }
+
     let mut opts = AutoOptions::default();
     let mut i = 0;
 
@@ -238,6 +278,37 @@ fn parse_auto_command(args: &[String]) -> Result<Command, String> {
 }
 
 fn parse_scan_command(args: &[String]) -> Result<Command, String> {
+    // Check for help flag first
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        return Err("loct scan - Build/update snapshot for current HEAD
+
+USAGE:
+    loct scan [OPTIONS] [PATHS...]
+
+DESCRIPTION:
+    Scans the codebase and updates the internal snapshot database.
+    This command builds the dependency graph, analyzes imports/exports,
+    and prepares data for other commands like 'dead', 'cycles', 'tree'.
+
+    Unlike 'auto', this command only builds the snapshot without
+    running additional analysis passes.
+
+OPTIONS:
+    --full-scan       Force full rescan, ignore cached data
+    --scan-all        Include hidden and ignored files
+    --help, -h        Show this help message
+
+ARGUMENTS:
+    [PATHS...]        Root directories to scan (default: current directory)
+
+EXAMPLES:
+    loct scan                    # Scan current directory
+    loct scan --full-scan        # Force complete rescan
+    loct scan src/ lib/          # Scan specific directories
+    loct scan --scan-all         # Include all files (even hidden)"
+            .to_string());
+    }
+
     let mut opts = ScanOptions::default();
     let mut i = 0;
 
@@ -270,6 +341,43 @@ fn parse_scan_command(args: &[String]) -> Result<Command, String> {
 }
 
 fn parse_tree_command(args: &[String]) -> Result<Command, String> {
+    // Check for help flag first
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        return Err("loct tree - Display LOC tree / structural overview
+
+USAGE:
+    loct tree [OPTIONS] [PATHS...]
+
+DESCRIPTION:
+    Displays a hierarchical tree view of your codebase structure,
+    annotated with lines of code (LOC) metrics for each directory
+    and file. Helps understand code distribution and organization.
+
+    Similar to 'tree' command but with LOC counting and better
+    handling of gitignored files.
+
+OPTIONS:
+    --depth <N>, -L <N>    Maximum depth to display (default: unlimited)
+    --summary [N]          Show summary of top N largest items (default: 5)
+    --loc <N>              Only show items with LOC >= N
+    --show-hidden, -H      Include hidden files/directories
+    --find-artifacts       Highlight build artifacts and generated files
+    --show-ignored         Show gitignored files (normally hidden)
+    --help, -h             Show this help message
+
+ARGUMENTS:
+    [PATHS...]             Root directories to analyze (default: current directory)
+
+EXAMPLES:
+    loct tree                       # Full tree of current directory
+    loct tree --depth 3             # Limit to 3 levels deep
+    loct tree --summary             # Show top 5 largest items
+    loct tree --summary 10          # Show top 10 largest items
+    loct tree --loc 100             # Only show files/dirs with 100+ LOC
+    loct tree src/ --show-hidden    # Include hidden files in src/"
+            .to_string());
+    }
+
     let mut opts = TreeOptions::default();
     let mut i = 0;
 
@@ -334,6 +442,40 @@ fn parse_tree_command(args: &[String]) -> Result<Command, String> {
 }
 
 fn parse_slice_command(args: &[String]) -> Result<Command, String> {
+    // Check for help flag first
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        return Err("loct slice - Extract holographic context for a file
+
+USAGE:
+    loct slice [OPTIONS] <TARGET_PATH>
+
+DESCRIPTION:
+    Extracts a 'holographic slice' - the minimal context needed to
+    understand a specific file. Shows its dependencies (imports) and
+    optionally its consumers (what imports it).
+
+    This is useful for:
+    - Understanding a file's context before editing
+    - Feeding relevant code to AI assistants
+    - Analyzing impact of changes to a file
+
+OPTIONS:
+    --consumers, -c      Include files that import the target (reverse deps)
+    --depth <N>          Maximum dependency depth to traverse (default: unlimited)
+    --root <PATH>        Project root for resolving relative imports
+    --help, -h           Show this help message
+
+ARGUMENTS:
+    <TARGET_PATH>        Path to the file to analyze (required)
+
+EXAMPLES:
+    loct slice src/main.rs                  # Show dependencies of main.rs
+    loct slice src/utils.ts --consumers     # Show deps and consumers
+    loct slice lib/api.ts --depth 2         # Limit to 2 levels deep
+    loct slice src/app.tsx --root ./        # Specify project root"
+            .to_string());
+    }
+
     let mut opts = SliceOptions::default();
     let mut i = 0;
 
@@ -385,6 +527,50 @@ fn parse_slice_command(args: &[String]) -> Result<Command, String> {
 }
 
 fn parse_find_command(args: &[String]) -> Result<Command, String> {
+    // Check for help flag first
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        return Err("loct find - Search symbols/files with regex filters
+
+USAGE:
+    loct find [QUERY] [OPTIONS]
+
+DESCRIPTION:
+    Powerful search across the codebase with multiple filter modes.
+    Supports regex patterns for symbols and file names, plus special
+    modes for impact analysis and similarity detection.
+
+    Search modes:
+    - Symbol search: Find functions, classes, types by name pattern
+    - File search: Find files by path pattern
+    - Impact analysis: Find all symbols affected by a file change
+    - Similarity: Find symbols with similar names
+
+OPTIONS:
+    --symbol <PATTERN>, -s <PATTERN>    Search for symbols matching regex
+    --file <PATTERN>, -f <PATTERN>      Search for files matching regex
+    --impact <FILE>                     Show symbols affected by file changes
+    --similar <SYMBOL>                  Find symbols with similar names
+    --dead                              Only show dead/unused symbols
+    --exported                          Only show exported symbols
+    --lang <LANG>                       Filter by language (ts, rs, js, py, etc.)
+    --limit <N>                         Maximum results to show (default: unlimited)
+    --help, -h                          Show this help message
+
+ARGUMENTS:
+    [QUERY]                             Search pattern (alternative to --symbol)
+
+EXAMPLES:
+    loct find Patient                   # Find symbols containing \"Patient\"
+    loct find --symbol \".*Config$\"      # Regex: symbols ending with Config
+    loct find --file \"utils\"            # Files containing \"utils\" in path
+    loct find --symbol Patient --lang ts # TypeScript Patient symbols
+    loct find --dead --exported         # Dead exported symbols
+    loct find --impact src/api.ts       # What's affected by api.ts changes
+    loct find --similar handleClick     # Find similarly named handlers
+    loct find --limit 50                # Limit to 50 results"
+            .to_string());
+    }
+
     let mut opts = FindOptions::default();
     let mut i = 0;
 
@@ -456,6 +642,57 @@ fn parse_find_command(args: &[String]) -> Result<Command, String> {
 }
 
 fn parse_dead_command(args: &[String]) -> Result<Command, String> {
+    // Check for help flag first
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        return Err("loct dead - Detect unused exports / dead code
+
+USAGE:
+    loct dead [OPTIONS] [PATHS...]
+
+DESCRIPTION:
+    Finds exported symbols that are never imported anywhere in the codebase.
+    Uses import graph analysis with alias-awareness to minimize false positives.
+
+    For Rust projects (v0.5.17+):
+    - Resolves crate-internal imports: use crate::foo::Bar, use super::Bar
+    - Detects same-file usage in generics, type annotations, struct literals
+    - Handles nested brace imports: use crate::{foo::{A, B}, bar::C}
+    - Tauri #[command] handler detection
+
+    For TypeScript/JavaScript:
+    - Path alias resolution via tsconfig.json
+    - Barrel file (index.ts) awareness
+    - Dynamic import() tracking
+
+OPTIONS:
+    --confidence <LEVEL>   Filter by confidence: high, medium, low (default: all)
+                           high = not imported in production code
+                           medium = only used in tests
+                           low = complex re-export, may be false positive
+    --top <N>              Limit to top N results (default: 20)
+    --path <PATTERN>       Filter to files matching pattern
+    --with-tests           Include test files in analysis
+    --exclude-tests        Exclude test files (default)
+    --with-helpers         Include helper/utility files
+    --help, -h             Show this help message
+
+EXAMPLES:
+    loct dead                          # All dead exports
+    loct dead --confidence high        # Only high-confidence (no test files)
+    loct dead --path src/components/   # Dead exports in components
+    loct dead --top 50                 # Top 50 dead exports
+    loct dead --json                   # JSON output for AI agents
+
+RUST CRATE-INTERNAL IMPORTS:
+    Loctree v0.5.17+ correctly handles Rust internal imports like:
+      use crate::ui::constants::MENU_GAP;
+      use super::types::Config;
+      use self::utils::helper;
+
+    These are resolved to actual file paths for accurate dead code detection."
+            .to_string());
+    }
+
     let mut opts = DeadOptions::default();
     let mut i = 0;
 
@@ -487,6 +724,10 @@ fn parse_dead_command(args: &[String]) -> Result<Command, String> {
                 opts.with_tests = true;
                 i += 1;
             }
+            "--exclude-tests" => {
+                opts.with_tests = false;
+                i += 1;
+            }
             "--with-helpers" => {
                 opts.with_helpers = true;
                 i += 1;
@@ -509,6 +750,39 @@ fn parse_dead_command(args: &[String]) -> Result<Command, String> {
 }
 
 fn parse_cycles_command(args: &[String]) -> Result<Command, String> {
+    // Check for help flag first
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        return Err("loct cycles - Detect circular imports
+
+USAGE:
+    loct cycles [OPTIONS] [PATHS...]
+
+DESCRIPTION:
+    Detects circular import dependencies in your codebase.
+    Circular imports can cause:
+    - Runtime initialization errors
+    - Undefined behavior in module loading
+    - Confusing dependency graphs
+    - Build/bundling issues
+
+    This command analyzes the import graph and reports all cycles,
+    grouped by severity and size.
+
+OPTIONS:
+    --path <PATTERN>     Filter to files matching path pattern
+    --help, -h           Show this help message
+
+ARGUMENTS:
+    [PATHS...]           Root directories to analyze (default: current directory)
+
+EXAMPLES:
+    loct cycles                       # Detect all cycles in current dir
+    loct cycles src/                  # Only analyze src/ directory
+    loct cycles --path components/    # Cycles involving components/
+    loct cycles --json                # JSON output for CI/CD"
+            .to_string());
+    }
+
     let mut opts = CyclesOptions::default();
     let mut i = 0;
 
@@ -540,6 +814,35 @@ fn parse_cycles_command(args: &[String]) -> Result<Command, String> {
 }
 
 fn parse_commands_command(args: &[String]) -> Result<Command, String> {
+    // Check for help flag first
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        return Err("loct commands - Show Tauri command bridges (FE ↔ BE)
+
+USAGE:
+    loct commands [OPTIONS] [PATHS...]
+
+DESCRIPTION:
+    Analyzes Tauri command invocations to detect:
+    - Frontend invoke() calls matched with backend #[tauri::command] handlers
+    - Missing handlers (FE calls BE command that doesn't exist)
+    - Unused handlers (BE command exists but FE never calls it)
+
+    This helps maintain contract integrity between frontend and backend in Tauri apps.
+
+OPTIONS:
+    --name <PATTERN>   Filter to commands matching pattern
+    --missing          Show only missing handlers (FE calls → no BE)
+    --unused           Show only unused handlers (BE exists → no FE calls)
+    --help, -h         Show this help message
+
+EXAMPLES:
+    loct commands                     # Show all command bridges
+    loct commands --missing           # Only missing handlers
+    loct commands --name patient_*    # Commands matching pattern
+    loct commands --unused            # Unused backend commands"
+            .to_string());
+    }
+
     let mut opts = CommandsOptions::default();
     let mut i = 0;
 
@@ -579,6 +882,35 @@ fn parse_commands_command(args: &[String]) -> Result<Command, String> {
 }
 
 fn parse_events_command(args: &[String]) -> Result<Command, String> {
+    // Check for help flag first
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        return Err("loct events - Show event flow and issues
+
+USAGE:
+    loct events [OPTIONS] [PATHS...]
+
+DESCRIPTION:
+    Analyzes Tauri event system to detect:
+    - Ghost events (emit() calls with no listen() handlers)
+    - Orphan listeners (listen() calls with no emit() sources)
+    - Race conditions (multiple emitters for same event)
+
+    Helps maintain event contract integrity in Tauri applications.
+
+OPTIONS:
+    --ghost      Show only ghost events (emitted but never listened)
+    --orphan     Show only orphan listeners (listening but never emitted)
+    --races      Show only potential race conditions (multiple emitters)
+    --help, -h   Show this help message
+
+EXAMPLES:
+    loct events                  # Show all event flow analysis
+    loct events --ghost          # Only ghost events
+    loct events --orphan         # Only orphan listeners
+    loct events --races          # Only race conditions"
+            .to_string());
+    }
+
     let mut opts = EventsOptions::default();
     let mut i = 0;
 
@@ -615,6 +947,36 @@ fn parse_events_command(args: &[String]) -> Result<Command, String> {
 }
 
 fn parse_info_command(args: &[String]) -> Result<Command, String> {
+    // Check for help flag first
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        return Err("loct info - Show snapshot metadata and project info
+
+USAGE:
+    loct info [PATH]
+
+DESCRIPTION:
+    Displays high-level metadata about the analyzed codebase:
+    - Total file count
+    - Lines of code (LOC) statistics
+    - Language breakdown
+    - Scan time and performance
+    - Snapshot ID and timestamp
+
+    Useful for quick project overview and verification of scan results.
+
+ARGUMENTS:
+    [PATH]     Root directory to analyze (default: current directory)
+
+OPTIONS:
+    --help, -h   Show this help message
+
+EXAMPLES:
+    loct info              # Show info for current directory
+    loct info src/         # Show info for src directory
+    loct info --json       # JSON output for automation"
+            .to_string());
+    }
+
     let mut opts = InfoOptions::default();
     let mut i = 0;
 
@@ -635,6 +997,39 @@ fn parse_info_command(args: &[String]) -> Result<Command, String> {
 }
 
 fn parse_lint_command(args: &[String]) -> Result<Command, String> {
+    // Check for help flag first
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        return Err("loct lint - Structural lint and policy checks
+
+USAGE:
+    loct lint [OPTIONS] [PATHS...]
+
+DESCRIPTION:
+    Performs structural and architectural policy checks:
+    - Entrypoint validation (main.ts, index.html, etc.)
+    - Import policy violations
+    - Circular dependency detection
+    - Tauri-specific contract validation
+
+    CI-friendly with exit codes:
+    - Exit 0: No issues found
+    - Exit 1: Policy violations detected (with --fail)
+
+OPTIONS:
+    --entrypoints    Validate entrypoint files exist and are properly configured
+    --fail           Exit with code 1 if any violations found (CI mode)
+    --sarif          Output in SARIF format (GitHub Code Scanning compatible)
+    --tauri          Enable Tauri-specific contract checks (commands, events)
+    --help, -h       Show this help message
+
+EXAMPLES:
+    loct lint                     # Run all lint checks
+    loct lint --fail              # Exit 1 on violations (CI)
+    loct lint --tauri             # Include Tauri contract checks
+    loct lint --sarif > lint.sarif   # SARIF output for GitHub"
+            .to_string());
+    }
+
     let mut opts = LintOptions::default();
     let mut i = 0;
 
@@ -675,6 +1070,39 @@ fn parse_lint_command(args: &[String]) -> Result<Command, String> {
 }
 
 fn parse_report_command(args: &[String]) -> Result<Command, String> {
+    // Check for help flag first
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        return Err("loct report - Generate HTML/JSON reports
+
+USAGE:
+    loct report [OPTIONS] [PATHS...]
+
+DESCRIPTION:
+    Generates interactive analysis reports with:
+    - Import graph visualization
+    - Dead code highlighting
+    - Crowd analysis results
+    - Semantic duplicate detection
+    - Tauri contract validation
+
+    HTML reports are interactive with clickable navigation to source files.
+
+OPTIONS:
+    --format <FORMAT>    Output format: html (default) or json
+    --output, -o <FILE>  Write report to file (default: auto-generate name)
+    --serve              Start HTTP server to view report
+    --port <PORT>        Server port (default: 8080, with --serve)
+    --editor <EDITOR>    Editor for click-to-open (vscode, cursor, etc.)
+    --help, -h           Show this help message
+
+EXAMPLES:
+    loct report                        # Generate HTML report
+    loct report --serve                # Generate and serve on http://localhost:8080
+    loct report --format json -o out.json   # JSON output
+    loct report --editor cursor        # Open files in Cursor editor"
+            .to_string());
+    }
+
     let mut opts = ReportOptions::default();
     let mut i = 0;
 
@@ -748,6 +1176,34 @@ fn parse_help_command(args: &[String]) -> Result<Command, String> {
 }
 
 fn parse_query_command(args: &[String]) -> Result<Command, String> {
+    // Check for help flag first
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        return Err("loct query - Query snapshot data
+
+USAGE:
+    loct query <KIND> <TARGET>
+
+DESCRIPTION:
+    Query the import graph and symbol index for specific information:
+
+    who-imports <FILE>      Find all files that import the specified file
+    where-symbol <SYMBOL>   Find where a symbol is defined/exported
+    component-of <FILE>     Show which components/modules contain this file
+
+    Results include import paths, symbol locations, and dependency chains.
+
+QUERY KINDS:
+    who-imports       List all importers of a file
+    where-symbol      Locate symbol definitions and exports
+    component-of      Show containing components/modules
+
+EXAMPLES:
+    loct query who-imports src/utils.ts        # Who imports utils.ts?
+    loct query where-symbol PatientRecord      # Where is PatientRecord defined?
+    loct query component-of src/ui/Button.tsx  # What component owns Button?"
+            .to_string());
+    }
+
     if args.len() < 2 {
         return Err(
             "query command requires a kind and target.\nUsage: loct query <kind> <target>\nKinds: who-imports, where-symbol, component-of"
@@ -774,6 +1230,39 @@ fn parse_query_command(args: &[String]) -> Result<Command, String> {
 }
 
 fn parse_diff_command(args: &[String]) -> Result<Command, String> {
+    // Check for help flag first
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        return Err("loct diff - Compare snapshots and show semantic delta
+
+USAGE:
+    loct diff --since <SNAPSHOT> [--to <SNAPSHOT>] [OPTIONS]
+    loct diff <SNAPSHOT1> [SNAPSHOT2]
+
+DESCRIPTION:
+    Compares two code snapshots and shows semantic changes:
+    - New/removed files
+    - Import graph changes
+    - New dead code introduced
+    - Symbol additions/removals
+    - Architecture drift
+
+    Snapshots can be Git refs (main, HEAD~1), tags, or snapshot IDs.
+
+OPTIONS:
+    --since <SNAPSHOT>   Base snapshot to compare from (required)
+    --to <SNAPSHOT>      Target snapshot to compare to (default: current working tree)
+    --jsonl              Output in JSONL format (one change per line)
+    --problems-only      Show only regressions (new dead code, new cycles)
+    --help, -h           Show this help message
+
+EXAMPLES:
+    loct diff --since main              # Compare main branch to working tree
+    loct diff --since HEAD~1            # Compare to previous commit
+    loct diff --since v1.0.0 --to v2.0.0   # Compare two tags
+    loct diff main --problems-only      # Only show regressions since main"
+            .to_string());
+    }
+
     let mut opts = DiffOptions::default();
     let mut i = 0;
 
@@ -830,6 +1319,242 @@ fn parse_diff_command(args: &[String]) -> Result<Command, String> {
     }
 
     Ok(Command::Diff(opts))
+}
+
+fn parse_memex_command(args: &[String]) -> Result<Command, String> {
+    // Check for help flag first
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        return Err("loct memex - Index analysis into AI memory (vector DB)
+
+USAGE:
+    loct memex [REPORT_PATH] [OPTIONS]
+
+DESCRIPTION:
+    Indexes code analysis results into a vector database for AI agent memory.
+    Creates semantic embeddings of:
+    - File summaries and purposes
+    - Symbol definitions and usage patterns
+    - Import relationships
+    - Dead code and quality issues
+
+    Enables AI agents to query codebase semantically: \"find patient validation logic\"
+    instead of keyword search.
+
+    NOTE: Requires building with --features memex
+
+OPTIONS:
+    --report-path, -r <PATH>   Path to analysis report (JSON format)
+    --project-id <ID>          Project identifier for multi-project databases
+    --namespace, -n <NAME>     Namespace for embeddings (default: default)
+    --db-path <PATH>           Custom vector DB path (default: ~/.loctree/memex.db)
+    --help, -h                 Show this help message
+
+EXAMPLES:
+    loct memex report.json                 # Index report into default DB
+    loct memex -r report.json --project-id vista   # Index with project ID
+    loct memex --namespace prod --db-path /data/memex.db   # Custom namespace and DB
+
+BUILDING WITH MEMEX:
+    cargo build --features memex
+    cargo install loctree --features memex"
+            .to_string());
+    }
+
+    let mut opts = MemexOptions::default();
+    let mut i = 0;
+
+    while i < args.len() {
+        let arg = &args[i];
+        match arg.as_str() {
+            "--report-path" | "-r" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--report-path requires a path".to_string())?;
+                opts.report_path = PathBuf::from(value);
+                i += 2;
+            }
+            "--project-id" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--project-id requires a value".to_string())?;
+                opts.project_id = Some(value.clone());
+                i += 2;
+            }
+            "--namespace" | "-n" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--namespace requires a value".to_string())?;
+                opts.namespace = value.clone();
+                i += 2;
+            }
+            "--db-path" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--db-path requires a path".to_string())?;
+                opts.db_path = Some(value.clone());
+                i += 2;
+            }
+            _ if !arg.starts_with('-') => {
+                // Positional argument is report path
+                opts.report_path = PathBuf::from(arg);
+                i += 1;
+            }
+            _ => {
+                return Err(format!("Unknown option '{}' for 'memex' command.", arg));
+            }
+        }
+    }
+
+    Ok(Command::Memex(opts))
+}
+
+fn parse_crowd_command(args: &[String]) -> Result<Command, String> {
+    // Check for help flag first
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        return Err(
+            "loct crowd - Detect functional crowds (similar files clustering)
+
+USAGE:
+    loct crowd [PATTERN] [OPTIONS]
+
+ARGUMENTS:
+    [PATTERN]    Pattern to detect crowd around (e.g., \"message\", \"patient\")
+                 If not specified, auto-detects all crowds
+
+OPTIONS:
+    --auto, -a         Detect all crowds automatically
+    --min-size <N>     Minimum crowd size to report (default: 2)
+    --limit <N>        Maximum crowds to show (default: 10)
+    --include-tests    Include test files (excluded by default)
+    --help, -h         Show this help message
+
+EXAMPLES:
+    loct crowd                  # Auto-detect all crowds
+    loct crowd message          # Find files clustering around \"message\"
+    loct crowd --limit 5        # Show top 5 crowds"
+                .to_string(),
+        );
+    }
+
+    let mut opts = CrowdOptions::default();
+    let mut i = 0;
+
+    while i < args.len() {
+        let arg = &args[i];
+        match arg.as_str() {
+            "--auto" | "-a" => {
+                opts.auto_detect = true;
+                i += 1;
+            }
+            "--min-size" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--min-size requires a number".to_string())?;
+                opts.min_size = Some(value.parse().map_err(|_| "--min-size requires a number")?);
+                i += 2;
+            }
+            "--limit" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--limit requires a number".to_string())?;
+                opts.limit = Some(value.parse().map_err(|_| "--limit requires a number")?);
+                i += 2;
+            }
+            "--include-tests" => {
+                opts.include_tests = true;
+                i += 1;
+            }
+            _ if !arg.starts_with('-') => {
+                // Positional argument is the pattern (if not a root path)
+                if opts.pattern.is_none() && !std::path::Path::new(arg).exists() {
+                    opts.pattern = Some(arg.clone());
+                } else {
+                    opts.roots.push(PathBuf::from(arg));
+                }
+                i += 1;
+            }
+            _ => {
+                return Err(format!("Unknown option '{}' for 'crowd' command.", arg));
+            }
+        }
+    }
+
+    // If no pattern and no auto flag, enable auto-detect
+    if opts.pattern.is_none() && !opts.auto_detect {
+        opts.auto_detect = true;
+    }
+
+    if opts.roots.is_empty() {
+        opts.roots.push(PathBuf::from("."));
+    }
+
+    Ok(Command::Crowd(opts))
+}
+
+fn parse_twins_command(args: &[String]) -> Result<Command, String> {
+    // Check for help flag first
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        return Err(
+            "loct twins - Detect semantic duplicates (dead parrots, exact twins, barrel chaos)
+
+USAGE:
+    loct twins [OPTIONS]
+
+DESCRIPTION:
+    Identifies three types of semantic issues:
+
+    Dead Parrots:   Exports with 0 imports (Monty Python reference)
+                    - Code that looks alive but is actually unused
+
+    Exact Twins:    Same symbol exported from multiple files
+                    - Duplicate exports causing confusion
+
+    Barrel Chaos:   Missing index.ts, deep re-export chains, inconsistent import paths
+                    - Barrel file issues and re-export problems
+
+OPTIONS:
+    --path <DIR>       Root directory to analyze (default: current directory)
+    --dead-only        Show only dead parrots (exports with 0 imports)
+    --help, -h         Show this help message
+
+EXAMPLES:
+    loct twins                  # Full semantic analysis (all three types)
+    loct twins --dead-only      # Only dead parrots (0 imports)
+    loct twins --path src/      # Analyze specific directory"
+                .to_string(),
+        );
+    }
+
+    let mut opts = TwinsOptions::default();
+    let mut i = 0;
+
+    while i < args.len() {
+        let arg = &args[i];
+        match arg.as_str() {
+            "--path" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--path requires a directory".to_string())?;
+                opts.path = Some(PathBuf::from(value));
+                i += 2;
+            }
+            "--dead-only" => {
+                opts.dead_only = true;
+                i += 1;
+            }
+            _ => {
+                // Treat as path if no flag prefix
+                if !arg.starts_with('-') {
+                    opts.path = Some(PathBuf::from(arg));
+                    i += 1;
+                } else {
+                    return Err(format!("Unknown option '{}' for 'twins' command.", arg));
+                }
+            }
+        }
+    }
+
+    Ok(Command::Twins(opts))
 }
 
 // ============================================================================
@@ -965,6 +1690,30 @@ mod tests {
             assert_eq!(opts.lang, Some("ts".into()));
         } else {
             panic!("Expected Find command");
+        }
+    }
+
+    #[test]
+    fn test_parse_crowd_command() {
+        let args = vec!["crowd".into(), "message".into()];
+        let result = parse_command(&args).unwrap().unwrap();
+        assert_eq!(result.command.name(), "crowd");
+        if let Command::Crowd(opts) = result.command {
+            assert_eq!(opts.pattern, Some("message".into()));
+        } else {
+            panic!("Expected Crowd command");
+        }
+    }
+
+    #[test]
+    fn test_parse_crowd_auto_detect() {
+        let args = vec!["crowd".into(), "--auto".into()];
+        let result = parse_command(&args).unwrap().unwrap();
+        if let Command::Crowd(opts) = result.command {
+            assert!(opts.auto_detect);
+            assert!(opts.pattern.is_none());
+        } else {
+            panic!("Expected Crowd command");
         }
     }
 }

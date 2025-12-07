@@ -7,8 +7,10 @@
 use std::path::PathBuf;
 
 use crate::args::ParsedArgs;
+use crate::progress::Spinner;
 use crate::types::{DEFAULT_LOC_THRESHOLD, Mode, OutputMode};
 
+use super::command::CrowdOptions;
 use super::command::*;
 
 /// Convert a Command and GlobalOptions into ParsedArgs for backward compatibility.
@@ -231,6 +233,21 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
             // Diff is handled specially in dispatch_command
             // as it doesn't go through ParsedArgs
         }
+
+        Command::Memex(_) => {
+            // Memex is handled specially in dispatch_command
+            // as it doesn't go through ParsedArgs
+        }
+
+        Command::Crowd(_) => {
+            // Crowd is handled specially in dispatch_command
+            // as it doesn't go through ParsedArgs
+        }
+
+        Command::Twins(_) => {
+            // Twins is handled specially in dispatch_command
+            // as it doesn't go through ParsedArgs
+        }
     }
 
     parsed
@@ -279,6 +296,33 @@ pub fn dispatch_command(parsed_cmd: &ParsedCommand) -> DispatchResult {
             // Execute diff and return result
             return handle_diff_command(opts, &parsed_cmd.global);
         }
+        Command::Memex(opts) => {
+            // Execute memex and return result
+            return handle_memex_command(opts, &parsed_cmd.global);
+        }
+        Command::Crowd(opts) => {
+            return handle_crowd_command(opts, &parsed_cmd.global);
+        }
+        Command::Twins(opts) => {
+            return handle_twins_command(opts, &parsed_cmd.global);
+        }
+        Command::Dead(opts) => {
+            return handle_dead_command(opts, &parsed_cmd.global);
+        }
+        Command::Cycles(opts) => {
+            return handle_cycles_command(opts, &parsed_cmd.global);
+        }
+        Command::Commands(opts) => {
+            return handle_commands_command(opts, &parsed_cmd.global);
+        }
+        Command::Events(opts) => {
+            return handle_events_command(opts, &parsed_cmd.global);
+        }
+        Command::Lint(opts) => {
+            return handle_lint_command(opts, &parsed_cmd.global);
+        }
+        // Note: Command::Report falls through to ParsedArgs flow to use full analysis pipeline
+        // which includes twins data, graph visualization, and proper Leptos SSR rendering
         _ => {}
     }
 
@@ -290,16 +334,14 @@ pub fn dispatch_command(parsed_cmd: &ParsedCommand) -> DispatchResult {
 /// Handle the query command directly
 fn handle_query_command(opts: &QueryOptions, global: &GlobalOptions) -> DispatchResult {
     use crate::query::{query_component_of, query_where_symbol, query_who_imports};
-    use crate::snapshot::Snapshot;
     use std::path::Path;
 
-    // Load snapshot from current directory
+    // Load snapshot (auto-scan if missing)
     let root = Path::new(".");
-    let snapshot = match Snapshot::load(root) {
+    let snapshot = match load_or_create_snapshot(root, global) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("[loct][error] Failed to load snapshot: {}", e);
-            eprintln!("[loct][hint] Run 'loct scan' first to create a snapshot.");
+            eprintln!("[loct][error] {}", e);
             return DispatchResult::Exit(1);
         }
     };
@@ -526,7 +568,7 @@ fn handle_problems_only_diff(
     opts: &DiffOptions,
     global: &GlobalOptions,
 ) -> DispatchResult {
-    use crate::analyzer::cycles::find_cycles;
+    use crate::analyzer::cycles::find_cycles_with_lazy;
     use crate::analyzer::dead_parrots::{DeadFilterConfig, find_dead_exports};
     use serde_json::json;
     use std::collections::HashSet;
@@ -560,8 +602,8 @@ fn handle_problems_only_diff(
         .map(|e| (e.from.clone(), e.to.clone(), e.label.clone()))
         .collect();
 
-    let from_cycles = find_cycles(&from_edges);
-    let to_cycles = find_cycles(&to_edges);
+    let from_cycles = find_cycles_with_lazy(&from_edges).0;
+    let to_cycles = find_cycles_with_lazy(&to_edges).0;
 
     // Build cycle signature sets for comparison
     let from_cycle_sigs: HashSet<String> = from_cycles
@@ -717,6 +759,718 @@ fn handle_problems_only_diff(
     DispatchResult::Exit(if total_problems > 0 { 1 } else { 0 })
 }
 
+/// Handle the memex command - available only in Loctree Pro
+fn handle_memex_command(_opts: &MemexOptions, _global: &GlobalOptions) -> DispatchResult {
+    eprintln!(
+        "[loct][memex][error] memex is a Loctree Pro feature. Visit https://loctree.io for more info."
+    );
+    DispatchResult::Exit(1)
+}
+
+/// Load snapshot from disk, or auto-create one if missing.
+/// This provides a better UX for commands that depend on snapshots.
+fn load_or_create_snapshot(
+    root: &std::path::Path,
+    global: &GlobalOptions,
+) -> std::io::Result<crate::snapshot::Snapshot> {
+    use crate::args::ParsedArgs;
+    use crate::snapshot::Snapshot;
+
+    // Try to load existing snapshot
+    match Snapshot::load(root) {
+        Ok(s) => return Ok(s),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            // No snapshot - auto-create one
+            if !global.quiet {
+                eprintln!("[loct] No snapshot found, running initial scan...");
+            }
+        }
+        Err(e) => return Err(e), // Other errors (corruption, etc.) - fail
+    }
+
+    // Create minimal ParsedArgs for scan
+    let parsed = ParsedArgs {
+        verbose: global.verbose,
+        use_gitignore: true,
+        ..Default::default()
+    };
+
+    // Run scan
+    let root_list = vec![root.to_path_buf()];
+    crate::snapshot::run_init(&root_list, &parsed)?;
+
+    // Now load the freshly created snapshot
+    Snapshot::load(root)
+}
+
+/// Check if a file path looks like a test file
+fn is_test_file(path: &str) -> bool {
+    let path_lower = path.to_lowercase();
+    let filename = std::path::Path::new(path)
+        .file_name()
+        .and_then(|f| f.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    // Directory patterns: tests/, __tests__/, test/, spec/
+    if path_lower.contains("/tests/")
+        || path_lower.contains("/__tests__/")
+        || path_lower.contains("/test/")
+        || path_lower.contains("/spec/")
+        || path_lower.contains("/fixtures/")
+        || path_lower.contains("/mocks/")
+    {
+        return true;
+    }
+
+    // File patterns: *_test.*, *.test.*, *_spec.*, *.spec.*, test_*, tests.*
+    if filename.contains("_test.")
+        || filename.contains(".test.")
+        || filename.contains("_spec.")
+        || filename.contains(".spec.")
+        || filename.contains("_tests.")  // Rust: module_tests.rs
+        || filename.starts_with("test_")
+        || filename.starts_with("spec_")
+        || filename.starts_with("tests.")  // tests.rs
+        || filename == "conftest.py"
+    {
+        return true;
+    }
+
+    false
+}
+
+/// Handle the crowd command - detect functional crowds
+fn handle_crowd_command(opts: &CrowdOptions, global: &GlobalOptions) -> DispatchResult {
+    use crate::analyzer::crowd::{
+        detect_all_crowds_with_edges, detect_crowd_with_edges, format_crowd, format_crowds_summary,
+    };
+
+    use std::path::Path;
+
+    // Show spinner unless in quiet/json mode
+    let spinner = if !global.quiet && !global.json {
+        Some(Spinner::new("Detecting functional crowds..."))
+    } else {
+        None
+    };
+
+    // Load snapshot (auto-scan if missing)
+    let root = opts
+        .roots
+        .first()
+        .map(|p| p.as_path())
+        .unwrap_or(Path::new("."));
+    let snapshot = match load_or_create_snapshot(root, global) {
+        Ok(s) => s,
+        Err(e) => {
+            if let Some(s) = spinner {
+                s.finish_error(&format!("Failed to load snapshot: {}", e));
+            } else {
+                eprintln!("[loct][error] {}", e);
+            }
+            return DispatchResult::Exit(1);
+        }
+    };
+
+    // Filter out test files unless --include-tests is specified
+    let files: Vec<_> = if opts.include_tests {
+        snapshot.files.clone()
+    } else {
+        snapshot
+            .files
+            .iter()
+            .filter(|f| !is_test_file(&f.path))
+            .cloned()
+            .collect()
+    };
+
+    // Detect crowds (using edges for accurate transitive importer counting)
+    let crowds = if let Some(ref pattern) = opts.pattern {
+        // Single pattern mode
+        vec![detect_crowd_with_edges(&files, pattern, &snapshot.edges)]
+    } else {
+        // Auto-detect mode
+        let mut all_crowds = detect_all_crowds_with_edges(&files, &snapshot.edges);
+
+        // Apply min_size filter
+        if let Some(min_size) = opts.min_size {
+            all_crowds.retain(|c| c.members.len() >= min_size);
+        }
+
+        // Apply limit
+        if let Some(limit) = opts.limit {
+            all_crowds.truncate(limit);
+        }
+
+        all_crowds
+    };
+
+    // Filter out empty crowds
+    let crowds: Vec<_> = crowds
+        .into_iter()
+        .filter(|c| !c.members.is_empty())
+        .collect();
+
+    if crowds.is_empty() {
+        if let Some(s) = spinner {
+            if let Some(ref pattern) = opts.pattern {
+                s.finish_warning(&format!("No files found matching pattern '{}'", pattern));
+            } else {
+                s.finish_warning("No crowds detected in codebase");
+            }
+        } else if !global.quiet {
+            if let Some(ref pattern) = opts.pattern {
+                eprintln!(
+                    "[loct][crowd] No files found matching pattern '{}'",
+                    pattern
+                );
+            } else {
+                eprintln!("[loct][crowd] No crowds detected in codebase");
+            }
+        }
+        return DispatchResult::Exit(0);
+    }
+
+    // Finish spinner with success message
+    if let Some(s) = spinner {
+        let total_members: usize = crowds.iter().map(|c| c.members.len()).sum();
+        s.finish_success(&format!(
+            "Found {} crowd(s) with {} total members",
+            crowds.len(),
+            total_members
+        ));
+    }
+
+    // Output results
+    if global.json {
+        match serde_json::to_string_pretty(&crowds) {
+            Ok(json) => println!("{}", json),
+            Err(e) => {
+                eprintln!("[loct][error] Failed to serialize crowds: {}", e);
+                return DispatchResult::Exit(1);
+            }
+        }
+    } else {
+        // Human-readable output
+        if crowds.len() == 1 {
+            // Single crowd - detailed view
+            println!("{}", format_crowd(&crowds[0], global.verbose));
+        } else {
+            // Multiple crowds - summary view
+            println!("{}", format_crowds_summary(&crowds));
+        }
+    }
+
+    DispatchResult::Exit(0)
+}
+
+fn handle_twins_command(
+    opts: &super::command::TwinsOptions,
+    global: &GlobalOptions,
+) -> DispatchResult {
+    use crate::analyzer::barrels::{analyze_barrel_chaos, format_barrel_analysis};
+    use crate::analyzer::twins::{
+        detect_exact_twins, find_dead_parrots, print_exact_twins, print_twins_result,
+    };
+    use std::path::Path;
+
+    // Show spinner unless in quiet/json mode
+    let spinner = if !global.quiet && !global.json {
+        Some(Spinner::new("Analyzing semantic duplicates..."))
+    } else {
+        None
+    };
+
+    // Load snapshot (auto-scan if missing)
+    let root = opts.path.as_deref().unwrap_or(Path::new("."));
+
+    let snapshot = match load_or_create_snapshot(root, global) {
+        Ok(s) => s,
+        Err(e) => {
+            if let Some(s) = spinner {
+                s.finish_error(&format!("Failed to load snapshot: {}", e));
+            } else {
+                eprintln!("[loct][error] {}", e);
+            }
+            return DispatchResult::Exit(1);
+        }
+    };
+
+    let output_mode = if global.json {
+        crate::types::OutputMode::Json
+    } else {
+        crate::types::OutputMode::Human
+    };
+
+    // Run dead parrot analysis
+    let result = find_dead_parrots(&snapshot.files, opts.dead_only);
+
+    // Finish spinner before printing results
+    if let Some(s) = spinner {
+        s.finish_success(&format!(
+            "Found {} dead parrot(s)",
+            result.dead_parrots.len()
+        ));
+    }
+
+    print_twins_result(&result, output_mode);
+
+    // Run exact twins detection (unless dead_only)
+    if !opts.dead_only {
+        let twins = detect_exact_twins(&snapshot.files);
+        if !twins.is_empty() {
+            print_exact_twins(&twins, output_mode);
+        }
+
+        // Run barrel chaos analysis
+        let barrel_analysis = analyze_barrel_chaos(&snapshot);
+        let has_issues = !barrel_analysis.missing_barrels.is_empty()
+            || !barrel_analysis.deep_chains.is_empty()
+            || !barrel_analysis.inconsistent_paths.is_empty();
+
+        if has_issues && output_mode == crate::types::OutputMode::Human {
+            println!("{}", format_barrel_analysis(&barrel_analysis));
+        }
+    }
+
+    DispatchResult::Exit(0)
+}
+
+/// Handle the dead command - detect dead exports
+fn handle_dead_command(opts: &DeadOptions, global: &GlobalOptions) -> DispatchResult {
+    use crate::analyzer::dead_parrots::{DeadFilterConfig, find_dead_exports, print_dead_exports};
+    use std::path::Path;
+
+    // Show spinner unless in quiet/json mode
+    let spinner = if !global.quiet && !global.json {
+        Some(Spinner::new("Analyzing dead exports..."))
+    } else {
+        None
+    };
+
+    // Load snapshot (auto-scan if missing)
+    let root = opts
+        .roots
+        .first()
+        .map(|p| p.as_path())
+        .unwrap_or(Path::new("."));
+
+    let snapshot = match load_or_create_snapshot(root, global) {
+        Ok(s) => s,
+        Err(e) => {
+            if let Some(s) = spinner {
+                s.finish_error(&format!("Failed to load snapshot: {}", e));
+            } else {
+                eprintln!("[loct][error] {}", e);
+            }
+            return DispatchResult::Exit(1);
+        }
+    };
+
+    // Determine confidence level
+    let high_confidence = opts.confidence.as_deref() == Some("high");
+
+    // Find dead exports
+    let dead_exports = find_dead_exports(
+        &snapshot.files,
+        high_confidence,
+        None,
+        DeadFilterConfig {
+            include_tests: opts.with_tests,
+            include_helpers: opts.with_helpers,
+        },
+    );
+
+    if let Some(s) = spinner {
+        s.finish_success(&format!("Found {} dead export(s)", dead_exports.len()));
+    }
+
+    // Output results
+    let output_mode = if global.json {
+        crate::types::OutputMode::Json
+    } else {
+        crate::types::OutputMode::Human
+    };
+
+    print_dead_exports(
+        &dead_exports,
+        output_mode,
+        high_confidence,
+        opts.top.unwrap_or(20),
+    );
+
+    DispatchResult::Exit(0)
+}
+
+/// Handle the cycles command - detect circular imports
+fn handle_cycles_command(opts: &CyclesOptions, global: &GlobalOptions) -> DispatchResult {
+    use crate::analyzer::cycles::{find_cycles_with_lazy, print_cycles};
+    use std::path::Path;
+
+    // Show spinner unless in quiet/json mode
+    let spinner = if !global.quiet && !global.json {
+        Some(Spinner::new("Detecting circular imports..."))
+    } else {
+        None
+    };
+
+    // Load snapshot (auto-scan if missing)
+    let root = opts
+        .roots
+        .first()
+        .map(|p| p.as_path())
+        .unwrap_or(Path::new("."));
+
+    let snapshot = match load_or_create_snapshot(root, global) {
+        Ok(s) => s,
+        Err(e) => {
+            if let Some(s) = spinner {
+                s.finish_error(&format!("Failed to load snapshot: {}", e));
+            } else {
+                eprintln!("[loct][error] {}", e);
+            }
+            return DispatchResult::Exit(1);
+        }
+    };
+
+    // Extract edges from snapshot
+    let edges: Vec<(String, String, String)> = snapshot
+        .edges
+        .iter()
+        .map(|e| (e.from.clone(), e.to.clone(), e.label.clone()))
+        .collect();
+
+    // Find cycles
+    let (cycles, lazy_cycles) = find_cycles_with_lazy(&edges);
+
+    if let Some(s) = spinner {
+        let total = cycles.len() + lazy_cycles.len();
+        s.finish_success(&format!(
+            "Found {} cycle(s) ({} strict, {} lazy)",
+            total,
+            cycles.len(),
+            lazy_cycles.len()
+        ));
+    }
+
+    // Output results
+    let json_output = global.json;
+    print_cycles(&cycles, json_output);
+
+    if !lazy_cycles.is_empty() && !json_output {
+        println!("\nLazy circular imports (info):");
+        print_cycles(&lazy_cycles, false);
+    }
+
+    DispatchResult::Exit(0)
+}
+
+/// Handle the commands command - show Tauri command bridges
+fn handle_commands_command(opts: &CommandsOptions, global: &GlobalOptions) -> DispatchResult {
+    use std::path::Path;
+
+    // Show spinner unless in quiet/json mode
+    let spinner = if !global.quiet && !global.json {
+        Some(Spinner::new("Analyzing Tauri commands..."))
+    } else {
+        None
+    };
+
+    // Load snapshot (auto-scan if missing)
+    let root = opts
+        .roots
+        .first()
+        .map(|p| p.as_path())
+        .unwrap_or(Path::new("."));
+
+    let snapshot = match load_or_create_snapshot(root, global) {
+        Ok(s) => s,
+        Err(e) => {
+            if let Some(s) = spinner {
+                s.finish_error(&format!("Failed to load snapshot: {}", e));
+            } else {
+                eprintln!("[loct][error] {}", e);
+            }
+            return DispatchResult::Exit(1);
+        }
+    };
+
+    // Filter command bridges based on options
+    let mut bridges: Vec<_> = snapshot.command_bridges.clone();
+
+    // Apply name filter
+    if let Some(ref filter) = opts.name_filter {
+        bridges.retain(|b| b.name.contains(filter));
+    }
+
+    // Apply missing-only filter
+    if opts.missing_only {
+        bridges.retain(|b| !b.has_handler && b.is_called);
+    }
+
+    // Apply unused-only filter
+    if opts.unused_only {
+        bridges.retain(|b| b.has_handler && !b.is_called);
+    }
+
+    if let Some(s) = spinner {
+        s.finish_success(&format!("Found {} command bridge(s)", bridges.len()));
+    }
+
+    // Output results
+    if global.json {
+        match serde_json::to_string_pretty(&bridges) {
+            Ok(json) => println!("{}", json),
+            Err(e) => {
+                eprintln!("[loct][error] Failed to serialize command bridges: {}", e);
+                return DispatchResult::Exit(1);
+            }
+        }
+    } else {
+        // Human-readable output
+        if bridges.is_empty() {
+            println!("No command bridges found matching criteria");
+        } else {
+            println!("Tauri Command Bridges ({} total):\n", bridges.len());
+
+            for bridge in &bridges {
+                let status = if !bridge.has_handler && bridge.is_called {
+                    "MISSING"
+                } else if bridge.has_handler && !bridge.is_called {
+                    "UNUSED"
+                } else if bridge.has_handler && bridge.is_called {
+                    "OK"
+                } else {
+                    "?"
+                };
+
+                println!("  [{}] {}", status, bridge.name);
+
+                if !bridge.frontend_calls.is_empty() {
+                    println!("    Frontend calls ({}):", bridge.frontend_calls.len());
+                    for (file, line) in bridge.frontend_calls.iter().take(3) {
+                        println!("      {}:{}", file, line);
+                    }
+                    if bridge.frontend_calls.len() > 3 {
+                        println!("      ... and {} more", bridge.frontend_calls.len() - 3);
+                    }
+                }
+
+                if let Some((ref backend_file, backend_line)) = bridge.backend_handler {
+                    println!("    Backend: {}:{}", backend_file, backend_line);
+                }
+
+                println!();
+            }
+        }
+    }
+
+    DispatchResult::Exit(0)
+}
+
+/// Handle the events command - analyze event flow
+fn handle_events_command(opts: &EventsOptions, global: &GlobalOptions) -> DispatchResult {
+    use std::path::Path;
+
+    // Show spinner unless in quiet/json mode
+    let spinner = if !global.quiet && !global.json {
+        Some(Spinner::new("Analyzing event flow..."))
+    } else {
+        None
+    };
+
+    // Load snapshot (auto-scan if missing)
+    let root = opts
+        .roots
+        .first()
+        .map(|p| p.as_path())
+        .unwrap_or(Path::new("."));
+
+    let snapshot = match load_or_create_snapshot(root, global) {
+        Ok(s) => s,
+        Err(e) => {
+            if let Some(s) = spinner {
+                s.finish_error(&format!("Failed to load snapshot: {}", e));
+            } else {
+                eprintln!("[loct][error] {}", e);
+            }
+            return DispatchResult::Exit(1);
+        }
+    };
+
+    if let Some(s) = spinner {
+        s.finish_success(&format!(
+            "Found {} event bridge(s)",
+            snapshot.event_bridges.len()
+        ));
+    }
+
+    // Output results
+    if global.json {
+        match serde_json::to_string_pretty(&snapshot.event_bridges) {
+            Ok(json) => println!("{}", json),
+            Err(e) => {
+                eprintln!("[loct][error] Failed to serialize events: {}", e);
+                return DispatchResult::Exit(1);
+            }
+        }
+    } else {
+        println!("Event Bridges Analysis:\n");
+
+        if snapshot.event_bridges.is_empty() {
+            println!("No event bridges found");
+        } else {
+            println!("Found {} event bridge(s):\n", snapshot.event_bridges.len());
+
+            for event in &snapshot.event_bridges {
+                println!("  Event: {}", event.name);
+
+                if !event.emits.is_empty() {
+                    println!("    Emit locations ({}):", event.emits.len());
+                    for (file, line, kind) in event.emits.iter().take(3) {
+                        println!("      {}:{} [{}]", file, line, kind);
+                    }
+                    if event.emits.len() > 3 {
+                        println!("      ... and {} more", event.emits.len() - 3);
+                    }
+                }
+
+                if !event.listens.is_empty() {
+                    println!("    Listen locations ({}):", event.listens.len());
+                    for (file, line) in event.listens.iter().take(3) {
+                        println!("      {}:{}", file, line);
+                    }
+                    if event.listens.len() > 3 {
+                        println!("      ... and {} more", event.listens.len() - 3);
+                    }
+                }
+
+                // Highlight potential issues
+                if event.emits.is_empty() {
+                    println!("    ⚠️  No emitters found (orphan listener?)");
+                }
+                if event.listens.is_empty() {
+                    println!("    ⚠️  No listeners found (orphan emitter?)");
+                }
+
+                println!();
+            }
+        }
+    }
+
+    DispatchResult::Exit(0)
+}
+
+/// Handle the lint command - run linting checks
+fn handle_lint_command(opts: &LintOptions, global: &GlobalOptions) -> DispatchResult {
+    use std::path::Path;
+
+    // Show spinner unless in quiet/json mode
+    let spinner = if !global.quiet && !global.json {
+        Some(Spinner::new("Running lint checks..."))
+    } else {
+        None
+    };
+
+    // Load snapshot (auto-scan if missing)
+    let root = opts
+        .roots
+        .first()
+        .map(|p| p.as_path())
+        .unwrap_or(Path::new("."));
+
+    let snapshot = match load_or_create_snapshot(root, global) {
+        Ok(s) => s,
+        Err(e) => {
+            if let Some(s) = spinner {
+                s.finish_error(&format!("Failed to load snapshot: {}", e));
+            } else {
+                eprintln!("[loct][error] {}", e);
+            }
+            return DispatchResult::Exit(1);
+        }
+    };
+
+    let mut issues_found = 0;
+
+    // Check for missing handlers if requested
+    if opts.fail || opts.tauri {
+        let missing_handlers: Vec<_> = snapshot
+            .command_bridges
+            .iter()
+            .filter(|b| !b.has_handler && b.is_called)
+            .collect();
+
+        if !missing_handlers.is_empty() {
+            issues_found += missing_handlers.len();
+
+            if !global.quiet {
+                eprintln!(
+                    "[loct][lint] {} missing Tauri handlers:",
+                    missing_handlers.len()
+                );
+                for bridge in &missing_handlers {
+                    eprintln!("  - {}", bridge.name);
+                }
+            }
+        }
+    }
+
+    // Check for problematic event bridges if requested
+    if opts.fail {
+        // Count events with no emitters or no listeners
+        let orphan_events = snapshot
+            .event_bridges
+            .iter()
+            .filter(|e| e.emits.is_empty() || e.listens.is_empty())
+            .collect::<Vec<_>>();
+
+        if !orphan_events.is_empty() {
+            issues_found += orphan_events.len();
+
+            if !global.quiet {
+                eprintln!("[loct][lint] {} orphan events:", orphan_events.len());
+                for event in orphan_events.iter().take(5) {
+                    if event.emits.is_empty() {
+                        eprintln!("  - {} (no emitters)", event.name);
+                    } else {
+                        eprintln!("  - {} (no listeners)", event.name);
+                    }
+                }
+                if orphan_events.len() > 5 {
+                    eprintln!("  ... and {} more", orphan_events.len() - 5);
+                }
+            }
+        }
+    }
+
+    // Determine exit code based on findings and --fail flag
+    let exit_code = if opts.fail && issues_found > 0 { 1 } else { 0 };
+
+    if let Some(s) = spinner {
+        if issues_found > 0 {
+            s.finish_warning(&format!("Found {} issue(s)", issues_found));
+        } else {
+            s.finish_success("No issues found");
+        }
+    } else if !global.quiet {
+        if issues_found == 0 {
+            println!("[loct][lint] No issues found");
+        } else {
+            println!("[loct][lint] Found {} issue(s)", issues_found);
+        }
+    }
+
+    // Output SARIF format if requested
+    if opts.sarif {
+        // TODO: Implement SARIF output using crate::analyzer::sarif
+        eprintln!("[loct][warn] SARIF output not yet implemented for unified lint command");
+    }
+
+    DispatchResult::Exit(exit_code)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -832,5 +1586,20 @@ mod tests {
         let parsed_cmd = ParsedCommand::new(Command::Version, GlobalOptions::default());
         let result = dispatch_command(&parsed_cmd);
         assert!(matches!(result, DispatchResult::ShowVersion));
+    }
+
+    #[test]
+    fn test_crowd_command_to_dispatch() {
+        let parsed_cmd = ParsedCommand::new(
+            Command::Crowd(CrowdOptions {
+                pattern: Some("message".into()),
+                ..Default::default()
+            }),
+            GlobalOptions::default(),
+        );
+        // Just verify it doesn't panic and returns Exit (will fail without snapshot, but that's OK)
+        let result = dispatch_command(&parsed_cmd);
+        // Should be Exit(1) because no snapshot exists in test env
+        assert!(matches!(result, DispatchResult::Exit(_)));
     }
 }

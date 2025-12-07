@@ -43,3 +43,7 @@ loctree-*.min.js
 gha-creds-*.json
 GEMINI.md
 **/.loctree/**/report.html
+/loctree_memex/target
+/loctree_server/target
+/target
+brave-mcp-servers-report.md

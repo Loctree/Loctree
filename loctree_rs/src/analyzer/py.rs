@@ -156,6 +156,134 @@ fn parse_all_list(content: &str) -> Vec<String> {
     names
 }
 
+/// Extract type names from decorator parameters.
+/// Detects patterns like:
+/// - response_model=ClassName
+/// - response_model=List[ClassName]
+/// - Depends(ClassName)
+/// - Depends(get_func)
+fn extract_decorator_type_usages(line: &str, local_uses: &mut Vec<String>) {
+    if !line.contains('(') {
+        return;
+    }
+    const SKIP_IDENTS: &[&str] = &[
+        "None",
+        "True",
+        "False",
+        "str",
+        "int",
+        "float",
+        "bool",
+        "bytes",
+        "list",
+        "dict",
+        "set",
+        "tuple",
+        "frozenset",
+        "type",
+        "object",
+        "Any",
+        "Union",
+        "Optional",
+        "List",
+        "Dict",
+        "Set",
+        "Tuple",
+        "Callable",
+        "Sequence",
+        "Mapping",
+        "Iterable",
+        "Iterator",
+        "Type",
+        "self",
+        "cls",
+    ];
+    let bytes = line.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+    while i < len {
+        if i + 14 < len {
+            let slice = &line[i..];
+            if slice.starts_with("response_model=") || slice.starts_with("response_class=") {
+                let eq_pos = slice.find('=').unwrap_or(0);
+                i += eq_pos + 1;
+                while i < len && bytes[i].is_ascii_whitespace() {
+                    i += 1;
+                }
+                extract_type_from_decorator(line, &mut i, local_uses, SKIP_IDENTS);
+                continue;
+            }
+        }
+        if i + 8 < len && &line[i..i + 8] == "Depends(" {
+            i += 8;
+            while i < len && bytes[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            if i < len && (bytes[i].is_ascii_alphabetic() || bytes[i] == b'_') {
+                let start = i;
+                while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                    i += 1;
+                }
+                let ident = &line[start..i];
+                if !SKIP_IDENTS.contains(&ident) && !local_uses.contains(&ident.to_string()) {
+                    local_uses.push(ident.to_string());
+                }
+            }
+            continue;
+        }
+        i += 1;
+    }
+}
+
+fn extract_type_from_decorator(
+    line: &str,
+    pos: &mut usize,
+    local_uses: &mut Vec<String>,
+    skip_idents: &[&str],
+) {
+    let bytes = line.as_bytes();
+    let len = bytes.len();
+    let i = *pos;
+    if i >= len || !(bytes[i].is_ascii_alphabetic() || bytes[i] == b'_') {
+        return;
+    }
+    let start = i;
+    let mut j = i;
+    while j < len && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_') {
+        j += 1;
+    }
+    let ident = &line[start..j];
+    *pos = j;
+    if j < len && bytes[j] == b'[' {
+        j += 1;
+        let mut bracket_depth = 1;
+        while j < len && bracket_depth > 0 {
+            match bytes[j] {
+                b'[' => bracket_depth += 1,
+                b']' => bracket_depth -= 1,
+                _ if bytes[j].is_ascii_alphabetic() || bytes[j] == b'_' => {
+                    let inner_start = j;
+                    while j < len && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_') {
+                        j += 1;
+                    }
+                    let inner_ident = &line[inner_start..j];
+                    if !skip_idents.contains(&inner_ident)
+                        && !local_uses.contains(&inner_ident.to_string())
+                    {
+                        local_uses.push(inner_ident.to_string());
+                    }
+                    continue;
+                }
+                _ => {}
+            }
+            j += 1;
+        }
+        *pos = j;
+    } else if !skip_idents.contains(&ident) && !local_uses.contains(&ident.to_string()) {
+        local_uses.push(ident.to_string());
+    }
+}
+
 /// Check if a decorator line indicates a framework that "uses" the decorated function.
 /// Returns true for pytest fixtures, CLI decorators, web route handlers, etc.
 fn is_framework_decorator(line: &str) -> bool {
@@ -487,6 +615,7 @@ pub(crate) fn analyze_py_file(
     let mut type_check_stack: Vec<usize> = Vec::new();
     let mut pending_callback_decorator = false;
     let mut pending_framework_decorator = false;
+    let mut pending_fixture_decorator = false;
     let mut in_docstring = false;
 
     // Set Python-specific metadata
@@ -555,6 +684,12 @@ pub(crate) fn analyze_py_file(
             if is_framework_decorator(trimmed) {
                 pending_framework_decorator = true;
             }
+            // pytest fixtures: treat next def as used
+            if trimmed.contains("pytest.fixture") {
+                pending_fixture_decorator = true;
+            }
+            // Extract type usages from decorator parameters (response_model=X, Depends(X))
+            extract_decorator_type_usages(trimmed, &mut analysis.local_uses);
             continue;
         }
 
@@ -571,6 +706,7 @@ pub(crate) fn analyze_py_file(
                     entry.resolution = resolution;
                     entry.resolved_path = resolved;
                     entry.is_type_checking = in_type_checking;
+                    entry.is_lazy = indent > 0;
                     analysis.imports.push(entry);
                 }
             }
@@ -587,6 +723,7 @@ pub(crate) fn analyze_py_file(
                 entry.resolution = resolution;
                 entry.resolved_path = resolved.clone();
                 entry.is_type_checking = in_type_checking;
+                entry.is_lazy = indent > 0;
                 entry.source_raw = format!("from {} import {}", module, names_clean);
 
                 if names_clean != "*" {
@@ -700,8 +837,12 @@ pub(crate) fn analyze_py_file(
                 if (pending_callback_decorator || pending_framework_decorator) && !name.is_empty() {
                     analysis.local_uses.push(name.to_string());
                 }
+                if pending_fixture_decorator && !name.is_empty() {
+                    analysis.local_uses.push(name.to_string());
+                }
                 pending_callback_decorator = false;
                 pending_framework_decorator = false;
+                pending_fixture_decorator = false;
             } else if !trimmed.is_empty()
                 && !trimmed.starts_with('#')
                 && !trimmed.starts_with("class ")
@@ -781,6 +922,11 @@ fn extract_type_hint_usages(content: &str, local_uses: &mut Vec<String>) {
         "TypedDict",
         "NewType",
         "cast",
+        // FastAPI dependency injection
+        "Depends",
+        "Security",
+        // Pydantic
+        "Field",
     ];
 
     // Keywords and builtins to skip
@@ -1665,6 +1811,35 @@ def process(items: List[Session]) -> None:
             analysis.local_uses.contains(&"Session".to_string()),
             "Session not found in local_uses: {:?}",
             analysis.local_uses
+        );
+    }
+
+    #[test]
+    fn marks_pytest_fixture_as_used() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path();
+
+        let content = r#"
+import pytest
+
+@pytest.fixture
+def client():
+    return object()
+"#;
+
+        let analysis = analyze_py_file(
+            content,
+            &root.join("conftest.py"),
+            root,
+            Some(&py_exts()),
+            "conftest.py".to_string(),
+            &[root.to_path_buf()],
+            &HashSet::new(),
+        );
+
+        assert!(
+            analysis.local_uses.contains(&"client".to_string()),
+            "pytest fixture should be marked as used"
         );
     }
 

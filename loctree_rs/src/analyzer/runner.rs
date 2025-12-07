@@ -30,10 +30,12 @@ const SCHEMA_NAME: &str = "loctree-json";
 const SCHEMA_VERSION: &str = "1.2.0";
 
 pub fn default_analyzer_exts() -> HashSet<String> {
-    ["ts", "tsx", "js", "jsx", "mjs", "cjs", "rs", "css", "py"]
-        .iter()
-        .map(|s| s.to_string())
-        .collect()
+    [
+        "ts", "tsx", "js", "jsx", "mjs", "cjs", "rs", "css", "py", "svelte", "vue",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
 }
 
 pub fn styles_preset_exts() -> HashSet<String> {
@@ -411,8 +413,12 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         .collect();
 
     if parsed.circular {
-        let cycles = super::cycles::find_cycles(&all_graph_edges);
+        let (cycles, lazy_cycles) = super::cycles::find_cycles_with_lazy(&all_graph_edges);
         super::cycles::print_cycles(&cycles, matches!(parsed.output, OutputMode::Json));
+        if !lazy_cycles.is_empty() && !matches!(parsed.output, OutputMode::Json) {
+            println!("\nLazy circular imports (info):");
+            super::cycles::print_cycles(&lazy_cycles, false);
+        }
         return Ok(());
     }
 
@@ -497,7 +503,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         );
 
         // Get circular imports
-        let circular_imports = super::cycles::find_cycles(&all_graph_edges);
+        let (circular_imports, _lazy) = super::cycles::find_cycles_with_lazy(&all_graph_edges);
 
         super::sarif::print_sarif(super::sarif::SarifInputs {
             duplicate_exports: &all_ranked_dups,
@@ -675,7 +681,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
     }
 
     if let Some(max_cycles) = parsed.max_cycles {
-        let cycles = super::cycles::find_cycles(&all_graph_edges);
+        let (cycles, _) = super::cycles::find_cycles_with_lazy(&all_graph_edges);
         let cycle_count = cycles.len();
         if cycle_count > max_cycles {
             fail_reasons.push(format!(

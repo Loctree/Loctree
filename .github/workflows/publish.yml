@@ -262,20 +262,19 @@ jobs:
 
       - name: Build release binary
         run: |
-          cd loctree_rs
-          cargo build --release --target ${{ matrix.target }}
+          cargo build -p loctree --release --target ${{ matrix.target }}
 
       - name: Prepare artifact (Unix)
         if: runner.os != 'Windows'
         run: |
-          cp loctree_rs/target/${{ matrix.target }}/release/loctree ${{ matrix.artifact }}
+          cp target/${{ matrix.target }}/release/loctree ${{ matrix.artifact }}
           chmod +x ${{ matrix.artifact }}
           tar -czvf ${{ matrix.artifact }}.tar.gz ${{ matrix.artifact }}
 
       - name: Prepare artifact (Windows)
         if: runner.os == 'Windows'
         run: |
-          copy loctree_rs\target\${{ matrix.target }}\release\loctree.exe ${{ matrix.artifact }}
+          copy target\${{ matrix.target }}\release\loctree.exe ${{ matrix.artifact }}
           Compress-Archive -Path ${{ matrix.artifact }} -DestinationPath ${{ matrix.artifact }}.zip
 
       - name: Upload to Release
