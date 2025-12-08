@@ -427,7 +427,7 @@ mod tests {
         });
         importer.imports.push(import);
 
-        let registry = build_symbol_registry(&vec![exporter, importer]);
+        let registry = build_symbol_registry(&[exporter, importer]);
 
         let helper_entry = registry
             .get(&("utils.ts".to_string(), "helper".to_string()))
@@ -454,7 +454,7 @@ mod tests {
         });
         importer.imports.push(import);
 
-        let result = find_dead_parrots(&vec![used_file, dead_file, importer], true);
+        let result = find_dead_parrots(&[used_file, dead_file, importer], true);
 
         assert_eq!(result.dead_parrots.len(), 1);
         assert_eq!(result.dead_parrots[0].name, "unused");
@@ -520,7 +520,7 @@ mod tests {
         });
         importer.imports.push(import);
 
-        let twins = detect_exact_twins(&vec![a, b, importer]);
+        let twins = detect_exact_twins(&[a, b, importer]);
         assert_eq!(twins.len(), 1);
 
         // Canonical should be the one with imports (a.ts)

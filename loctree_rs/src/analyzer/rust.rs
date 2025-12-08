@@ -2327,7 +2327,7 @@ pub struct CustomType {
         // Create a temporary directory structure for testing
         let temp_dir = std::env::temp_dir().join("loctree_test_crate");
         let _ = std::fs::remove_dir_all(&temp_dir);
-        std::fs::create_dir_all(&temp_dir.join("src/foo")).unwrap();
+        std::fs::create_dir_all(temp_dir.join("src/foo")).unwrap();
 
         // Create lib.rs with module declarations
         std::fs::write(temp_dir.join("src/lib.rs"), "pub mod foo;\npub mod bar;\n").unwrap();
@@ -2382,7 +2382,7 @@ pub struct CustomType {
     fn crate_module_map_resolves_super() {
         let temp_dir = std::env::temp_dir().join("loctree_test_super");
         let _ = std::fs::remove_dir_all(&temp_dir);
-        std::fs::create_dir_all(&temp_dir.join("src/foo")).unwrap();
+        std::fs::create_dir_all(temp_dir.join("src/foo")).unwrap();
 
         // Create lib.rs
         std::fs::write(temp_dir.join("src/lib.rs"), "pub mod foo;\n").unwrap();
@@ -2419,7 +2419,7 @@ pub struct CustomType {
     fn crate_module_map_resolves_self() {
         let temp_dir = std::env::temp_dir().join("loctree_test_self");
         let _ = std::fs::remove_dir_all(&temp_dir);
-        std::fs::create_dir_all(&temp_dir.join("src/foo")).unwrap();
+        std::fs::create_dir_all(temp_dir.join("src/foo")).unwrap();
 
         // Create lib.rs
         std::fs::write(temp_dir.join("src/lib.rs"), "pub mod foo;\n").unwrap();
@@ -2452,7 +2452,7 @@ pub struct CustomType {
     fn crate_module_map_resolves_relative_imports() {
         let temp_dir = std::env::temp_dir().join("loctree_test_relative");
         let _ = std::fs::remove_dir_all(&temp_dir);
-        std::fs::create_dir_all(&temp_dir.join("src")).unwrap();
+        std::fs::create_dir_all(temp_dir.join("src")).unwrap();
 
         // Create lib.rs
         std::fs::write(temp_dir.join("src/lib.rs"), "pub mod foo;\npub mod bar;\n").unwrap();
@@ -2482,7 +2482,7 @@ pub struct CustomType {
         // Test the foo/mod.rs convention
         let temp_dir = std::env::temp_dir().join("loctree_test_mod_dir");
         let _ = std::fs::remove_dir_all(&temp_dir);
-        std::fs::create_dir_all(&temp_dir.join("src/foo")).unwrap();
+        std::fs::create_dir_all(temp_dir.join("src/foo")).unwrap();
 
         // Create lib.rs
         std::fs::write(temp_dir.join("src/lib.rs"), "pub mod foo;\n").unwrap();
@@ -2509,7 +2509,7 @@ pub struct CustomType {
         // Test that we can resolve imports with type names (last segment)
         let temp_dir = std::env::temp_dir().join("loctree_test_types");
         let _ = std::fs::remove_dir_all(&temp_dir);
-        std::fs::create_dir_all(&temp_dir.join("src")).unwrap();
+        std::fs::create_dir_all(temp_dir.join("src")).unwrap();
 
         // Create lib.rs
         std::fs::write(temp_dir.join("src/lib.rs"), "pub mod types;\n").unwrap();
