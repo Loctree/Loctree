@@ -11,8 +11,8 @@ use crate::types::ColorMode;
 
 /// Known subcommand names for the new CLI interface.
 const SUBCOMMANDS: &[&str] = &[
-    "auto", "scan", "tree", "slice", "find", "dead", "unused", "cycles", "commands", "events",
-    "info", "lint", "report", "help", "query", "diff", "memex", "crowd", "twins",
+    "auto", "agent", "scan", "tree", "slice", "find", "dead", "unused", "cycles", "commands",
+    "events", "info", "lint", "report", "help", "query", "diff", "crowd", "twins", "routes",
 ];
 
 /// Check if an argument looks like a new-style subcommand.
@@ -157,8 +157,31 @@ pub fn parse_command(args: &[String]) -> Result<Option<ParsedCommand>, String> {
     }
 
     // Parse the specific command
+    if let Some(sub) = subcommand.as_deref()
+        && remaining_args.iter().any(|a| a == "--help" || a == "-h")
+    {
+        return Ok(Some(ParsedCommand::new(
+            Command::Help(HelpOptions {
+                command: Some(sub.to_string()),
+                ..Default::default()
+            }),
+            global,
+        )));
+    }
+
     let command = match subcommand.as_deref() {
         None | Some("auto") => parse_auto_command(&remaining_args)?,
+        Some("agent") => {
+            let cmd = parse_auto_command(&remaining_args)?;
+            match cmd {
+                Command::Auto(mut opts) => {
+                    opts.for_agent_feed = true;
+                    opts.agent_json = true;
+                    Command::Auto(opts)
+                }
+                other => other,
+            }
+        }
         Some("scan") => parse_scan_command(&remaining_args)?,
         Some("tree") => parse_tree_command(&remaining_args)?,
         Some("slice") => parse_slice_command(&remaining_args)?,
@@ -167,13 +190,13 @@ pub fn parse_command(args: &[String]) -> Result<Option<ParsedCommand>, String> {
         Some("cycles") => parse_cycles_command(&remaining_args)?,
         Some("commands") => parse_commands_command(&remaining_args)?,
         Some("events") => parse_events_command(&remaining_args)?,
+        Some("routes") => parse_routes_command(&remaining_args)?,
         Some("info") => parse_info_command(&remaining_args)?,
         Some("lint") => parse_lint_command(&remaining_args)?,
         Some("report") => parse_report_command(&remaining_args)?,
         Some("help") => parse_help_command(&remaining_args)?,
         Some("query") => parse_query_command(&remaining_args)?,
         Some("diff") => parse_diff_command(&remaining_args)?,
-        Some("memex") => parse_memex_command(&remaining_args)?,
         Some("crowd") => parse_crowd_command(&remaining_args)?,
         Some("twins") => parse_twins_command(&remaining_args)?,
         Some(unknown) => {
@@ -225,7 +248,10 @@ DESCRIPTION:
 OPTIONS:
     --full-scan          Force full rescan (ignore cache)
     --scan-all           Scan all files including hidden/ignored
-    --for-agent-feed     Output optimized format for AI agents
+    --for-agent-feed     Output optimized format for AI agents (JSONL stream)
+    --agent-json         Emit a single agent bundle JSON (alias: loct agent)
+    --no-duplicates      Hide duplicate export sections in CLI output
+    --no-dynamic-imports Hide dynamic import sections in CLI output
     --help, -h           Show this help message
 
 ARGUMENTS:
@@ -236,7 +262,8 @@ EXAMPLES:
     loct auto                    # Explicit auto command
     loct auto --full-scan        # Force full rescan
     loct auto src/ lib/          # Scan specific directories
-    loct --for-agent-feed        # AI-optimized output"
+    loct --for-agent-feed        # AI-optimized output (JSONL stream)
+    loct --agent-json            # Single agent bundle JSON"
                 .to_string(),
         );
     }
@@ -257,6 +284,19 @@ EXAMPLES:
             }
             "--for-agent-feed" => {
                 opts.for_agent_feed = true;
+                i += 1;
+            }
+            "--agent-json" => {
+                opts.for_agent_feed = true;
+                opts.agent_json = true;
+                i += 1;
+            }
+            "--no-duplicates" => {
+                opts.suppress_duplicates = true;
+                i += 1;
+            }
+            "--no-dynamic-imports" => {
+                opts.suppress_dynamic = true;
                 i += 1;
             }
             _ if !arg.starts_with('-') => {
@@ -359,7 +399,9 @@ DESCRIPTION:
 OPTIONS:
     --depth <N>, -L <N>    Maximum depth to display (default: unlimited)
     --summary [N]          Show summary of top N largest items (default: 5)
+    --top [N]              Show only top N largest items (default: 50)
     --loc <N>              Only show items with LOC >= N
+    --min-loc <N>          Alias for --loc
     --show-hidden, -H      Include hidden files/directories
     --find-artifacts       Highlight build artifacts and generated files
     --show-ignored         Show gitignored files (normally hidden)
@@ -405,11 +447,31 @@ EXAMPLES:
                 opts.summary = Some(5); // Default summary limit
                 i += 1;
             }
+            "--top" => {
+                if let Some(next) = args.get(i + 1)
+                    && !next.starts_with('-')
+                {
+                    opts.summary = Some(next.parse().map_err(|_| "--top value must be a number")?);
+                    i += 2;
+                } else {
+                    opts.summary = Some(50);
+                    i += 1;
+                }
+                opts.summary_only = true;
+            }
             "--loc" => {
                 let value = args
                     .get(i + 1)
                     .ok_or_else(|| "--loc requires a value".to_string())?;
                 opts.loc_threshold = Some(value.parse().map_err(|_| "--loc requires a number")?);
+                i += 2;
+            }
+            "--min-loc" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--min-loc requires a value".to_string())?;
+                opts.loc_threshold =
+                    Some(value.parse().map_err(|_| "--min-loc requires a number")?);
                 i += 2;
             }
             "--show-hidden" | "-H" => {
@@ -547,6 +609,7 @@ DESCRIPTION:
 
 OPTIONS:
     --symbol <PATTERN>, -s <PATTERN>    Search for symbols matching regex
+    --pattern <PATTERN>                 Alias for --symbol (regex)
     --file <PATTERN>, -f <PATTERN>      Search for files matching regex
     --impact <FILE>                     Show symbols affected by file changes
     --similar <SYMBOL>                  Find symbols with similar names
@@ -581,6 +644,13 @@ EXAMPLES:
                 let value = args
                     .get(i + 1)
                     .ok_or_else(|| "--symbol requires a pattern".to_string())?;
+                opts.symbol = Some(value.clone());
+                i += 2;
+            }
+            "--pattern" => {
+                let value = args.get(i + 1).ok_or_else(|| {
+                    "--pattern requires a pattern (alias for --symbol)".to_string()
+                })?;
                 opts.symbol = Some(value.clone());
                 i += 2;
             }
@@ -670,6 +740,7 @@ OPTIONS:
                            medium = only used in tests
                            low = complex re-export, may be false positive
     --top <N>              Limit to top N results (default: 20)
+    --full, --all          Show all results (ignore top limit)
     --path <PATTERN>       Filter to files matching pattern
     --with-tests           Include test files in analysis
     --exclude-tests        Exclude test files (default)
@@ -712,6 +783,10 @@ RUST CRATE-INTERNAL IMPORTS:
                     .ok_or_else(|| "--top requires a number".to_string())?;
                 opts.top = Some(value.parse().map_err(|_| "--top requires a number")?);
                 i += 2;
+            }
+            "--full" | "--all" => {
+                opts.full = true;
+                i += 1;
             }
             "--path" => {
                 let value = args
@@ -833,6 +908,8 @@ OPTIONS:
     --name <PATTERN>   Filter to commands matching pattern
     --missing          Show only missing handlers (FE calls → no BE)
     --unused           Show only unused handlers (BE exists → no FE calls)
+    --no-duplicates    Hide duplicate export sections in CLI output
+    --no-dynamic-imports Hide dynamic import sections in CLI output
     --help, -h         Show this help message
 
 EXAMPLES:
@@ -862,6 +939,14 @@ EXAMPLES:
             }
             "--unused" => {
                 opts.unused_only = true;
+                i += 1;
+            }
+            "--no-duplicates" => {
+                opts.suppress_duplicates = true;
+                i += 1;
+            }
+            "--no-dynamic-imports" => {
+                opts.suppress_dynamic = true;
                 i += 1;
             }
             _ if !arg.starts_with('-') => {
@@ -901,6 +986,8 @@ OPTIONS:
     --ghost      Show only ghost events (emitted but never listened)
     --orphan     Show only orphan listeners (listening but never emitted)
     --races      Show only potential race conditions (multiple emitters)
+    --no-duplicates      Hide duplicate export sections in CLI output
+    --no-dynamic-imports Hide dynamic import sections in CLI output
     --help, -h   Show this help message
 
 EXAMPLES:
@@ -929,6 +1016,14 @@ EXAMPLES:
                 opts.races = true;
                 i += 1;
             }
+            "--no-duplicates" => {
+                opts.suppress_duplicates = true;
+                i += 1;
+            }
+            "--no-dynamic-imports" => {
+                opts.suppress_dynamic = true;
+                i += 1;
+            }
             _ if !arg.starts_with('-') => {
                 opts.roots.push(PathBuf::from(arg));
                 i += 1;
@@ -944,6 +1039,71 @@ EXAMPLES:
     }
 
     Ok(Command::Events(opts))
+}
+
+fn parse_routes_command(args: &[String]) -> Result<Command, String> {
+    // Check for help flag first
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        return Err("loct routes - List backend/web routes (FastAPI/Flask)
+
+USAGE:
+    loct routes [OPTIONS] [PATHS...]
+
+DESCRIPTION:
+    Detects Python web routes based on common decorators:
+    - FastAPI: @app.get/post/put/delete/patch, @router.*, @api_router.*
+    - Flask:   @app.route, @blueprint.route, .route(...)
+
+    Useful for contract checks and quick navigation of backend endpoints.
+
+OPTIONS:
+    --framework <NAME>   Filter by framework label (fastapi, flask)
+    --path <PATTERN>     Filter by route path substring
+    --help, -h           Show this help message
+
+EXAMPLES:
+    loct routes                    # Show all detected routes
+    loct routes --framework fastapi
+    loct routes --path /patients
+    loct routes api/               # Limit analysis to api/ path"
+            .to_string());
+    }
+
+    let mut opts = RoutesOptions::default();
+    let mut i = 0;
+
+    while i < args.len() {
+        let arg = &args[i];
+        match arg.as_str() {
+            "--framework" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--framework requires a value".to_string())?;
+                opts.framework = Some(value.clone());
+                i += 2;
+            }
+            "--path" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--path requires a value".to_string())?;
+                opts.path_filter = Some(value.clone());
+                i += 2;
+            }
+            _ if !arg.starts_with('-') => {
+                opts.roots.push(PathBuf::from(arg));
+                i += 1;
+            }
+            _ => {
+                return Err(format!("Unknown option '{}' for 'routes' command.", arg));
+            }
+        }
+    }
+
+    if opts.roots.is_empty() {
+        opts.roots.push(PathBuf::from("."));
+    }
+
+    Ok(Command::Routes(opts))
 }
 
 fn parse_info_command(args: &[String]) -> Result<Command, String> {
@@ -1020,6 +1180,8 @@ OPTIONS:
     --fail           Exit with code 1 if any violations found (CI mode)
     --sarif          Output in SARIF format (GitHub Code Scanning compatible)
     --tauri          Enable Tauri-specific contract checks (commands, events)
+    --no-duplicates  Hide duplicate export sections in CLI output
+    --no-dynamic-imports Hide dynamic import sections in CLI output
     --help, -h       Show this help message
 
 EXAMPLES:
@@ -1050,6 +1212,14 @@ EXAMPLES:
             }
             "--tauri" => {
                 opts.tauri = true;
+                i += 1;
+            }
+            "--no-duplicates" => {
+                opts.suppress_duplicates = true;
+                i += 1;
+            }
+            "--no-dynamic-imports" => {
+                opts.suppress_dynamic = true;
                 i += 1;
             }
             _ if !arg.starts_with('-') => {
@@ -1321,92 +1491,7 @@ EXAMPLES:
     Ok(Command::Diff(opts))
 }
 
-fn parse_memex_command(args: &[String]) -> Result<Command, String> {
-    // Check for help flag first
-    if args.iter().any(|a| a == "--help" || a == "-h") {
-        return Err("loct memex - Index analysis into AI memory (vector DB)
-
-USAGE:
-    loct memex [REPORT_PATH] [OPTIONS]
-
-DESCRIPTION:
-    Indexes code analysis results into a vector database for AI agent memory.
-    Creates semantic embeddings of:
-    - File summaries and purposes
-    - Symbol definitions and usage patterns
-    - Import relationships
-    - Dead code and quality issues
-
-    Enables AI agents to query codebase semantically: \"find patient validation logic\"
-    instead of keyword search.
-
-    NOTE: Requires building with --features memex
-
-OPTIONS:
-    --report-path, -r <PATH>   Path to analysis report (JSON format)
-    --project-id <ID>          Project identifier for multi-project databases
-    --namespace, -n <NAME>     Namespace for embeddings (default: default)
-    --db-path <PATH>           Custom vector DB path (default: ~/.loctree/memex.db)
-    --help, -h                 Show this help message
-
-EXAMPLES:
-    loct memex report.json                 # Index report into default DB
-    loct memex -r report.json --project-id vista   # Index with project ID
-    loct memex --namespace prod --db-path /data/memex.db   # Custom namespace and DB
-
-BUILDING WITH MEMEX:
-    cargo build --features memex
-    cargo install loctree --features memex"
-            .to_string());
-    }
-
-    let mut opts = MemexOptions::default();
-    let mut i = 0;
-
-    while i < args.len() {
-        let arg = &args[i];
-        match arg.as_str() {
-            "--report-path" | "-r" => {
-                let value = args
-                    .get(i + 1)
-                    .ok_or_else(|| "--report-path requires a path".to_string())?;
-                opts.report_path = PathBuf::from(value);
-                i += 2;
-            }
-            "--project-id" => {
-                let value = args
-                    .get(i + 1)
-                    .ok_or_else(|| "--project-id requires a value".to_string())?;
-                opts.project_id = Some(value.clone());
-                i += 2;
-            }
-            "--namespace" | "-n" => {
-                let value = args
-                    .get(i + 1)
-                    .ok_or_else(|| "--namespace requires a value".to_string())?;
-                opts.namespace = value.clone();
-                i += 2;
-            }
-            "--db-path" => {
-                let value = args
-                    .get(i + 1)
-                    .ok_or_else(|| "--db-path requires a path".to_string())?;
-                opts.db_path = Some(value.clone());
-                i += 2;
-            }
-            _ if !arg.starts_with('-') => {
-                // Positional argument is report path
-                opts.report_path = PathBuf::from(arg);
-                i += 1;
-            }
-            _ => {
-                return Err(format!("Unknown option '{}' for 'memex' command.", arg));
-            }
-        }
-    }
-
-    Ok(Command::Memex(opts))
-}
+// memex command intentionally removed from base edition
 
 fn parse_crowd_command(args: &[String]) -> Result<Command, String> {
     // Check for help flag first

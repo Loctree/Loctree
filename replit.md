@@ -5,9 +5,7 @@ Loctree is a static analysis tool designed for AI agents and developers to under
 The project consists of:
 - **loctree_rs**: Core Rust CLI analyzer that performs static analysis
 - **reports**: Leptos-based (WASM) HTML report generator
-- **landing**: Marketing website built with Leptos CSR
-- **rmcp_memex**: MCP-based RAG server for code memory/search (separate but related)
-- **rmcp_mux**: MCP multiplexer library and daemon (separate but related)
+- **loctree_server**: MCP server for exposing loctree analysis
 
 # User Preferences
 
@@ -47,12 +45,6 @@ Preferred communication style: Simple, everyday language.
 - **Zero JavaScript Runtime**: Reports are pure SSR HTML with embedded Cytoscape for graphs. This ensures reports are viewable without build tooling.
 - **Component Architecture**: Modular UI components (`FileTable`, `GraphView`, `QuickWinPanel`) for maintainability.
 - **Dark Mode**: CSS variable-based theming with graph-specific dark mode toggle.
-
-## Landing Page (landing/)
-
-**Framework**: Leptos CSR (client-side rendering)
-**Build Tool**: Trunk
-**Styling**: Monochromatic "CRT terminal" aesthetic with CSS modules
 
 ## Tauri Integration
 
@@ -117,11 +109,6 @@ loct report --serve     # Launch HTML report server
 
 - Custom Python parser (not using external AST library)
 - Planned improvements for `TYPE_CHECKING` blocks, `importlib` dynamic imports, and `__all__` expansion
-
-## Related Projects
-
-- **rmcp_memex**: MCP server providing RAG/memory storage using LanceDB + FastEmbed
-- **rmcp_mux**: MCP multiplexer library for sharing MCP servers across multiple clients via Unix socket
 
 ## CI/CD
 

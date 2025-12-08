@@ -332,6 +332,7 @@ fn scan_single_root(
         output: cfg.parsed.output,
         summary: cfg.parsed.summary,
         summary_limit: cfg.parsed.summary_limit,
+        summary_only: cfg.parsed.summary_only,
         show_hidden: cfg.parsed.show_hidden,
         show_ignored: false, // Only used in tree mode
         loc_threshold: cfg.parsed.loc_threshold,
@@ -1216,6 +1217,7 @@ pub fn scan_results_from_snapshot(snapshot: &Snapshot) -> ScanResults {
                 output: OutputMode::Human,
                 summary: false,
                 summary_limit: 5,
+                summary_only: false,
                 show_hidden: false,
                 show_ignored: false,
                 loc_threshold: 1000,

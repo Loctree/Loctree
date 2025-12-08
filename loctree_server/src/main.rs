@@ -10,13 +10,9 @@
 //! - Fast symbol search across the entire codebase
 //! - Real-time dead code and cycle detection
 //!
-//! ## Usage with rmcp-mux
+//! ## Usage
 //!
 //! ```bash
-//! # Start via mux (recommended for hot-service architecture)
-//! rmcp-mux --socket /tmp/loctree.sock --cmd loctree_server -- --project .
-//!
-//! # Standalone
 //! loctree_server --project /path/to/project
 //! ```
 

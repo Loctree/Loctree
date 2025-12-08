@@ -174,7 +174,7 @@ pub fn process_root_context(
         .map(|a| (a.path.clone(), a.clone()))
         .collect();
 
-    let duplicate_exports: Vec<_> = export_index
+    let _duplicate_exports: Vec<_> = export_index
         .into_iter()
         .filter(|(_, files)| files.len() > 1)
         .collect();
@@ -800,6 +800,46 @@ pub fn process_root_context(
         }));
     }
 
+    // Visibility toggles (noise reduction)
+    let duplicates_hidden = parsed.suppress_duplicates;
+    let dynamic_hidden = parsed.suppress_dynamic;
+    let filtered_ranked_for_output = if duplicates_hidden {
+        Vec::new()
+    } else {
+        filtered_ranked.clone()
+    };
+    let clusters_json_for_output = if duplicates_hidden {
+        Vec::new()
+    } else {
+        clusters_json.clone()
+    };
+    let top_clusters_for_output = if duplicates_hidden {
+        Vec::new()
+    } else {
+        top_clusters.clone()
+    };
+    let duplicate_clusters_count_for_output = if duplicates_hidden {
+        0
+    } else {
+        duplicate_clusters_count
+    };
+    let max_cluster_size_for_output = if duplicates_hidden {
+        0
+    } else {
+        max_cluster_size
+    };
+
+    let dynamic_imports_json_for_output = if dynamic_hidden {
+        Vec::new()
+    } else {
+        dynamic_imports_json.clone()
+    };
+    let dynamic_summary_for_output = if dynamic_hidden {
+        Vec::new()
+    } else {
+        dynamic_summary.clone()
+    };
+
     let generated_at = OffsetDateTime::now_utc()
         .format(&Rfc3339)
         .unwrap_or_else(|_| String::new());
@@ -860,9 +900,9 @@ pub fn process_root_context(
                 "languages": languages_vec,
                 "filesAnalyzed": analyses.len(),
                 "summary": {
-                    "duplicateExports": filtered_ranked.len(),
+                    "duplicateExports": filtered_ranked_for_output.len(),
                     "reexportFiles": reexport_files.len(),
-                    "dynamicImports": dynamic_summary.len(),
+                    "dynamicImports": dynamic_summary_for_output.len(),
                 "commands": {
                     "frontendCalls": fe_commands.len(),
                     "backendHandlers": be_commands.len(),
@@ -875,8 +915,8 @@ pub fn process_root_context(
                         "risks": pipeline_risks.len(),
                     },
                     "clusters": {
-                        "duplicateCount": duplicate_clusters_count,
-                        "maxClusterSize": max_cluster_size,
+                        "duplicateCount": duplicate_clusters_count_for_output,
+                        "maxClusterSize": max_cluster_size_for_output,
                     },
                     "barrels": {
                         "count": barrels.len(),
@@ -884,7 +924,7 @@ pub fn process_root_context(
                     },
                 },
                 "topIssues": {
-                    "duplicateExports": filtered_ranked.iter().take(top_limit).map(|dup| json!({
+                    "duplicateExports": filtered_ranked_for_output.iter().take(top_limit).map(|dup| json!({
                         "name": dup.name,
                         "canonical": dup.canonical,
                         "canonicalLine": dup.canonical_line,
@@ -915,7 +955,7 @@ pub fn process_root_context(
                     "events": event_alerts,
                     "pipelineRisks": pipeline_risks.iter().take(top_limit).cloned().collect::<Vec<_>>(),
                     "deadSymbols": dead_symbols.iter().take(parsed.top_dead_symbols).cloned().collect::<Vec<_>>(),
-                    "duplicateClusters": top_clusters,
+                    "duplicateClusters": top_clusters_for_output,
                     "bridges": bridges_for_ai,
                     "barrels": barrels_json.iter().take(barrel_limit).cloned().collect::<Vec<_>>(),
                 },
@@ -951,7 +991,7 @@ pub fn process_root_context(
                 },
                 "languages": languages_vec,
                 "filesAnalyzed": analyses.len(),
-                "duplicateExports": filtered_ranked
+                "duplicateExports": filtered_ranked_for_output
                     .iter()
                     .map(|dup| json!({
                         "name": dup.name,
@@ -959,7 +999,7 @@ pub fn process_root_context(
                         "locations": dup.locations,
                     }))
                     .collect::<Vec<_>>(),
-                "duplicateExportsRanked": filtered_ranked
+                "duplicateExportsRanked": filtered_ranked_for_output
                     .iter()
                     .map(|dup| json!({
                         "name": dup.name,
@@ -982,7 +1022,7 @@ pub fn process_root_context(
                     .map(|(from, to)| json!({"from": from, "to": to}))
                     .collect::<Vec<_>>(),
                 "barrels": barrels_json,
-                "dynamicImports": dynamic_imports_json,
+                "dynamicImports": dynamic_imports_json_for_output,
                 "commands": {
                     "frontend": fe_commands.iter().map(|(k,v)| json!({"name": k, "locations": v})).collect::<Vec<_>>(),
                     "backend": be_commands.iter().map(|(k,v)| json!({"name": k, "locations": v})).collect::<Vec<_>>(),
@@ -1019,7 +1059,7 @@ pub fn process_root_context(
                     "unregistered_handlers": unregistered_handlers.iter().map(|g| &g.name).collect::<Vec<_>>(),
                 },
                 "symbols": symbols_json,
-                "clusters": clusters_json,
+                "clusters": clusters_json_for_output,
                 "pipeline": pipeline_summary,
                 "aiViews": {
                     "defaultExportChains": default_export_chains,
@@ -1042,9 +1082,9 @@ pub fn process_root_context(
                         "items": barrels_json,
                     },
                     "ciSummary": {
-                        "duplicateClustersCount": duplicate_clusters_count,
-                        "maxClusterSize": max_cluster_size,
-                        "topClusters": top_clusters,
+                        "duplicateClustersCount": duplicate_clusters_count_for_output,
+                        "maxClusterSize": max_cluster_size_for_output,
+                        "topClusters": top_clusters_for_output,
                     }
                 },
                 "files": files_json,
@@ -1067,9 +1107,17 @@ pub fn process_root_context(
 
         println!("Import/export analysis for {}/", root_path.display());
         println!("  Files analyzed: {}", analyses.len());
-        println!("  Duplicate exports: {}", filtered_ranked.len());
+        if duplicates_hidden {
+            println!("  Duplicate exports: (hidden by --no-duplicates)");
+        } else {
+            println!("  Duplicate exports: {}", filtered_ranked_for_output.len());
+        }
         println!("  Files with re-exports: {}", reexport_files.len());
-        println!("  Dynamic imports: {}", dynamic_summary.len());
+        if dynamic_hidden {
+            println!("  Dynamic imports: (hidden by --no-dynamic-imports)");
+        } else {
+            println!("  Dynamic imports: {}", dynamic_summary_for_output.len());
+        }
         if dead_symbols_total > 0 {
             println!(
                 "  Dead exports (high confidence): {}{}",
@@ -1082,7 +1130,7 @@ pub fn process_root_context(
             );
         }
 
-        if !duplicate_exports.is_empty() {
+        if !duplicates_hidden && !filtered_ranked_for_output.is_empty() {
             // Count silenced (cross-lang) duplicates
             let cross_lang_count = filtered_ranked
                 .iter()
@@ -1143,12 +1191,12 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
             }
         }
 
-        if !dynamic_summary.is_empty() {
+        if !dynamic_hidden && !dynamic_summary_for_output.is_empty() {
             println!(
                 "\nDynamic imports (showing up to {}):",
                 parsed.analyze_limit
             );
-            let mut sorted_dyn = dynamic_summary.clone();
+            let mut sorted_dyn = dynamic_summary_for_output.clone();
             sorted_dyn.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
             for (file, sources) in sorted_dyn.iter().take(parsed.analyze_limit) {
                 println!(

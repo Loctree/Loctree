@@ -37,7 +37,11 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
             // Unless --for-agent-feed is set, then use Mode::ForAi
             if opts.for_agent_feed {
                 parsed.mode = Mode::ForAi;
-                parsed.output = OutputMode::Json;
+                parsed.output = if opts.agent_json {
+                    OutputMode::Json
+                } else {
+                    OutputMode::Jsonl
+                };
             } else {
                 parsed.mode = Mode::Init;
                 parsed.auto_outputs = true;
@@ -47,6 +51,8 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
             } else {
                 opts.roots.clone()
             };
+            parsed.suppress_duplicates = opts.suppress_duplicates;
+            parsed.suppress_dynamic = opts.suppress_dynamic;
             parsed.full_scan = opts.full_scan;
             parsed.scan_all = opts.scan_all;
             parsed.use_gitignore = true; // Auto mode respects gitignore by default
@@ -76,6 +82,7 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
                 parsed.summary = true;
                 parsed.summary_limit = limit;
             }
+            parsed.summary_only = opts.summary_only;
             parsed.loc_threshold = opts.loc_threshold.unwrap_or(DEFAULT_LOC_THRESHOLD);
             parsed.show_hidden = opts.show_hidden;
             parsed.find_artifacts = opts.find_artifacts;
@@ -155,6 +162,8 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
             parsed.commands_name_filter = opts.name_filter.clone();
             parsed.commands_missing_only = opts.missing_only;
             parsed.commands_unused_only = opts.unused_only;
+            parsed.suppress_duplicates = opts.suppress_duplicates;
+            parsed.suppress_dynamic = opts.suppress_dynamic;
         }
 
         Command::Events(opts) => {
@@ -168,6 +177,8 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
             // Enable race detection if specified
             parsed.py_races = opts.races;
             parsed.use_gitignore = true;
+            parsed.suppress_duplicates = opts.suppress_duplicates;
+            parsed.suppress_dynamic = opts.suppress_dynamic;
         }
 
         Command::Info(_opts) => {
@@ -192,6 +203,8 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
                 parsed.fail_on_ghost_events = true;
             }
             parsed.use_gitignore = true;
+            parsed.suppress_duplicates = opts.suppress_duplicates;
+            parsed.suppress_dynamic = opts.suppress_dynamic;
         }
 
         Command::Report(opts) => {
@@ -234,11 +247,6 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
             // as it doesn't go through ParsedArgs
         }
 
-        Command::Memex(_) => {
-            // Memex is handled specially in dispatch_command
-            // as it doesn't go through ParsedArgs
-        }
-
         Command::Crowd(_) => {
             // Crowd is handled specially in dispatch_command
             // as it doesn't go through ParsedArgs
@@ -247,6 +255,10 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
         Command::Twins(_) => {
             // Twins is handled specially in dispatch_command
             // as it doesn't go through ParsedArgs
+        }
+
+        Command::Routes(_) => {
+            // Routes is handled specially in dispatch_command
         }
     }
 
@@ -282,6 +294,19 @@ pub fn dispatch_command(parsed_cmd: &ParsedCommand) -> DispatchResult {
         Command::Help(opts) if opts.full => {
             return DispatchResult::ShowLegacyHelp; // Full help shows legacy too
         }
+        Command::Help(opts) if opts.command.is_some() => {
+            let cmd_name = opts.command.clone().unwrap();
+            if let Some(text) = Command::format_command_help(&cmd_name) {
+                println!("{}", text);
+                return DispatchResult::Exit(0);
+            } else {
+                eprintln!(
+                    "Unknown command '{}'. Run 'loct --help' for available commands.",
+                    cmd_name
+                );
+                return DispatchResult::Exit(1);
+            }
+        }
         Command::Help(_) => {
             return DispatchResult::ShowHelp;
         }
@@ -295,10 +320,6 @@ pub fn dispatch_command(parsed_cmd: &ParsedCommand) -> DispatchResult {
         Command::Diff(opts) => {
             // Execute diff and return result
             return handle_diff_command(opts, &parsed_cmd.global);
-        }
-        Command::Memex(opts) => {
-            // Execute memex and return result
-            return handle_memex_command(opts, &parsed_cmd.global);
         }
         Command::Crowd(opts) => {
             return handle_crowd_command(opts, &parsed_cmd.global);
@@ -314,6 +335,9 @@ pub fn dispatch_command(parsed_cmd: &ParsedCommand) -> DispatchResult {
         }
         Command::Commands(opts) => {
             return handle_commands_command(opts, &parsed_cmd.global);
+        }
+        Command::Routes(opts) => {
+            return handle_routes_command(opts, &parsed_cmd.global);
         }
         Command::Events(opts) => {
             return handle_events_command(opts, &parsed_cmd.global);
@@ -759,14 +783,6 @@ fn handle_problems_only_diff(
     DispatchResult::Exit(if total_problems > 0 { 1 } else { 0 })
 }
 
-/// Handle the memex command - available only in Loctree Pro
-fn handle_memex_command(_opts: &MemexOptions, _global: &GlobalOptions) -> DispatchResult {
-    eprintln!(
-        "[loct][memex][error] memex is a Loctree Pro feature. Visit https://loctree.io for more info."
-    );
-    DispatchResult::Exit(1)
-}
-
 /// Load snapshot from disk, or auto-create one if missing.
 /// This provides a better UX for commands that depend on snapshots.
 fn load_or_create_snapshot(
@@ -1097,7 +1113,11 @@ fn handle_dead_command(opts: &DeadOptions, global: &GlobalOptions) -> DispatchRe
         &dead_exports,
         output_mode,
         high_confidence,
-        opts.top.unwrap_or(20),
+        if opts.full {
+            dead_exports.len()
+        } else {
+            opts.top.unwrap_or(20)
+        },
     );
 
     DispatchResult::Exit(0)
@@ -1160,7 +1180,23 @@ fn handle_cycles_command(opts: &CyclesOptions, global: &GlobalOptions) -> Dispat
 
     if !lazy_cycles.is_empty() && !json_output {
         println!("\nLazy circular imports (info):");
+        println!(
+            "  Detected via imports inside functions/methods; usually safe but review if init order matters."
+        );
         print_cycles(&lazy_cycles, false);
+
+        // Show the lazy edges that participated (sample)
+        let lazy_edges: Vec<_> = edges
+            .iter()
+            .filter(|(_, _, kind)| kind.contains("lazy"))
+            .take(5)
+            .collect();
+        if !lazy_edges.is_empty() {
+            println!("  Lazy edges (sample):");
+            for (from, to, kind) in lazy_edges {
+                println!("    {} -> {} [{}]", from, to, kind);
+            }
+        }
     }
 
     DispatchResult::Exit(0)
@@ -1261,6 +1297,16 @@ fn handle_commands_command(opts: &CommandsOptions, global: &GlobalOptions) -> Di
                     println!("    Backend: {}:{}", backend_file, backend_line);
                 }
 
+                if !bridge.has_handler && bridge.is_called {
+                    if let Some((file, line)) = bridge.frontend_calls.first() {
+                        println!("    First callsite: {}:{}", file, line);
+                    }
+                    println!(
+                        "    Stub: #[tauri::command] pub async fn {}(...) -> Result<(), String> {{ todo!() }}",
+                        bridge.name
+                    );
+                }
+
                 println!();
             }
         }
@@ -1357,6 +1403,114 @@ fn handle_events_command(opts: &EventsOptions, global: &GlobalOptions) -> Dispat
                 println!();
             }
         }
+    }
+
+    DispatchResult::Exit(0)
+}
+
+/// Handle the routes command - list backend/web routes (FastAPI/Flask)
+fn handle_routes_command(opts: &RoutesOptions, global: &GlobalOptions) -> DispatchResult {
+    use std::path::Path;
+
+    let spinner = if !global.quiet && !global.json {
+        Some(Spinner::new("Detecting backend routes..."))
+    } else {
+        None
+    };
+
+    let root = opts
+        .roots
+        .first()
+        .map(|p| p.as_path())
+        .unwrap_or(Path::new("."));
+
+    let snapshot = match load_or_create_snapshot(root, global) {
+        Ok(s) => s,
+        Err(e) => {
+            if let Some(s) = spinner {
+                s.finish_error(&format!("Failed to load snapshot: {}", e));
+            } else {
+                eprintln!("[loct][error] {}", e);
+            }
+            return DispatchResult::Exit(1);
+        }
+    };
+
+    let framework_filter = opts.framework.as_ref().map(|f| f.to_lowercase());
+    let path_filter = opts.path_filter.as_ref().map(|p| p.to_lowercase());
+
+    let mut routes: Vec<serde_json::Value> = Vec::new();
+
+    for file in &snapshot.files {
+        for r in &file.routes {
+            if let Some(ff) = &framework_filter
+                && r.framework.to_lowercase() != *ff
+            {
+                continue;
+            }
+            if let Some(pf) = &path_filter {
+                let path_match = r
+                    .path
+                    .as_ref()
+                    .map(|p| p.to_lowercase().contains(pf))
+                    .unwrap_or(false);
+                if !path_match && !file.path.to_lowercase().contains(pf) {
+                    continue;
+                }
+            }
+
+            routes.push(serde_json::json!({
+                "framework": r.framework,
+                "method": r.method,
+                "path": r.path,
+                "handler": r.name,
+                "file": file.path,
+                "line": r.line,
+            }));
+        }
+    }
+
+    routes.sort_by(|a, b| {
+        let af = a.get("framework").and_then(|v| v.as_str()).unwrap_or("");
+        let bf = b.get("framework").and_then(|v| v.as_str()).unwrap_or("");
+        let ap = a.get("path").and_then(|v| v.as_str()).unwrap_or("");
+        let bp = b.get("path").and_then(|v| v.as_str()).unwrap_or("");
+        af.cmp(bf).then_with(|| ap.cmp(bp))
+    });
+
+    if let Some(s) = spinner {
+        s.finish_success(&format!("Found {} route(s)", routes.len()));
+    }
+
+    if global.json {
+        let output = serde_json::json!({
+            "routes": routes,
+            "summary": { "count": routes.len() }
+        });
+        println!("{}", serde_json::to_string_pretty(&output).unwrap());
+    } else if routes.is_empty() {
+        println!("No routes detected.");
+    } else {
+        println!("Detected routes ({}):", routes.len());
+        for r in &routes {
+            let framework = r.get("framework").and_then(|v| v.as_str()).unwrap_or("-");
+            let method = r.get("method").and_then(|v| v.as_str()).unwrap_or("-");
+            let path = r
+                .get("path")
+                .and_then(|v| v.as_str())
+                .unwrap_or("(no path)");
+            let file = r.get("file").and_then(|v| v.as_str()).unwrap_or("");
+            let line = r.get("line").and_then(|v| v.as_u64()).unwrap_or(0);
+            let handler = r
+                .get("handler")
+                .and_then(|v| v.as_str())
+                .unwrap_or("(anon)");
+            println!(
+                "  [{}] {} {} -> {}:{} ({})",
+                framework, method, path, file, line, handler
+            );
+        }
+        println!("\nTip: use --framework fastapi or --path <substr> to filter.");
     }
 
     DispatchResult::Exit(0)
@@ -1482,6 +1636,9 @@ mod tests {
             full_scan: true,
             scan_all: false,
             for_agent_feed: false,
+            agent_json: false,
+            suppress_duplicates: false,
+            suppress_dynamic: false,
         });
         let global = GlobalOptions::default();
         let parsed = command_to_parsed_args(&cmd, &global);
@@ -1497,6 +1654,7 @@ mod tests {
             roots: vec![],
             confidence: Some("high".into()),
             top: Some(10),
+            full: false,
             path_filter: None,
             with_tests: false,
             with_helpers: false,
@@ -1522,6 +1680,7 @@ mod tests {
             roots: vec![PathBuf::from("src")],
             depth: Some(3),
             summary: Some(5),
+            summary_only: false,
             loc_threshold: Some(500),
             show_hidden: true,
             find_artifacts: false,

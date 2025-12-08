@@ -120,6 +120,8 @@ pub struct Options {
     pub summary: bool,
     /// Max items in summary lists.
     pub summary_limit: usize,
+    /// If true, only show summary/top entries (suppress full tree dump).
+    pub summary_only: bool,
     /// Include dotfiles/directories.
     pub show_hidden: bool,
     /// Include gitignored files.
@@ -162,6 +164,7 @@ impl Default for Options {
             output: OutputMode::Human,
             summary: false,
             summary_limit: 50,
+            summary_only: false,
             show_hidden: false,
             show_ignored: false,
             loc_threshold: 500,
@@ -377,6 +380,23 @@ pub struct StringLiteral {
     pub line: usize,
 }
 
+/// Python/Backend route declaration (FastAPI/Flask/etc.)
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct RouteInfo {
+    /// Framework label (e.g., "fastapi", "flask")
+    pub framework: String,
+    /// HTTP method or decorator kind (GET/POST/route/etc.)
+    pub method: String,
+    /// Route path if extracted from decorator
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// Handler name (set when attached to a def)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// 1-based line number of the decorator
+    pub line: usize,
+}
+
 /// A Tauri event reference (emit or listen).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EventRef {
@@ -496,6 +516,14 @@ pub struct FileAnalysis {
     /// Type usages that appear in function signatures (parameters/returns).
     #[serde(default)]
     pub signature_uses: Vec<SignatureUse>,
+
+    /// Web route handlers detected in Python/other backends
+    #[serde(default)]
+    pub routes: Vec<RouteInfo>,
+
+    /// Pytest fixtures defined in this file
+    #[serde(default)]
+    pub pytest_fixtures: Vec<String>,
 }
 
 impl ImportEntry {
@@ -560,6 +588,8 @@ impl FileAnalysis {
             is_namespace_package: false,
             local_uses: Vec::new(),
             signature_uses: Vec::new(),
+            routes: Vec::new(),
+            pytest_fixtures: Vec::new(),
         }
     }
 }
