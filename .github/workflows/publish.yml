@@ -92,8 +92,7 @@ jobs:
 
           # Also update landing source files with display version
           echo "Updating landing source files..."
-          sed -i "s/pub const VERSION: &str = \"v[0-9.]*\";/pub const VERSION: \&str = \"$V_VERSION\";/" landing/src/sections/mod.rs
-          sed -i "s/v[0-9.]* | loctree.io/$V_VERSION | loctree.io/" landing/src/sections/easter_eggs.rs
+          # Base edition does not ship landing; keep version in Rust code only
           sed -i "s/\"version\": \"[0-9.]*\"/\"version\": \"$VERSION\"/" landing/api/agent/index.json
 
           # Update loctree's dependency on report-leptos to match

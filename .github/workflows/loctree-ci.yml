@@ -49,14 +49,14 @@ jobs:
 
       - name: Analyze landing crate
         run: |
-          ./target/release/loctree landing/src -A --ext rs \
+          ./target/release/loctree loctree_rs/src -A --ext rs \
             --circular \
             --dead \
             --confidence high
 
       - name: Check for circular imports (all crates)
         run: |
-          for CRATE in loctree_rs/src reports/src landing/src; do
+          for CRATE in loctree_rs/src reports/src; do
             OUTPUT=$(./target/release/loctree $CRATE -A --circular --json 2>/dev/null || true)
             CYCLES=$(echo "$OUTPUT" | jq -r '.cycles // [] | length' 2>/dev/null || echo "0")
             if [ "$CYCLES" != "0" ] && [ "$CYCLES" != "" ]; then
@@ -70,7 +70,7 @@ jobs:
             --report loctree-report.html --graph
           ./target/release/loctree reports/src -A --ext rs \
             --report reports-report.html --graph
-          ./target/release/loctree landing/src -A --ext rs \
+          ./target/release/loctree loctree_rs/src -A --ext rs \
             --report landing-report.html --graph
 
       - name: Upload analysis reports
