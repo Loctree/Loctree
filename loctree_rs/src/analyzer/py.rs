@@ -209,17 +209,17 @@ fn extract_decorator_type_usages(line: &str, local_uses: &mut Vec<String>) {
     let len = bytes.len();
     let mut i = 0;
     while i < len {
-        if i + 14 < len {
-            let slice = &line[i..];
-            if slice.starts_with("response_model=") || slice.starts_with("response_class=") {
-                let eq_pos = slice.find('=').unwrap_or(0);
-                i += eq_pos + 1;
-                while i < len && bytes[i].is_ascii_whitespace() {
-                    i += 1;
-                }
-                extract_type_from_decorator(line, &mut i, local_uses, SKIP_IDENTS);
-                continue;
+        // Check for response_model= or response_class= using byte comparison
+        if bytes_match_keyword(bytes, i, b"response_model=")
+            || bytes_match_keyword(bytes, i, b"response_class=")
+        {
+            // Skip to after the '=' (both "response_model=" and "response_class=" are 15 chars)
+            i += 15;
+            while i < len && bytes[i].is_ascii_whitespace() {
+                i += 1;
             }
+            extract_type_from_decorator(line, &mut i, local_uses, SKIP_IDENTS);
+            continue;
         }
         if bytes_match_keyword(bytes, i, b"Depends(") {
             i += 8;
