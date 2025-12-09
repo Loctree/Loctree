@@ -1,6 +1,6 @@
 [package]
 name = "loctree"
-version = "0.6.3-dev"
+version = "0.6.4-dev"
 edition = "2024"
 default-run = "loctree"
 authors = ["Loctree <loct@loctree.io>"]
