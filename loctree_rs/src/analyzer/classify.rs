@@ -46,6 +46,14 @@ fn is_generated_path(path: &str) -> bool {
         || lower.ends_with(".gen.tsx")
         || lower.ends_with(".gen.rs")
         || lower.ends_with(".g.rs")
+        || lower.ends_with(".g.dart")
+        || lower.ends_with(".freezed.dart")
+        || lower.ends_with(".gr.dart")
+        || lower.ends_with(".pb.dart")
+        || lower.ends_with(".pbjson.dart")
+        || lower.ends_with(".pbenum.dart")
+        || lower.ends_with(".pbserver.dart")
+        || lower.ends_with(".config.dart")
 }
 
 pub fn file_kind(path: &str) -> (String, bool, bool) {

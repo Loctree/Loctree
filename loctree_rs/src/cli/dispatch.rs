@@ -28,6 +28,7 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
         color: global.color,
         ..Default::default()
     };
+    parsed.library_mode = global.library_mode;
 
     // Convert command-specific options
     match cmd {
@@ -42,6 +43,9 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
                 } else {
                     OutputMode::Jsonl
                 };
+                parsed.for_agent_feed = true;
+                parsed.agent_json = opts.agent_json;
+                parsed.force_full_scan = true; // don't reuse snapshot for agent feed
             } else {
                 parsed.mode = Mode::Init;
                 parsed.auto_outputs = true;
@@ -213,6 +217,7 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
 
         Command::Report(opts) => {
             parsed.mode = Mode::AnalyzeImports;
+            parsed.auto_outputs = true;
             parsed.root_list = if opts.roots.is_empty() {
                 vec![PathBuf::from(".")]
             } else {
@@ -612,7 +617,7 @@ fn handle_problems_only_diff(
 
     // 1. Find dead exports in both snapshots
     let dead_config = DeadFilterConfig::default();
-    let from_dead = find_dead_exports(&from_snapshot.files, true, None, dead_config);
+    let from_dead = find_dead_exports(&from_snapshot.files, true, None, dead_config.clone());
     let to_dead = find_dead_exports(&to_snapshot.files, true, None, dead_config);
 
     // Build sets for comparison (use symbol, not name)
@@ -1155,6 +1160,8 @@ fn handle_dead_command(opts: &DeadOptions, global: &GlobalOptions) -> DispatchRe
         DeadFilterConfig {
             include_tests: opts.with_tests,
             include_helpers: opts.with_helpers,
+            library_mode: global.library_mode,
+            example_globs: Vec::new(),
         },
     );
 

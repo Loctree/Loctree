@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use oxc_allocator::Allocator;
@@ -514,6 +514,7 @@ pub(crate) fn analyze_js_file_ast(
         ts_resolver,
         source_text: content_to_parse,
         command_cfg,
+        namespace_imports: HashMap::new(),
     };
 
     visitor.visit_program(&ret.program);
@@ -582,6 +583,8 @@ struct JsVisitor<'a> {
     ts_resolver: Option<&'a TsPathResolver>,
     source_text: &'a str,
     command_cfg: &'a CommandDetectionConfig,
+    /// Map of namespace import aliases to their resolved paths: alias -> (source, resolved_path)
+    namespace_imports: HashMap<String, (String, Option<String>)>,
 }
 
 impl<'a> JsVisitor<'a> {
@@ -749,6 +752,43 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
         walk_expression(self, expr);
     }
 
+    fn visit_member_expression(&mut self, member: &MemberExpression<'a>) {
+        // Track namespace member access: NS.member where NS is from `import * as NS`
+        // This fixes Issue #5 - namespace member access not tracked
+        if let MemberExpression::StaticMemberExpression(static_member) = member {
+            // Check if the object is an identifier (e.g., `NS` in `NS.transform`)
+            if let Expression::Identifier(obj_ident) = &static_member.object {
+                let namespace_name = obj_ident.name.to_string();
+                let member_name = static_member.property.name.to_string();
+
+                // Check if this identifier is a namespace import
+                if let Some((source, _resolved_path)) = self.namespace_imports.get(&namespace_name)
+                {
+                    // Find the import entry and add this member as a used symbol
+                    for imp in &mut self.analysis.imports {
+                        if &imp.source == source {
+                            // Check if we already have this member symbol
+                            let already_has_member =
+                                imp.symbols.iter().any(|s| s.name == member_name);
+                            if !already_has_member {
+                                // Add the accessed member as an import symbol
+                                imp.symbols.push(ImportSymbol {
+                                    name: member_name.clone(),
+                                    alias: None,
+                                    is_default: false,
+                                });
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Continue walking the AST
+        oxc_ast_visit::walk::walk_member_expression(self, member);
+    }
+
     // --- IMPORTS ---
 
     fn visit_import_declaration(&mut self, decl: &ImportDeclaration<'a>) {
@@ -791,11 +831,15 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                         });
                     }
                     ImportDeclarationSpecifier::ImportNamespaceSpecifier(s) => {
+                        let alias = s.local.name.to_string();
                         entry.symbols.push(ImportSymbol {
                             name: "*".to_string(),
-                            alias: Some(s.local.name.to_string()),
+                            alias: Some(alias.clone()),
                             is_default: false,
                         });
+                        // Track namespace import for member expression resolution
+                        self.namespace_imports
+                            .insert(alias, (source.clone(), entry.resolved_path.clone()));
                     }
                 }
             }
@@ -1928,5 +1972,82 @@ export const greeting = message + ' World'
         assert!(!usages.contains(&"component".to_string()));
         assert!(!usages.contains(&"transition".to_string()));
         assert!(!usages.contains(&"console".to_string()));
+    }
+
+    /// Test for Issue #5: Namespace member access should be tracked
+    /// When using `import * as namespace`, accessing `namespace.member` should be detected
+    /// as usage of the `member` export from the imported module.
+    #[test]
+    fn test_namespace_member_access_tracking() {
+        let content = r#"
+            import * as amp from '@sveltejs/amp';
+            import * as utils from './utils';
+
+            // These member accesses should be tracked as using 'transform' and 'helper'
+            const result = amp.transform(buffer);
+            utils.helper();
+            const value = utils.CONSTANT;
+        "#;
+
+        let analysis = analyze_js_file_ast(
+            content,
+            Path::new("src/app.ts"),
+            Path::new("src"),
+            None,
+            None,
+            "app.ts".to_string(),
+            &CommandDetectionConfig::default(),
+        );
+
+        // Should have 2 imports
+        assert_eq!(analysis.imports.len(), 2);
+
+        // Check the amp import
+        let amp_import = analysis
+            .imports
+            .iter()
+            .find(|i| i.source == "@sveltejs/amp")
+            .expect("Should find @sveltejs/amp import");
+
+        // Should have both the namespace symbol (*) and the accessed member (transform)
+        assert_eq!(
+            amp_import.symbols.len(),
+            2,
+            "amp import should have 2 symbols: * and transform"
+        );
+        assert!(
+            amp_import.symbols.iter().any(|s| s.name == "*"),
+            "amp import should have namespace symbol"
+        );
+        assert!(
+            amp_import.symbols.iter().any(|s| s.name == "transform"),
+            "amp import should track 'transform' member access"
+        );
+
+        // Check the utils import
+        let utils_import = analysis
+            .imports
+            .iter()
+            .find(|i| i.source == "./utils")
+            .expect("Should find ./utils import");
+
+        // Should have namespace symbol (*), helper, and CONSTANT
+        assert_eq!(
+            utils_import.symbols.len(),
+            3,
+            "utils import should have 3 symbols: *, helper, and CONSTANT"
+        );
+        assert!(
+            utils_import.symbols.iter().any(|s| s.name == "*"),
+            "utils import should have namespace symbol"
+        );
+        assert!(
+            utils_import.symbols.iter().any(|s| s.name == "helper"),
+            "utils import should track 'helper' member access"
+        );
+        assert!(
+            utils_import.symbols.iter().any(|s| s.name == "CONSTANT"),
+            "utils import should track 'CONSTANT' member access"
+        );
     }
 }

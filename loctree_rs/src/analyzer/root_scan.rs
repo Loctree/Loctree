@@ -323,10 +323,19 @@ fn scan_single_root(
         .canonicalize()
         .unwrap_or_else(|_| root_path.to_path_buf());
 
+    // Ensure core language extensions are always included even if user provided a custom list
+    let extensions = cfg.extensions.clone().map(|mut set| {
+        for lang_ext in ["go", "dart"] {
+            set.insert(lang_ext.to_string());
+        }
+        set
+    });
+
     let options = Options {
-        extensions: cfg.extensions.clone(),
+        extensions,
         ignore_paths,
-        use_gitignore: cfg.parsed.use_gitignore,
+        // --scan-all should ignore gitignore and include everything
+        use_gitignore: cfg.parsed.use_gitignore && !cfg.parsed.scan_all,
         max_depth: cfg.parsed.max_depth,
         color: cfg.parsed.color,
         output: cfg.parsed.output,

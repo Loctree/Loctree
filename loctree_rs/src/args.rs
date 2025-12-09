@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use crate::types::{ColorMode, DEFAULT_LOC_THRESHOLD, GitSubcommand, Mode, OutputMode};
 
+#[derive(Clone)]
 pub struct ParsedArgs {
     pub extensions: Option<HashSet<String>>,
     pub ignore_patterns: Vec<String>,
@@ -93,6 +94,16 @@ pub struct ParsedArgs {
     pub with_tests: bool,
     /// Include helper/docs/scripts in dead-export analysis
     pub with_helpers: bool,
+    /// Agent feed / JSON output mode
+    pub for_agent_feed: bool,
+    /// Write agent.json to disk
+    pub agent_json: bool,
+    /// Enforce fresh scan (no snapshot reuse) for agent mode
+    pub force_full_scan: bool,
+    /// Library/framework mode (ignore examples/demos from dead-code noise)
+    pub library_mode: bool,
+    /// Additional example/demo globs to ignore in library mode
+    pub library_example_globs: Vec<String>,
 }
 
 impl Default for ParsedArgs {
@@ -172,6 +183,11 @@ impl Default for ParsedArgs {
             commands_unused_only: false,
             with_tests: false,
             with_helpers: false,
+            for_agent_feed: false,
+            agent_json: false,
+            force_full_scan: false,
+            library_mode: false,
+            library_example_globs: Vec::new(),
         }
     }
 }
@@ -387,6 +403,10 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
             }
             "--graph" => {
                 parsed.graph = true;
+                i += 1;
+            }
+            "--library-mode" => {
+                parsed.library_mode = true;
                 i += 1;
             }
             "--verbose" | "-v" => {

@@ -31,7 +31,7 @@ const SCHEMA_VERSION: &str = "1.2.0";
 
 pub fn default_analyzer_exts() -> HashSet<String> {
     [
-        "ts", "tsx", "js", "jsx", "mjs", "cjs", "rs", "css", "py", "svelte", "vue",
+        "ts", "tsx", "js", "jsx", "mjs", "cjs", "rs", "css", "py", "svelte", "vue", "dart", "go",
     ]
     .iter()
     .map(|s| s.to_string())
@@ -128,6 +128,7 @@ fn print_py_race_indicators(analyses: &[crate::types::FileAnalysis], json: bool)
 pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
     use std::time::Instant;
 
+    let mut parsed = parsed.clone();
     let scan_started = Instant::now();
     let mut json_results = Vec::new();
     let mut report_sections: Vec<ReportSection> = Vec::new();
@@ -170,6 +171,11 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         .first()
         .map(|root| LoctreeConfig::load(root))
         .unwrap_or_default();
+    parsed.library_mode = parsed.library_mode || loctree_config.library_mode;
+    if parsed.library_mode && parsed.library_example_globs.is_empty() {
+        parsed.library_example_globs = loctree_config.library_example_globs.clone();
+    }
+    let library_mode = parsed.library_mode;
     let custom_command_macros = loctree_config.tauri.command_macros;
     let command_detection = CommandDetectionConfig::new(
         &loctree_config.tauri.dom_exclusions,
@@ -262,7 +268,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                         }
                         scan_roots(ScanConfig {
                             roots: root_list,
-                            parsed,
+                            parsed: &parsed,
                             extensions: base_extensions.clone(),
                             focus_set: &focus_set,
                             exclude_set: &exclude_set,
@@ -282,7 +288,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                 // No .loctree directory found, scan fresh
                 scan_roots(ScanConfig {
                     roots: root_list,
-                    parsed,
+                    parsed: &parsed,
                     extensions: base_extensions.clone(),
                     focus_set: &focus_set,
                     exclude_set: &exclude_set,
@@ -299,7 +305,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             // No roots provided
             scan_roots(ScanConfig {
                 roots: root_list,
-                parsed,
+                parsed: &parsed,
                 extensions: base_extensions.clone(),
                 focus_set: &focus_set,
                 exclude_set: &exclude_set,
@@ -316,7 +322,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         // --symbol requires reading files, skip snapshot
         scan_roots(ScanConfig {
             roots: root_list,
-            parsed,
+            parsed: &parsed,
             extensions: base_extensions,
             focus_set: &focus_set,
             exclude_set: &exclude_set,
@@ -329,6 +335,31 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             command_detection,
         })?
     };
+    if parsed.auto_outputs {
+        let snapshot_root = if root_list.len() == 1 {
+            root_list
+                .first()
+                .cloned()
+                .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+        } else {
+            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+        };
+
+        match crate::snapshot::write_auto_artifacts(&snapshot_root, &scan_results, &parsed) {
+            Ok(paths) => {
+                if !paths.is_empty() {
+                    println!("Artifacts saved under ./.loctree:");
+                    for p in paths {
+                        println!("  - {}", p);
+                    }
+                }
+            }
+            Err(err) => {
+                eprintln!("[loctree][warn] failed to write auto artifacts: {}", err);
+            }
+        }
+    }
+
     let ScanResults {
         contexts,
         global_fe_commands,
@@ -377,6 +408,8 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             DeadFilterConfig {
                 include_tests: parsed.with_tests,
                 include_helpers: parsed.with_helpers,
+                library_mode,
+                example_globs: parsed.library_example_globs.clone(),
             },
         );
         // Apply --focus and --exclude-report filters to dead exports
@@ -513,6 +546,8 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             DeadFilterConfig {
                 include_tests: parsed.with_tests,
                 include_helpers: parsed.with_helpers,
+                library_mode,
+                example_globs: parsed.library_example_globs.clone(),
             },
         );
 
@@ -538,7 +573,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         } = process_root_context(
             idx,
             ctx,
-            parsed,
+            &parsed,
             &global_fe_commands,
             &global_be_commands,
             &global_missing_handlers,
@@ -683,6 +718,8 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             DeadFilterConfig {
                 include_tests: parsed.with_tests,
                 include_helpers: parsed.with_helpers,
+                library_mode,
+                example_globs: parsed.library_example_globs.clone(),
             },
         );
         let dead_count = dead_exports.len();

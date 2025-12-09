@@ -9,6 +9,7 @@ use crate::types::{FileAnalysis, Options};
 
 use super::classify::{detect_language, file_kind};
 use super::css::analyze_css_file;
+use super::dart::analyze_dart_file;
 use super::js::analyze_js_file;
 use super::py::{analyze_py_file, python_stdlib_set};
 use super::resolvers::{
@@ -166,6 +167,7 @@ pub(crate) fn analyze_file(
             &content, &canonical, root_canon, extensions, relative, py_roots, py_stdlib,
         ),
         "go" => crate::analyzer::go::analyze_go_file(&content, relative),
+        "dart" => analyze_dart_file(&content, relative),
         _ => analyze_js_file(
             &content,
             &canonical,

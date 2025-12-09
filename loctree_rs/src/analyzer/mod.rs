@@ -7,6 +7,7 @@
 //! - [`py`] - Python import/export analysis
 //! - [`rust`] - Rust analysis (Tauri commands, mod statements)
 //! - [`css`] - CSS/SCSS dependency tracking
+//! - [`dart`] - Dart/Flutter import/export analysis (lightweight)
 //!
 //! ## Analysis Features
 //! - [`cycles`] - Circular import detection (Tarjan's SCC algorithm)
@@ -29,6 +30,7 @@ pub mod coverage;
 pub mod crowd;
 mod css;
 pub mod cycles;
+pub mod dart;
 pub mod dead_parrots;
 pub mod entrypoints;
 pub mod for_ai;

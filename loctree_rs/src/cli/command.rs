@@ -38,6 +38,9 @@ pub struct GlobalOptions {
 
     /// Verbose output with progress information
     pub verbose: bool,
+
+    /// Library/framework mode (tunes dead-code heuristics, ignores examples)
+    pub library_mode: bool,
 }
 
 // ============================================================================
