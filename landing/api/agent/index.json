@@ -1,6 +1,6 @@
 {
   "name": "loctree",
-  "version": "0.6.1-dev",
+  "version": "0.6.2-dev",
   "tagline": "Scan once, slice many.",
   "description": "AI-oriented codebase analyzer. Use BEFORE reading files manually.",
   "install": "cargo install loctree",

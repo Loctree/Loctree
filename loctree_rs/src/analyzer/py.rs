@@ -221,7 +221,7 @@ fn extract_decorator_type_usages(line: &str, local_uses: &mut Vec<String>) {
                 continue;
             }
         }
-        if i + 8 < len && &line[i..i + 8] == "Depends(" {
+        if bytes_match_keyword(bytes, i, b"Depends(") {
             i += 8;
             while i < len && bytes[i].is_ascii_whitespace() {
                 i += 1;
@@ -231,9 +231,12 @@ fn extract_decorator_type_usages(line: &str, local_uses: &mut Vec<String>) {
                 while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
                     i += 1;
                 }
-                let ident = &line[start..i];
-                if !SKIP_IDENTS.contains(&ident) && !local_uses.contains(&ident.to_string()) {
-                    local_uses.push(ident.to_string());
+                let ident = extract_ascii_ident(bytes, start, i);
+                if !ident.is_empty()
+                    && !SKIP_IDENTS.contains(&ident.as_str())
+                    && !local_uses.contains(&ident)
+                {
+                    local_uses.push(ident);
                 }
             }
             continue;
@@ -259,7 +262,7 @@ fn extract_type_from_decorator(
     while j < len && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_') {
         j += 1;
     }
-    let ident = &line[start..j];
+    let ident = extract_ascii_ident(bytes, start, j);
     *pos = j;
     if j < len && bytes[j] == b'[' {
         j += 1;
@@ -273,11 +276,12 @@ fn extract_type_from_decorator(
                     while j < len && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_') {
                         j += 1;
                     }
-                    let inner_ident = &line[inner_start..j];
-                    if !skip_idents.contains(&inner_ident)
-                        && !local_uses.contains(&inner_ident.to_string())
+                    let inner_ident = extract_ascii_ident(bytes, inner_start, j);
+                    if !inner_ident.is_empty()
+                        && !skip_idents.contains(&inner_ident.as_str())
+                        && !local_uses.contains(&inner_ident)
                     {
-                        local_uses.push(inner_ident.to_string());
+                        local_uses.push(inner_ident);
                     }
                     continue;
                 }
@@ -286,8 +290,11 @@ fn extract_type_from_decorator(
             j += 1;
         }
         *pos = j;
-    } else if !skip_idents.contains(&ident) && !local_uses.contains(&ident.to_string()) {
-        local_uses.push(ident.to_string());
+    } else if !ident.is_empty()
+        && !skip_idents.contains(&ident.as_str())
+        && !local_uses.contains(&ident)
+    {
+        local_uses.push(ident);
     }
 }
 
@@ -664,8 +671,8 @@ fn parse_route_decorator(line: &str, line_num: usize) -> Option<crate::types::Ro
             || lower.contains(".route("))
     {
         framework = Some("flask");
-        // Try to extract explicit methods list
-        if let Some(pos) = lower.find("methods")
+        // Try to extract explicit methods list - use original line, not lowercased
+        if let Some(pos) = line.find("methods")
             && let Some(start) = line[pos..].find('[')
             && let Some(end) = line[pos + start + 1..].find(']')
         {
@@ -1153,10 +1160,12 @@ fn extract_type_hint_usages(content: &str, local_uses: &mut Vec<String>) {
                         while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
                             i += 1;
                         }
-                        let ident = &content[ident_start..i];
-                        if !SKIP_IDENTS.contains(&ident) && !local_uses.contains(&ident.to_string())
+                        let ident = extract_ascii_ident(bytes, ident_start, i);
+                        if !ident.is_empty()
+                            && !SKIP_IDENTS.contains(&ident.as_str())
+                            && !local_uses.contains(&ident)
                         {
-                            local_uses.push(ident.to_string());
+                            local_uses.push(ident);
                         }
                     }
                     _ => {
@@ -1176,9 +1185,9 @@ fn extract_type_hint_usages(content: &str, local_uses: &mut Vec<String>) {
             while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
                 i += 1;
             }
-            let ident = &content[ident_start..i];
+            let ident = extract_ascii_ident(bytes, ident_start, i);
 
-            if TYPE_FACTORIES.contains(&ident) {
+            if TYPE_FACTORIES.contains(&ident.as_str()) {
                 // Skip whitespace
                 while i < len && bytes[i].is_ascii_whitespace() {
                     i += 1;
@@ -1196,11 +1205,12 @@ fn extract_type_hint_usages(content: &str, local_uses: &mut Vec<String>) {
                         while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
                             i += 1;
                         }
-                        let type_ident = &content[type_start..i];
-                        if !SKIP_IDENTS.contains(&type_ident)
-                            && !local_uses.contains(&type_ident.to_string())
+                        let type_ident = extract_ascii_ident(bytes, type_start, i);
+                        if !type_ident.is_empty()
+                            && !SKIP_IDENTS.contains(&type_ident.as_str())
+                            && !local_uses.contains(&type_ident)
                         {
-                            local_uses.push(type_ident.to_string());
+                            local_uses.push(type_ident);
                         }
                     }
                 }
@@ -1281,7 +1291,7 @@ fn extract_class_from_containers(content: &str, local_uses: &mut Vec<String>) {
                         while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
                             i += 1;
                         }
-                        let ident = &content[start..i];
+                        let ident = extract_ascii_ident(bytes, start, i);
 
                         // Skip if followed by '=' (dict key) or '(' (function call)
                         let mut j = i;
@@ -1291,12 +1301,13 @@ fn extract_class_from_containers(content: &str, local_uses: &mut Vec<String>) {
                         let is_dict_key = j < len && bytes[j] == b'=';
                         let is_function_call = j < len && bytes[j] == b'(';
 
-                        if !is_dict_key
+                        if !ident.is_empty()
+                            && !is_dict_key
                             && !is_function_call
-                            && !SKIP_IDENTS.contains(&ident)
-                            && !local_uses.contains(&ident.to_string())
+                            && !SKIP_IDENTS.contains(&ident.as_str())
+                            && !local_uses.contains(&ident)
                         {
-                            local_uses.push(ident.to_string());
+                            local_uses.push(ident);
                         }
                         continue;
                     }
@@ -1332,7 +1343,7 @@ fn extract_python_function_calls(content: &str, local_uses: &mut Vec<String>) {
             while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
                 i += 1;
             }
-            let ident = &content[start..i];
+            let ident = extract_ascii_ident(bytes, start, i);
 
             // Skip whitespace
             while i < len && bytes[i].is_ascii_whitespace() {
@@ -1342,14 +1353,41 @@ fn extract_python_function_calls(content: &str, local_uses: &mut Vec<String>) {
             // Check if followed by `(`
             if i < len
                 && bytes[i] == b'('
-                && !KEYWORDS.contains(&ident)
-                && !local_uses.contains(&ident.to_string())
+                && !ident.is_empty()
+                && !KEYWORDS.contains(&ident.as_str())
+                && !local_uses.contains(&ident)
             {
-                local_uses.push(ident.to_string());
+                local_uses.push(ident);
             }
         } else {
             i += 1;
         }
+    }
+}
+
+/// Helper to safely compare bytes at position with a keyword
+/// Returns true if the bytes at position match the keyword
+#[inline]
+fn bytes_match_keyword(bytes: &[u8], pos: usize, keyword: &[u8]) -> bool {
+    if pos + keyword.len() > bytes.len() {
+        return false;
+    }
+    &bytes[pos..pos + keyword.len()] == keyword
+}
+
+/// Helper to safely extract an ASCII identifier from bytes
+/// Returns the identifier as a string if valid ASCII, empty string otherwise
+#[inline]
+fn extract_ascii_ident(bytes: &[u8], start: usize, end: usize) -> String {
+    if start >= end || end > bytes.len() {
+        return String::new();
+    }
+    // Only extract if all bytes are valid ASCII identifier chars
+    let slice = &bytes[start..end];
+    if slice.iter().all(|b| b.is_ascii()) {
+        String::from_utf8_lossy(slice).into_owned()
+    } else {
+        String::new()
     }
 }
 
@@ -1387,8 +1425,8 @@ fn extract_bare_class_references(content: &str, local_uses: &mut Vec<String>) {
     let mut i = 0;
 
     while i < len {
-        // Look for "return" keyword
-        if i + 6 < len && &content[i..i + 6] == "return" {
+        // Look for "return" keyword (use byte comparison, not string slicing)
+        if bytes_match_keyword(bytes, i, b"return") {
             // Check it's a word boundary
             if i == 0 || !bytes[i - 1].is_ascii_alphanumeric() {
                 i += 6;
@@ -1402,9 +1440,12 @@ fn extract_bare_class_references(content: &str, local_uses: &mut Vec<String>) {
                     while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
                         i += 1;
                     }
-                    let ident = &content[start..i];
-                    if !SKIP_IDENTS.contains(&ident) && !local_uses.contains(&ident.to_string()) {
-                        local_uses.push(ident.to_string());
+                    let ident = extract_ascii_ident(bytes, start, i);
+                    if !ident.is_empty()
+                        && !SKIP_IDENTS.contains(&ident.as_str())
+                        && !local_uses.contains(&ident)
+                    {
+                        local_uses.push(ident);
                     }
                 }
                 continue;
@@ -1412,8 +1453,7 @@ fn extract_bare_class_references(content: &str, local_uses: &mut Vec<String>) {
         }
 
         // Look for "raise" keyword (exception class names)
-        if i + 5 < len
-            && &content[i..i + 5] == "raise"
+        if bytes_match_keyword(bytes, i, b"raise")
             && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric())
         {
             i += 5;
@@ -1427,69 +1467,67 @@ fn extract_bare_class_references(content: &str, local_uses: &mut Vec<String>) {
                 {
                     i += 1;
                 }
-                let ident = &content[start..i];
+                let ident = extract_ascii_ident(bytes, start, i);
                 // Extract last component if dotted
-                let simple = ident.rsplit('.').next().unwrap_or(ident);
-                if !SKIP_IDENTS.contains(&simple) && !local_uses.contains(&simple.to_string()) {
+                let simple = ident.rsplit('.').next().unwrap_or(&ident);
+                if !ident.is_empty()
+                    && !SKIP_IDENTS.contains(&simple)
+                    && !local_uses.contains(&simple.to_string())
+                {
                     local_uses.push(simple.to_string());
                 }
             }
             continue;
         }
 
-        // Look for isinstance/issubclass calls
-        if i + 10 < len
-            && (&content[i..i + 10] == "isinstance" || &content[i..i + 10] == "issubclass")
-        {
-            let func_name = if &content[i..i + 10] == "isinstance" {
-                "isinstance"
-            } else {
-                "issubclass"
-            };
+        // Look for isinstance/issubclass calls (use byte comparison)
+        let is_isinstance = bytes_match_keyword(bytes, i, b"isinstance");
+        let is_issubclass = bytes_match_keyword(bytes, i, b"issubclass");
+        if (is_isinstance || is_issubclass) && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric()) {
+            i += 10; // Both "isinstance" and "issubclass" are 10 chars
+            // Skip whitespace and opening paren
+            while i < len && (bytes[i].is_ascii_whitespace() || bytes[i] == b'(') {
+                i += 1;
+            }
 
-            if i == 0 || !bytes[i - 1].is_ascii_alphanumeric() {
-                i += func_name.len();
-                // Skip whitespace and opening paren
-                while i < len && (bytes[i].is_ascii_whitespace() || bytes[i] == b'(') {
-                    i += 1;
-                }
-
-                // Skip first argument (object/class to check)
-                let mut paren_depth = 0;
-                while i < len {
-                    match bytes[i] {
-                        b'(' => paren_depth += 1,
-                        b')' => {
-                            if paren_depth == 0 {
-                                break;
-                            }
-                            paren_depth -= 1;
-                        }
-                        b',' if paren_depth == 0 => {
-                            i += 1;
+            // Skip first argument (object/class to check)
+            let mut paren_depth = 0;
+            while i < len {
+                match bytes[i] {
+                    b'(' => paren_depth += 1,
+                    b')' => {
+                        if paren_depth == 0 {
                             break;
                         }
-                        _ => {}
+                        paren_depth -= 1;
                     }
-                    i += 1;
-                }
-
-                // Now extract the class name (second argument)
-                while i < len && bytes[i].is_ascii_whitespace() {
-                    i += 1;
-                }
-                if i < len && (bytes[i].is_ascii_alphabetic() || bytes[i] == b'_') {
-                    let start = i;
-                    while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                    b',' if paren_depth == 0 => {
                         i += 1;
+                        break;
                     }
-                    let ident = &content[start..i];
-                    if !SKIP_IDENTS.contains(&ident) && !local_uses.contains(&ident.to_string()) {
-                        local_uses.push(ident.to_string());
-                    }
+                    _ => {}
                 }
-                continue;
+                i += 1;
             }
+
+            // Now extract the class name (second argument)
+            while i < len && bytes[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            if i < len && (bytes[i].is_ascii_alphabetic() || bytes[i] == b'_') {
+                let start = i;
+                while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                    i += 1;
+                }
+                let ident = extract_ascii_ident(bytes, start, i);
+                if !ident.is_empty()
+                    && !SKIP_IDENTS.contains(&ident.as_str())
+                    && !local_uses.contains(&ident)
+                {
+                    local_uses.push(ident);
+                }
+            }
+            continue;
         }
 
         i += 1;
@@ -2535,5 +2573,48 @@ def check_column(column_class):
 
         // issubclass check should detect usage (via function call detection)
         // Note: issubclass is detected as a function call with ButtonsColumnMixin as argument
+    }
+
+    #[test]
+    fn handles_utf8_emoji_in_python_code() {
+        // Test that UTF-8 content (emoji, unicode) doesn't crash the analyzer
+        let code = r#"
+"""
+This docstring has emoji 😱 and ellipsis … and bullet • points
+"""
+
+class MyClass:
+    """Another docstring with 🎉 emoji"""
+
+    def method(self):
+        return MyHelper  # Class reference after emoji content
+
+class MyHelper:
+    pass
+"#;
+
+        let temp = tempdir().unwrap();
+        let py_file = temp.path().join("test_emoji.py");
+        std::fs::write(&py_file, code).unwrap();
+
+        // This should NOT panic
+        let relative = py_file
+            .strip_prefix(temp.path())
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let analysis = analyze_py_file(
+            code,
+            &py_file,
+            temp.path(),
+            Some(&py_exts()),
+            relative,
+            &[],
+            &HashSet::new(),
+        );
+
+        // Verify exports and basic functionality still work
+        assert!(analysis.exports.iter().any(|e| e.name == "MyClass"));
+        assert!(analysis.exports.iter().any(|e| e.name == "MyHelper"));
     }
 }

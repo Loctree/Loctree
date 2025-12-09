@@ -221,13 +221,16 @@ fn main() -> std::io::Result<()> {
 
     // Auto-detect stack if no explicit extensions provided
     if !parsed.root_list.is_empty() {
+        let mut library_mode = parsed.library_mode; // Preserve user-set library_mode flag
         detect::apply_detected_stack(
             &parsed.root_list[0],
             &mut parsed.extensions,
             &mut parsed.ignore_patterns,
             &mut parsed.tauri_preset,
+            &mut library_mode,
             parsed.verbose,
         );
+        parsed.library_mode = library_mode; // Apply auto-detected library mode
 
         // Load .loctreeignore from root (if exists)
         let loctreeignore_patterns = fs_utils::load_loctreeignore(&parsed.root_list[0]);

@@ -2808,4 +2808,121 @@ use super::super::super::root::Type;
             "super::super::super::root::Type"
         );
     }
+
+    #[test]
+    fn detects_associated_functions_and_const_fn() {
+        // Test that we properly detect:
+        // 1. Associated functions in impl blocks (static methods)
+        // 2. Const functions (both top-level and in impl blocks)
+        // 3. That const functions are not incorrectly matched as const declarations
+        let content = r#"
+pub struct MyType {
+    field: String,
+}
+
+impl MyType {
+    // Associated function (static method)
+    pub fn new() -> Self {
+        Self { field: String::new() }
+    }
+
+    // Const associated function
+    pub const fn default_value() -> i32 {
+        42
+    }
+
+    // Public method
+    pub fn do_something(&self) {
+        println!("doing something");
+    }
+
+    // Private method - should NOT be detected
+    fn private_method(&self) {
+        println!("private");
+    }
+}
+
+// Top-level const fn
+pub const fn calculate() -> usize {
+    100
+}
+
+// Regular top-level fn
+pub fn regular_function() {
+    println!("regular");
+}
+
+// Top-level const - should be detected separately
+pub const BUFFER_SIZE: usize = 480;
+"#;
+        let analysis = analyze_rust_file(content, "types.rs".to_string(), &[]);
+
+        // Check that all public functions are detected (including associated functions)
+        let fn_exports: Vec<&str> = analysis
+            .exports
+            .iter()
+            .filter(|e| e.kind == "const") // Functions are marked as "const" kind in current code
+            .map(|e| e.name.as_str())
+            .collect();
+
+        // All public functions should be detected
+        assert!(
+            fn_exports.contains(&"new"),
+            "Should detect associated function 'new'. Got: {:?}",
+            fn_exports
+        );
+        assert!(
+            fn_exports.contains(&"default_value"),
+            "Should detect const associated function 'default_value'. Got: {:?}",
+            fn_exports
+        );
+        assert!(
+            fn_exports.contains(&"do_something"),
+            "Should detect public method 'do_something'. Got: {:?}",
+            fn_exports
+        );
+        assert!(
+            fn_exports.contains(&"calculate"),
+            "Should detect top-level const fn 'calculate'. Got: {:?}",
+            fn_exports
+        );
+        assert!(
+            fn_exports.contains(&"regular_function"),
+            "Should detect regular function 'regular_function'. Got: {:?}",
+            fn_exports
+        );
+
+        // Private method should NOT be detected
+        assert!(
+            !fn_exports.contains(&"private_method"),
+            "Should NOT detect private method 'private_method'. Got: {:?}",
+            fn_exports
+        );
+
+        // Check that const declarations are detected separately
+        let const_exports: Vec<&str> = analysis
+            .exports
+            .iter()
+            .filter(|e| e.kind == "decl") // Constants are marked as "decl" kind in current code
+            .map(|e| e.name.as_str())
+            .collect();
+
+        assert!(
+            const_exports.contains(&"BUFFER_SIZE"),
+            "Should detect const declaration 'BUFFER_SIZE'. Got: {:?}",
+            const_exports
+        );
+
+        // Make sure const functions are NOT in const_exports
+        assert!(
+            !const_exports.contains(&"calculate"),
+            "Const function 'calculate' should NOT be in const declarations. Got: {:?}",
+            const_exports
+        );
+        assert!(
+            !const_exports.contains(&"default_value"),
+            "Const function 'default_value' should NOT be in const declarations. Got: {:?}",
+            const_exports
+        );
+    }
 }

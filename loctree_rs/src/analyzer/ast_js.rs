@@ -284,6 +284,30 @@ fn parse_svelte_template_usages(template: &str) -> Vec<String> {
         }
     }
 
+    // Pattern 8: Method calls with optional chaining - obj?.method() or obj.method()
+    // This catches component method references like chatInput?.focusInput()
+    if let Ok(re) =
+        Regex::new(r#"([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\??\.\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\("#)
+    {
+        for caps in re.captures_iter(template) {
+            // Capture the object (e.g., chatInput)
+            if let Some(obj) = caps.get(1) {
+                let ident = obj.as_str().to_string();
+                if !is_svelte_builtin(&ident) && !usages.contains(&ident) {
+                    usages.push(ident);
+                }
+            }
+            // Capture the method name (e.g., focusInput)
+            // This is critical for detecting Svelte component API methods called via bind:this
+            if let Some(method) = caps.get(2) {
+                let method_name = method.as_str().to_string();
+                if !is_svelte_builtin(&method_name) && !usages.contains(&method_name) {
+                    usages.push(method_name);
+                }
+            }
+        }
+    }
+
     usages
 }
 
@@ -1810,6 +1834,50 @@ export const greeting = message + ' World'
         assert!(usages.contains(&"directHandler".to_string()));
         assert!(usages.contains(&"arrowHandler".to_string()));
         assert!(usages.contains(&"complexHandler".to_string()));
+    }
+
+    #[test]
+    fn test_svelte_component_method_calls() {
+        // Test component method calls via bind:this pattern
+        // Pattern: <ChatInput bind:this={chatInput} /> then chatInput?.focusInput()
+        let template = r#"
+            <ChatInput bind:this={chatInput} />
+            <button on:click={() => chatInput?.focusInput()}>Focus</button>
+            <div>{modal.show()}</div>
+            <input use:action={() => input.getValue()}>
+        "#;
+
+        let usages = parse_svelte_template_usages(template);
+        assert!(
+            usages.contains(&"focusInput".to_string()),
+            "Should detect focusInput method call via optional chaining, found: {:?}",
+            usages
+        );
+        assert!(
+            usages.contains(&"chatInput".to_string()),
+            "Should detect chatInput object, found: {:?}",
+            usages
+        );
+        assert!(
+            usages.contains(&"show".to_string()),
+            "Should detect show method call, found: {:?}",
+            usages
+        );
+        assert!(
+            usages.contains(&"modal".to_string()),
+            "Should detect modal object, found: {:?}",
+            usages
+        );
+        assert!(
+            usages.contains(&"getValue".to_string()),
+            "Should detect getValue method call, found: {:?}",
+            usages
+        );
+        assert!(
+            usages.contains(&"input".to_string()),
+            "Should detect input object, found: {:?}",
+            usages
+        );
     }
 
     // ========== VUE TEMPLATE TESTS ==========

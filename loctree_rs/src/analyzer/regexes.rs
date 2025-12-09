@@ -88,19 +88,35 @@ pub(crate) fn regex_rust_pub_use() -> &'static Regex {
 }
 
 pub(crate) fn regex_rust_pub_item(kind: &str) -> Regex {
-    // Matches visibility modifiers like pub(crate) and optional async for fn
+    // Matches visibility modifiers like pub(crate), optional async/unsafe modifiers
+    // For 'fn', also matches 'const fn' to capture const functions in impl blocks
+    // Also matches associated functions inside impl blocks (not just items at line start)
+    let modifiers = if kind == "fn" {
+        r#"(?:(?:async|const|unsafe)\s+)*"#
+    } else {
+        r#"(?:(?:async|unsafe)\s+)*"#
+    };
     let pattern = format!(
-        r#"(?m)^\s*pub\s*(?:\([^)]*\)\s*)?(?:async\s+)?{}\s+([A-Za-z0-9_]+)"#,
-        kind
+        r#"pub\s*(?:\([^)]*\)\s*)?{}{}\s+([A-Za-z0-9_]+)"#,
+        modifiers, kind
     );
     regex(&pattern)
 }
 
 pub(crate) fn regex_rust_pub_const_like(kind: &str) -> Regex {
-    let pattern = format!(
-        r#"(?m)^\s*pub\s*(?:\([^)]*\)\s*)?{}\s+([A-Za-z0-9_]+)"#,
-        kind
-    );
+    // Matches pub const/static declarations anywhere (including in impl blocks)
+    // Removed (?m)^\s* anchor to allow matching inside impl blocks
+    // For 'const', we need to ensure it's followed by an identifier (not fn/unsafe/async)
+    // This avoids matching "const fn" which should only be captured by the fn regex
+    let suffix = if kind == "const" {
+        // After "const ", expect an uppercase identifier (const names follow SCREAMING_SNAKE_CASE)
+        // This naturally excludes "const fn/unsafe/async" which have lowercase keywords
+        r#"([A-Z][A-Za-z0-9_]*)"#
+    } else {
+        // For static, just capture the identifier name
+        r#"([A-Za-z0-9_]+)"#
+    };
+    let pattern = format!(r#"pub\s*(?:\([^)]*\)\s*)?{}\s+{}"#, kind, suffix);
     regex(&pattern)
 }
 

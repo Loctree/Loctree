@@ -55,7 +55,7 @@
 //!
 //! See the [README](https://github.com/Loctree/Loctree) for full documentation.
 
-#![doc(html_root_url = "https://docs.rs/loctree/0.6.1-dev")]
+#![doc(html_root_url = "https://docs.rs/loctree/0.6.2-dev")]
 #![doc(
     html_favicon_url = "https://raw.githubusercontent.com/Loctree/Loctree/main/assets/loctree-badge.svg"
 )]

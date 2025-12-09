@@ -1069,6 +1069,18 @@ pub fn find_dead_exports(
             if python_framework_magic {
                 continue;
             }
+
+            // Django/Wagtail mixin pattern heuristic:
+            // Classes ending in "Mixin" are typically used via multiple inheritance
+            // and their methods are called via MRO (Method Resolution Order), not directly imported
+            // Common patterns: LoginRequiredMixin, PermissionRequiredMixin, ButtonsColumnMixin, etc.
+            let is_django_mixin =
+                is_python_file && exp.kind == "class" && exp.name.ends_with("Mixin");
+            if is_django_mixin {
+                // Skip mixin classes from dead export detection
+                // They're used via inheritance which may not be fully tracked in complex codebases
+                continue;
+            }
             if is_python_test_export(analysis, exp) || is_python_test_path(&analysis.path) {
                 continue;
             }
@@ -1873,6 +1885,131 @@ mod tests {
             .collect();
         // Should truncate to limit and show "... and N more"
         print_dead_exports(&dead, OutputMode::Human, false, 50);
+    }
+
+    #[test]
+    fn test_django_wagtail_mixin_not_dead() {
+        // Test that Django/Wagtail mixins used in inheritance are not marked as dead
+        // This tests the integration between py.rs (which tracks inheritance) and dead_parrots.rs
+
+        use crate::types::{ExportSymbol, FileAnalysis};
+
+        // Mixin definition file
+        let mixin_file = FileAnalysis {
+            path: "myapp/mixins.py".to_string(),
+            language: "py".to_string(),
+            exports: vec![
+                ExportSymbol::new("LoginRequiredMixin".to_string(), "class", "named", Some(1)),
+                ExportSymbol::new(
+                    "PermissionRequiredMixin".to_string(),
+                    "class",
+                    "named",
+                    Some(5),
+                ),
+                ExportSymbol::new("ButtonsColumnMixin".to_string(), "class", "named", Some(10)),
+            ],
+            ..Default::default()
+        };
+
+        // View file that uses the mixins
+        let mut view_file = FileAnalysis {
+            path: "myapp/views.py".to_string(),
+            language: "py".to_string(),
+            exports: vec![], // No exports to avoid noise
+            // Simulate what py.rs does: add base classes to local_uses
+            local_uses: vec![
+                "LoginRequiredMixin".to_string(),
+                "PermissionRequiredMixin".to_string(),
+                "ButtonsColumnMixin".to_string(),
+            ],
+            ..Default::default()
+        };
+
+        // Add import entry to track the relationship
+        use crate::types::{ImportEntry, ImportKind, ImportSymbol};
+        let mut imp = ImportEntry::new("myapp.mixins".to_string(), ImportKind::Static);
+        imp.resolved_path = Some("myapp/mixins.py".to_string());
+        imp.symbols = vec![
+            ImportSymbol {
+                name: "LoginRequiredMixin".to_string(),
+                alias: None,
+                is_default: false,
+            },
+            ImportSymbol {
+                name: "PermissionRequiredMixin".to_string(),
+                alias: None,
+                is_default: false,
+            },
+            ImportSymbol {
+                name: "ButtonsColumnMixin".to_string(),
+                alias: None,
+                is_default: false,
+            },
+        ];
+        view_file.imports.push(imp);
+
+        let analyses = vec![mixin_file, view_file];
+        let result = find_dead_exports(&analyses, false, None, DeadFilterConfig::default());
+
+        // All mixins should be marked as used (both via imports AND local_uses from inheritance tracking)
+        assert!(
+            result.is_empty(),
+            "Django/Wagtail mixins should not be marked as dead. Found dead: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_django_mixin_pattern_common_names() {
+        // Test common Django/Wagtail mixin naming patterns
+        // These should not be flagged as dead even if static analysis misses some usage
+        use crate::types::{ExportSymbol, FileAnalysis};
+
+        let mixin_file = FileAnalysis {
+            path: "django/contrib/auth/mixins.py".to_string(),
+            language: "py".to_string(),
+            exports: vec![
+                // Standard Django mixins that are ALWAYS used via MRO, never called directly
+                ExportSymbol::new("LoginRequiredMixin".to_string(), "class", "named", Some(1)),
+                ExportSymbol::new(
+                    "PermissionRequiredMixin".to_string(),
+                    "class",
+                    "named",
+                    Some(10),
+                ),
+                ExportSymbol::new(
+                    "UserPassesTestMixin".to_string(),
+                    "class",
+                    "named",
+                    Some(20),
+                ),
+                // Non-mixin class (should be flagged if unused)
+                ExportSymbol::new("AuthHelper".to_string(), "class", "named", Some(30)),
+            ],
+            ..Default::default()
+        };
+
+        // No imports - testing heuristic fallback for common Django patterns
+        let analyses = vec![mixin_file];
+        let result = find_dead_exports(&analyses, false, None, DeadFilterConfig::default());
+
+        // Mixins ending in "Mixin" should NOT be flagged (heuristic protection)
+        let mixin_names: Vec<_> = result
+            .iter()
+            .filter(|d| d.symbol.ends_with("Mixin"))
+            .collect();
+        assert!(
+            mixin_names.is_empty(),
+            "Classes ending in 'Mixin' should not be flagged as dead (Django/Wagtail pattern). Found: {:?}",
+            mixin_names
+        );
+
+        // Non-mixin classes (like AuthHelper) SHOULD be flagged if truly unused
+        let has_non_mixin = result.iter().any(|d| d.symbol == "AuthHelper");
+        assert!(
+            has_non_mixin,
+            "Non-mixin classes like 'AuthHelper' should still be flagged when unused"
+        );
     }
 
     #[test]
