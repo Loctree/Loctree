@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use oxc_allocator::Allocator;
@@ -284,6 +284,30 @@ fn parse_svelte_template_usages(template: &str) -> Vec<String> {
         }
     }
 
+    // Pattern 8: Method calls with optional chaining - obj?.method() or obj.method()
+    // This catches component method references like chatInput?.focusInput()
+    if let Ok(re) =
+        Regex::new(r#"([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\??\.\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\("#)
+    {
+        for caps in re.captures_iter(template) {
+            // Capture the object (e.g., chatInput)
+            if let Some(obj) = caps.get(1) {
+                let ident = obj.as_str().to_string();
+                if !is_svelte_builtin(&ident) && !usages.contains(&ident) {
+                    usages.push(ident);
+                }
+            }
+            // Capture the method name (e.g., focusInput)
+            // This is critical for detecting Svelte component API methods called via bind:this
+            if let Some(method) = caps.get(2) {
+                let method_name = method.as_str().to_string();
+                if !is_svelte_builtin(&method_name) && !usages.contains(&method_name) {
+                    usages.push(method_name);
+                }
+            }
+        }
+    }
+
     usages
 }
 
@@ -438,6 +462,18 @@ fn is_svelte_builtin(name: &str) -> bool {
     )
 }
 
+/// Check if file uses Flow type annotations
+/// Flow files start with // @flow or /* @flow */
+fn is_flow_file(content: &str) -> bool {
+    // Use floor_char_boundary to avoid panic on UTF-8 multi-byte characters
+    let end_idx = content.len().min(1000);
+    let safe_end = content.floor_char_boundary(end_idx);
+    let first_1000 = &content[..safe_end];
+    first_1000.contains("@flow")
+        || first_1000.contains("// @flow")
+        || first_1000.contains("/* @flow */")
+}
+
 /// Analyze JS/TS file using OXC AST parser
 pub(crate) fn analyze_js_file_ast(
     content: &str,
@@ -458,6 +494,9 @@ pub(crate) fn analyze_js_file_ast(
     let is_svelte_file = ext == "svelte";
     let is_vue_file = ext == "vue";
     let is_sfc_file = is_svelte_file || is_vue_file;
+
+    // Detect Flow type annotations
+    let is_flow = is_flow_file(content);
 
     // For SFC files (Svelte/Vue), extract script content first
     let parsed_content: String;
@@ -514,9 +553,13 @@ pub(crate) fn analyze_js_file_ast(
         ts_resolver,
         source_text: content_to_parse,
         command_cfg,
+        namespace_imports: HashMap::new(),
     };
 
     visitor.visit_program(&ret.program);
+
+    // Mark file as Flow if detected
+    visitor.analysis.is_flow_file = is_flow;
 
     // Use oxc_semantic to track local symbol references
     // This helps detect when exported symbols are used internally (not dead)
@@ -582,6 +625,8 @@ struct JsVisitor<'a> {
     ts_resolver: Option<&'a TsPathResolver>,
     source_text: &'a str,
     command_cfg: &'a CommandDetectionConfig,
+    /// Map of namespace import aliases to their resolved paths: alias -> (source, resolved_path)
+    namespace_imports: HashMap<String, (String, Option<String>)>,
 }
 
 impl<'a> JsVisitor<'a> {
@@ -744,9 +789,56 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                     self.push_string_literal(&tpl.quasis[0].value.raw, tpl.span);
                 }
             }
+            Expression::NewExpression(new_expr) => {
+                // Detect WeakMap/WeakSet constructor calls to identify global registry patterns
+                // Common in React DevTools and other libraries for storing metadata
+                if let Expression::Identifier(ident) = &new_expr.callee {
+                    let name = ident.name.to_string();
+                    if name == "WeakMap" || name == "WeakSet" {
+                        self.analysis.has_weak_collections = true;
+                    }
+                }
+            }
             _ => {}
         }
         walk_expression(self, expr);
+    }
+
+    fn visit_member_expression(&mut self, member: &MemberExpression<'a>) {
+        // Track namespace member access: NS.member where NS is from `import * as NS`
+        // This fixes Issue #5 - namespace member access not tracked
+        if let MemberExpression::StaticMemberExpression(static_member) = member {
+            // Check if the object is an identifier (e.g., `NS` in `NS.transform`)
+            if let Expression::Identifier(obj_ident) = &static_member.object {
+                let namespace_name = obj_ident.name.to_string();
+                let member_name = static_member.property.name.to_string();
+
+                // Check if this identifier is a namespace import
+                if let Some((source, _resolved_path)) = self.namespace_imports.get(&namespace_name)
+                {
+                    // Find the import entry and add this member as a used symbol
+                    for imp in &mut self.analysis.imports {
+                        if &imp.source == source {
+                            // Check if we already have this member symbol
+                            let already_has_member =
+                                imp.symbols.iter().any(|s| s.name == member_name);
+                            if !already_has_member {
+                                // Add the accessed member as an import symbol
+                                imp.symbols.push(ImportSymbol {
+                                    name: member_name.clone(),
+                                    alias: None,
+                                    is_default: false,
+                                });
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Continue walking the AST
+        oxc_ast_visit::walk::walk_member_expression(self, member);
     }
 
     // --- IMPORTS ---
@@ -791,11 +883,15 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                         });
                     }
                     ImportDeclarationSpecifier::ImportNamespaceSpecifier(s) => {
+                        let alias = s.local.name.to_string();
                         entry.symbols.push(ImportSymbol {
                             name: "*".to_string(),
-                            alias: Some(s.local.name.to_string()),
+                            alias: Some(alias.clone()),
                             is_default: false,
                         });
+                        // Track namespace import for member expression resolution
+                        self.namespace_imports
+                            .insert(alias, (source.clone(), entry.resolved_path.clone()));
                     }
                 }
             }
@@ -1768,6 +1864,50 @@ export const greeting = message + ' World'
         assert!(usages.contains(&"complexHandler".to_string()));
     }
 
+    #[test]
+    fn test_svelte_component_method_calls() {
+        // Test component method calls via bind:this pattern
+        // Pattern: <ChatInput bind:this={chatInput} /> then chatInput?.focusInput()
+        let template = r#"
+            <ChatInput bind:this={chatInput} />
+            <button on:click={() => chatInput?.focusInput()}>Focus</button>
+            <div>{modal.show()}</div>
+            <input use:action={() => input.getValue()}>
+        "#;
+
+        let usages = parse_svelte_template_usages(template);
+        assert!(
+            usages.contains(&"focusInput".to_string()),
+            "Should detect focusInput method call via optional chaining, found: {:?}",
+            usages
+        );
+        assert!(
+            usages.contains(&"chatInput".to_string()),
+            "Should detect chatInput object, found: {:?}",
+            usages
+        );
+        assert!(
+            usages.contains(&"show".to_string()),
+            "Should detect show method call, found: {:?}",
+            usages
+        );
+        assert!(
+            usages.contains(&"modal".to_string()),
+            "Should detect modal object, found: {:?}",
+            usages
+        );
+        assert!(
+            usages.contains(&"getValue".to_string()),
+            "Should detect getValue method call, found: {:?}",
+            usages
+        );
+        assert!(
+            usages.contains(&"input".to_string()),
+            "Should detect input object, found: {:?}",
+            usages
+        );
+    }
+
     // ========== VUE TEMPLATE TESTS ==========
 
     #[test]
@@ -1928,5 +2068,346 @@ export const greeting = message + ' World'
         assert!(!usages.contains(&"component".to_string()));
         assert!(!usages.contains(&"transition".to_string()));
         assert!(!usages.contains(&"console".to_string()));
+    }
+
+    /// Test import alias tracking - the original export name should be in `name`,
+    /// and the local alias should be in `alias` field.
+    #[test]
+    fn test_import_alias_tracking() {
+        let content = r#"
+            // Test various import alias patterns
+            import { Component as MyComponent } from 'react';
+            import { useState as useStateHook, useEffect } from 'react';
+            import DefaultExport from './module';
+            import { originalName as renamedImport } from './utils';
+            import { default as DefaultWithAlias } from './other';
+
+            // Use the imports (to avoid them being marked as unused in other analyses)
+            MyComponent();
+            useStateHook();
+            useEffect();
+            DefaultExport();
+            renamedImport();
+            DefaultWithAlias();
+        "#;
+
+        let analysis = analyze_js_file_ast(
+            content,
+            Path::new("src/test.tsx"),
+            Path::new("src"),
+            None,
+            None,
+            "test.tsx".to_string(),
+            &CommandDetectionConfig::default(),
+        );
+
+        // Find ALL react imports - they may be separate or merged depending on implementation
+        let react_imports: Vec<_> = analysis
+            .imports
+            .iter()
+            .filter(|i| i.source == "react")
+            .collect();
+
+        // Collect all react symbols across all import entries
+        let all_react_symbols: Vec<_> = react_imports
+            .iter()
+            .flat_map(|i| i.symbols.iter())
+            .collect();
+
+        // We should have 3 symbols from react: Component, useState, useEffect
+        assert_eq!(
+            all_react_symbols.len(),
+            3,
+            "Should have 3 symbols from react total"
+        );
+
+        // Check Component as MyComponent
+        let component_sym = all_react_symbols
+            .iter()
+            .find(|s| s.name == "Component")
+            .expect("Should find Component symbol");
+        assert_eq!(
+            component_sym.alias.as_deref(),
+            Some("MyComponent"),
+            "Alias should be 'MyComponent'"
+        );
+        assert!(
+            !component_sym.is_default,
+            "Component is not a default export"
+        );
+
+        // Check useState as useStateHook
+        let usestate_sym = all_react_symbols
+            .iter()
+            .find(|s| s.name == "useState")
+            .expect("Should find useState symbol");
+
+        assert_eq!(
+            usestate_sym.name, "useState",
+            "Original export name should be 'useState'"
+        );
+        assert_eq!(
+            usestate_sym.alias.as_deref(),
+            Some("useStateHook"),
+            "Alias should be 'useStateHook'"
+        );
+
+        // Check useEffect (no alias)
+        let useeffect_sym = all_react_symbols
+            .iter()
+            .find(|s| s.name == "useEffect")
+            .expect("Should find useEffect symbol");
+
+        assert_eq!(
+            useeffect_sym.name, "useEffect",
+            "Name should be 'useEffect'"
+        );
+        assert_eq!(useeffect_sym.alias, None, "Should have no alias");
+
+        // Check utils import
+        let utils_import = analysis
+            .imports
+            .iter()
+            .find(|i| i.source == "./utils")
+            .expect("Should find ./utils import");
+
+        let original_sym = utils_import
+            .symbols
+            .iter()
+            .find(|s| s.name == "originalName")
+            .expect("Should find originalName symbol");
+
+        assert_eq!(
+            original_sym.name, "originalName",
+            "Original name should be preserved"
+        );
+        assert_eq!(
+            original_sym.alias.as_deref(),
+            Some("renamedImport"),
+            "Alias should be 'renamedImport'"
+        );
+
+        // Check { default as DefaultWithAlias } pattern
+        let other_import = analysis
+            .imports
+            .iter()
+            .find(|i| i.source == "./other")
+            .expect("Should find ./other import");
+
+        let default_alias_sym = &other_import.symbols[0];
+        assert_eq!(
+            default_alias_sym.name, "default",
+            "Should track 'default' as the original export name"
+        );
+        assert_eq!(
+            default_alias_sym.alias.as_deref(),
+            Some("DefaultWithAlias"),
+            "Alias should be 'DefaultWithAlias'"
+        );
+        assert!(
+            !default_alias_sym.is_default,
+            "This is NOT a default import (uses named import syntax)"
+        );
+    }
+
+    /// Test for Issue #5: Namespace member access should be tracked
+    /// When using `import * as namespace`, accessing `namespace.member` should be detected
+    /// as usage of the `member` export from the imported module.
+    #[test]
+    fn test_namespace_member_access_tracking() {
+        let content = r#"
+            import * as amp from '@sveltejs/amp';
+            import * as utils from './utils';
+
+            // These member accesses should be tracked as using 'transform' and 'helper'
+            const result = amp.transform(buffer);
+            utils.helper();
+            const value = utils.CONSTANT;
+        "#;
+
+        let analysis = analyze_js_file_ast(
+            content,
+            Path::new("src/app.ts"),
+            Path::new("src"),
+            None,
+            None,
+            "app.ts".to_string(),
+            &CommandDetectionConfig::default(),
+        );
+
+        // Should have 2 imports
+        assert_eq!(analysis.imports.len(), 2);
+
+        // Check the amp import
+        let amp_import = analysis
+            .imports
+            .iter()
+            .find(|i| i.source == "@sveltejs/amp")
+            .expect("Should find @sveltejs/amp import");
+
+        // Should have both the namespace symbol (*) and the accessed member (transform)
+        assert_eq!(
+            amp_import.symbols.len(),
+            2,
+            "amp import should have 2 symbols: * and transform"
+        );
+        assert!(
+            amp_import.symbols.iter().any(|s| s.name == "*"),
+            "amp import should have namespace symbol"
+        );
+        assert!(
+            amp_import.symbols.iter().any(|s| s.name == "transform"),
+            "amp import should track 'transform' member access"
+        );
+
+        // Check the utils import
+        let utils_import = analysis
+            .imports
+            .iter()
+            .find(|i| i.source == "./utils")
+            .expect("Should find ./utils import");
+
+        // Should have namespace symbol (*), helper, and CONSTANT
+        assert_eq!(
+            utils_import.symbols.len(),
+            3,
+            "utils import should have 3 symbols: *, helper, and CONSTANT"
+        );
+        assert!(
+            utils_import.symbols.iter().any(|s| s.name == "*"),
+            "utils import should have namespace symbol"
+        );
+        assert!(
+            utils_import.symbols.iter().any(|s| s.name == "helper"),
+            "utils import should track 'helper' member access"
+        );
+        assert!(
+            utils_import.symbols.iter().any(|s| s.name == "CONSTANT"),
+            "utils import should track 'CONSTANT' member access"
+        );
+    }
+
+    #[test]
+    fn test_flow_file_detection() {
+        // Test Flow annotation detection at start of file
+        let flow_content = r#"
+// @flow
+export type MyType = {
+    name: string,
+    age: number,
+};
+
+export const myValue = 42;
+        "#;
+
+        let analysis = analyze_js_file_ast(
+            flow_content,
+            Path::new("src/types.js"),
+            Path::new("src"),
+            None,
+            None,
+            "types.js".to_string(),
+            &CommandDetectionConfig::default(),
+        );
+
+        assert!(
+            analysis.is_flow_file,
+            "File with @flow annotation should be detected as Flow file"
+        );
+    }
+
+    #[test]
+    fn test_non_flow_file() {
+        // Test that files without @flow annotation are not marked as Flow
+        let regular_content = r#"
+export type MyType = {
+    name: string,
+    age: number,
+};
+
+export const myValue = 42;
+        "#;
+
+        let analysis = analyze_js_file_ast(
+            regular_content,
+            Path::new("src/types.ts"),
+            Path::new("src"),
+            None,
+            None,
+            "types.ts".to_string(),
+            &CommandDetectionConfig::default(),
+        );
+
+        assert!(
+            !analysis.is_flow_file,
+            "File without @flow annotation should NOT be detected as Flow file"
+        );
+    }
+
+    /// Test WeakMap/WeakSet detection for registry pattern (React DevTools, etc.)
+    #[test]
+    fn test_weakmap_detection() {
+        let content = r#"
+            // React DevTools pattern: store component metadata in WeakMap
+            const componentMap = new WeakMap();
+            const stateMap = new WeakSet();
+
+            export function registerComponent(component) {
+                componentMap.set(component, { name: component.name });
+            }
+
+            export const MyComponent = () => <div>Hello</div>;
+        "#;
+
+        let analysis = analyze_js_file_ast(
+            content,
+            Path::new("src/devtools.tsx"), // Use .tsx for JSX support
+            Path::new("src"),
+            None,
+            None,
+            "devtools.tsx".to_string(),
+            &CommandDetectionConfig::default(),
+        );
+
+        assert!(
+            analysis.has_weak_collections,
+            "Should detect WeakMap/WeakSet usage"
+        );
+
+        // Should export 2 symbols
+        assert_eq!(analysis.exports.len(), 2);
+        assert!(
+            analysis
+                .exports
+                .iter()
+                .any(|e| e.name == "registerComponent")
+        );
+        assert!(analysis.exports.iter().any(|e| e.name == "MyComponent"));
+    }
+
+    /// Test that files without WeakMap/WeakSet don't get flagged
+    #[test]
+    fn test_no_weakmap_detection() {
+        let content = r#"
+            const cache = new Map();
+            export function getCached(key) {
+                return cache.get(key);
+            }
+        "#;
+
+        let analysis = analyze_js_file_ast(
+            content,
+            Path::new("src/cache.ts"),
+            Path::new("src"),
+            None,
+            None,
+            "cache.ts".to_string(),
+            &CommandDetectionConfig::default(),
+        );
+
+        assert!(
+            !analysis.has_weak_collections,
+            "Should NOT flag regular Map as WeakMap"
+        );
     }
 }

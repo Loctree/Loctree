@@ -323,10 +323,19 @@ fn scan_single_root(
         .canonicalize()
         .unwrap_or_else(|_| root_path.to_path_buf());
 
+    // Ensure core language extensions are always included even if user provided a custom list
+    let extensions = cfg.extensions.clone().map(|mut set| {
+        for lang_ext in ["go", "dart"] {
+            set.insert(lang_ext.to_string());
+        }
+        set
+    });
+
     let options = Options {
-        extensions: cfg.extensions.clone(),
+        extensions,
         ignore_paths,
-        use_gitignore: cfg.parsed.use_gitignore,
+        // --scan-all should ignore gitignore and include everything
+        use_gitignore: cfg.parsed.use_gitignore && !cfg.parsed.scan_all,
         max_depth: cfg.parsed.max_depth,
         color: cfg.parsed.color,
         output: cfg.parsed.output,
@@ -449,7 +458,7 @@ fn scan_single_root(
                 } else {
                     // File changed - re-analyze
                     fresh_scans += 1;
-                    let mut a = analyze_file(
+                    match analyze_file(
                         &file,
                         &root_canon,
                         options.extensions.as_ref(),
@@ -459,15 +468,23 @@ fn scan_single_root(
                         options.symbol.as_deref(),
                         cfg.custom_command_macros,
                         &cfg.command_detection,
-                    )?;
-                    a.mtime = current_mtime;
-                    a.size = current_size;
-                    a
+                    ) {
+                        Ok(mut a) => {
+                            a.mtime = current_mtime;
+                            a.size = current_size;
+                            a
+                        }
+                        Err(e) if e.kind() == io::ErrorKind::InvalidData => {
+                            // Skip binary files or invalid UTF-8
+                            continue;
+                        }
+                        Err(e) => return Err(e),
+                    }
                 }
             } else {
                 // New file - analyze
                 fresh_scans += 1;
-                let mut a = analyze_file(
+                match analyze_file(
                     &file,
                     &root_canon,
                     options.extensions.as_ref(),
@@ -477,15 +494,23 @@ fn scan_single_root(
                     options.symbol.as_deref(),
                     cfg.custom_command_macros,
                     &cfg.command_detection,
-                )?;
-                a.mtime = current_mtime;
-                a.size = current_size;
-                a
+                ) {
+                    Ok(mut a) => {
+                        a.mtime = current_mtime;
+                        a.size = current_size;
+                        a
+                    }
+                    Err(e) if e.kind() == io::ErrorKind::InvalidData => {
+                        // Skip binary files or invalid UTF-8
+                        continue;
+                    }
+                    Err(e) => return Err(e),
+                }
             }
         } else {
             // No cache - fresh scan
             fresh_scans += 1;
-            let mut a = analyze_file(
+            match analyze_file(
                 &file,
                 &root_canon,
                 options.extensions.as_ref(),
@@ -495,10 +520,18 @@ fn scan_single_root(
                 options.symbol.as_deref(),
                 cfg.custom_command_macros,
                 &cfg.command_detection,
-            )?;
-            a.mtime = current_mtime;
-            a.size = current_size;
-            a
+            ) {
+                Ok(mut a) => {
+                    a.mtime = current_mtime;
+                    a.size = current_size;
+                    a
+                }
+                Err(e) if e.kind() == io::ErrorKind::InvalidData => {
+                    // Skip binary files or invalid UTF-8
+                    continue;
+                }
+                Err(e) => return Err(e),
+            }
         };
         let abs_for_match = root_canon.join(&analysis.path);
         let is_excluded_for_commands = cfg

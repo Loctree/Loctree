@@ -31,6 +31,7 @@ pub fn uses_new_syntax(args: &[String]) -> bool {
             || arg == "--quiet"
             || arg == "--verbose"
             || arg.starts_with("--color")
+            || arg == "--library-mode"
             || arg == "-v"
             || arg == "-q"
         {
@@ -105,6 +106,14 @@ pub fn parse_command(args: &[String]) -> Result<Option<ParsedCommand>, String> {
             _ if arg.starts_with("--color=") => {
                 let value = arg.trim_start_matches("--color=");
                 global.color = parse_color_mode(value)?;
+                i += 1;
+            }
+            "--library-mode" => {
+                global.library_mode = true;
+                i += 1;
+            }
+            "--python-library" => {
+                global.python_library = true;
                 i += 1;
             }
             "--help" | "-h" => {
@@ -906,8 +915,10 @@ DESCRIPTION:
 
 OPTIONS:
     --name <PATTERN>   Filter to commands matching pattern
-    --missing          Show only missing handlers (FE calls → no BE)
-    --unused           Show only unused handlers (BE exists → no FE calls)
+    --missing, --missing-only
+                       Show only missing handlers (FE calls → no BE)
+    --unused, --unused-only
+                       Show only unused handlers (BE exists → no FE calls)
     --no-duplicates    Hide duplicate export sections in CLI output
     --no-dynamic-imports Hide dynamic import sections in CLI output
     --help, -h         Show this help message
@@ -933,11 +944,11 @@ EXAMPLES:
                 opts.name_filter = Some(value.clone());
                 i += 2;
             }
-            "--missing" => {
+            "--missing" | "--missing-only" => {
                 opts.missing_only = true;
                 i += 1;
             }
-            "--unused" => {
+            "--unused" | "--unused-only" => {
                 opts.unused_only = true;
                 i += 1;
             }
@@ -1490,8 +1501,6 @@ EXAMPLES:
 
     Ok(Command::Diff(opts))
 }
-
-// memex command intentionally removed from base edition
 
 fn parse_crowd_command(args: &[String]) -> Result<Command, String> {
     // Check for help flag first

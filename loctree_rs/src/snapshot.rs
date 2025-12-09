@@ -565,6 +565,7 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
     use crate::config::LoctreeConfig;
 
     let start_time = Instant::now();
+    let mut parsed = parsed.clone();
 
     // Snapshot root defaults to the first provided root (common UX: keep artifacts near target),
     // falling back to CWD if multiple roots are provided.
@@ -639,6 +640,10 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
         .first()
         .map(|root| LoctreeConfig::load(root))
         .unwrap_or_default();
+    parsed.library_mode = parsed.library_mode || loctree_config.library_mode;
+    if parsed.library_mode && parsed.library_example_globs.is_empty() {
+        parsed.library_example_globs = loctree_config.library_example_globs.clone();
+    }
     let custom_command_macros = loctree_config.tauri.command_macros;
     let command_detection = crate::analyzer::ast_js::CommandDetectionConfig::new(
         &loctree_config.tauri.dom_exclusions,
@@ -648,7 +653,7 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
 
     let scan_config = ScanConfig {
         roots: root_list,
-        parsed,
+        parsed: &parsed,
         extensions: base_extensions,
         focus_set: &focus_set,
         exclude_set: &exclude_set,
@@ -886,7 +891,7 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
 
     // Auto mode: emit full artifact set into ./.loctree to avoid extra commands
     if parsed.auto_outputs {
-        match write_auto_artifacts(&snapshot_root, &scan_results, parsed) {
+        match write_auto_artifacts(&snapshot_root, &scan_results, &parsed) {
             Ok(paths) => {
                 if !paths.is_empty() {
                     println!("Artifacts saved under ./.loctree:");
@@ -905,7 +910,7 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
 }
 
 /// In auto mode, generate the full set of analysis artifacts inside ./.loctree
-fn write_auto_artifacts(
+pub(crate) fn write_auto_artifacts(
     snapshot_root: &Path,
     scan_results: &crate::analyzer::root_scan::ScanResults,
     parsed: &ParsedArgs,
@@ -1094,6 +1099,16 @@ fn write_auto_artifacts(
             .display()
     ));
 
+    let mut languages: Vec<String> = scan_results
+        .contexts
+        .iter()
+        .flat_map(|ctx| ctx.languages.iter().cloned())
+        .collect();
+    languages.sort();
+    languages.dedup();
+    let total_loc: usize = scan_results.global_analyses.iter().map(|a| a.loc).sum();
+    let file_count = scan_results.global_analyses.len();
+
     let bundle = json!({
         "schema": { "name": SCHEMA_NAME, "version": SCHEMA_VERSION },
         "generatedAt": time::OffsetDateTime::now_utc()
@@ -1104,6 +1119,11 @@ fn write_auto_artifacts(
             "branch": git_ctx.branch,
             "commit": git_ctx.commit,
             "scanId": git_ctx.scan_id,
+        },
+        "stats": {
+            "files": file_count,
+            "loc": total_loc,
+            "languages": languages,
         },
         "analysis": json_results,
         "pipelineSummary": pipeline_summary,
@@ -1133,7 +1153,13 @@ fn write_auto_artifacts(
         &scan_results.global_analyses,
         high_confidence,
         None,
-        crate::analyzer::dead_parrots::DeadFilterConfig::default(),
+        crate::analyzer::dead_parrots::DeadFilterConfig {
+            include_tests: false,
+            include_helpers: false,
+            library_mode: parsed.library_mode,
+            example_globs: parsed.library_example_globs.clone(),
+            python_library_mode: parsed.python_library,
+        },
     );
 
     let sarif_content = generate_sarif_string(SarifInputs {

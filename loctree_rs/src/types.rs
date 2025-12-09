@@ -453,6 +453,9 @@ pub struct FileAnalysis {
     /// True if generated file (has generation marker).
     #[serde(default)]
     pub is_generated: bool,
+    /// True if file uses Flow type annotations (@flow).
+    #[serde(default)]
+    pub is_flow_file: bool,
     /// Import statements found in file.
     #[serde(default)]
     pub imports: Vec<ImportEntry>,
@@ -524,6 +527,10 @@ pub struct FileAnalysis {
     /// Pytest fixtures defined in this file
     #[serde(default)]
     pub pytest_fixtures: Vec<String>,
+
+    /// True if file uses WeakMap or WeakSet (global registry pattern in React/libs)
+    #[serde(default)]
+    pub has_weak_collections: bool,
 }
 
 impl ImportEntry {
@@ -567,6 +574,7 @@ impl FileAnalysis {
             kind: "code".to_string(),
             is_test: false,
             is_generated: false,
+            is_flow_file: false,
             imports: Vec::new(),
             reexports: Vec::new(),
             dynamic_imports: Vec::new(),
@@ -590,6 +598,7 @@ impl FileAnalysis {
             signature_uses: Vec::new(),
             routes: Vec::new(),
             pytest_fixtures: Vec::new(),
+            has_weak_collections: false,
         }
     }
 }

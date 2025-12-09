@@ -661,6 +661,9 @@ pub fn process_root_context(
             DeadFilterConfig {
                 include_tests: parsed.with_tests,
                 include_helpers: parsed.with_helpers,
+                library_mode: parsed.library_mode,
+                example_globs: parsed.library_example_globs.clone(),
+                python_library_mode: parsed.python_library,
             },
         );
 

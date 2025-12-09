@@ -1374,7 +1374,7 @@ dependencies = [
 
 [[package]]
 name = "loctree"
-version = "0.5.19"
+version = "0.6.5-dev"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -1386,6 +1386,7 @@ dependencies = [
  "heck",
  "indicatif",
  "json-five",
+ "once_cell",
  "oxc_allocator",
  "oxc_ast",
  "oxc_ast_visit",

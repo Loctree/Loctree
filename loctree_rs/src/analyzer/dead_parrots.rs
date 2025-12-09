@@ -9,9 +9,10 @@
 //! - Similarity check (`--check`/`--sim`)
 //! - Dead exports detection (`--dead`)
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 
+use globset::GlobSet;
 use serde_json::json;
 
 use crate::similarity::similarity;
@@ -147,12 +148,18 @@ pub struct DeadExport {
 }
 
 /// Controls which files are considered during dead-export detection.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct DeadFilterConfig {
     /// Include tests and fixtures (default: false)
     pub include_tests: bool,
     /// Include helper/scripts/docs files (default: false)
     pub include_helpers: bool,
+    /// Treat project as library/framework (ignore examples/demos noise)
+    pub library_mode: bool,
+    /// Extra example/demo globs to ignore when library_mode is enabled
+    pub example_globs: Vec<String>,
+    /// Python library mode: exports in __all__ are public API, not dead
+    pub python_library_mode: bool,
 }
 
 /// Search for symbol occurrences across analyzed files (case-insensitive, substring).
@@ -393,11 +400,39 @@ pub fn print_similarity_results(
 /// Check if a file should be skipped from dead export detection.
 /// These are files whose exports are consumed by external tools/frameworks,
 /// not by regular imports in the codebase.
-fn should_skip_dead_export_check(analysis: &FileAnalysis, config: DeadFilterConfig) -> bool {
+fn should_skip_dead_export_check(
+    analysis: &FileAnalysis,
+    config: &DeadFilterConfig,
+    example_globs: Option<&GlobSet>,
+) -> bool {
     let path = &analysis.path;
+    let lower_path = path.to_ascii_lowercase();
+
+    // Go exports are primarily public API; static import graph is insufficient (FP-heavy)
+    // Skip dead-export detection for Go to avoid noise.
+    if analysis.language == "go" {
+        return true;
+    }
+
+    // JSX runtime files - exports consumed by TypeScript/Babel compiler, not by imports
+    // Files matching: *jsx-runtime*, jsx-runtime.js, jsx-runtime/index.js, jsx-dev-runtime.js, etc.
+    if (analysis.language == "ts" || analysis.language == "js")
+        && (lower_path.contains("jsx-runtime")
+            || lower_path.contains("jsx_runtime")
+            || lower_path.contains("jsx-dev-runtime"))
+    {
+        return true;
+    }
 
     // Test files and fixtures
     if analysis.is_test && !config.include_tests {
+        return true;
+    }
+
+    // Flutter generated/plugin registrant files
+    if path.ends_with("generated_plugin_registrant.dart")
+        || path.contains("/generated_plugin_registrant.dart")
+    {
         return true;
     }
 
@@ -414,12 +449,71 @@ fn should_skip_dead_export_check(analysis: &FileAnalysis, config: DeadFilterConf
         "/tests/",
         "/spec/",
     ];
-    if TEST_DIRS.iter().any(|d| path.contains(d)) && !config.include_tests {
+    if TEST_DIRS.iter().any(|d| lower_path.contains(d)) && !config.include_tests {
+        return true;
+    }
+
+    // Example/demo/fixture packages (library-mode noise)
+    const EXAMPLE_DIRS: &[&str] = &[
+        "/examples/",
+        "/example/",
+        "/samples/",
+        "/sample/",
+        "/demo/",
+        "/demos/",
+        "/playground/",
+        "/showcase/",
+    ];
+    if EXAMPLE_DIRS.iter().any(|d| lower_path.contains(d)) {
+        return true;
+    }
+    if config.library_mode {
+        if let Some(globs) = example_globs
+            && (globs.is_match(path) || globs.is_match(&lower_path))
+        {
+            return true;
+        }
+        const LIBRARY_NOISE_DIRS: &[&str] = &[
+            "/kitchen-sink/",
+            "/kitchensink/",
+            "/sandbox/",
+            "/sandboxes/",
+            "/cookbook/",
+            "/gallery/",
+            "/examples-",
+            "/examples_",
+            "/docs/examples/",
+            "/documentation/examples/",
+        ];
+        if LIBRARY_NOISE_DIRS.iter().any(|d| lower_path.contains(d))
+            || lower_path.starts_with("examples/")
+            || lower_path.starts_with("example/")
+            || lower_path.starts_with("demo/")
+            || lower_path.contains("/examples/")
+        {
+            return true;
+        }
+    }
+    // Lowercase check for testfixtures (common in codemods)
+    if lower_path.contains("testfixtures") {
         return true;
     }
 
     // TypeScript declaration files (.d.ts) - only contain type declarations
     if path.ends_with(".d.ts") {
+        return true;
+    }
+
+    // Dart/Flutter generated artifacts
+    if path.ends_with(".g.dart")
+        || path.ends_with(".freezed.dart")
+        || path.ends_with(".gr.dart")
+        || path.ends_with(".pb.dart")
+        || path.ends_with(".pbjson.dart")
+        || path.ends_with(".pbenum.dart")
+        || path.ends_with(".pbserver.dart")
+        || path.ends_with(".config.dart")
+    {
         return true;
     }
 
@@ -463,6 +557,29 @@ fn should_skip_dead_export_check(analysis: &FileAnalysis, config: DeadFilterConf
         "/hooks.",
     ];
     if FRAMEWORK_ENTRY_PATTERNS.iter().any(|p| path.contains(p)) {
+        return true;
+    }
+
+    // Virtual/module-runtime entrypoints (framework-provided consumers)
+    const RUNTIME_PATTERNS: &[&str] =
+        &["/.svelte-kit/", "/runtime/", "/app/router/", "/app/routes/"];
+    if (analysis.language == "ts" || analysis.language == "js")
+        && RUNTIME_PATTERNS.iter().any(|p| path.contains(p))
+    {
+        return true;
+    }
+
+    // Library barrels and public API surfaces (avoid flagging public exports)
+    if (path.ends_with("/index.ts")
+        || path.ends_with("/index.tsx")
+        || path.ends_with("/index.js")
+        || path.ends_with("/index.mjs")
+        || path.ends_with("/index.cjs")
+        || path.ends_with("/mod.ts")
+        || path.ends_with("/mod.js"))
+        && (analysis.language == "ts" || analysis.language == "js")
+        && (path.contains("/packages/") || path.contains("/libs/") || path.contains("/library/"))
+    {
         return true;
     }
 
@@ -629,6 +746,138 @@ fn is_svelte_component_api(file_path: &str, export_name: &str) -> bool {
     false
 }
 
+/// Check if an export is a JSX runtime export consumed by compilers.
+/// These exports are used by TypeScript/Babel when compiling JSX, configured via tsconfig.json:
+/// { "jsx": "react-jsx", "jsxImportSource": "solid-js" }
+/// The compiler transforms JSX into calls to these functions without explicit imports.
+fn is_jsx_runtime_export(export_name: &str, file_path: &str) -> bool {
+    // JSX runtime export names defined by React JSX transform spec
+    const JSX_RUNTIME_EXPORTS: &[&str] = &["jsx", "jsxs", "jsxDEV", "jsxsDEV", "Fragment"];
+
+    if !JSX_RUNTIME_EXPORTS.contains(&export_name) {
+        return false;
+    }
+
+    // Check if file is likely a JSX runtime
+    // Patterns: jsx-runtime, jsx_runtime, jsx-dev-runtime (React dev mode)
+    let lower_path = file_path.to_ascii_lowercase();
+    lower_path.contains("jsx-runtime")
+        || lower_path.contains("jsx_runtime")
+        || lower_path.contains("jsx-dev-runtime")
+}
+
+/// Check if an export is likely a Flow type-only export.
+/// Flow files (annotated with @flow) export types that are used via Flow's type system,
+/// not via regular import statements. These exports don't appear in static import analysis
+/// but are consumed by Flow type checker.
+fn is_flow_type_export(export_symbol: &ExportSymbol, analysis: &FileAnalysis) -> bool {
+    if !analysis.is_flow_file {
+        return false;
+    }
+
+    // Flow type exports: type, interface, opaque type
+    // These are type-only and won't appear in runtime imports
+    matches!(export_symbol.kind.as_str(), "type" | "interface" | "opaque")
+}
+
+/// Check if an export is used in a WeakMap/WeakSet registry pattern.
+/// These are common in React and other libraries for storing metadata about objects
+/// without causing memory leaks. Exports stored in WeakMap/WeakSet are used dynamically.
+/// Pattern: `const registry = new WeakMap(); registry.set(key, ExportedClass)`
+fn is_weakmap_registry_export(_export_symbol: &ExportSymbol, analysis: &FileAnalysis) -> bool {
+    // If a file contains WeakMap/WeakSet usage (detected by AST visitor),
+    // conservatively assume all exports might be stored dynamically in the registry.
+    // This reduces false positives in React DevTools and similar code where exports
+    // are stored in WeakMaps for dynamic lookup.
+    analysis.has_weak_collections
+}
+
+fn is_rust_const_table(analysis: &FileAnalysis) -> bool {
+    if analysis.language != "rs" {
+        return false;
+    }
+    let const_exports: Vec<_> = analysis
+        .exports
+        .iter()
+        .filter(|e| e.kind == "const")
+        .collect();
+    if const_exports.len() < 8 {
+        return false;
+    }
+
+    let shouting: usize = const_exports
+        .iter()
+        .filter(|e| {
+            let name = e.name.as_str();
+            !name.is_empty()
+                && name
+                    .chars()
+                    .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+        })
+        .count();
+
+    // Heuristic: mostly uppercase consts, very few non-const exports => treat as data table.
+    let non_const_exports = analysis.exports.len().saturating_sub(const_exports.len());
+    shouting * 4 >= const_exports.len() * 3 && non_const_exports <= 2
+}
+/// Detect if Python file is part of a library (has setup.py/pyproject.toml in tree)
+fn is_python_library(root: &std::path::Path) -> bool {
+    root.join("setup.py").exists()
+        || root.join("pyproject.toml").exists()
+        || root.join("setup.cfg").exists()
+        // CPython stdlib pattern: Lib/ directory at root
+        || root.join("Lib").is_dir()
+}
+
+/// Check if export is in __all__ list (public API in Python libraries)
+fn is_in_python_all(analysis: &FileAnalysis, export_name: &str) -> bool {
+    analysis
+        .exports
+        .iter()
+        .any(|e| e.name == export_name && e.kind == "__all__")
+}
+
+/// Check if a Python export is part of the stdlib public API
+/// Returns true for exports that are in __all__ lists in CPython's Lib/ directory
+fn is_python_stdlib_export(analysis: &FileAnalysis, export_name: &str) -> bool {
+    // Check if file is in CPython stdlib structure (Lib/ directory)
+    if !analysis.path.contains("/Lib/") && !analysis.path.starts_with("Lib/") {
+        return false;
+    }
+
+    // All exports in __all__ of stdlib modules are public API
+    // This includes constants like calendar.APRIL, classes like csv.DictWriter, etc.
+    if is_in_python_all(analysis, export_name) {
+        return true;
+    }
+
+    // Additional stdlib patterns: top-level public symbols (not starting with _)
+    // in stdlib modules that don't have explicit __all__
+    if !export_name.starts_with('_') {
+        // Constants (UPPER_CASE) in stdlib are typically public API
+        if export_name
+            .chars()
+            .all(|c| c.is_uppercase() || c.is_ascii_digit() || c == '_')
+        {
+            return true;
+        }
+
+        // Classes and functions in stdlib without __all__ are typically public
+        // Only if the file doesn't have any __all__ (if __all__ exists, it's definitive)
+        let has_explicit_all = analysis.exports.iter().any(|e| e.kind == "__all__");
+        if !has_explicit_all {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Check if export is a Python dunder method (protocol methods, never dead)
+fn is_python_dunder_method(export_name: &str) -> bool {
+    export_name.starts_with("__") && export_name.ends_with("__")
+}
+
 /// Find potentially dead (unused) exports in the codebase
 pub fn find_dead_exports(
     analyses: &[FileAnalysis],
@@ -636,6 +885,41 @@ pub fn find_dead_exports(
     open_base: Option<&str>,
     config: DeadFilterConfig,
 ) -> Vec<DeadExport> {
+    let example_globset = if config.library_mode && !config.example_globs.is_empty() {
+        let mut builder = globset::GlobSetBuilder::new();
+        for pat in &config.example_globs {
+            match globset::Glob::new(pat) {
+                Ok(glob) => {
+                    builder.add(glob);
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[loctree][warn] invalid library_example_glob '{}': {}",
+                        pat, e
+                    );
+                }
+            }
+        }
+        builder.build().ok()
+    } else {
+        None
+    };
+
+    // Detect Python library mode if enabled
+    let is_py_library = config.python_library_mode
+        && analyses.iter().any(|a| {
+            a.path.ends_with(".py")
+                && std::path::Path::new(&a.path)
+                    .ancestors()
+                    .any(is_python_library)
+        });
+
+    // Skip Go for now to avoid false positives until package-level usage is implemented
+    let analyses: Vec<&FileAnalysis> = analyses
+        .iter()
+        .filter(|a| !a.path.ends_with(".go"))
+        .collect();
+
     // Build usage set: (resolved_path, symbol_name)
     let mut used_exports: HashSet<(String, String)> = HashSet::new();
     // Track all imported symbol names as fallback (handles $lib/, @scope/, monorepo paths)
@@ -643,7 +927,7 @@ pub fn find_dead_exports(
     // Track crate-internal imports for Rust: (raw_path, symbol_name)
     let mut crate_internal_imports: Vec<(String, String)> = Vec::new();
 
-    for analysis in analyses {
+    for analysis in &analyses {
         for imp in &analysis.imports {
             let target_norm = if let Some(target) = &imp.resolved_path {
                 // Use resolved path if available
@@ -694,11 +978,60 @@ pub fn find_dead_exports(
         }
     }
 
+    // CRITICAL FIX FOR SVELTE .d.ts RE-EXPORTS (60% of FPs):
+    // TypeScript declaration files (.d.ts) re-export from implementation files (.js/.ts)
+    // Pattern: foo.d.ts has `export { bar } from './foo.js'`
+    // The exports in foo.js are NOT dead - they're the implementation for the .d.ts types
+    // This fixes false positives like Svelte's easing functions being marked as dead
+    let dts_reexports: Vec<_> = analyses
+        .iter()
+        .filter(|a| {
+            a.path.ends_with(".d.ts") || a.path.ends_with(".d.mts") || a.path.ends_with(".d.cts")
+        })
+        .flat_map(|a| &a.reexports)
+        .collect();
+
+    for re in dts_reexports {
+        // Mark the re-exported symbols from the source file as used
+        let target_norm = re
+            .resolved
+            .as_ref()
+            .map(|t| normalize_module_id(t).as_key())
+            .unwrap_or_else(|| normalize_module_id(&re.source).as_key());
+
+        match &re.kind {
+            ReexportKind::Star => {
+                // Star re-export: mark all exports from target as used
+                used_exports.insert((target_norm, "*".to_string()));
+            }
+            ReexportKind::Named(names) => {
+                // Named re-export: mark specific symbols as used
+                for name in names {
+                    used_exports.insert((target_norm.clone(), name.clone()));
+                }
+            }
+        }
+    }
+
     // Build set of all Tauri registered command handlers (used via generate_handler![])
     let tauri_handlers: HashSet<String> = analyses
         .iter()
         .flat_map(|a| a.tauri_registered_handlers.iter().cloned())
         .collect();
+
+    // Go: gather identifiers used anywhere within the same directory (package-level)
+    let mut go_local_uses_by_dir: HashMap<String, HashSet<String>> = HashMap::new();
+    for analysis in analyses.iter().filter(|a| a.path.ends_with(".go")) {
+        if let Some(dir) = std::path::Path::new(&analysis.path)
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+        {
+            go_local_uses_by_dir
+                .entry(dir)
+                .or_default()
+                .extend(analysis.local_uses.iter().cloned());
+        }
+    }
 
     // Build set of all path-qualified symbols from Rust files
     // These are calls like `command::branch::handle()` that don't use `use` imports
@@ -715,7 +1048,7 @@ pub fn find_dead_exports(
         // Build import graph: file_path -> list of resolved import paths
         let mut import_graph: std::collections::HashMap<String, Vec<String>> =
             std::collections::HashMap::new();
-        for analysis in analyses {
+        for analysis in &analyses {
             let key = normalize_module_id(&analysis.path).as_key();
             let imports: Vec<String> = analysis
                 .imports
@@ -728,13 +1061,13 @@ pub fn find_dead_exports(
 
         // Collect initial set of dynamically imported files
         let mut reachable: HashSet<String> = HashSet::new();
-        for analysis in analyses {
+        for analysis in &analyses {
             for dyn_imp in &analysis.dynamic_imports {
                 let dyn_norm = normalize_module_id(dyn_imp);
                 let dyn_key = dyn_norm.as_key();
                 let dyn_alias = strip_alias_prefix(&dyn_norm.path).to_string();
                 // Find matching file in analyses
-                for a in analyses {
+                for a in &analyses {
                     let a_norm = normalize_module_id(&a.path);
                     let a_key = a_norm.as_key();
                     if paths_match(dyn_imp, &a_norm.path)
@@ -777,7 +1110,7 @@ pub fn find_dead_exports(
 
     for analysis in analyses {
         // Skip files that should be excluded from dead export detection
-        if should_skip_dead_export_check(analysis, config) {
+        if should_skip_dead_export_check(analysis, &config, example_globset.as_ref()) {
             continue;
         }
 
@@ -792,7 +1125,27 @@ pub fn find_dead_exports(
             continue;
         }
 
+        if is_rust_const_table(analysis) {
+            continue;
+        }
+
         let path_norm = normalize_module_id(&analysis.path).as_key();
+        let is_go_file = analysis.path.ends_with(".go");
+
+        // Skip noisy generated Go bindings (protobuf/grpc)
+        if is_go_file
+            && (analysis.path.ends_with(".pb.go")
+                || analysis.path.ends_with(".pb.gw.go")
+                || analysis.path.contains(".pb.")
+                || analysis.path.contains(".pbjson"))
+        {
+            continue;
+        }
+
+        // Temporarily skip Go dead detection to avoid high FP until full package-level usage is implemented
+        if is_go_file {
+            continue;
+        }
 
         // Skip if file is reachable from dynamic imports (directly or transitively)
         // This handles React.lazy(), Next.js dynamic(), and other code-splitting patterns
@@ -846,6 +1199,37 @@ pub fn find_dead_exports(
             if python_framework_magic {
                 continue;
             }
+
+            // Python library mode: skip exports in __all__ (public API)
+            // Also check CPython stdlib pattern independent of is_py_library flag
+            // because CPython stdlib has unique Lib/ structure that should be recognized
+            let is_stdlib = is_python_file && is_python_stdlib_export(analysis, &exp.name);
+            if (is_py_library || is_stdlib) && is_python_file {
+                // Skip exports in __all__ (definitive public API marker)
+                if is_in_python_all(analysis, &exp.name) {
+                    continue;
+                }
+                // Skip CPython stdlib public API (in Lib/ directory)
+                if is_stdlib {
+                    continue;
+                }
+                // Skip dunder methods (__init__, __str__, etc. - runtime protocol)
+                if is_python_dunder_method(&exp.name) {
+                    continue;
+                }
+            }
+
+            // Django/Wagtail mixin pattern heuristic:
+            // Classes ending in "Mixin" are typically used via multiple inheritance
+            // and their methods are called via MRO (Method Resolution Order), not directly imported
+            // Common patterns: LoginRequiredMixin, PermissionRequiredMixin, ButtonsColumnMixin, etc.
+            let is_django_mixin =
+                is_python_file && exp.kind == "class" && exp.name.ends_with("Mixin");
+            if is_django_mixin {
+                // Skip mixin classes from dead export detection
+                // They're used via inheritance which may not be fully tracked in complex codebases
+                continue;
+            }
             if is_python_test_export(analysis, exp) || is_python_test_path(&analysis.path) {
                 continue;
             }
@@ -854,6 +1238,28 @@ pub fn find_dead_exports(
                 && (analysis.path.ends_with("page.tsx") || analysis.path.ends_with("layout.tsx"))
             {
                 // Next.js / framework roots - ignore default export
+                continue;
+            }
+
+            // JS/TS runtime/framework exports that are inherently used via tooling/framework
+            let is_ts_file = analysis.path.ends_with(".ts")
+                || analysis.path.ends_with(".tsx")
+                || analysis.path.ends_with(".js")
+                || analysis.path.ends_with(".jsx")
+                || analysis.path.ends_with(".mjs")
+                || analysis.path.ends_with(".cjs");
+            let ts_runtime_symbol = is_ts_file
+                && (matches!(
+                    exp.name.as_str(),
+                    "jsx" | "jsxs" | "jsxDEV" | "Fragment" | "VoidComponent" | "Component"
+                ) || analysis.path.contains("jsx-runtime"));
+            let ts_framework_magic = is_ts_file
+                && (matches!(
+                    exp.name.as_str(),
+                    "start" | "resolveRoute" | "enhance" | "load" | "PageLoad" | "LayoutLoad"
+                ) || analysis.path.contains("sveltekit")
+                    || analysis.path.contains("app/navigation"));
+            if ts_runtime_symbol || ts_framework_magic {
                 continue;
             }
 
@@ -866,6 +1272,14 @@ pub fn find_dead_exports(
             // Also check if "*" was imported from this file
             let star_used = used_exports.contains(&(path_norm.clone(), "*".to_string()));
             let locally_used = local_uses.contains(&exp.name);
+            let go_pkg_used = if analysis.path.ends_with(".go") {
+                std::path::Path::new(&analysis.path)
+                    .parent()
+                    .and_then(|p| go_local_uses_by_dir.get(&p.to_string_lossy().to_string()))
+                    .is_some_and(|set| set.contains(&exp.name))
+            } else {
+                false
+            };
             // Check if this is a Tauri command handler registered via generate_handler![]
             let is_tauri_handler = tauri_handlers.contains(&exp.name);
             // Fallback: check if symbol is imported anywhere by name
@@ -893,14 +1307,30 @@ pub fn find_dead_exports(
                 .count();
             let is_crate_imported = crate_import_count > 0;
 
+            // Check if this is a JSX runtime export (jsx, jsxs, Fragment, etc.)
+            // These are consumed by TypeScript/Babel compiler, not by regular imports
+            let is_jsx_runtime = is_jsx_runtime_export(&exp.name, &analysis.path);
+
+            // Check if this is a Flow type-only export
+            // Flow type exports are consumed by Flow type checker, not by runtime imports
+            let is_flow_type = is_flow_type_export(exp, analysis);
+
+            // Check if this export is used in a WeakMap/WeakSet registry pattern
+            // These are dynamically accessed and won't show up in static imports
+            let is_weak_registry = is_weakmap_registry_export(exp, analysis);
+
             if !is_used
                 && !star_used
                 && !locally_used
+                && !go_pkg_used
                 && !is_tauri_handler
                 && !imported_by_name
                 && !is_svelte_api
                 && !is_rust_path_qualified
                 && !is_crate_imported
+                && !is_jsx_runtime
+                && !is_flow_type
+                && !is_weak_registry
             {
                 let open_url = super::build_open_url(&analysis.path, exp.line, open_base);
 
@@ -1402,6 +1832,9 @@ mod tests {
             DeadFilterConfig {
                 include_tests: true,
                 include_helpers: false,
+                library_mode: false,
+                example_globs: Vec::new(),
+                python_library_mode: false,
             },
         );
         assert_eq!(result.len(), 1);
@@ -1414,6 +1847,62 @@ mod tests {
         let analyses = vec![mock_file("src/app.ts"), helper];
         let result = find_dead_exports(&analyses, false, None, DeadFilterConfig::default());
         assert!(result.is_empty(), "helper scripts should be skipped");
+    }
+
+    #[test]
+    fn test_find_dead_exports_skips_jsx_runtime_files() {
+        // JSX runtime files should be completely skipped from dead export detection
+        let mut jsx_runtime = mock_file_with_exports(
+            "packages/solid-js/jsx-runtime/index.ts",
+            vec!["jsx", "jsxs", "jsxDEV", "Fragment"],
+        );
+        jsx_runtime.language = "ts".to_string();
+
+        let result = find_dead_exports(&[jsx_runtime], false, None, DeadFilterConfig::default());
+        assert!(
+            result.is_empty(),
+            "JSX runtime files should be completely skipped: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_find_dead_exports_skips_jsx_runtime_exports() {
+        // Individual JSX runtime exports (jsx, jsxs, Fragment) in jsx-runtime paths should not be flagged
+        let mut runtime_file = mock_file_with_exports(
+            "node_modules/solid-js/jsx-runtime.js",
+            vec!["jsx", "jsxs", "jsxDEV", "Fragment", "createComponent"],
+        );
+        runtime_file.language = "js".to_string();
+
+        let result = find_dead_exports(&[runtime_file], false, None, DeadFilterConfig::default());
+        // File should be skipped entirely due to jsx-runtime path pattern
+        assert!(
+            result.is_empty(),
+            "JSX runtime exports should not be flagged as dead: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_jsx_runtime_export_detection() {
+        // Test the helper function directly
+        assert!(is_jsx_runtime_export(
+            "jsx",
+            "packages/solid-js/jsx-runtime/index.ts"
+        ));
+        assert!(is_jsx_runtime_export("jsxs", "vue/jsx-runtime.js"));
+        assert!(is_jsx_runtime_export("jsxDEV", "react/jsx-dev-runtime.js"));
+        assert!(is_jsx_runtime_export(
+            "Fragment",
+            "preact/jsx-runtime/index.mjs"
+        ));
+        assert!(is_jsx_runtime_export("jsxsDEV", "solid/jsx_runtime.ts"));
+
+        // Non JSX runtime exports should not match
+        assert!(!is_jsx_runtime_export("Component", "jsx-runtime/index.ts"));
+        assert!(!is_jsx_runtime_export("jsx", "src/utils/helpers.ts"));
+        assert!(!is_jsx_runtime_export("createElement", "jsx-runtime.js"));
     }
 
     #[test]
@@ -1559,6 +2048,170 @@ mod tests {
     }
 
     #[test]
+    fn test_django_wagtail_mixin_not_dead() {
+        // Test that Django/Wagtail mixins used in inheritance are not marked as dead
+        // This tests the integration between py.rs (which tracks inheritance) and dead_parrots.rs
+
+        use crate::types::{ExportSymbol, FileAnalysis};
+
+        // Mixin definition file
+        let mixin_file = FileAnalysis {
+            path: "myapp/mixins.py".to_string(),
+            language: "py".to_string(),
+            exports: vec![
+                ExportSymbol::new("LoginRequiredMixin".to_string(), "class", "named", Some(1)),
+                ExportSymbol::new(
+                    "PermissionRequiredMixin".to_string(),
+                    "class",
+                    "named",
+                    Some(5),
+                ),
+                ExportSymbol::new("ButtonsColumnMixin".to_string(), "class", "named", Some(10)),
+            ],
+            ..Default::default()
+        };
+
+        // View file that uses the mixins
+        let mut view_file = FileAnalysis {
+            path: "myapp/views.py".to_string(),
+            language: "py".to_string(),
+            exports: vec![], // No exports to avoid noise
+            // Simulate what py.rs does: add base classes to local_uses
+            local_uses: vec![
+                "LoginRequiredMixin".to_string(),
+                "PermissionRequiredMixin".to_string(),
+                "ButtonsColumnMixin".to_string(),
+            ],
+            ..Default::default()
+        };
+
+        // Add import entry to track the relationship
+        use crate::types::{ImportEntry, ImportKind, ImportSymbol};
+        let mut imp = ImportEntry::new("myapp.mixins".to_string(), ImportKind::Static);
+        imp.resolved_path = Some("myapp/mixins.py".to_string());
+        imp.symbols = vec![
+            ImportSymbol {
+                name: "LoginRequiredMixin".to_string(),
+                alias: None,
+                is_default: false,
+            },
+            ImportSymbol {
+                name: "PermissionRequiredMixin".to_string(),
+                alias: None,
+                is_default: false,
+            },
+            ImportSymbol {
+                name: "ButtonsColumnMixin".to_string(),
+                alias: None,
+                is_default: false,
+            },
+        ];
+        view_file.imports.push(imp);
+
+        let analyses = vec![mixin_file, view_file];
+        let result = find_dead_exports(&analyses, false, None, DeadFilterConfig::default());
+
+        // All mixins should be marked as used (both via imports AND local_uses from inheritance tracking)
+        assert!(
+            result.is_empty(),
+            "Django/Wagtail mixins should not be marked as dead. Found dead: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_django_mixin_pattern_common_names() {
+        // Test common Django/Wagtail mixin naming patterns
+        // These should not be flagged as dead even if static analysis misses some usage
+        use crate::types::{ExportSymbol, FileAnalysis};
+
+        let mixin_file = FileAnalysis {
+            path: "django/contrib/auth/mixins.py".to_string(),
+            language: "py".to_string(),
+            exports: vec![
+                // Standard Django mixins that are ALWAYS used via MRO, never called directly
+                ExportSymbol::new("LoginRequiredMixin".to_string(), "class", "named", Some(1)),
+                ExportSymbol::new(
+                    "PermissionRequiredMixin".to_string(),
+                    "class",
+                    "named",
+                    Some(10),
+                ),
+                ExportSymbol::new(
+                    "UserPassesTestMixin".to_string(),
+                    "class",
+                    "named",
+                    Some(20),
+                ),
+                // Non-mixin class (should be flagged if unused)
+                ExportSymbol::new("AuthHelper".to_string(), "class", "named", Some(30)),
+            ],
+            ..Default::default()
+        };
+
+        // No imports - testing heuristic fallback for common Django patterns
+        let analyses = vec![mixin_file];
+        let result = find_dead_exports(&analyses, false, None, DeadFilterConfig::default());
+
+        // Mixins ending in "Mixin" should NOT be flagged (heuristic protection)
+        let mixin_names: Vec<_> = result
+            .iter()
+            .filter(|d| d.symbol.ends_with("Mixin"))
+            .collect();
+        assert!(
+            mixin_names.is_empty(),
+            "Classes ending in 'Mixin' should not be flagged as dead (Django/Wagtail pattern). Found: {:?}",
+            mixin_names
+        );
+
+        // Non-mixin classes (like AuthHelper) SHOULD be flagged if truly unused
+        let has_non_mixin = result.iter().any(|d| d.symbol == "AuthHelper");
+        assert!(
+            has_non_mixin,
+            "Non-mixin classes like 'AuthHelper' should still be flagged when unused"
+        );
+    }
+
+    #[test]
+    fn test_weakmap_registry_skips_dead_exports() {
+        // Test that exports in files with WeakMap/WeakSet are not marked as dead
+        // This handles React DevTools and similar code where exports are stored dynamically
+
+        let weakmap_file = FileAnalysis {
+            path: "src/devtools.ts".to_string(),
+            language: "ts".to_string(),
+            has_weak_collections: true, // File contains new WeakMap() or new WeakSet()
+            exports: vec![
+                ExportSymbol::new(
+                    "registerComponent".to_string(),
+                    "function",
+                    "named",
+                    Some(10),
+                ),
+                ExportSymbol::new(
+                    "getComponentData".to_string(),
+                    "function",
+                    "named",
+                    Some(20),
+                ),
+            ],
+            ..Default::default()
+        };
+
+        // Simulate that these exports are NOT imported anywhere (would normally be dead)
+        // But they should not be flagged because the file has WeakMap/WeakSet
+
+        let analyses = vec![weakmap_file];
+        let result = find_dead_exports(&analyses, false, None, DeadFilterConfig::default());
+
+        assert!(
+            result.is_empty(),
+            "Exports in files with WeakMap/WeakSet should NOT be flagged as dead. Found: {:?}",
+            result
+        );
+    }
+
+    #[test]
     fn test_paths_match_exact() {
         assert!(paths_match("src/App.tsx", "src/App.tsx"));
         assert!(paths_match("foo.ts", "foo.ts"));
@@ -1600,12 +2253,156 @@ mod tests {
         assert!(!paths_match("App.tsx", "src/MyApp.tsx"));
         assert!(!paths_match("Button.tsx", "src/BigButton.tsx"));
     }
+
+    #[test]
+    fn test_python_stdlib_exports_not_dead() {
+        // Test that CPython stdlib exports in __all__ are not marked as dead
+        // This addresses the 100% FP rate on python/cpython smoke test
+
+        // Simulate calendar.py module with APRIL constant in __all__
+        let calendar_module = FileAnalysis {
+            path: "Lib/calendar.py".to_string(),
+            language: "py".to_string(),
+            exports: vec![
+                ExportSymbol::new("APRIL".to_string(), "__all__", "named", Some(1)),
+                ExportSymbol::new("APRIL".to_string(), "const", "named", Some(10)),
+            ],
+            ..Default::default()
+        };
+
+        // Simulate csv.py module with DictWriter in __all__
+        let csv_module = FileAnalysis {
+            path: "Lib/csv.py".to_string(),
+            language: "py".to_string(),
+            exports: vec![
+                ExportSymbol::new("DictWriter".to_string(), "__all__", "named", Some(1)),
+                ExportSymbol::new("DictWriter".to_string(), "class", "named", Some(50)),
+            ],
+            ..Default::default()
+        };
+
+        // Simulate typing.py module with override in __all__
+        let typing_module = FileAnalysis {
+            path: "Lib/typing.py".to_string(),
+            language: "py".to_string(),
+            exports: vec![
+                ExportSymbol::new("override".to_string(), "__all__", "named", Some(1)),
+                ExportSymbol::new("override".to_string(), "function", "named", Some(200)),
+            ],
+            ..Default::default()
+        };
+
+        let analyses = vec![calendar_module, csv_module, typing_module];
+
+        // Run dead export detection with python_library_mode enabled
+        let dead_exports = find_dead_exports(
+            &analyses,
+            false,
+            None,
+            DeadFilterConfig {
+                include_tests: false,
+                include_helpers: false,
+                library_mode: false,
+                example_globs: Vec::new(),
+                python_library_mode: true, // Enable Python library mode
+            },
+        );
+
+        // Verify that NONE of these stdlib exports are marked as dead
+        // They're all in __all__ lists and are public API for millions of Python programs
+        assert!(
+            dead_exports.is_empty(),
+            "CPython stdlib exports in __all__ should NOT be marked as dead. Found: {:?}",
+            dead_exports
+        );
+    }
+
+    #[test]
+    fn test_python_stdlib_uppercase_constants_not_dead() {
+        // Test that UPPER_CASE constants in stdlib are treated as public API
+        // even if not in __all__ (some stdlib modules don't have explicit __all__)
+
+        let module = FileAnalysis {
+            path: "Lib/socket.py".to_string(),
+            language: "py".to_string(),
+            exports: vec![
+                ExportSymbol::new("AF_INET".to_string(), "const", "named", Some(10)),
+                ExportSymbol::new("SOCK_STREAM".to_string(), "const", "named", Some(20)),
+            ],
+            ..Default::default()
+        };
+
+        let analyses = vec![module];
+
+        let dead_exports = find_dead_exports(
+            &analyses,
+            false,
+            None,
+            DeadFilterConfig {
+                include_tests: false,
+                include_helpers: false,
+                library_mode: false,
+                example_globs: Vec::new(),
+                python_library_mode: true,
+            },
+        );
+
+        // UPPER_CASE constants in stdlib should not be marked as dead
+        assert!(
+            dead_exports.is_empty(),
+            "CPython stdlib UPPER_CASE constants should NOT be dead. Found: {:?}",
+            dead_exports
+        );
+    }
+
+    #[test]
+    fn test_python_non_stdlib_requires_all() {
+        // Test that non-stdlib Python files still require proper __all__ or usage
+        // to avoid being marked as dead
+
+        let user_module = FileAnalysis {
+            path: "myapp/utils.py".to_string(), // NOT in Lib/
+            language: "py".to_string(),
+            exports: vec![ExportSymbol::new(
+                "helper".to_string(),
+                "function",
+                "named",
+                Some(10),
+            )],
+            ..Default::default()
+        };
+
+        let analyses = vec![user_module];
+
+        let dead_exports = find_dead_exports(
+            &analyses,
+            false,
+            None,
+            DeadFilterConfig {
+                include_tests: false,
+                include_helpers: false,
+                library_mode: false,
+                example_globs: Vec::new(),
+                python_library_mode: true,
+            },
+        );
+
+        // User code without __all__ or usage SHOULD be marked as dead
+        assert_eq!(
+            dead_exports.len(),
+            1,
+            "Non-stdlib exports without __all__ should be marked as dead"
+        );
+        assert_eq!(dead_exports[0].symbol, "helper");
+    }
 }
 
 #[cfg(test)]
 mod integration_tests {
     use super::*;
-    use crate::types::{ExportSymbol, ImportEntry, ImportKind, ImportSymbol};
+    use crate::types::{
+        ExportSymbol, ImportEntry, ImportKind, ImportSymbol, ReexportEntry, ReexportKind,
+    };
 
     #[test]
     fn test_recommendations_pdf_not_dead() {
@@ -1645,6 +2442,97 @@ mod integration_tests {
         assert!(
             result.is_empty(),
             "RecommendationsPDFTemplate should NOT be dead. Found: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_dts_reexport_marks_implementation_as_used() {
+        // Test the Svelte .d.ts re-export pattern (60% of FPs)
+        // Pattern: easing/index.d.ts re-exports from easing/index.js
+        // The exports in index.js should NOT be marked as dead
+
+        // Implementation file (.js)
+        let mut implementation = FileAnalysis {
+            path: "packages/svelte/src/easing/index.js".to_string(),
+            language: "js".to_string(),
+            ..Default::default()
+        };
+        implementation.exports = vec![
+            ExportSymbol::new("linear".to_string(), "function", "named", Some(1)),
+            ExportSymbol::new("backIn".to_string(), "function", "named", Some(5)),
+            ExportSymbol::new("backOut".to_string(), "function", "named", Some(10)),
+        ];
+
+        // Declaration file (.d.ts) that re-exports from implementation
+        let mut declaration = FileAnalysis {
+            path: "packages/svelte/src/easing/index.d.ts".to_string(),
+            language: "ts".to_string(),
+            ..Default::default()
+        };
+        declaration.reexports.push(ReexportEntry {
+            source: "./index.js".to_string(),
+            kind: ReexportKind::Named(vec![
+                "linear".to_string(),
+                "backIn".to_string(),
+                "backOut".to_string(),
+            ]),
+            resolved: Some("packages/svelte/src/easing/index.js".to_string()),
+        });
+
+        let result = find_dead_exports(
+            &[implementation, declaration],
+            false,
+            None,
+            DeadFilterConfig::default(),
+        );
+
+        // All easing functions should be marked as used (re-exported by .d.ts)
+        assert!(
+            result.is_empty(),
+            "Exports re-exported by .d.ts should NOT be marked as dead. Found dead: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_dts_star_reexport_marks_all_as_used() {
+        // Test .d.ts star re-export pattern
+        // Pattern: index.d.ts has `export * from './impl.js'`
+
+        let mut implementation = FileAnalysis {
+            path: "lib/impl.js".to_string(),
+            language: "js".to_string(),
+            ..Default::default()
+        };
+        implementation.exports = vec![
+            ExportSymbol::new("funcA".to_string(), "function", "named", Some(1)),
+            ExportSymbol::new("funcB".to_string(), "function", "named", Some(5)),
+            ExportSymbol::new("funcC".to_string(), "function", "named", Some(10)),
+        ];
+
+        let mut declaration = FileAnalysis {
+            path: "lib/index.d.ts".to_string(),
+            language: "ts".to_string(),
+            ..Default::default()
+        };
+        declaration.reexports.push(ReexportEntry {
+            source: "./impl.js".to_string(),
+            kind: ReexportKind::Star,
+            resolved: Some("lib/impl.js".to_string()),
+        });
+
+        let result = find_dead_exports(
+            &[implementation, declaration],
+            false,
+            None,
+            DeadFilterConfig::default(),
+        );
+
+        // All functions should be marked as used (star re-export from .d.ts)
+        assert!(
+            result.is_empty(),
+            "Exports re-exported via star by .d.ts should NOT be marked as dead. Found dead: {:?}",
             result
         );
     }

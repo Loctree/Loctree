@@ -43,6 +43,17 @@ pub(crate) fn render_html_report(path: &Path, sections: &[ReportSection]) -> io:
         ..Default::default()
     };
 
+    // Check if this project has Tauri command data
+    let has_tauri = sections.iter().any(|s| {
+        !s.missing_handlers.is_empty()
+            || !s.unused_handlers.is_empty()
+            || !s.unregistered_handlers.is_empty()
+            || !s.command_bridges.is_empty()
+            || s.command_counts.0 > 0
+            || s.command_counts.1 > 0
+    });
+
+    let _ = has_tauri; // Base version doesn't use Tauri-specific sections
     let html = report_leptos::render_report(&leptos_sections, &js_assets);
     fs::write(path, html)
 }
@@ -149,7 +160,7 @@ mod tests {
 
         // Verify key parts exist in the Leptos-rendered output
         assert!(html.contains("<!DOCTYPE html>"));
-        assert!(html.contains("loctree report")); // Title in HTML
+        assert!(html.contains("Loctree Report")); // Title in new Vista design
 
         // The output format might differ slightly from legacy, check for content
         assert!(html.contains("Hint"));

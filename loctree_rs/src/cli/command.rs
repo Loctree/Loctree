@@ -38,6 +38,12 @@ pub struct GlobalOptions {
 
     /// Verbose output with progress information
     pub verbose: bool,
+
+    /// Library/framework mode (tunes dead-code heuristics, ignores examples)
+    pub library_mode: bool,
+
+    /// Python library mode (treat __all__ exports as public API, skip dunder methods)
+    pub python_library: bool,
 }
 
 // ============================================================================
@@ -697,9 +703,9 @@ impl Command {
             "report" => Some(REPORT_HELP),
             "query" => Some(QUERY_HELP),
             "diff" => Some(DIFF_HELP),
-            "routes" => Some(ROUTES_HELP),
             "crowd" => Some(CROWD_HELP),
             "twins" => Some(TWINS_HELP),
+            "routes" => Some(ROUTES_HELP),
             _ => None,
         }
     }
@@ -772,6 +778,7 @@ USAGE:
 DESCRIPTION:
     Runs the auto scan and emits a single JSON tuned for AI agents:
     handlers, duplicates, dead exports, dynamic imports, cycles, and top files.
+    The bundle is also saved to ./.loctree/agent.json for reuse.
 
 OPTIONS:
     --full-scan          Force full rescan (ignore cache)
