@@ -29,12 +29,24 @@ loct commands                  # show all command bridges
 loct commands --unused         # investigate unused handlers
 ```
 
+### Crowd detection
+```bash
+loct crowd <pattern>           # find file clusters around a concept
+loct crowd auth                # "38 files, 2 dead parrots"
+```
+
 ### Dead code & CI
 ```bash
 loct dead                      # unused exports
 loct lint --fail               # CI check
 loct lint --sarif > results.sarif  # GitHub/GitLab integration
 loct diff --since main         # what changed since main
+```
+
+### MCP Server (for Claude, Cursor, etc.)
+```bash
+loctree-mcp stdio              # run MCP server
+# AI agents get native access to slices, dead code, crowd
 ```"#;
 
     let copy_prompt = move |_| {
@@ -91,6 +103,11 @@ loct diff --since main         # what changed since main
                                 right="loct commands --unused"
                                 label="Investigating handlers"
                             />
+                            <MistakeRow
+                                wrong="find . -name \"*auth*\" | xargs wc -l"
+                                right="loct crowd auth"
+                                label="Finding file clusters"
+                            />
                         </div>
                     </div>
 
@@ -125,6 +142,10 @@ loct diff --since main         # what changed since main
                         <ExampleCard
                             task="CI pipeline check"
                             cmd="loct lint --fail --sarif"
+                        />
+                        <ExampleCard
+                            task="Find scattered features"
+                            cmd="loct crowd assistant"
                         />
                     </div>
                 </div>

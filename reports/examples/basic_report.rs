@@ -17,7 +17,7 @@ fn main() {
     let js_assets = JsAssets::default();
 
     // Render to HTML
-    let html = render_report(&[section], &js_assets);
+    let html = render_report(&[section], &js_assets, false);
 
     // Write to file
     let output_path = "basic_report.html";

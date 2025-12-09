@@ -1,0 +1,64 @@
+[package]
+name = "rmcp-mux"
+version = "0.3.1"
+edition = "2024"
+description = "MCP server multiplexer - single server, multiple clients via Unix sockets"
+license = "MIT"
+repository = "https://github.com/Loctree/rmcp-mux"
+keywords = ["mcp", "multiplexer", "rpc", "unix-socket"]
+categories = ["network-programming", "development-tools"]
+readme = "README.md"
+
+[lib]
+name = "rmcp_mux"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rmcp-mux"
+path = "src/bin/rmcp_mux.rs"
+required-features = ["cli"]
+
+[[bin]]
+name = "rmcp-mux-proxy"
+path = "src/bin/rmcp_mux_proxy.rs"
+required-features = ["cli"]
+
+[features]
+default = ["cli", "tray"]
+# CLI features (wizard, scan commands)
+cli = ["clap", "ratatui", "crossterm"]
+# System tray icon support
+tray = ["tray-icon", "image"]
+
+[dependencies]
+# Core dependencies (always required)
+anyhow = "1"
+futures = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+tracing = "0.1"
+bytes = "1"
+rmcp = "0.10"
+serde_yaml = "0.9"
+toml = "0.8"
+uuid = { version = "1", features = ["v4"] }
+
+# CLI dependencies (optional)
+clap = { version = "4", features = ["derive"], optional = true }
+ratatui = { version = "0.28", optional = true }
+crossterm = { version = "0.27", optional = true }
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+crossbeam-channel = "0.5"
+
+# Tray dependencies (optional)
+tray-icon = { version = "0.21.2", optional = true }
+image = { version = "0.25", default-features = false, features = ["png"], optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

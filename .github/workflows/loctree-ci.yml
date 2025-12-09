@@ -23,33 +23,33 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            loctree_rs/target
-          key: loctree-ci-${{ hashFiles('loctree_rs/Cargo.lock') }}
+            target
+          key: loctree-ci-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             loctree-ci-
 
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Build loctree
-        run: cd loctree_rs && cargo build --release
+        run: cargo build -p loctree --release
 
       - name: Analyze loctree_rs
         run: |
-          ./loctree_rs/target/release/loctree loctree_rs/src -A --ext rs \
+          ./target/release/loctree loctree_rs/src -A --ext rs \
             --circular \
             --dead \
             --confidence high
 
       - name: Analyze reports crate
         run: |
-          ./loctree_rs/target/release/loctree reports/src -A --ext rs \
+          ./target/release/loctree reports/src -A --ext rs \
             --circular \
             --dead \
             --confidence high
 
       - name: Analyze landing crate
         run: |
-          ./loctree_rs/target/release/loctree landing/src -A --ext rs \
+          ./target/release/loctree landing/src -A --ext rs \
             --circular \
             --dead \
             --confidence high
@@ -57,7 +57,7 @@ jobs:
       - name: Check for circular imports (all crates)
         run: |
           for CRATE in loctree_rs/src reports/src landing/src; do
-            OUTPUT=$(./loctree_rs/target/release/loctree $CRATE -A --circular --json 2>/dev/null || true)
+            OUTPUT=$(./target/release/loctree $CRATE -A --circular --json 2>/dev/null || true)
             CYCLES=$(echo "$OUTPUT" | jq -r '.cycles // [] | length' 2>/dev/null || echo "0")
             if [ "$CYCLES" != "0" ] && [ "$CYCLES" != "" ]; then
               echo "::warning::Found $CYCLES circular import(s) in $CRATE"
@@ -66,11 +66,11 @@ jobs:
 
       - name: Generate HTML reports
         run: |
-          ./loctree_rs/target/release/loctree loctree_rs/src -A --ext rs \
+          ./target/release/loctree loctree_rs/src -A --ext rs \
             --report loctree-report.html --graph
-          ./loctree_rs/target/release/loctree reports/src -A --ext rs \
+          ./target/release/loctree reports/src -A --ext rs \
             --report reports-report.html --graph
-          ./loctree_rs/target/release/loctree landing/src -A --ext rs \
+          ./target/release/loctree landing/src -A --ext rs \
             --report landing-report.html --graph
 
       - name: Upload analysis reports

@@ -9,6 +9,7 @@ use crate::types::{FileAnalysis, Options};
 
 use super::classify::{detect_language, file_kind};
 use super::css::analyze_css_file;
+use super::dart::analyze_dart_file;
 use super::js::analyze_js_file;
 use super::py::{analyze_py_file, python_stdlib_set};
 use super::resolvers::{
@@ -165,6 +166,8 @@ pub(crate) fn analyze_file(
         "py" => analyze_py_file(
             &content, &canonical, root_canon, extensions, relative, py_roots, py_stdlib,
         ),
+        "go" => crate::analyzer::go::analyze_go_file(&content, relative),
+        "dart" => analyze_dart_file(&content, relative),
         _ => analyze_js_file(
             &content,
             &canonical,
@@ -212,11 +215,13 @@ pub(crate) fn analyze_file(
         if imp.resolved_path.is_none() && imp.source.starts_with('.') {
             let resolved = match ext.as_str() {
                 "py" => resolve_python_relative(&imp.source, &canonical, root_canon, extensions),
-                "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "css" => ts_resolver
-                    .and_then(|r| r.resolve(&imp.source, extensions))
-                    .or_else(|| {
-                        resolve_js_relative(&canonical, root_canon, &imp.source, extensions)
-                    }),
+                "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "css" | "svelte" | "vue" => {
+                    ts_resolver
+                        .and_then(|r| r.resolve(&imp.source, extensions))
+                        .or_else(|| {
+                            resolve_js_relative(&canonical, root_canon, &imp.source, extensions)
+                        })
+                }
                 _ => None,
             };
             imp.resolved_path = resolved;
@@ -439,6 +444,11 @@ mod tests {
                     }],
                     resolution: crate::types::ImportResolutionKind::Local,
                     is_type_checking: false,
+                    is_lazy: false,
+                    is_crate_relative: false,
+                    is_super_relative: false,
+                    is_self_relative: false,
+                    raw_path: String::new(),
                 }],
                 event_listens: vec![crate::types::EventRef {
                     raw_name: Some("EVENT_NAME".to_string()),
@@ -531,6 +541,11 @@ mod tests {
                     }],
                     resolution: crate::types::ImportResolutionKind::Local,
                     is_type_checking: false,
+                    is_lazy: false,
+                    is_crate_relative: false,
+                    is_super_relative: false,
+                    is_self_relative: false,
+                    raw_path: String::new(),
                 }],
                 event_emits: vec![crate::types::EventRef {
                     raw_name: Some("ALIASED".to_string()),

@@ -5,9 +5,12 @@ use serde_json::json;
 
 use crate::analyzer::coverage::CommandUsage;
 use crate::types::{FileAnalysis, PayloadMap};
+use once_cell::sync::Lazy;
+use std::env;
 
 fn normalize_event(name: &str) -> String {
-    name.chars()
+    resolve_event_alias(name)
+        .chars()
         .map(|c| {
             if c.is_alphanumeric() {
                 c.to_ascii_lowercase()
@@ -16,6 +19,33 @@ fn normalize_event(name: &str) -> String {
             }
         })
         .collect::<String>()
+}
+
+/// Optional event aliasing via env `LOCT_EVENT_ALIASES` (comma or semicolon separated `old=new`).
+/// Helps bridge cross-language or naming-drifted events (e.g., rust://foo=tauri://foo).
+static EVENT_ALIASES: Lazy<std::collections::HashMap<String, String>> = Lazy::new(|| {
+    let mut map = std::collections::HashMap::new();
+    if let Ok(raw) = env::var("LOCT_EVENT_ALIASES") {
+        for pair in raw.split([',', ';']) {
+            let trimmed = pair.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if let Some((from, to)) = trimmed.split_once('=') {
+                map.insert(from.trim().to_lowercase(), to.trim().to_string());
+            }
+        }
+    }
+    map
+});
+
+fn resolve_event_alias(name: &str) -> String {
+    let lower = name.to_lowercase();
+    if let Some(alias) = EVENT_ALIASES.get(&lower) {
+        alias.clone()
+    } else {
+        name.to_string()
+    }
 }
 
 fn is_in_scope(path: &str, focus: &Option<GlobSet>, exclude: &Option<GlobSet>) -> bool {
@@ -109,6 +139,15 @@ pub fn build_pipeline_summary(
     let mut risks = Vec::new();
     let mut call_payloads: PayloadMap = HashMap::new();
     let mut handler_payloads: PayloadMap = HashMap::new();
+    let mut string_literals_by_path: HashMap<String, Vec<(String, usize)>> = HashMap::new();
+    for analysis in analyses {
+        let lits: Vec<(String, usize)> = analysis
+            .string_literals
+            .iter()
+            .map(|s| (normalize_event(&s.value), s.line))
+            .collect();
+        string_literals_by_path.insert(analysis.path.clone(), lits);
+    }
 
     for (name, entries) in fe_payloads {
         call_payloads
@@ -131,12 +170,34 @@ pub fn build_pipeline_summary(
 
         let has_emit = !emitters.is_empty();
         let has_listen = !listeners.is_empty();
-        let status = match (has_emit, has_listen) {
+        let mut status = match (has_emit, has_listen) {
             (true, true) => "ok",
             (true, false) => "ghost",
             (false, true) => "orphan",
             _ => "unknown",
         };
+
+        // Heuristic: if only listeners exist but the same file contains the event literal,
+        // synthesize a self-emitter to avoid noisy orphan for runtime-patched/self emissions.
+        if status == "orphan" {
+            for site in &listeners {
+                if let Some(lits) = string_literals_by_path.get(&site.path)
+                    && let Some((_, line)) = lits.iter().find(|(lit, _)| lit == norm).cloned()
+                {
+                    emitters.push(Site {
+                        norm: norm.clone(),
+                        raw: site.raw.clone(),
+                        path: site.path.clone(),
+                        line,
+                        awaited: false,
+                        payload: None,
+                    });
+                }
+            }
+            if !emitters.is_empty() {
+                status = "ok";
+            }
+        }
 
         let mut aliases: Vec<String> = rec.raw_names.iter().cloned().collect();
         aliases.sort();

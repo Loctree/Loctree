@@ -21,6 +21,8 @@ pub struct DetectedStack {
     pub preset_name: Option<String>,
     /// Human-readable description of detected stack
     pub description: String,
+    /// Whether this appears to be a library/framework project (not an app)
+    pub is_library: bool,
 }
 
 impl DetectedStack {
@@ -42,6 +44,35 @@ pub fn detect_stack(root: &Path) -> DetectedStack {
         result.extensions.insert("rs".to_string());
         result.ignores.push("target".to_string());
         detected_parts.push("Rust");
+    }
+
+    // Check for Dart/Flutter (pubspec.yaml)
+    if root.join("pubspec.yaml").exists() {
+        result.extensions.insert("dart".to_string());
+        result.ignores.push(".dart_tool".to_string());
+        result.ignores.push("build".to_string());
+        result.ignores.push(".packages".to_string());
+        detected_parts.push("Dart/Flutter");
+    }
+
+    // Check for Go projects (go.mod or .go files)
+    if root.join("go.mod").exists()
+        || root
+            .read_dir()
+            .ok()
+            .map(|entries| {
+                entries.flatten().any(|entry| {
+                    entry
+                        .path()
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("go"))
+                })
+            })
+            .unwrap_or(false)
+    {
+        result.extensions.insert("go".to_string());
+        result.ignores.push("vendor".to_string());
+        detected_parts.push("Go");
     }
 
     // Check for src-tauri/ -> Tauri preset (must check before generic TS)
@@ -82,6 +113,14 @@ pub fn detect_stack(root: &Path) -> DetectedStack {
             detected_parts.push("TypeScript");
         } else if has_package_json && !detected_parts.contains(&"Tauri") {
             detected_parts.push("JavaScript");
+        }
+
+        // Check if this is a library/framework project
+        if is_npm_library(root) {
+            result.is_library = true;
+            if !detected_parts.contains(&"Library") {
+                detected_parts.push("Library");
+            }
         }
     }
 
@@ -130,6 +169,59 @@ pub fn detect_stack(root: &Path) -> DetectedStack {
         result.ignores.push(".svelte-kit".to_string());
         if !detected_parts.contains(&"SvelteKit") {
             detected_parts.push("SvelteKit");
+        }
+    }
+
+    // Check for Vue projects (vue.config.*, vite.config.* with Vue, or .vue files in src/)
+    let vue_config_exists =
+        root.join("vue.config.js").exists() || root.join("vue.config.ts").exists();
+    let has_vue_files = root.join("src").exists()
+        && std::fs::read_dir(root.join("src"))
+            .map(|entries| {
+                entries.flatten().any(|e| {
+                    e.path()
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("vue"))
+                })
+            })
+            .unwrap_or(false);
+    // Also check packages/* for monorepos (common in Vue ecosystem)
+    let mut vue_in_subdir = false;
+    for subdir in ["packages", "packages-private", "apps"] {
+        let dir = root.join(subdir);
+        if dir.is_dir()
+            && let Ok(entries) = std::fs::read_dir(&dir)
+        {
+            for e in entries.flatten() {
+                let path = e.path();
+                if path.is_dir() {
+                    // Check for .vue files in this package's src/
+                    let pkg_src = path.join("src");
+                    if pkg_src.is_dir()
+                        && std::fs::read_dir(&pkg_src)
+                            .map(|entries| {
+                                entries.flatten().any(|e| {
+                                    e.path()
+                                        .extension()
+                                        .is_some_and(|ext| ext.eq_ignore_ascii_case("vue"))
+                                })
+                            })
+                            .unwrap_or(false)
+                    {
+                        vue_in_subdir = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if vue_in_subdir {
+            break;
+        }
+    }
+    if vue_config_exists || has_vue_files || vue_in_subdir {
+        result.extensions.insert("vue".to_string());
+        if !detected_parts.contains(&"Vue") {
+            detected_parts.push("Vue");
         }
     }
 
@@ -218,12 +310,75 @@ fn has_cargo_in_subdir(root: &Path) -> bool {
     false
 }
 
+/// Check if a package.json indicates this is a library/framework (not an app)
+///
+/// Library indicators:
+/// - Has "exports" field (npm package exports map)
+/// - Has "main", "module", or "types" field (package entry points)
+/// - Has "packages/" directory (monorepo with publishable packages)
+/// - Lacks typical app indicators (index.html, vite.config.*, etc.)
+fn is_npm_library(root: &Path) -> bool {
+    let package_json_path = root.join("package.json");
+    if !package_json_path.exists() {
+        return false;
+    }
+
+    // Read and parse package.json
+    let Ok(content) = std::fs::read_to_string(&package_json_path) else {
+        return false;
+    };
+
+    let Ok(parsed): Result<serde_json::Value, _> = serde_json::from_str(&content) else {
+        return false;
+    };
+
+    // Strong library indicators
+    if parsed.get("exports").is_some() {
+        // Modern npm package with exports field
+        return true;
+    }
+
+    // Has package entry points (main, module, types)
+    let has_main = parsed.get("main").is_some();
+    let has_module = parsed.get("module").is_some();
+    let has_types = parsed.get("types").is_some() || parsed.get("typings").is_some();
+
+    if has_main || has_module || has_types {
+        // Check if it's NOT an app by looking for app-specific files
+        let has_index_html = root.join("index.html").exists();
+        let has_public_html = root.join("public/index.html").exists();
+
+        if !has_index_html && !has_public_html {
+            // Likely a library - has entry points but no HTML
+            return true;
+        }
+    }
+
+    // Check for monorepo packages/ directory
+    let packages_dir = root.join("packages");
+    if packages_dir.is_dir()
+        && std::fs::read_dir(&packages_dir)
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .filter(|e| e.path().is_dir())
+                    .any(|e| e.path().join("package.json").exists())
+            })
+            .unwrap_or(false)
+    {
+        return true;
+    }
+
+    false
+}
+
 /// Apply detected stack to parsed args if no explicit config provided
 pub fn apply_detected_stack(
     root: &Path,
     extensions: &mut Option<HashSet<String>>,
     ignore_patterns: &mut Vec<String>,
     tauri_preset: &mut bool,
+    library_mode: &mut bool,
     verbose: bool,
 ) {
     // Skip if user already specified extensions
@@ -261,6 +416,16 @@ pub fn apply_detected_stack(
         && preset == "tauri"
     {
         *tauri_preset = true;
+    }
+
+    // Apply library mode if detected and not already set by user
+    if detected.is_library && !*library_mode {
+        *library_mode = true;
+        if verbose {
+            eprintln!(
+                "[loctree][detect] Detected library/framework project - enabling library mode"
+            );
+        }
     }
 }
 
@@ -388,8 +553,16 @@ mod tests {
         let mut extensions = Some(HashSet::from(["py".to_string()]));
         let mut ignores = Vec::new();
         let mut tauri = false;
+        let mut library_mode = false;
 
-        apply_detected_stack(tmp.path(), &mut extensions, &mut ignores, &mut tauri, false);
+        apply_detected_stack(
+            tmp.path(),
+            &mut extensions,
+            &mut ignores,
+            &mut tauri,
+            &mut library_mode,
+            false,
+        );
 
         // Should not have changed - user specified extensions
         assert!(extensions.as_ref().unwrap().contains("py"));
@@ -404,8 +577,16 @@ mod tests {
         let mut extensions: Option<HashSet<String>> = None;
         let mut ignores = Vec::new();
         let mut tauri = true; // Already set
+        let mut library_mode = false;
 
-        apply_detected_stack(tmp.path(), &mut extensions, &mut ignores, &mut tauri, false);
+        apply_detected_stack(
+            tmp.path(),
+            &mut extensions,
+            &mut ignores,
+            &mut tauri,
+            &mut library_mode,
+            false,
+        );
 
         // Should not have changed - tauri already set
         assert!(extensions.is_none());
@@ -420,8 +601,16 @@ mod tests {
         let mut extensions: Option<HashSet<String>> = None;
         let mut ignores = Vec::new();
         let mut tauri = false;
+        let mut library_mode = false;
 
-        apply_detected_stack(tmp.path(), &mut extensions, &mut ignores, &mut tauri, false);
+        apply_detected_stack(
+            tmp.path(),
+            &mut extensions,
+            &mut ignores,
+            &mut tauri,
+            &mut library_mode,
+            false,
+        );
 
         assert!(tauri);
         assert!(extensions.is_some());
@@ -436,8 +625,16 @@ mod tests {
         let mut extensions: Option<HashSet<String>> = None;
         let mut ignores = vec!["custom_ignore".to_string()];
         let mut tauri = false;
+        let mut library_mode = false;
 
-        apply_detected_stack(tmp.path(), &mut extensions, &mut ignores, &mut tauri, false);
+        apply_detected_stack(
+            tmp.path(),
+            &mut extensions,
+            &mut ignores,
+            &mut tauri,
+            &mut library_mode,
+            false,
+        );
 
         // Should NOT have applied detected ignores since user specified their own
         assert_eq!(ignores, vec!["custom_ignore".to_string()]);
@@ -451,9 +648,17 @@ mod tests {
         let mut extensions: Option<HashSet<String>> = None;
         let mut ignores = Vec::new();
         let mut tauri = false;
+        let mut library_mode = false;
 
         // Should not panic with verbose=true
-        apply_detected_stack(tmp.path(), &mut extensions, &mut ignores, &mut tauri, true);
+        apply_detected_stack(
+            tmp.path(),
+            &mut extensions,
+            &mut ignores,
+            &mut tauri,
+            &mut library_mode,
+            true,
+        );
     }
 
     #[test]
@@ -520,5 +725,104 @@ mod tests {
 
         // Should not find Cargo.toml in hidden directories
         assert!(!has_cargo_in_subdir(tmp.path()));
+    }
+
+    #[test]
+    fn test_detect_library_with_exports_field() {
+        let tmp = TempDir::new().expect("create temp dir");
+        std::fs::write(
+            tmp.path().join("package.json"),
+            r#"{"name": "solid-js", "exports": {"./jsx-runtime": "./jsx-runtime/index.js"}}"#,
+        )
+        .expect("write package.json");
+
+        let detected = detect_stack(tmp.path());
+
+        assert!(
+            detected.is_library,
+            "Should detect library project with exports field"
+        );
+        assert!(detected.description.contains("Library"));
+    }
+
+    #[test]
+    fn test_detect_library_with_main_field_no_html() {
+        let tmp = TempDir::new().expect("create temp dir");
+        std::fs::write(
+            tmp.path().join("package.json"),
+            r#"{"name": "some-lib", "main": "dist/index.js", "types": "dist/index.d.ts"}"#,
+        )
+        .expect("write package.json");
+
+        let detected = detect_stack(tmp.path());
+
+        assert!(
+            detected.is_library,
+            "Should detect library with main/types but no HTML"
+        );
+    }
+
+    #[test]
+    fn test_detect_app_with_index_html() {
+        let tmp = TempDir::new().expect("create temp dir");
+        std::fs::write(
+            tmp.path().join("package.json"),
+            r#"{"name": "some-app", "main": "src/main.js"}"#,
+        )
+        .expect("write package.json");
+        std::fs::write(tmp.path().join("index.html"), "<!DOCTYPE html>").expect("write index.html");
+
+        let detected = detect_stack(tmp.path());
+
+        assert!(
+            !detected.is_library,
+            "Should NOT detect library when index.html exists"
+        );
+    }
+
+    #[test]
+    fn test_detect_monorepo_with_packages() {
+        let tmp = TempDir::new().expect("create temp dir");
+        std::fs::write(tmp.path().join("package.json"), "{}").expect("write package.json");
+        std::fs::create_dir(tmp.path().join("packages")).expect("mkdir packages");
+        std::fs::create_dir(tmp.path().join("packages/foo")).expect("mkdir foo");
+        std::fs::write(tmp.path().join("packages/foo/package.json"), "{}")
+            .expect("write foo package.json");
+
+        let detected = detect_stack(tmp.path());
+
+        assert!(
+            detected.is_library,
+            "Should detect monorepo with packages/ as library"
+        );
+    }
+
+    #[test]
+    fn test_library_mode_applied_automatically() {
+        let tmp = TempDir::new().expect("create temp dir");
+        std::fs::write(
+            tmp.path().join("package.json"),
+            r#"{"name": "test-lib", "exports": {"./index": "./index.js"}}"#,
+        )
+        .expect("write package.json");
+
+        let mut extensions: Option<HashSet<String>> = None;
+        let mut ignores = Vec::new();
+        let mut tauri = false;
+        let mut library_mode = false;
+
+        apply_detected_stack(
+            tmp.path(),
+            &mut extensions,
+            &mut ignores,
+            &mut tauri,
+            &mut library_mode,
+            false,
+        );
+
+        assert!(
+            library_mode,
+            "Library mode should be auto-enabled for library projects"
+        );
     }
 }

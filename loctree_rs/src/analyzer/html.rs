@@ -43,7 +43,17 @@ pub(crate) fn render_html_report(path: &Path, sections: &[ReportSection]) -> io:
         ..Default::default()
     };
 
-    let html = report_leptos::render_report(&leptos_sections, &js_assets);
+    // Check if this project has Tauri command data
+    let has_tauri = sections.iter().any(|s| {
+        !s.missing_handlers.is_empty()
+            || !s.unused_handlers.is_empty()
+            || !s.unregistered_handlers.is_empty()
+            || !s.command_bridges.is_empty()
+            || s.command_counts.0 > 0
+            || s.command_counts.1 > 0
+    });
+
+    let html = report_leptos::render_report(&leptos_sections, &js_assets, has_tauri);
     fs::write(path, html)
 }
 
@@ -86,7 +96,7 @@ fn write_js_assets(dir: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::render_html_report;
-    use crate::analyzer::report::{AiInsight, RankedDup, ReportSection};
+    use crate::analyzer::report::{AiInsight, DupSeverity, RankedDup, ReportSection};
     use std::fs;
     use tempfile::tempdir;
 
@@ -105,6 +115,10 @@ mod tests {
             canonical: "a.ts".into(),
             canonical_line: None,
             refactors: vec!["b.ts".into()],
+            severity: DupSeverity::SamePackage,
+            is_cross_lang: false,
+            packages: vec![],
+            reason: String::new(),
         };
 
         let section = ReportSection {
@@ -116,6 +130,7 @@ mod tests {
             ranked_dups: vec![dup],
             cascades: vec![("a.ts".into(), "b.ts".into())],
             circular_imports: vec![],
+            lazy_circular_imports: vec![],
             dynamic: vec![("dyn.ts".into(), vec!["./lazy".into()])],
             analyze_limit: 5,
             missing_handlers: Vec::new(),
@@ -134,6 +149,9 @@ mod tests {
             }],
             git_branch: None,
             git_commit: None,
+            crowds: Vec::new(),
+            dead_exports: Vec::new(),
+            twins_data: None,
         };
 
         render_html_report(&out_path, &[section]).expect("render html");
@@ -141,7 +159,7 @@ mod tests {
 
         // Verify key parts exist in the Leptos-rendered output
         assert!(html.contains("<!DOCTYPE html>"));
-        assert!(html.contains("loctree report")); // Title in new Vista design
+        assert!(html.contains("Loctree Report")); // Title in new Vista design
 
         // The output format might differ slightly from legacy, check for content
         assert!(html.contains("Hint"));
@@ -163,6 +181,7 @@ mod tests {
             ranked_dups: Vec::new(),
             cascades: Vec::new(),
             circular_imports: Vec::new(),
+            lazy_circular_imports: Vec::new(),
             dynamic: Vec::new(),
             analyze_limit: 1,
             missing_handlers: Vec::new(),
@@ -177,6 +196,9 @@ mod tests {
             insights: Vec::new(),
             git_branch: None,
             git_commit: None,
+            crowds: Vec::new(),
+            dead_exports: Vec::new(),
+            twins_data: None,
         };
 
         render_html_report(&out_path, &[section]).expect("render html");

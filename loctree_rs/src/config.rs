@@ -10,6 +10,12 @@ use std::path::Path;
 #[serde(default)]
 pub struct LoctreeConfig {
     pub tauri: TauriConfig,
+    /// Enable library mode to filter example/demo/fixture files
+    #[serde(default)]
+    pub library_mode: bool,
+    /// Additional glob patterns for library example files
+    #[serde(default)]
+    pub library_example_globs: Vec<String>,
 }
 
 /// Tauri-specific configuration

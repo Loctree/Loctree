@@ -1,5 +1,7 @@
 use super::VERSION;
+use crate::components::{ICON_MOON, ICON_SUN, Icon};
 use leptos::prelude::*;
+use leptos_router::components::A;
 
 #[component]
 pub fn Nav() -> impl IntoView {
@@ -8,6 +10,21 @@ pub fn Nav() -> impl IntoView {
     let (install_copied, set_install_copied) = signal(false);
     let (prompt_copied, set_prompt_copied) = signal(false);
     let (expanded, set_expanded) = signal(false);
+    let (is_light_mode, set_is_light_mode) = signal(false);
+
+    let toggle_theme = move |_| {
+        set_is_light_mode.update(|light| *light = !*light);
+        if let Some(window) = web_sys::window()
+            && let Some(document) = window.document()
+            && let Some(body) = document.body()
+        {
+            if is_light_mode.get() {
+                let _ = body.class_list().add_1("light-mode");
+            } else {
+                let _ = body.class_list().remove_1("light-mode");
+            }
+        }
+    };
 
     let install_command = "cargo install loctree";
 
@@ -107,20 +124,32 @@ loct lint --fail --sarif > results.sarif
     view! {
         <nav class="nav">
             <div class="nav-inner">
-                <a href="/" class="nav-brand">
+                <A href="/" attr:class="nav-brand">
                     <div class="nav-logo">
-                        <img src="assets/loctree-logo.png" alt="loctree" />
+                        <img src="/assets/loctree-logo.png" alt="loctree" />
                     </div>
                     <span class="nav-title">"loctree"</span>
                     <span class="nav-version">{VERSION}</span>
-                </a>
+                </A>
                 <div class="nav-links">
-                    <a href="#features" class="nav-link">"Features"</a>
-                    <a href="#slice" class="nav-link">"Slice"</a>
-                    <a href="#cli" class="nav-link">"CLI"</a>
-                    <a href="#blog" class="nav-link">"Blog"</a>
-                    <a href="https://docs.rs/loctree" target="_blank" class="nav-link">"Docs"</a>
+                    <A href="/features" attr:class="nav-link">"Features"</A>
+                    <A href="/docs" attr:class="nav-link">"Docs"</A>
+                    <A href="/blog" attr:class="nav-link">"Blog"</A>
                     <a href="https://github.com/Loctree/Loctree" target="_blank" class="nav-link">"GitHub"</a>
+                    <div class="theme-switcher-wrapper">
+                        <button
+                            class="theme-switcher"
+                            on:click=toggle_theme
+                            aria-label="Toggle dark/light mode"
+                        >
+                            {move || if is_light_mode.get() {
+                                view! { <Icon path=ICON_SUN size="18" /> }.into_any()
+                            } else {
+                                view! { <Icon path=ICON_MOON size="18" /> }.into_any()
+                            }}
+                        </button>
+                        <span class="theme-tooltip">"Zawsze startujemy z dark mode, bo światło przyciąga bugs."</span>
+                    </div>
                     <button
                         class=move || if drawer_open.get() { "nav-cta active" } else { "nav-cta" }
                         on:click=move |_| set_drawer_open.update(|o| *o = !*o)

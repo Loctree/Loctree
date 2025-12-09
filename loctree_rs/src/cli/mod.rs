@@ -78,6 +78,7 @@ pub use command::{
     HelpOptions,
     InfoOptions,
     LintOptions,
+    MemexOptions,
     // Parsing result
     ParsedCommand,
     ReportOptions,

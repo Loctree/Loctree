@@ -9,13 +9,14 @@
 //! - Similarity check (`--check`/`--sim`)
 //! - Dead exports detection (`--dead`)
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 
+use globset::GlobSet;
 use serde_json::json;
 
 use crate::similarity::similarity;
-use crate::types::{FileAnalysis, OutputMode, ReexportKind};
+use crate::types::{ExportSymbol, FileAnalysis, OutputMode, ReexportKind};
 
 use super::root_scan::{RootContext, normalize_module_id};
 
@@ -147,27 +148,32 @@ pub struct DeadExport {
 }
 
 /// Controls which files are considered during dead-export detection.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct DeadFilterConfig {
     /// Include tests and fixtures (default: false)
     pub include_tests: bool,
     /// Include helper/scripts/docs files (default: false)
     pub include_helpers: bool,
+    /// Treat project as library/framework (ignore examples/demos noise)
+    pub library_mode: bool,
+    /// Extra example/demo globs to ignore when library_mode is enabled
+    pub example_globs: Vec<String>,
 }
 
-/// Search for symbol occurrences across analyzed files
-/// Note: The actual symbol search is performed during file scanning (in `analyze_file`).
-/// This function only collects the pre-computed matches from analyses.
-pub fn search_symbol(_symbol: &str, analyses: &[FileAnalysis]) -> SymbolSearchResult {
+/// Search for symbol occurrences across analyzed files (case-insensitive, substring).
+/// Falls back to export list so it works even without `--symbol` pre-scan.
+pub fn search_symbol(symbol: &str, analyses: &[FileAnalysis]) -> SymbolSearchResult {
+    let needle = symbol.to_lowercase();
     let mut files = Vec::new();
     let mut total_matches = 0;
 
     for analysis in analyses {
-        if !analysis.matches.is_empty() {
-            let mut matches = Vec::new();
-            for m in &analysis.matches {
-                // Infer if it's a definition from context keywords
-                let ctx_lower = m.context.to_lowercase();
+        let mut matches = Vec::new();
+
+        // 1) Recorded line matches (only present if scan was run with --symbol)
+        for m in &analysis.matches {
+            let ctx_lower = m.context.to_lowercase();
+            if ctx_lower.contains(&needle) {
                 let is_def = ctx_lower.contains("export ")
                     || ctx_lower.contains("pub ")
                     || ctx_lower.contains("function ")
@@ -182,6 +188,20 @@ pub fn search_symbol(_symbol: &str, analyses: &[FileAnalysis]) -> SymbolSearchRe
                     is_definition: is_def,
                 });
             }
+        }
+
+        // 2) Exports list (always available) - substring / case-insensitive
+        for exp in &analysis.exports {
+            if exp.name.to_lowercase().contains(&needle) {
+                matches.push(SymbolMatch {
+                    line: exp.line.unwrap_or(0),
+                    context: format!("export {} {}", exp.kind, exp.name),
+                    is_definition: true,
+                });
+            }
+        }
+
+        if !matches.is_empty() {
             total_matches += matches.len();
             files.push(SymbolFileMatch {
                 file: analysis.path.clone(),
@@ -378,11 +398,39 @@ pub fn print_similarity_results(
 /// Check if a file should be skipped from dead export detection.
 /// These are files whose exports are consumed by external tools/frameworks,
 /// not by regular imports in the codebase.
-fn should_skip_dead_export_check(analysis: &FileAnalysis, config: DeadFilterConfig) -> bool {
+fn should_skip_dead_export_check(
+    analysis: &FileAnalysis,
+    config: &DeadFilterConfig,
+    example_globs: Option<&GlobSet>,
+) -> bool {
     let path = &analysis.path;
+    let lower_path = path.to_ascii_lowercase();
+
+    // Go exports are primarily public API; static import graph is insufficient (FP-heavy)
+    // Skip dead-export detection for Go to avoid noise.
+    if analysis.language == "go" {
+        return true;
+    }
+
+    // JSX runtime files - exports consumed by TypeScript/Babel compiler, not by imports
+    // Files matching: *jsx-runtime*, jsx-runtime.js, jsx-runtime/index.js, jsx-dev-runtime.js, etc.
+    if (analysis.language == "ts" || analysis.language == "js")
+        && (lower_path.contains("jsx-runtime")
+            || lower_path.contains("jsx_runtime")
+            || lower_path.contains("jsx-dev-runtime"))
+    {
+        return true;
+    }
 
     // Test files and fixtures
     if analysis.is_test && !config.include_tests {
+        return true;
+    }
+
+    // Flutter generated/plugin registrant files
+    if path.ends_with("generated_plugin_registrant.dart")
+        || path.contains("/generated_plugin_registrant.dart")
+    {
         return true;
     }
 
@@ -399,12 +447,71 @@ fn should_skip_dead_export_check(analysis: &FileAnalysis, config: DeadFilterConf
         "/tests/",
         "/spec/",
     ];
-    if TEST_DIRS.iter().any(|d| path.contains(d)) && !config.include_tests {
+    if TEST_DIRS.iter().any(|d| lower_path.contains(d)) && !config.include_tests {
+        return true;
+    }
+
+    // Example/demo/fixture packages (library-mode noise)
+    const EXAMPLE_DIRS: &[&str] = &[
+        "/examples/",
+        "/example/",
+        "/samples/",
+        "/sample/",
+        "/demo/",
+        "/demos/",
+        "/playground/",
+        "/showcase/",
+    ];
+    if EXAMPLE_DIRS.iter().any(|d| lower_path.contains(d)) {
+        return true;
+    }
+    if config.library_mode {
+        if let Some(globs) = example_globs
+            && (globs.is_match(path) || globs.is_match(&lower_path))
+        {
+            return true;
+        }
+        const LIBRARY_NOISE_DIRS: &[&str] = &[
+            "/kitchen-sink/",
+            "/kitchensink/",
+            "/sandbox/",
+            "/sandboxes/",
+            "/cookbook/",
+            "/gallery/",
+            "/examples-",
+            "/examples_",
+            "/docs/examples/",
+            "/documentation/examples/",
+        ];
+        if LIBRARY_NOISE_DIRS.iter().any(|d| lower_path.contains(d))
+            || lower_path.starts_with("examples/")
+            || lower_path.starts_with("example/")
+            || lower_path.starts_with("demo/")
+            || lower_path.contains("/examples/")
+        {
+            return true;
+        }
+    }
+    // Lowercase check for testfixtures (common in codemods)
+    if lower_path.contains("testfixtures") {
         return true;
     }
 
     // TypeScript declaration files (.d.ts) - only contain type declarations
     if path.ends_with(".d.ts") {
+        return true;
+    }
+
+    // Dart/Flutter generated artifacts
+    if path.ends_with(".g.dart")
+        || path.ends_with(".freezed.dart")
+        || path.ends_with(".gr.dart")
+        || path.ends_with(".pb.dart")
+        || path.ends_with(".pbjson.dart")
+        || path.ends_with(".pbenum.dart")
+        || path.ends_with(".pbserver.dart")
+        || path.ends_with(".config.dart")
+    {
         return true;
     }
 
@@ -448,6 +555,29 @@ fn should_skip_dead_export_check(analysis: &FileAnalysis, config: DeadFilterConf
         "/hooks.",
     ];
     if FRAMEWORK_ENTRY_PATTERNS.iter().any(|p| path.contains(p)) {
+        return true;
+    }
+
+    // Virtual/module-runtime entrypoints (framework-provided consumers)
+    const RUNTIME_PATTERNS: &[&str] =
+        &["/.svelte-kit/", "/runtime/", "/app/router/", "/app/routes/"];
+    if (analysis.language == "ts" || analysis.language == "js")
+        && RUNTIME_PATTERNS.iter().any(|p| path.contains(p))
+    {
+        return true;
+    }
+
+    // Library barrels and public API surfaces (avoid flagging public exports)
+    if (path.ends_with("/index.ts")
+        || path.ends_with("/index.tsx")
+        || path.ends_with("/index.js")
+        || path.ends_with("/index.mjs")
+        || path.ends_with("/index.cjs")
+        || path.ends_with("/mod.ts")
+        || path.ends_with("/mod.js"))
+        && (analysis.language == "ts" || analysis.language == "js")
+        && (path.contains("/packages/") || path.contains("/libs/") || path.contains("/library/"))
+    {
         return true;
     }
 
@@ -614,6 +744,54 @@ fn is_svelte_component_api(file_path: &str, export_name: &str) -> bool {
     false
 }
 
+/// Check if an export is a JSX runtime export consumed by compilers.
+/// These exports are used by TypeScript/Babel when compiling JSX, configured via tsconfig.json:
+/// { "jsx": "react-jsx", "jsxImportSource": "solid-js" }
+/// The compiler transforms JSX into calls to these functions without explicit imports.
+fn is_jsx_runtime_export(export_name: &str, file_path: &str) -> bool {
+    // JSX runtime export names defined by React JSX transform spec
+    const JSX_RUNTIME_EXPORTS: &[&str] = &["jsx", "jsxs", "jsxDEV", "jsxsDEV", "Fragment"];
+
+    if !JSX_RUNTIME_EXPORTS.contains(&export_name) {
+        return false;
+    }
+
+    // Check if file is likely a JSX runtime
+    // Patterns: jsx-runtime, jsx_runtime, jsx-dev-runtime (React dev mode)
+    let lower_path = file_path.to_ascii_lowercase();
+    lower_path.contains("jsx-runtime")
+        || lower_path.contains("jsx_runtime")
+        || lower_path.contains("jsx-dev-runtime")
+}
+
+fn is_rust_const_table(analysis: &FileAnalysis) -> bool {
+    if analysis.language != "rs" {
+        return false;
+    }
+    let const_exports: Vec<_> = analysis
+        .exports
+        .iter()
+        .filter(|e| e.kind == "const")
+        .collect();
+    if const_exports.len() < 8 {
+        return false;
+    }
+
+    let shouting: usize = const_exports
+        .iter()
+        .filter(|e| {
+            let name = e.name.as_str();
+            !name.is_empty()
+                && name
+                    .chars()
+                    .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+        })
+        .count();
+
+    // Heuristic: mostly uppercase consts, very few non-const exports => treat as data table.
+    let non_const_exports = analysis.exports.len().saturating_sub(const_exports.len());
+    shouting * 4 >= const_exports.len() * 3 && non_const_exports <= 2
+}
 /// Find potentially dead (unused) exports in the codebase
 pub fn find_dead_exports(
     analyses: &[FileAnalysis],
@@ -621,12 +799,40 @@ pub fn find_dead_exports(
     open_base: Option<&str>,
     config: DeadFilterConfig,
 ) -> Vec<DeadExport> {
+    let example_globset = if config.library_mode && !config.example_globs.is_empty() {
+        let mut builder = globset::GlobSetBuilder::new();
+        for pat in &config.example_globs {
+            match globset::Glob::new(pat) {
+                Ok(glob) => {
+                    builder.add(glob);
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[loctree][warn] invalid library_example_glob '{}': {}",
+                        pat, e
+                    );
+                }
+            }
+        }
+        builder.build().ok()
+    } else {
+        None
+    };
+
+    // Skip Go for now to avoid false positives until package-level usage is implemented
+    let analyses: Vec<&FileAnalysis> = analyses
+        .iter()
+        .filter(|a| !a.path.ends_with(".go"))
+        .collect();
+
     // Build usage set: (resolved_path, symbol_name)
     let mut used_exports: HashSet<(String, String)> = HashSet::new();
     // Track all imported symbol names as fallback (handles $lib/, @scope/, monorepo paths)
     let mut all_imported_symbols: HashSet<String> = HashSet::new();
+    // Track crate-internal imports for Rust: (raw_path, symbol_name)
+    let mut crate_internal_imports: Vec<(String, String)> = Vec::new();
 
-    for analysis in analyses {
+    for analysis in &analyses {
         for imp in &analysis.imports {
             let target_norm = if let Some(target) = &imp.resolved_path {
                 // Use resolved path if available
@@ -648,7 +854,12 @@ pub fn find_dead_exports(
                 // Track all imported symbol names as fallback for unresolved/incorrectly resolved paths
                 // This catches symbols imported via $lib/, @scope/, or other aliases that may not resolve correctly
                 if !used_name.is_empty() {
-                    all_imported_symbols.insert(used_name);
+                    all_imported_symbols.insert(used_name.clone());
+                }
+
+                // Track crate-internal imports (crate::, super::, self::)
+                if imp.is_crate_relative || imp.is_super_relative || imp.is_self_relative {
+                    crate_internal_imports.push((imp.raw_path.clone(), used_name));
                 }
             }
         }
@@ -678,6 +889,20 @@ pub fn find_dead_exports(
         .flat_map(|a| a.tauri_registered_handlers.iter().cloned())
         .collect();
 
+    // Go: gather identifiers used anywhere within the same directory (package-level)
+    let mut go_local_uses_by_dir: HashMap<String, HashSet<String>> = HashMap::new();
+    for analysis in analyses.iter().filter(|a| a.path.ends_with(".go")) {
+        if let Some(dir) = std::path::Path::new(&analysis.path)
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+        {
+            go_local_uses_by_dir
+                .entry(dir)
+                .or_default()
+                .extend(analysis.local_uses.iter().cloned());
+        }
+    }
+
     // Build set of all path-qualified symbols from Rust files
     // These are calls like `command::branch::handle()` that don't use `use` imports
     let rust_path_qualified_symbols: HashSet<String> = analyses
@@ -693,7 +918,7 @@ pub fn find_dead_exports(
         // Build import graph: file_path -> list of resolved import paths
         let mut import_graph: std::collections::HashMap<String, Vec<String>> =
             std::collections::HashMap::new();
-        for analysis in analyses {
+        for analysis in &analyses {
             let key = normalize_module_id(&analysis.path).as_key();
             let imports: Vec<String> = analysis
                 .imports
@@ -706,13 +931,13 @@ pub fn find_dead_exports(
 
         // Collect initial set of dynamically imported files
         let mut reachable: HashSet<String> = HashSet::new();
-        for analysis in analyses {
+        for analysis in &analyses {
             for dyn_imp in &analysis.dynamic_imports {
                 let dyn_norm = normalize_module_id(dyn_imp);
                 let dyn_key = dyn_norm.as_key();
                 let dyn_alias = strip_alias_prefix(&dyn_norm.path).to_string();
                 // Find matching file in analyses
-                for a in analyses {
+                for a in &analyses {
                     let a_norm = normalize_module_id(&a.path);
                     let a_key = a_norm.as_key();
                     if paths_match(dyn_imp, &a_norm.path)
@@ -755,7 +980,7 @@ pub fn find_dead_exports(
 
     for analysis in analyses {
         // Skip files that should be excluded from dead export detection
-        if should_skip_dead_export_check(analysis, config) {
+        if should_skip_dead_export_check(analysis, &config, example_globset.as_ref()) {
             continue;
         }
 
@@ -770,7 +995,27 @@ pub fn find_dead_exports(
             continue;
         }
 
+        if is_rust_const_table(analysis) {
+            continue;
+        }
+
         let path_norm = normalize_module_id(&analysis.path).as_key();
+        let is_go_file = analysis.path.ends_with(".go");
+
+        // Skip noisy generated Go bindings (protobuf/grpc)
+        if is_go_file
+            && (analysis.path.ends_with(".pb.go")
+                || analysis.path.ends_with(".pb.gw.go")
+                || analysis.path.contains(".pb.")
+                || analysis.path.contains(".pbjson"))
+        {
+            continue;
+        }
+
+        // Temporarily skip Go dead detection to avoid high FP until full package-level usage is implemented
+        if is_go_file {
+            continue;
+        }
 
         // Skip if file is reachable from dynamic imports (directly or transitively)
         // This handles React.lazy(), Next.js dynamic(), and other code-splitting patterns
@@ -825,10 +1070,47 @@ pub fn find_dead_exports(
                 continue;
             }
 
+            // Django/Wagtail mixin pattern heuristic:
+            // Classes ending in "Mixin" are typically used via multiple inheritance
+            // and their methods are called via MRO (Method Resolution Order), not directly imported
+            // Common patterns: LoginRequiredMixin, PermissionRequiredMixin, ButtonsColumnMixin, etc.
+            let is_django_mixin =
+                is_python_file && exp.kind == "class" && exp.name.ends_with("Mixin");
+            if is_django_mixin {
+                // Skip mixin classes from dead export detection
+                // They're used via inheritance which may not be fully tracked in complex codebases
+                continue;
+            }
+            if is_python_test_export(analysis, exp) || is_python_test_path(&analysis.path) {
+                continue;
+            }
+
             if exp.name == "default"
                 && (analysis.path.ends_with("page.tsx") || analysis.path.ends_with("layout.tsx"))
             {
                 // Next.js / framework roots - ignore default export
+                continue;
+            }
+
+            // JS/TS runtime/framework exports that are inherently used via tooling/framework
+            let is_ts_file = analysis.path.ends_with(".ts")
+                || analysis.path.ends_with(".tsx")
+                || analysis.path.ends_with(".js")
+                || analysis.path.ends_with(".jsx")
+                || analysis.path.ends_with(".mjs")
+                || analysis.path.ends_with(".cjs");
+            let ts_runtime_symbol = is_ts_file
+                && (matches!(
+                    exp.name.as_str(),
+                    "jsx" | "jsxs" | "jsxDEV" | "Fragment" | "VoidComponent" | "Component"
+                ) || analysis.path.contains("jsx-runtime"));
+            let ts_framework_magic = is_ts_file
+                && (matches!(
+                    exp.name.as_str(),
+                    "start" | "resolveRoute" | "enhance" | "load" | "PageLoad" | "LayoutLoad"
+                ) || analysis.path.contains("sveltekit")
+                    || analysis.path.contains("app/navigation"));
+            if ts_runtime_symbol || ts_framework_magic {
                 continue;
             }
 
@@ -841,6 +1123,14 @@ pub fn find_dead_exports(
             // Also check if "*" was imported from this file
             let star_used = used_exports.contains(&(path_norm.clone(), "*".to_string()));
             let locally_used = local_uses.contains(&exp.name);
+            let go_pkg_used = if analysis.path.ends_with(".go") {
+                std::path::Path::new(&analysis.path)
+                    .parent()
+                    .and_then(|p| go_local_uses_by_dir.get(&p.to_string_lossy().to_string()))
+                    .is_some_and(|set| set.contains(&exp.name))
+            } else {
+                false
+            };
             // Check if this is a Tauri command handler registered via generate_handler![]
             let is_tauri_handler = tauri_handlers.contains(&exp.name);
             // Fallback: check if symbol is imported anywhere by name
@@ -852,13 +1142,36 @@ pub fn find_dead_exports(
             let is_rust_path_qualified =
                 analysis.path.ends_with(".rs") && rust_path_qualified_symbols.contains(&exp.name);
 
+            // Check if this export is imported via crate-internal paths (crate::, super::, self::)
+            // Use fuzzy matching since nested brace imports may have symbol names with extra chars
+            let crate_import_count = crate_internal_imports
+                .iter()
+                .filter(|(raw_path, symbol)| {
+                    // Exact match or symbol contains the export name (handles "MENU_GAP}" matching "MENU_GAP")
+                    let symbol_matches = symbol == &exp.name
+                        || symbol.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '_')
+                            == exp.name
+                        || symbol.trim_start_matches(|c: char| !c.is_alphanumeric() && c != '_')
+                            == exp.name;
+                    symbol_matches && crate_import_matches_file(raw_path, &analysis.path, &exp.name)
+                })
+                .count();
+            let is_crate_imported = crate_import_count > 0;
+
+            // Check if this is a JSX runtime export (jsx, jsxs, Fragment, etc.)
+            // These are consumed by TypeScript/Babel compiler, not by regular imports
+            let is_jsx_runtime = is_jsx_runtime_export(&exp.name, &analysis.path);
+
             if !is_used
                 && !star_used
                 && !locally_used
+                && !go_pkg_used
                 && !is_tauri_handler
                 && !imported_by_name
                 && !is_svelte_api
                 && !is_rust_path_qualified
+                && !is_crate_imported
+                && !is_jsx_runtime
             {
                 let open_url = super::build_open_url(&analysis.path, exp.line, open_base);
 
@@ -866,7 +1179,8 @@ pub fn find_dead_exports(
                 let reason = if is_rust_file {
                     format!(
                         "No imports found for '{}'. Checked: direct imports (0 matches), \
-                         star imports (none), local uses (none), Tauri handlers (not registered)",
+                         star imports (none), crate imports (0 matches), local uses (none), \
+                         Tauri handlers (not registered)",
                         exp.name
                     )
                 } else {
@@ -1128,6 +1442,97 @@ mod tests {
     }
 
     #[test]
+    fn test_find_dead_exports_respects_crate_imports() {
+        let exporter = mock_file_with_exports("src/ui/constants.rs", vec!["MENU_GAP"]);
+        let mut importer = mock_file("src/main.rs");
+        let mut imp = ImportEntry::new(
+            "crate::ui::constants::MENU_GAP".to_string(),
+            ImportKind::Static,
+        );
+        imp.raw_path = "crate::ui::constants::MENU_GAP".to_string();
+        imp.is_crate_relative = true;
+        imp.symbols.push(ImportSymbol {
+            name: "MENU_GAP".to_string(),
+            alias: None,
+            is_default: false,
+        });
+        importer.imports.push(imp);
+
+        let result = find_dead_exports(
+            &[importer, exporter],
+            false,
+            None,
+            DeadFilterConfig::default(),
+        );
+        assert!(
+            result.is_empty(),
+            "crate-internal imports should prevent dead export marking. Found: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_find_dead_exports_respects_super_imports() {
+        let exporter = mock_file_with_exports("src/types.rs", vec!["Config"]);
+        let mut importer = mock_file("src/ui/widget.rs");
+        let mut imp = ImportEntry::new("super::types::Config".to_string(), ImportKind::Static);
+        imp.raw_path = "super::types::Config".to_string();
+        imp.is_super_relative = true;
+        imp.symbols.push(ImportSymbol {
+            name: "Config".to_string(),
+            alias: None,
+            is_default: false,
+        });
+        importer.imports.push(imp);
+
+        let result = find_dead_exports(
+            &[importer, exporter],
+            false,
+            None,
+            DeadFilterConfig::default(),
+        );
+        assert!(
+            result.is_empty(),
+            "super:: imports should prevent dead export marking. Found: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_crate_import_matches_file_basic() {
+        // Test basic crate:: import matching
+        assert!(
+            crate_import_matches_file(
+                "crate::ui::constants::MENU_GAP",
+                "src/ui/constants.rs",
+                "MENU_GAP"
+            ),
+            "should match crate::ui::constants with src/ui/constants.rs"
+        );
+
+        assert!(
+            crate_import_matches_file("crate::types::Config", "src/types.rs", "Config"),
+            "should match crate::types with src/types.rs"
+        );
+
+        assert!(
+            crate_import_matches_file("super::utils::helper", "utils.rs", "helper"),
+            "should match super::utils with utils.rs"
+        );
+
+        // Test non-matches
+        assert!(
+            !crate_import_matches_file("crate::ui::constants::X", "src/ui/layout.rs", "X"),
+            "should NOT match constants with layout.rs"
+        );
+
+        assert!(
+            !crate_import_matches_file("external::package::Foo", "src/foo.rs", "Foo"),
+            "should NOT match non-crate imports"
+        );
+    }
+
+    #[test]
     fn test_print_symbol_results_no_matches() {
         let result = SymbolSearchResult {
             found: false,
@@ -1268,6 +1673,8 @@ mod tests {
             DeadFilterConfig {
                 include_tests: true,
                 include_helpers: false,
+                library_mode: false,
+                example_globs: Vec::new(),
             },
         );
         assert_eq!(result.len(), 1);
@@ -1280,6 +1687,62 @@ mod tests {
         let analyses = vec![mock_file("src/app.ts"), helper];
         let result = find_dead_exports(&analyses, false, None, DeadFilterConfig::default());
         assert!(result.is_empty(), "helper scripts should be skipped");
+    }
+
+    #[test]
+    fn test_find_dead_exports_skips_jsx_runtime_files() {
+        // JSX runtime files should be completely skipped from dead export detection
+        let mut jsx_runtime = mock_file_with_exports(
+            "packages/solid-js/jsx-runtime/index.ts",
+            vec!["jsx", "jsxs", "jsxDEV", "Fragment"],
+        );
+        jsx_runtime.language = "ts".to_string();
+
+        let result = find_dead_exports(&[jsx_runtime], false, None, DeadFilterConfig::default());
+        assert!(
+            result.is_empty(),
+            "JSX runtime files should be completely skipped: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_find_dead_exports_skips_jsx_runtime_exports() {
+        // Individual JSX runtime exports (jsx, jsxs, Fragment) in jsx-runtime paths should not be flagged
+        let mut runtime_file = mock_file_with_exports(
+            "node_modules/solid-js/jsx-runtime.js",
+            vec!["jsx", "jsxs", "jsxDEV", "Fragment", "createComponent"],
+        );
+        runtime_file.language = "js".to_string();
+
+        let result = find_dead_exports(&[runtime_file], false, None, DeadFilterConfig::default());
+        // File should be skipped entirely due to jsx-runtime path pattern
+        assert!(
+            result.is_empty(),
+            "JSX runtime exports should not be flagged as dead: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_jsx_runtime_export_detection() {
+        // Test the helper function directly
+        assert!(is_jsx_runtime_export(
+            "jsx",
+            "packages/solid-js/jsx-runtime/index.ts"
+        ));
+        assert!(is_jsx_runtime_export("jsxs", "vue/jsx-runtime.js"));
+        assert!(is_jsx_runtime_export("jsxDEV", "react/jsx-dev-runtime.js"));
+        assert!(is_jsx_runtime_export(
+            "Fragment",
+            "preact/jsx-runtime/index.mjs"
+        ));
+        assert!(is_jsx_runtime_export("jsxsDEV", "solid/jsx_runtime.ts"));
+
+        // Non JSX runtime exports should not match
+        assert!(!is_jsx_runtime_export("Component", "jsx-runtime/index.ts"));
+        assert!(!is_jsx_runtime_export("jsx", "src/utils/helpers.ts"));
+        assert!(!is_jsx_runtime_export("createElement", "jsx-runtime.js"));
     }
 
     #[test]
@@ -1425,6 +1888,131 @@ mod tests {
     }
 
     #[test]
+    fn test_django_wagtail_mixin_not_dead() {
+        // Test that Django/Wagtail mixins used in inheritance are not marked as dead
+        // This tests the integration between py.rs (which tracks inheritance) and dead_parrots.rs
+
+        use crate::types::{ExportSymbol, FileAnalysis};
+
+        // Mixin definition file
+        let mixin_file = FileAnalysis {
+            path: "myapp/mixins.py".to_string(),
+            language: "py".to_string(),
+            exports: vec![
+                ExportSymbol::new("LoginRequiredMixin".to_string(), "class", "named", Some(1)),
+                ExportSymbol::new(
+                    "PermissionRequiredMixin".to_string(),
+                    "class",
+                    "named",
+                    Some(5),
+                ),
+                ExportSymbol::new("ButtonsColumnMixin".to_string(), "class", "named", Some(10)),
+            ],
+            ..Default::default()
+        };
+
+        // View file that uses the mixins
+        let mut view_file = FileAnalysis {
+            path: "myapp/views.py".to_string(),
+            language: "py".to_string(),
+            exports: vec![], // No exports to avoid noise
+            // Simulate what py.rs does: add base classes to local_uses
+            local_uses: vec![
+                "LoginRequiredMixin".to_string(),
+                "PermissionRequiredMixin".to_string(),
+                "ButtonsColumnMixin".to_string(),
+            ],
+            ..Default::default()
+        };
+
+        // Add import entry to track the relationship
+        use crate::types::{ImportEntry, ImportKind, ImportSymbol};
+        let mut imp = ImportEntry::new("myapp.mixins".to_string(), ImportKind::Static);
+        imp.resolved_path = Some("myapp/mixins.py".to_string());
+        imp.symbols = vec![
+            ImportSymbol {
+                name: "LoginRequiredMixin".to_string(),
+                alias: None,
+                is_default: false,
+            },
+            ImportSymbol {
+                name: "PermissionRequiredMixin".to_string(),
+                alias: None,
+                is_default: false,
+            },
+            ImportSymbol {
+                name: "ButtonsColumnMixin".to_string(),
+                alias: None,
+                is_default: false,
+            },
+        ];
+        view_file.imports.push(imp);
+
+        let analyses = vec![mixin_file, view_file];
+        let result = find_dead_exports(&analyses, false, None, DeadFilterConfig::default());
+
+        // All mixins should be marked as used (both via imports AND local_uses from inheritance tracking)
+        assert!(
+            result.is_empty(),
+            "Django/Wagtail mixins should not be marked as dead. Found dead: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_django_mixin_pattern_common_names() {
+        // Test common Django/Wagtail mixin naming patterns
+        // These should not be flagged as dead even if static analysis misses some usage
+        use crate::types::{ExportSymbol, FileAnalysis};
+
+        let mixin_file = FileAnalysis {
+            path: "django/contrib/auth/mixins.py".to_string(),
+            language: "py".to_string(),
+            exports: vec![
+                // Standard Django mixins that are ALWAYS used via MRO, never called directly
+                ExportSymbol::new("LoginRequiredMixin".to_string(), "class", "named", Some(1)),
+                ExportSymbol::new(
+                    "PermissionRequiredMixin".to_string(),
+                    "class",
+                    "named",
+                    Some(10),
+                ),
+                ExportSymbol::new(
+                    "UserPassesTestMixin".to_string(),
+                    "class",
+                    "named",
+                    Some(20),
+                ),
+                // Non-mixin class (should be flagged if unused)
+                ExportSymbol::new("AuthHelper".to_string(), "class", "named", Some(30)),
+            ],
+            ..Default::default()
+        };
+
+        // No imports - testing heuristic fallback for common Django patterns
+        let analyses = vec![mixin_file];
+        let result = find_dead_exports(&analyses, false, None, DeadFilterConfig::default());
+
+        // Mixins ending in "Mixin" should NOT be flagged (heuristic protection)
+        let mixin_names: Vec<_> = result
+            .iter()
+            .filter(|d| d.symbol.ends_with("Mixin"))
+            .collect();
+        assert!(
+            mixin_names.is_empty(),
+            "Classes ending in 'Mixin' should not be flagged as dead (Django/Wagtail pattern). Found: {:?}",
+            mixin_names
+        );
+
+        // Non-mixin classes (like AuthHelper) SHOULD be flagged if truly unused
+        let has_non_mixin = result.iter().any(|d| d.symbol == "AuthHelper");
+        assert!(
+            has_non_mixin,
+            "Non-mixin classes like 'AuthHelper' should still be flagged when unused"
+        );
+    }
+
+    #[test]
     fn test_paths_match_exact() {
         assert!(paths_match("src/App.tsx", "src/App.tsx"));
         assert!(paths_match("foo.ts", "foo.ts"));
@@ -1514,4 +2102,133 @@ mod integration_tests {
             result
         );
     }
+}
+fn is_python_test_export(analysis: &FileAnalysis, exp: &ExportSymbol) -> bool {
+    if !analysis.path.ends_with(".py") {
+        return false;
+    }
+    if exp.kind == "class" && exp.name.starts_with("Test") {
+        return true;
+    }
+    if exp.kind == "def" && exp.name.starts_with("test_") {
+        return true;
+    }
+    false
+}
+
+fn is_python_test_path(path: &str) -> bool {
+    let lower = path.replace('\\', "/").to_lowercase();
+    lower.contains("/tests/")
+        || lower.contains("/test/")
+        || lower.ends_with("_test.py")
+        || lower.ends_with("_tests.py")
+        || lower
+            .rsplit('/')
+            .next()
+            .is_some_and(|name| name.starts_with("test_"))
+}
+
+/// Check if a crate-internal import (e.g., `use crate::foo::MENU_GAP`) might reference
+/// an export from the given file path.
+///
+/// This is a heuristic approach that handles ~80% of cases without full module resolution:
+/// - Extract the module path from the import (e.g., `foo` from `crate::foo::X`)
+/// - Check if the export file's name/path matches that module segment
+///
+/// Examples:
+/// - `use crate::ui::constants::MENU_GAP` matches `src/ui/constants.rs`
+/// - `use super::types::Config` matches `types.rs` in parent dir
+/// - `use self::utils::helper` matches `utils.rs` in same dir
+fn crate_import_matches_file(
+    import_raw_path: &str,
+    export_file_path: &str,
+    symbol_name: &str,
+) -> bool {
+    // Only handle Rust crate-internal imports
+    if !import_raw_path.starts_with("crate::")
+        && !import_raw_path.starts_with("super::")
+        && !import_raw_path.starts_with("self::")
+    {
+        return false;
+    }
+
+    // Normalize the export file path for matching
+    let export_normalized = export_file_path.replace('\\', "/");
+
+    // Extract module path segments from import
+    // e.g., "crate::ui::constants::MENU_GAP" -> ["ui", "constants"]
+    let import_segments: Vec<&str> = import_raw_path
+        .split("::")
+        .filter(|s| *s != "crate" && *s != "super" && *s != "self" && *s != symbol_name)
+        .collect();
+
+    if import_segments.is_empty() {
+        return false;
+    }
+
+    // Build potential module path patterns
+    // For "crate::ui::constants::X", we check if file ends with:
+    // - "ui/constants.rs"
+    // - "ui/constants/mod.rs"
+    // - just "constants.rs" (simple heuristic)
+
+    let module_path = import_segments.join("/");
+
+    // Check various patterns:
+    // 1. Full path match: "src/ui/constants.rs"
+    if export_normalized.contains(&format!("{}.rs", module_path))
+        || export_normalized.contains(&format!("{}/mod.rs", module_path))
+        || export_normalized.contains(&format!("{}/lib.rs", module_path))
+    {
+        return true;
+    }
+
+    // 2. Last segment match (simple heuristic): "constants.rs"
+    if let Some(last_segment) = import_segments.last() {
+        let file_stem = export_normalized
+            .rsplit('/')
+            .next()
+            .unwrap_or("")
+            .trim_end_matches(".rs");
+
+        if file_stem == *last_segment {
+            return true;
+        }
+    }
+
+    // 3. super:: relative match - check if export is in parent directory
+    if import_raw_path.starts_with("super::") && !import_segments.is_empty() {
+        // For super::types::Config, check if file name is "types.rs"
+        if let Some(first_segment) = import_segments.first() {
+            let file_name = export_normalized.rsplit('/').next().unwrap_or("");
+            if file_name == format!("{}.rs", first_segment) {
+                return true;
+            }
+        }
+    }
+
+    // 4. Fallback heuristic for complex nested imports like:
+    //    crate::{..., code_context_menus::{..., MENU_GAP}, ...}
+    // Check if BOTH the symbol name AND the file's module name appear in raw_path
+    let file_stem = export_normalized
+        .rsplit('/')
+        .next()
+        .unwrap_or("")
+        .trim_end_matches(".rs")
+        .trim_end_matches("/mod");
+
+    // Symbol must appear as a word boundary (not part of another identifier)
+    let symbol_pattern = format!(r"\b{}\b", regex::escape(symbol_name));
+    let module_pattern = format!(r"\b{}\b", regex::escape(file_stem));
+
+    if let (Ok(sym_re), Ok(mod_re)) = (
+        regex::Regex::new(&symbol_pattern),
+        regex::Regex::new(&module_pattern),
+    ) && sym_re.is_match(import_raw_path)
+        && mod_re.is_match(import_raw_path)
+    {
+        return true;
+    }
+
+    false
 }

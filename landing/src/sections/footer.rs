@@ -6,7 +6,7 @@ pub fn Footer() -> impl IntoView {
         <footer class="footer">
             <div class="container">
                 <div class="footer-brand">
-                    <span class="footer-logo">
+                <span class="footer-logo">
                         <img src="assets/loctree-logo.png" alt="loctree" />
                     </span>
                     <span class="footer-title">"loctree"</span>
@@ -18,7 +18,7 @@ pub fn Footer() -> impl IntoView {
                     <a href="https://github.com/Loctree/Loctree/blob/main/LICENSE" target="_blank" class="footer-link">"MIT License"</a>
                 </div>
                 <p class="footer-copyright">
-                    "Developed with 💀 by The Loctree Team (c)2025 "
+                    "Developed with 💀 by Loctree Team (c)2025"
                 </p>
             </div>
         </footer>

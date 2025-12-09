@@ -1,6 +1,6 @@
 {
   "name": "loctree",
-  "version": "0.5.13",
+  "version": "0.6.2-dev",
   "tagline": "Scan once, slice many.",
   "description": "AI-oriented codebase analyzer. Use BEFORE reading files manually.",
   "install": "cargo install loctree",
@@ -43,7 +43,7 @@
     },
     "dead_code": {
       "cmd": "loct dead --confidence high",
-      "desc": "Find unused exports (safe to remove)"
+      "desc": "Find unused exports (pytest Test* ignored)"
     },
     "impact": {
       "cmd": "loct find --impact <file>",
@@ -64,13 +64,31 @@
     "lint_ci": {
       "cmd": "loct lint --fail --sarif",
       "desc": "CI guardrails with SARIF output"
+    },
+    "crowd_auto": {
+      "cmd": "loct crowd",
+      "desc": "Auto-detect crowds (clusters of similar files)"
+    },
+    "crowd_pattern": {
+      "cmd": "loct crowd <pattern>",
+      "desc": "Detect crowd around a pattern (e.g., \"message\")"
+    },
+    "twins": {
+      "cmd": "loct twins",
+      "desc": "Dead parrots + exact twins + barrel chaos"
+    },
+    "twins_dead_only": {
+      "cmd": "loct twins --dead-only",
+      "desc": "Only exports with 0 imports (dead parrots)"
     }
   },
   "workflows": {
-    "before_new_component": ["check_similar", "query_where_symbol"],
+    "before_new_component": ["check_similar", "query_where_symbol", "twins"],
     "before_refactor": ["slice", "impact", "circular", "query_who_imports"],
     "debugging_tauri": ["trace", "commands_missing", "commands_unused"],
-    "compare_branches": ["diff"]
+    "compare_branches": ["diff"],
+    "find_crowds": ["crowd_auto", "crowd_pattern"],
+    "cleanup_dead_code": ["twins", "dead_code"]
   },
   "ide_integration": {
     "url_scheme": "loctree://open?f=<file>&l=<line>",

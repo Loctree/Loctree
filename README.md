@@ -35,6 +35,9 @@ loct --for-ai
 # Find circular imports
 loct cycles
 
+# Semantic duplicate analysis (dead parrots, twins, barrel chaos)
+loct twins
+
 # Detect dead exports
 loct dead --confidence high
 ```
@@ -193,6 +196,16 @@ loct impact src/utils/api.ts
 # Find a symbol across the codebase
 loct find useAuth
 
+# Twins analysis (dead parrots, exact twins, barrel chaos)
+loct twins
+loct twins --dead-only    # Only exports with 0 imports
+
+## Library / Framework Mode
+
+- Use `loct --library-mode` (or `library_mode = true` in `.loctree/config.toml`) for SDKs/frameworks so public APIs and example sandboxes don't get flagged as dead code.
+- Common noise paths such as examples, demos, playgrounds, kitchen-sink, sandboxes, and docs/examples are ignored in this mode; extend with `library_example_globs = ["docs/examples/**", "packages/**/sandbox/**"]` in config if needed.
+- `loct auto` and `loct report` now drop `.loctree/report.html` and `.loctree/analysis.json` by default, so CI and humans get artifacts without extra flags.
+
 # List entry points
 loct lint --entrypoints
 ```
@@ -235,6 +248,7 @@ Modes:
   find                      Unified search (symbols, similar, impact)
   dead                      Unused exports (alias/barrel aware)
   cycles                    Circular imports
+  twins                     Semantic duplicates (dead parrots, exact twins, barrel chaos)
   commands                  Tauri FE↔BE bridges (missing/unused)
   events                    Emit/listen/races summary
   tree                      Directory tree with LOC counts

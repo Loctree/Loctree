@@ -1,5 +1,9 @@
 use serde::Serialize;
 
+use super::barrels::BarrelAnalysis;
+use super::crowd::types::Crowd;
+use super::dead_parrots::DeadExport;
+
 /// Confidence level for unused handler detection.
 /// HIGH = no string literal matches found (likely truly unused)
 /// LOW = string literal matches found (may be used dynamically)
@@ -101,6 +105,19 @@ pub struct DupLocation {
     pub line: Option<usize>,
 }
 
+/// Severity levels for duplicate exports
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DupSeverity {
+    /// Cross-language expected (Rust↔TS DTOs) - noise
+    CrossLangExpected = 0,
+    /// Same-package TS duplicate - potential issue
+    #[default]
+    SamePackage = 1,
+    /// Semantic conflict (different meanings) - needs attention
+    SemanticConflict = 2,
+}
+
 #[derive(Clone, Serialize)]
 pub struct RankedDup {
     pub name: String,
@@ -116,6 +133,18 @@ pub struct RankedDup {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub canonical_line: Option<usize>,
     pub refactors: Vec<String>,
+    /// Severity level: 0=cross-lang expected, 1=same-package, 2=semantic conflict
+    #[serde(default)]
+    pub severity: DupSeverity,
+    /// True if duplicate spans multiple languages (Rust↔TS)
+    #[serde(default)]
+    pub is_cross_lang: bool,
+    /// Distinct packages/directories containing this symbol
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub packages: Vec<String>,
+    /// Explanation for the severity classification
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub reason: String,
 }
 
 /// Full command bridge for FE↔BE comparison table.
@@ -154,6 +183,9 @@ pub struct ReportSection {
     /// Actual circular import components (normalized)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub circular_imports: Vec<Vec<String>>,
+    /// Lazy circular imports (broken by lazy imports inside functions)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lazy_circular_imports: Vec<Vec<String>>,
     pub dynamic: Vec<(String, Vec<String>)>,
     pub analyze_limit: usize,
     pub missing_handlers: Vec<CommandGap>,
@@ -172,6 +204,26 @@ pub struct ReportSection {
     pub insights: Vec<AiInsight>,
     pub git_branch: Option<String>,
     pub git_commit: Option<String>,
+    /// Crowd analysis results (naming collision detection)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub crowds: Vec<Crowd>,
+    /// Dead exports (exported but never imported)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dead_exports: Vec<DeadExport>,
+    /// Twins analysis data (dead parrots, exact twins, barrel chaos)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub twins_data: Option<TwinsData>,
+}
+
+/// Twins analysis data for the HTML report
+#[derive(Clone, Serialize)]
+pub struct TwinsData {
+    /// Dead parrots (0 imports) - uses SymbolEntry from twins module
+    pub dead_parrots: Vec<super::twins::SymbolEntry>,
+    /// Exact twins (same symbol exported from multiple files)
+    pub exact_twins: Vec<super::twins::ExactTwin>,
+    /// Barrel analysis (missing barrels, deep chains, inconsistent paths)
+    pub barrel_chaos: BarrelAnalysis,
 }
 
 #[cfg(test)]

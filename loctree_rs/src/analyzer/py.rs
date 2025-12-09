@@ -143,10 +143,17 @@ fn parse_all_list(content: &str) -> Vec<String> {
             }
             for item in cleaned.split(',') {
                 let trimmed = item.trim();
-                let name = trimmed
+                let mut name = trimmed
+                    .split('#')
+                    .next()
+                    .unwrap_or("")
                     .trim_matches(|c| c == '\'' || c == '"')
                     .trim()
+                    .replace('\n', "")
                     .to_string();
+                if name.starts_with('#') {
+                    name.clear();
+                }
                 if !name.is_empty() {
                     names.push(name);
                 }
@@ -154,6 +161,141 @@ fn parse_all_list(content: &str) -> Vec<String> {
         }
     }
     names
+}
+
+/// Extract type names from decorator parameters.
+/// Detects patterns like:
+/// - response_model=ClassName
+/// - response_model=List[ClassName]
+/// - Depends(ClassName)
+/// - Depends(get_func)
+fn extract_decorator_type_usages(line: &str, local_uses: &mut Vec<String>) {
+    if !line.contains('(') {
+        return;
+    }
+    const SKIP_IDENTS: &[&str] = &[
+        "None",
+        "True",
+        "False",
+        "str",
+        "int",
+        "float",
+        "bool",
+        "bytes",
+        "list",
+        "dict",
+        "set",
+        "tuple",
+        "frozenset",
+        "type",
+        "object",
+        "Any",
+        "Union",
+        "Optional",
+        "List",
+        "Dict",
+        "Set",
+        "Tuple",
+        "Callable",
+        "Sequence",
+        "Mapping",
+        "Iterable",
+        "Iterator",
+        "Type",
+        "self",
+        "cls",
+    ];
+    let bytes = line.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+    while i < len {
+        // Check for response_model= or response_class= using byte comparison
+        if bytes_match_keyword(bytes, i, b"response_model=")
+            || bytes_match_keyword(bytes, i, b"response_class=")
+        {
+            // Skip to after the '=' (both "response_model=" and "response_class=" are 15 chars)
+            i += 15;
+            while i < len && bytes[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            extract_type_from_decorator(line, &mut i, local_uses, SKIP_IDENTS);
+            continue;
+        }
+        if bytes_match_keyword(bytes, i, b"Depends(") {
+            i += 8;
+            while i < len && bytes[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            if i < len && (bytes[i].is_ascii_alphabetic() || bytes[i] == b'_') {
+                let start = i;
+                while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                    i += 1;
+                }
+                let ident = extract_ascii_ident(bytes, start, i);
+                if !ident.is_empty()
+                    && !SKIP_IDENTS.contains(&ident.as_str())
+                    && !local_uses.contains(&ident)
+                {
+                    local_uses.push(ident);
+                }
+            }
+            continue;
+        }
+        i += 1;
+    }
+}
+
+fn extract_type_from_decorator(
+    line: &str,
+    pos: &mut usize,
+    local_uses: &mut Vec<String>,
+    skip_idents: &[&str],
+) {
+    let bytes = line.as_bytes();
+    let len = bytes.len();
+    let i = *pos;
+    if i >= len || !(bytes[i].is_ascii_alphabetic() || bytes[i] == b'_') {
+        return;
+    }
+    let start = i;
+    let mut j = i;
+    while j < len && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_') {
+        j += 1;
+    }
+    let ident = extract_ascii_ident(bytes, start, j);
+    *pos = j;
+    if j < len && bytes[j] == b'[' {
+        j += 1;
+        let mut bracket_depth = 1;
+        while j < len && bracket_depth > 0 {
+            match bytes[j] {
+                b'[' => bracket_depth += 1,
+                b']' => bracket_depth -= 1,
+                _ if bytes[j].is_ascii_alphabetic() || bytes[j] == b'_' => {
+                    let inner_start = j;
+                    while j < len && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_') {
+                        j += 1;
+                    }
+                    let inner_ident = extract_ascii_ident(bytes, inner_start, j);
+                    if !inner_ident.is_empty()
+                        && !skip_idents.contains(&inner_ident.as_str())
+                        && !local_uses.contains(&inner_ident)
+                    {
+                        local_uses.push(inner_ident);
+                    }
+                    continue;
+                }
+                _ => {}
+            }
+            j += 1;
+        }
+        *pos = j;
+    } else if !ident.is_empty()
+        && !skip_idents.contains(&ident.as_str())
+        && !local_uses.contains(&ident)
+    {
+        local_uses.push(ident);
+    }
 }
 
 /// Check if a decorator line indicates a framework that "uses" the decorated function.
@@ -474,6 +616,98 @@ fn check_namespace_package(path: &Path, root: &Path) -> bool {
     })
 }
 
+/// Extract first quoted string literal content from text (single or double quotes).
+fn extract_first_string_literal(text: &str) -> Option<String> {
+    let mut in_quote: Option<char> = None;
+    let mut buf = String::new();
+    for ch in text.chars() {
+        if let Some(q) = in_quote {
+            if ch == q {
+                return Some(buf);
+            } else {
+                buf.push(ch);
+            }
+        } else if ch == '"' || ch == '\'' {
+            in_quote = Some(ch);
+        }
+    }
+    None
+}
+
+/// Parse a decorator line into a route if it matches common web frameworks.
+fn parse_route_decorator(line: &str, line_num: usize) -> Option<crate::types::RouteInfo> {
+    let lower = line.to_lowercase();
+    let mut framework = None;
+    let mut method = None;
+    let mut methods_param: Option<String> = None;
+
+    for (pat, m) in [
+        ("@app.get", "GET"),
+        ("@app.post", "POST"),
+        ("@app.put", "PUT"),
+        ("@app.delete", "DELETE"),
+        ("@app.patch", "PATCH"),
+        ("@router.get", "GET"),
+        ("@router.post", "POST"),
+        ("@router.put", "PUT"),
+        ("@router.delete", "DELETE"),
+        ("@router.patch", "PATCH"),
+        ("@api_router.get", "GET"),
+        ("@api_router.post", "POST"),
+        ("@api_router.put", "PUT"),
+        ("@api_router.delete", "DELETE"),
+        ("@api_router.patch", "PATCH"),
+    ] {
+        if lower.contains(pat) {
+            framework = Some("fastapi");
+            method = Some(m);
+            break;
+        }
+    }
+
+    if framework.is_none()
+        && (lower.contains("@app.route")
+            || lower.contains("@blueprint.route")
+            || lower.contains(".route("))
+    {
+        framework = Some("flask");
+        // Try to extract explicit methods list - use original line, not lowercased
+        if let Some(pos) = line.find("methods")
+            && let Some(start) = line[pos..].find('[')
+            && let Some(end) = line[pos + start + 1..].find(']')
+        {
+            let body = &line[pos + start + 1..pos + start + 1 + end];
+            let tokens: Vec<String> = body
+                .split([',', ' ', '\t'])
+                .filter_map(|p| {
+                    let trimmed = p.trim().trim_matches(|c| c == '"' || c == '\'');
+                    if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(trimmed.to_uppercase())
+                    }
+                })
+                .collect();
+            if !tokens.is_empty() {
+                methods_param = Some(tokens.join(","));
+            }
+        }
+        method = Some(methods_param.as_deref().unwrap_or("route"));
+    }
+
+    let framework = framework?;
+    let method = method.unwrap_or("route");
+    let path = extract_first_string_literal(line);
+
+    Some(crate::types::RouteInfo {
+        framework: framework.to_string(),
+        method: method.to_string(),
+        path,
+        name: None,
+        line: line_num,
+    })
+}
+
 pub(crate) fn analyze_py_file(
     content: &str,
     path: &Path,
@@ -487,6 +721,9 @@ pub(crate) fn analyze_py_file(
     let mut type_check_stack: Vec<usize> = Vec::new();
     let mut pending_callback_decorator = false;
     let mut pending_framework_decorator = false;
+    let mut pending_fixture_decorator = false;
+    let mut pending_routes: Vec<crate::types::RouteInfo> = Vec::new();
+    let mut pending_fixture_name: Option<String> = None;
     let mut in_docstring = false;
 
     // Set Python-specific metadata
@@ -555,6 +792,16 @@ pub(crate) fn analyze_py_file(
             if is_framework_decorator(trimmed) {
                 pending_framework_decorator = true;
             }
+            if let Some(route) = parse_route_decorator(trimmed, line_num) {
+                pending_routes.push(route);
+            }
+            // pytest fixtures: treat next def as used
+            if trimmed.contains("pytest.fixture") {
+                pending_fixture_decorator = true;
+                pending_fixture_name = None;
+            }
+            // Extract type usages from decorator parameters (response_model=X, Depends(X))
+            extract_decorator_type_usages(trimmed, &mut analysis.local_uses);
             continue;
         }
 
@@ -571,6 +818,7 @@ pub(crate) fn analyze_py_file(
                     entry.resolution = resolution;
                     entry.resolved_path = resolved;
                     entry.is_type_checking = in_type_checking;
+                    entry.is_lazy = indent > 0;
                     analysis.imports.push(entry);
                 }
             }
@@ -587,6 +835,7 @@ pub(crate) fn analyze_py_file(
                 entry.resolution = resolution;
                 entry.resolved_path = resolved.clone();
                 entry.is_type_checking = in_type_checking;
+                entry.is_lazy = indent > 0;
                 entry.source_raw = format!("from {} import {}", module, names_clean);
 
                 if names_clean != "*" {
@@ -676,7 +925,16 @@ pub(crate) fn analyze_py_file(
                             .trim_start_matches("cls.")
                             .trim();
                         if !base.is_empty() {
-                            analysis.local_uses.push(base.to_string());
+                            // Extract the last component for dotted names (e.g., wagtail.models.Page -> Page)
+                            // But also keep the full dotted name in case it's a relative import
+                            let simple_name = base.rsplit('.').next().unwrap_or(base);
+                            if simple_name != base {
+                                // If it's a dotted name, add both the full name and the simple name
+                                analysis.local_uses.push(base.to_string());
+                            }
+                            if !simple_name.is_empty() {
+                                analysis.local_uses.push(simple_name.to_string());
+                            }
                         }
                     }
                 }
@@ -700,14 +958,34 @@ pub(crate) fn analyze_py_file(
                 if (pending_callback_decorator || pending_framework_decorator) && !name.is_empty() {
                     analysis.local_uses.push(name.to_string());
                 }
+                if pending_fixture_decorator && !name.is_empty() {
+                    analysis.local_uses.push(name.to_string());
+                    pending_fixture_name = Some(name.to_string());
+                }
+                if !name.is_empty() && !pending_routes.is_empty() {
+                    for mut r in pending_routes.drain(..) {
+                        if r.name.is_none() {
+                            r.name = Some(name.to_string());
+                        }
+                        analysis.routes.push(r);
+                    }
+                } else {
+                    pending_routes.clear();
+                }
                 pending_callback_decorator = false;
                 pending_framework_decorator = false;
+                pending_fixture_decorator = false;
+                if let Some(fix) = pending_fixture_name.take() {
+                    analysis.pytest_fixtures.push(fix);
+                }
             } else if !trimmed.is_empty()
                 && !trimmed.starts_with('#')
                 && !trimmed.starts_with("class ")
             {
                 // Reset decorator flags if we hit a non-decorator, non-def, non-class line
                 pending_framework_decorator = false;
+                pending_routes.clear();
+                pending_fixture_name = None;
             }
         }
     }
@@ -753,6 +1031,14 @@ pub(crate) fn analyze_py_file(
     // Detect type hint usages (dict[str, MyClass], defaultdict(MyClass), etc.)
     extract_type_hint_usages(content, &mut analysis.local_uses);
 
+    // Detect class references in tuple/list/dict literals (issue #2)
+    // This catches patterns like: (ClassName, 'value'), [Foo, Bar], {'key': Baz}
+    extract_class_from_containers(content, &mut analysis.local_uses);
+
+    // Detect bare class name usage in function arguments and returns (issue #3)
+    // This catches: return ClassName, issubclass(x, ClassName), isinstance(obj, MyClass)
+    extract_bare_class_references(content, &mut analysis.local_uses);
+
     // Detect Python concurrency race indicators
     analysis.py_race_indicators = detect_py_race_indicators(content);
 
@@ -781,6 +1067,11 @@ fn extract_type_hint_usages(content: &str, local_uses: &mut Vec<String>) {
         "TypedDict",
         "NewType",
         "cast",
+        // FastAPI dependency injection
+        "Depends",
+        "Security",
+        // Pydantic
+        "Field",
     ];
 
     // Keywords and builtins to skip
@@ -869,10 +1160,12 @@ fn extract_type_hint_usages(content: &str, local_uses: &mut Vec<String>) {
                         while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
                             i += 1;
                         }
-                        let ident = &content[ident_start..i];
-                        if !SKIP_IDENTS.contains(&ident) && !local_uses.contains(&ident.to_string())
+                        let ident = extract_ascii_ident(bytes, ident_start, i);
+                        if !ident.is_empty()
+                            && !SKIP_IDENTS.contains(&ident.as_str())
+                            && !local_uses.contains(&ident)
                         {
-                            local_uses.push(ident.to_string());
+                            local_uses.push(ident);
                         }
                     }
                     _ => {
@@ -892,9 +1185,9 @@ fn extract_type_hint_usages(content: &str, local_uses: &mut Vec<String>) {
             while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
                 i += 1;
             }
-            let ident = &content[ident_start..i];
+            let ident = extract_ascii_ident(bytes, ident_start, i);
 
-            if TYPE_FACTORIES.contains(&ident) {
+            if TYPE_FACTORIES.contains(&ident.as_str()) {
                 // Skip whitespace
                 while i < len && bytes[i].is_ascii_whitespace() {
                     i += 1;
@@ -912,11 +1205,12 @@ fn extract_type_hint_usages(content: &str, local_uses: &mut Vec<String>) {
                         while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
                             i += 1;
                         }
-                        let type_ident = &content[type_start..i];
-                        if !SKIP_IDENTS.contains(&type_ident)
-                            && !local_uses.contains(&type_ident.to_string())
+                        let type_ident = extract_ascii_ident(bytes, type_start, i);
+                        if !type_ident.is_empty()
+                            && !SKIP_IDENTS.contains(&type_ident.as_str())
+                            && !local_uses.contains(&type_ident)
                         {
-                            local_uses.push(type_ident.to_string());
+                            local_uses.push(type_ident);
                         }
                     }
                 }
@@ -924,6 +1218,106 @@ fn extract_type_hint_usages(content: &str, local_uses: &mut Vec<String>) {
         } else {
             i += 1;
         }
+    }
+}
+
+/// Extract class references from tuple/list/dict literals.
+/// This catches patterns like:
+/// - `(ClassName, 'value')` - tuple literals
+/// - `[ClassName, other]` - list literals
+/// - `{'key': ClassName}` - dict values
+/// - `self.classes = (Foo, Bar)` - class attribute assignments
+fn extract_class_from_containers(content: &str, local_uses: &mut Vec<String>) {
+    const SKIP_IDENTS: &[&str] = &[
+        "None",
+        "True",
+        "False",
+        "str",
+        "int",
+        "float",
+        "bool",
+        "bytes",
+        "list",
+        "dict",
+        "set",
+        "tuple",
+        "frozenset",
+        "type",
+        "object",
+        "self",
+        "cls",
+    ];
+
+    let bytes = content.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+
+    while i < len {
+        let ch = bytes[i];
+
+        // Look for container opening: ( [ {
+        if ch == b'(' || ch == b'[' || ch == b'{' {
+            i += 1;
+            let closing = match ch {
+                b'(' => b')',
+                b'[' => b']',
+                b'{' => b'}',
+                _ => unreachable!(),
+            };
+
+            // Parse identifiers within the container
+            let mut depth = 1;
+            while i < len && depth > 0 {
+                match bytes[i] {
+                    b'(' | b'[' | b'{' => depth += 1,
+                    b')' | b']' | b'}' => {
+                        if bytes[i] == closing {
+                            depth -= 1;
+                        }
+                    }
+                    b'\'' | b'"' => {
+                        // Skip string literals
+                        let quote = bytes[i];
+                        i += 1;
+                        while i < len && bytes[i] != quote {
+                            if bytes[i] == b'\\' {
+                                i += 1; // Skip escaped character
+                            }
+                            i += 1;
+                        }
+                    }
+                    _ if bytes[i].is_ascii_alphabetic() || bytes[i] == b'_' => {
+                        let start = i;
+                        while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                            i += 1;
+                        }
+                        let ident = extract_ascii_ident(bytes, start, i);
+
+                        // Skip if followed by '=' (dict key) or '(' (function call)
+                        let mut j = i;
+                        while j < len && bytes[j].is_ascii_whitespace() {
+                            j += 1;
+                        }
+                        let is_dict_key = j < len && bytes[j] == b'=';
+                        let is_function_call = j < len && bytes[j] == b'(';
+
+                        if !ident.is_empty()
+                            && !is_dict_key
+                            && !is_function_call
+                            && !SKIP_IDENTS.contains(&ident.as_str())
+                            && !local_uses.contains(&ident)
+                        {
+                            local_uses.push(ident);
+                        }
+                        continue;
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+            continue;
+        }
+        i += 1;
     }
 }
 
@@ -949,7 +1343,7 @@ fn extract_python_function_calls(content: &str, local_uses: &mut Vec<String>) {
             while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
                 i += 1;
             }
-            let ident = &content[start..i];
+            let ident = extract_ascii_ident(bytes, start, i);
 
             // Skip whitespace
             while i < len && bytes[i].is_ascii_whitespace() {
@@ -959,14 +1353,184 @@ fn extract_python_function_calls(content: &str, local_uses: &mut Vec<String>) {
             // Check if followed by `(`
             if i < len
                 && bytes[i] == b'('
-                && !KEYWORDS.contains(&ident)
-                && !local_uses.contains(&ident.to_string())
+                && !ident.is_empty()
+                && !KEYWORDS.contains(&ident.as_str())
+                && !local_uses.contains(&ident)
             {
-                local_uses.push(ident.to_string());
+                local_uses.push(ident);
             }
         } else {
             i += 1;
         }
+    }
+}
+
+/// Helper to safely compare bytes at position with a keyword
+/// Returns true if the bytes at position match the keyword
+#[inline]
+fn bytes_match_keyword(bytes: &[u8], pos: usize, keyword: &[u8]) -> bool {
+    if pos + keyword.len() > bytes.len() {
+        return false;
+    }
+    &bytes[pos..pos + keyword.len()] == keyword
+}
+
+/// Helper to safely extract an ASCII identifier from bytes
+/// Returns the identifier as a string if valid ASCII, empty string otherwise
+#[inline]
+fn extract_ascii_ident(bytes: &[u8], start: usize, end: usize) -> String {
+    if start >= end || end > bytes.len() {
+        return String::new();
+    }
+    // Only extract if all bytes are valid ASCII identifier chars
+    let slice = &bytes[start..end];
+    if slice.iter().all(|b| b.is_ascii()) {
+        String::from_utf8_lossy(slice).into_owned()
+    } else {
+        String::new()
+    }
+}
+
+/// Extract bare class name references from Python code.
+/// This catches patterns like:
+/// - `return ClassName` - bare class name in return statement
+/// - `issubclass(x, ClassName)` - class as function argument
+/// - `isinstance(obj, MyClass)` - class as function argument
+/// - `raise CustomError` - exception class names
+#[allow(dead_code)]
+fn extract_bare_class_references(content: &str, local_uses: &mut Vec<String>) {
+    const SKIP_IDENTS: &[&str] = &[
+        "None",
+        "True",
+        "False",
+        "str",
+        "int",
+        "float",
+        "bool",
+        "bytes",
+        "list",
+        "dict",
+        "set",
+        "tuple",
+        "frozenset",
+        "type",
+        "object",
+        "Any",
+        "self",
+        "cls",
+    ];
+
+    let bytes = content.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+
+    while i < len {
+        // Look for "return" keyword (use byte comparison, not string slicing)
+        if bytes_match_keyword(bytes, i, b"return") {
+            // Check it's a word boundary
+            if i == 0 || !bytes[i - 1].is_ascii_alphanumeric() {
+                i += 6;
+                // Skip whitespace
+                while i < len && bytes[i].is_ascii_whitespace() {
+                    i += 1;
+                }
+                // Extract identifier after return
+                if i < len && (bytes[i].is_ascii_alphabetic() || bytes[i] == b'_') {
+                    let start = i;
+                    while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                        i += 1;
+                    }
+                    let ident = extract_ascii_ident(bytes, start, i);
+                    if !ident.is_empty()
+                        && !SKIP_IDENTS.contains(&ident.as_str())
+                        && !local_uses.contains(&ident)
+                    {
+                        local_uses.push(ident);
+                    }
+                }
+                continue;
+            }
+        }
+
+        // Look for "raise" keyword (exception class names)
+        if bytes_match_keyword(bytes, i, b"raise")
+            && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric())
+        {
+            i += 5;
+            while i < len && bytes[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            if i < len && (bytes[i].is_ascii_alphabetic() || bytes[i] == b'_') {
+                let start = i;
+                while i < len
+                    && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_' || bytes[i] == b'.')
+                {
+                    i += 1;
+                }
+                let ident = extract_ascii_ident(bytes, start, i);
+                // Extract last component if dotted
+                let simple = ident.rsplit('.').next().unwrap_or(&ident);
+                if !ident.is_empty()
+                    && !SKIP_IDENTS.contains(&simple)
+                    && !local_uses.contains(&simple.to_string())
+                {
+                    local_uses.push(simple.to_string());
+                }
+            }
+            continue;
+        }
+
+        // Look for isinstance/issubclass calls (use byte comparison)
+        let is_isinstance = bytes_match_keyword(bytes, i, b"isinstance");
+        let is_issubclass = bytes_match_keyword(bytes, i, b"issubclass");
+        if (is_isinstance || is_issubclass) && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric()) {
+            i += 10; // Both "isinstance" and "issubclass" are 10 chars
+            // Skip whitespace and opening paren
+            while i < len && (bytes[i].is_ascii_whitespace() || bytes[i] == b'(') {
+                i += 1;
+            }
+
+            // Skip first argument (object/class to check)
+            let mut paren_depth = 0;
+            while i < len {
+                match bytes[i] {
+                    b'(' => paren_depth += 1,
+                    b')' => {
+                        if paren_depth == 0 {
+                            break;
+                        }
+                        paren_depth -= 1;
+                    }
+                    b',' if paren_depth == 0 => {
+                        i += 1;
+                        break;
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+
+            // Now extract the class name (second argument)
+            while i < len && bytes[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            if i < len && (bytes[i].is_ascii_alphabetic() || bytes[i] == b'_') {
+                let start = i;
+                while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                    i += 1;
+                }
+                let ident = extract_ascii_ident(bytes, start, i);
+                if !ident.is_empty()
+                    && !SKIP_IDENTS.contains(&ident.as_str())
+                    && !local_uses.contains(&ident)
+                {
+                    local_uses.push(ident);
+                }
+            }
+            continue;
+        }
+
+        i += 1;
     }
 }
 
@@ -1669,6 +2233,39 @@ def process(items: List[Session]) -> None:
     }
 
     #[test]
+    fn marks_pytest_fixture_as_used() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path();
+
+        let content = r#"
+import pytest
+
+@pytest.fixture
+def client():
+    return object()
+"#;
+
+        let analysis = analyze_py_file(
+            content,
+            &root.join("conftest.py"),
+            root,
+            Some(&py_exts()),
+            "conftest.py".to_string(),
+            &[root.to_path_buf()],
+            &HashSet::new(),
+        );
+
+        assert!(
+            analysis.local_uses.contains(&"client".to_string()),
+            "pytest fixture should be marked as used"
+        );
+        assert!(
+            analysis.pytest_fixtures.contains(&"client".to_string()),
+            "pytest fixture list should capture fixture name"
+        );
+    }
+
+    #[test]
     fn type_hint_skips_builtins() {
         let mut uses = Vec::new();
         let content = "def foo(x: str, y: int) -> bool: pass";
@@ -1691,5 +2288,333 @@ def process(items: List[Session]) -> None:
             "MyClass not found in: {:?}",
             uses
         );
+    }
+
+    #[test]
+    fn captures_fastapi_route_metadata() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path();
+
+        let content = r#"
+from fastapi import APIRouter
+router = APIRouter()
+
+@router.get("/patients")
+def list_patients():
+    return []
+"#;
+
+        let analysis = analyze_py_file(
+            content,
+            &root.join("api.py"),
+            root,
+            Some(&py_exts()),
+            "api.py".to_string(),
+            &[root.to_path_buf()],
+            &HashSet::new(),
+        );
+
+        assert_eq!(analysis.routes.len(), 1);
+        let route = &analysis.routes[0];
+        assert_eq!(route.framework, "fastapi");
+        assert_eq!(route.method, "GET");
+        assert_eq!(route.path.as_deref(), Some("/patients"));
+        assert_eq!(route.name.as_deref(), Some("list_patients"));
+    }
+
+    #[test]
+    fn captures_flask_route_methods_list() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path();
+
+        let content = r#"
+from flask import Blueprint
+bp = Blueprint("bp", __name__)
+
+@bp.route("/ping", methods=["GET", "POST"])
+def ping():
+    return "ok"
+"#;
+
+        let analysis = analyze_py_file(
+            content,
+            &root.join("flask_app.py"),
+            root,
+            Some(&py_exts()),
+            "flask_app.py".to_string(),
+            &[root.to_path_buf()],
+            &HashSet::new(),
+        );
+
+        assert_eq!(analysis.routes.len(), 1);
+        let route = &analysis.routes[0];
+        assert_eq!(route.framework, "flask");
+        assert_eq!(route.method, "GET,POST");
+        assert_eq!(route.path.as_deref(), Some("/ping"));
+        assert_eq!(route.name.as_deref(), Some("ping"));
+    }
+
+    #[test]
+    fn detects_class_in_tuple_literal() {
+        let mut uses = Vec::new();
+        let content = r#"
+class StringTypePrinter: pass
+class SliceTypePrinter: pass
+
+how = ((StringTypePrinter, 'len'),
+       (SliceTypePrinter, 'len'))
+"#;
+        extract_class_from_containers(content, &mut uses);
+
+        assert!(
+            uses.contains(&"StringTypePrinter".to_string()),
+            "StringTypePrinter not found in: {:?}",
+            uses
+        );
+        assert!(
+            uses.contains(&"SliceTypePrinter".to_string()),
+            "SliceTypePrinter not found in: {:?}",
+            uses
+        );
+    }
+
+    #[test]
+    fn detects_class_in_list_literal() {
+        let mut uses = Vec::new();
+        let content = r#"
+class Foo: pass
+class Bar: pass
+
+items = [Foo, Bar, 'string']
+"#;
+        extract_class_from_containers(content, &mut uses);
+
+        assert!(uses.contains(&"Foo".to_string()));
+        assert!(uses.contains(&"Bar".to_string()));
+        // String literals should be skipped
+        assert!(!uses.iter().any(|s| s.contains("string")));
+    }
+
+    #[test]
+    fn detects_class_in_dict_literal() {
+        let mut uses = Vec::new();
+        let content = r#"
+class Handler: pass
+class Parser: pass
+
+mapping = {'handler': Handler, 'parser': Parser}
+"#;
+        extract_class_from_containers(content, &mut uses);
+
+        assert!(uses.contains(&"Handler".to_string()));
+        assert!(uses.contains(&"Parser".to_string()));
+    }
+
+    #[test]
+    fn skips_builtins_in_containers() {
+        let mut uses = Vec::new();
+        let content = r#"
+types = (str, int, bool, None, True, False)
+"#;
+        extract_class_from_containers(content, &mut uses);
+
+        // Should not contain any builtins
+        assert!(!uses.contains(&"str".to_string()));
+        assert!(!uses.contains(&"int".to_string()));
+        assert!(!uses.contains(&"bool".to_string()));
+        assert!(!uses.contains(&"None".to_string()));
+        assert!(!uses.contains(&"True".to_string()));
+        assert!(!uses.contains(&"False".to_string()));
+    }
+
+    #[test]
+    fn golang_gdb_pattern_full_integration() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path();
+
+        // Real pattern from GoLang stdlib gdb scripts
+        let content = r#"
+class StringTypePrinter:
+    pattern = re.compile(r'^struct string$')
+
+class SliceTypePrinter:
+    pattern = re.compile(r'^struct \[\]')
+
+class MapTypePrinter:
+    pattern = re.compile(r'^map\[')
+
+class ChanTypePrinter:
+    pattern = re.compile(r'^chan ')
+
+class GoLenFunc(gdb.Function):
+    how = ((StringTypePrinter, 'len'),
+           (SliceTypePrinter, 'len'),
+           (MapTypePrinter, 'used'),
+           (ChanTypePrinter, 'qcount'))
+
+    def invoke(self, obj):
+        typename = str(obj.type)
+        for klass, fld in self.how:
+            if klass.pattern.match(typename):
+                return obj[fld]
+"#;
+
+        let analysis = analyze_py_file(
+            content,
+            &root.join("gdb_golang.py"),
+            root,
+            Some(&py_exts()),
+            "gdb_golang.py".to_string(),
+            &[root.to_path_buf()],
+            &HashSet::new(),
+        );
+
+        // All printer classes should be detected as used
+        assert!(
+            analysis
+                .local_uses
+                .contains(&"StringTypePrinter".to_string()),
+            "StringTypePrinter not found in local_uses: {:?}",
+            analysis.local_uses
+        );
+        assert!(
+            analysis
+                .local_uses
+                .contains(&"SliceTypePrinter".to_string()),
+            "SliceTypePrinter not found in local_uses"
+        );
+        assert!(
+            analysis.local_uses.contains(&"MapTypePrinter".to_string()),
+            "MapTypePrinter not found in local_uses"
+        );
+        assert!(
+            analysis.local_uses.contains(&"ChanTypePrinter".to_string()),
+            "ChanTypePrinter not found in local_uses"
+        );
+
+        // Also verify they're exported
+        let export_names: Vec<_> = analysis.exports.iter().map(|e| e.name.as_str()).collect();
+        assert!(export_names.contains(&"StringTypePrinter"));
+        assert!(export_names.contains(&"SliceTypePrinter"));
+        assert!(export_names.contains(&"MapTypePrinter"));
+        assert!(export_names.contains(&"ChanTypePrinter"));
+        assert!(export_names.contains(&"GoLenFunc"));
+    }
+
+    #[test]
+    fn detects_mixin_class_usage() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path();
+
+        // Test Wagtail-style mixin inheritance patterns
+        let content = r#"
+class ButtonsColumnMixin:
+    """Mixin for button column functionality"""
+    pass
+
+class WagtailAdminDraftStateFormMixin:
+    pass
+
+class IndexViewOptionalFeaturesMixin:
+    pass
+
+class NullAdminURLFinder:
+    """Class used in same-file reference"""
+    pass
+
+# Mixin used in multiple inheritance
+class MyView(IndexViewOptionalFeaturesMixin, ButtonsColumnMixin):
+    pass
+
+# Class reference in same file (not inheritance)
+def get_finder():
+    return NullAdminURLFinder
+
+# issubclass check
+def check_column(column_class):
+    if issubclass(column_class, ButtonsColumnMixin):
+        return True
+"#;
+
+        let analysis = analyze_py_file(
+            content,
+            &root.join("views.py"),
+            root,
+            Some(&py_exts()),
+            "views.py".to_string(),
+            &[root.to_path_buf()],
+            &HashSet::new(),
+        );
+
+        // All mixins should be detected as used via inheritance
+        assert!(
+            analysis
+                .local_uses
+                .contains(&"ButtonsColumnMixin".to_string()),
+            "ButtonsColumnMixin should be marked as used (inheritance): {:?}",
+            analysis.local_uses
+        );
+        assert!(
+            analysis
+                .local_uses
+                .contains(&"IndexViewOptionalFeaturesMixin".to_string()),
+            "IndexViewOptionalFeaturesMixin should be marked as used (inheritance): {:?}",
+            analysis.local_uses
+        );
+
+        // Class reference in same file should be detected
+        assert!(
+            analysis
+                .local_uses
+                .contains(&"NullAdminURLFinder".to_string()),
+            "NullAdminURLFinder should be marked as used (function return): {:?}",
+            analysis.local_uses
+        );
+
+        // issubclass check should detect usage (via function call detection)
+        // Note: issubclass is detected as a function call with ButtonsColumnMixin as argument
+    }
+
+    #[test]
+    fn handles_utf8_emoji_in_python_code() {
+        // Test that UTF-8 content (emoji, unicode) doesn't crash the analyzer
+        let code = r#"
+"""
+This docstring has emoji 😱 and ellipsis … and bullet • points
+"""
+
+class MyClass:
+    """Another docstring with 🎉 emoji"""
+
+    def method(self):
+        return MyHelper  # Class reference after emoji content
+
+class MyHelper:
+    pass
+"#;
+
+        let temp = tempdir().unwrap();
+        let py_file = temp.path().join("test_emoji.py");
+        std::fs::write(&py_file, code).unwrap();
+
+        // This should NOT panic
+        let relative = py_file
+            .strip_prefix(temp.path())
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let analysis = analyze_py_file(
+            code,
+            &py_file,
+            temp.path(),
+            Some(&py_exts()),
+            relative,
+            &[],
+            &HashSet::new(),
+        );
+
+        // Verify exports and basic functionality still work
+        assert!(analysis.exports.iter().any(|e| e.name == "MyClass"));
+        assert!(analysis.exports.iter().any(|e| e.name == "MyHelper"));
     }
 }
