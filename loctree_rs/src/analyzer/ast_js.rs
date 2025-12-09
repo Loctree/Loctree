@@ -2042,6 +2042,132 @@ export const greeting = message + ' World'
         assert!(!usages.contains(&"console".to_string()));
     }
 
+    /// Test import alias tracking - the original export name should be in `name`,
+    /// and the local alias should be in `alias` field.
+    #[test]
+    fn test_import_alias_tracking() {
+        let content = r#"
+            // Test various import alias patterns
+            import { Component as MyComponent } from 'react';
+            import { useState as useStateHook, useEffect } from 'react';
+            import DefaultExport from './module';
+            import { originalName as renamedImport } from './utils';
+
+            // Use the imports (to avoid them being marked as unused in other analyses)
+            MyComponent();
+            useStateHook();
+            useEffect();
+            DefaultExport();
+            renamedImport();
+        "#;
+
+        let analysis = analyze_js_file_ast(
+            content,
+            Path::new("src/test.tsx"),
+            Path::new("src"),
+            None,
+            None,
+            "test.tsx".to_string(),
+            &CommandDetectionConfig::default(),
+        );
+
+        // Debug: print all imports
+        eprintln!("All imports:");
+        for (i, imp) in analysis.imports.iter().enumerate() {
+            eprintln!("  [{}] source={}, symbols={:?}", i, imp.source, imp.symbols);
+        }
+
+        // Find the react import
+        let react_import = analysis
+            .imports
+            .iter()
+            .find(|i| i.source == "react")
+            .expect("Should find react import");
+
+        eprintln!("React import has {} symbols", react_import.symbols.len());
+
+        // Should have 2 symbols from react
+        assert_eq!(
+            react_import.symbols.len(),
+            2,
+            "Should have 2 symbols from react"
+        );
+
+        // Check Component as MyComponent
+        let component_sym = react_import
+            .symbols
+            .iter()
+            .find(|s| s.name == "Component")
+            .expect("Should find Component symbol");
+
+        assert_eq!(
+            component_sym.name, "Component",
+            "Original export name should be 'Component'"
+        );
+        assert_eq!(
+            component_sym.alias.as_deref(),
+            Some("MyComponent"),
+            "Alias should be 'MyComponent'"
+        );
+        assert!(
+            !component_sym.is_default,
+            "Component is not a default export"
+        );
+
+        // Check useState as useStateHook
+        let usestate_sym = react_import
+            .symbols
+            .iter()
+            .find(|s| s.name == "useState")
+            .expect("Should find useState symbol");
+
+        assert_eq!(
+            usestate_sym.name, "useState",
+            "Original export name should be 'useState'"
+        );
+        assert_eq!(
+            usestate_sym.alias.as_deref(),
+            Some("useStateHook"),
+            "Alias should be 'useStateHook'"
+        );
+
+        // Check useEffect (no alias)
+        let useeffect_sym = react_import
+            .symbols
+            .iter()
+            .find(|s| s.name == "useEffect")
+            .expect("Should find useEffect symbol");
+
+        assert_eq!(
+            useeffect_sym.name, "useEffect",
+            "Name should be 'useEffect'"
+        );
+        assert_eq!(useeffect_sym.alias, None, "Should have no alias");
+
+        // Check utils import
+        let utils_import = analysis
+            .imports
+            .iter()
+            .find(|i| i.source == "./utils")
+            .expect("Should find ./utils import");
+
+        let original_sym = utils_import
+            .symbols
+            .iter()
+            .find(|s| s.name == "originalName")
+            .expect("Should find originalName symbol");
+
+        assert_eq!(
+            original_sym.name, "originalName",
+            "Original name should be preserved"
+        );
+        assert_eq!(
+            original_sym.alias.as_deref(),
+            Some("renamedImport"),
+            "Alias should be 'renamedImport'"
+        );
+    }
+
     /// Test for Issue #5: Namespace member access should be tracked
     /// When using `import * as namespace`, accessing `namespace.member` should be detected
     /// as usage of the `member` export from the imported module.
