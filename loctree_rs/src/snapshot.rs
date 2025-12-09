@@ -1158,6 +1158,7 @@ pub(crate) fn write_auto_artifacts(
             include_helpers: false,
             library_mode: parsed.library_mode,
             example_globs: parsed.library_example_globs.clone(),
+            python_library_mode: parsed.python_library,
         },
     );
 

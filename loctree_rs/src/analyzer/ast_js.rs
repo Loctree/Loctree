@@ -462,6 +462,15 @@ fn is_svelte_builtin(name: &str) -> bool {
     )
 }
 
+/// Check if file uses Flow type annotations
+/// Flow files start with // @flow or /* @flow */
+fn is_flow_file(content: &str) -> bool {
+    let first_1000 = &content[..content.len().min(1000)];
+    first_1000.contains("@flow")
+        || first_1000.contains("// @flow")
+        || first_1000.contains("/* @flow */")
+}
+
 /// Analyze JS/TS file using OXC AST parser
 pub(crate) fn analyze_js_file_ast(
     content: &str,
@@ -482,6 +491,9 @@ pub(crate) fn analyze_js_file_ast(
     let is_svelte_file = ext == "svelte";
     let is_vue_file = ext == "vue";
     let is_sfc_file = is_svelte_file || is_vue_file;
+
+    // Detect Flow type annotations
+    let is_flow = is_flow_file(content);
 
     // For SFC files (Svelte/Vue), extract script content first
     let parsed_content: String;
@@ -539,9 +551,13 @@ pub(crate) fn analyze_js_file_ast(
         source_text: content_to_parse,
         command_cfg,
         namespace_imports: HashMap::new(),
+        is_flow_file: is_flow,
     };
 
     visitor.visit_program(&ret.program);
+
+    // Mark file as Flow if detected
+    visitor.analysis.is_flow_file = is_flow;
 
     // Use oxc_semantic to track local symbol references
     // This helps detect when exported symbols are used internally (not dead)
@@ -609,6 +625,8 @@ struct JsVisitor<'a> {
     command_cfg: &'a CommandDetectionConfig,
     /// Map of namespace import aliases to their resolved paths: alias -> (source, resolved_path)
     namespace_imports: HashMap<String, (String, Option<String>)>,
+    /// Whether this file uses Flow type annotations
+    is_flow_file: bool,
 }
 
 impl<'a> JsVisitor<'a> {
@@ -769,6 +787,16 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                     self.push_string_literal(cooked, tpl.span);
                 } else if tpl.expressions.is_empty() && tpl.quasis.len() == 1 {
                     self.push_string_literal(&tpl.quasis[0].value.raw, tpl.span);
+                }
+            }
+            Expression::NewExpression(new_expr) => {
+                // Detect WeakMap/WeakSet constructor calls to identify global registry patterns
+                // Common in React DevTools and other libraries for storing metadata
+                if let Expression::Identifier(ident) = &new_expr.callee {
+                    let name = ident.name.to_string();
+                    if name == "WeakMap" || name == "WeakSet" {
+                        self.analysis.has_weak_collections = true;
+                    }
                 }
             }
             _ => {}
@@ -2256,6 +2284,63 @@ export const greeting = message + ' World'
         assert!(
             utils_import.symbols.iter().any(|s| s.name == "CONSTANT"),
             "utils import should track 'CONSTANT' member access"
+        );
+    }
+
+    #[test]
+    fn test_flow_file_detection() {
+        // Test Flow annotation detection at start of file
+        let flow_content = r#"
+// @flow
+export type MyType = {
+    name: string,
+    age: number,
+};
+
+export const myValue = 42;
+        "#;
+
+        let analysis = analyze_js_file_ast(
+            flow_content,
+            Path::new("src/types.js"),
+            Path::new("src"),
+            None,
+            None,
+            "types.js".to_string(),
+            &CommandDetectionConfig::default(),
+        );
+
+        assert!(
+            analysis.is_flow_file,
+            "File with @flow annotation should be detected as Flow file"
+        );
+    }
+
+    #[test]
+    fn test_non_flow_file() {
+        // Test that files without @flow annotation are not marked as Flow
+        let regular_content = r#"
+export type MyType = {
+    name: string,
+    age: number,
+};
+
+export const myValue = 42;
+        "#;
+
+        let analysis = analyze_js_file_ast(
+            regular_content,
+            Path::new("src/types.ts"),
+            Path::new("src"),
+            None,
+            None,
+            "types.ts".to_string(),
+            &CommandDetectionConfig::default(),
+        );
+
+        assert!(
+            !analysis.is_flow_file,
+            "File without @flow annotation should NOT be detected as Flow file"
         );
     }
 }

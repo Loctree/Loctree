@@ -41,6 +41,9 @@ pub struct GlobalOptions {
 
     /// Library/framework mode (tunes dead-code heuristics, ignores examples)
     pub library_mode: bool,
+
+    /// Python library mode (treat __all__ exports as public API, skip dunder methods)
+    pub python_library: bool,
 }
 
 // ============================================================================
