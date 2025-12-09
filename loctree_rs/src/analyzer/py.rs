@@ -143,10 +143,17 @@ fn parse_all_list(content: &str) -> Vec<String> {
             }
             for item in cleaned.split(',') {
                 let trimmed = item.trim();
-                let name = trimmed
+                let mut name = trimmed
+                    .split('#')
+                    .next()
+                    .unwrap_or("")
                     .trim_matches(|c| c == '\'' || c == '"')
                     .trim()
+                    .replace('\n', "")
                     .to_string();
+                if name.starts_with('#') {
+                    name.clear();
+                }
                 if !name.is_empty() {
                     names.push(name);
                 }
@@ -154,6 +161,134 @@ fn parse_all_list(content: &str) -> Vec<String> {
         }
     }
     names
+}
+
+/// Extract type names from decorator parameters.
+/// Detects patterns like:
+/// - response_model=ClassName
+/// - response_model=List[ClassName]
+/// - Depends(ClassName)
+/// - Depends(get_func)
+fn extract_decorator_type_usages(line: &str, local_uses: &mut Vec<String>) {
+    if !line.contains('(') {
+        return;
+    }
+    const SKIP_IDENTS: &[&str] = &[
+        "None",
+        "True",
+        "False",
+        "str",
+        "int",
+        "float",
+        "bool",
+        "bytes",
+        "list",
+        "dict",
+        "set",
+        "tuple",
+        "frozenset",
+        "type",
+        "object",
+        "Any",
+        "Union",
+        "Optional",
+        "List",
+        "Dict",
+        "Set",
+        "Tuple",
+        "Callable",
+        "Sequence",
+        "Mapping",
+        "Iterable",
+        "Iterator",
+        "Type",
+        "self",
+        "cls",
+    ];
+    let bytes = line.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+    while i < len {
+        if i + 14 < len {
+            let slice = &line[i..];
+            if slice.starts_with("response_model=") || slice.starts_with("response_class=") {
+                let eq_pos = slice.find('=').unwrap_or(0);
+                i += eq_pos + 1;
+                while i < len && bytes[i].is_ascii_whitespace() {
+                    i += 1;
+                }
+                extract_type_from_decorator(line, &mut i, local_uses, SKIP_IDENTS);
+                continue;
+            }
+        }
+        if i + 8 < len && &line[i..i + 8] == "Depends(" {
+            i += 8;
+            while i < len && bytes[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            if i < len && (bytes[i].is_ascii_alphabetic() || bytes[i] == b'_') {
+                let start = i;
+                while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                    i += 1;
+                }
+                let ident = &line[start..i];
+                if !SKIP_IDENTS.contains(&ident) && !local_uses.contains(&ident.to_string()) {
+                    local_uses.push(ident.to_string());
+                }
+            }
+            continue;
+        }
+        i += 1;
+    }
+}
+
+fn extract_type_from_decorator(
+    line: &str,
+    pos: &mut usize,
+    local_uses: &mut Vec<String>,
+    skip_idents: &[&str],
+) {
+    let bytes = line.as_bytes();
+    let len = bytes.len();
+    let i = *pos;
+    if i >= len || !(bytes[i].is_ascii_alphabetic() || bytes[i] == b'_') {
+        return;
+    }
+    let start = i;
+    let mut j = i;
+    while j < len && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_') {
+        j += 1;
+    }
+    let ident = &line[start..j];
+    *pos = j;
+    if j < len && bytes[j] == b'[' {
+        j += 1;
+        let mut bracket_depth = 1;
+        while j < len && bracket_depth > 0 {
+            match bytes[j] {
+                b'[' => bracket_depth += 1,
+                b']' => bracket_depth -= 1,
+                _ if bytes[j].is_ascii_alphabetic() || bytes[j] == b'_' => {
+                    let inner_start = j;
+                    while j < len && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_') {
+                        j += 1;
+                    }
+                    let inner_ident = &line[inner_start..j];
+                    if !skip_idents.contains(&inner_ident)
+                        && !local_uses.contains(&inner_ident.to_string())
+                    {
+                        local_uses.push(inner_ident.to_string());
+                    }
+                    continue;
+                }
+                _ => {}
+            }
+            j += 1;
+        }
+        *pos = j;
+    } else if !skip_idents.contains(&ident) && !local_uses.contains(&ident.to_string()) {
+        local_uses.push(ident.to_string());
+    }
 }
 
 /// Check if a decorator line indicates a framework that "uses" the decorated function.
@@ -474,6 +609,98 @@ fn check_namespace_package(path: &Path, root: &Path) -> bool {
     })
 }
 
+/// Extract first quoted string literal content from text (single or double quotes).
+fn extract_first_string_literal(text: &str) -> Option<String> {
+    let mut in_quote: Option<char> = None;
+    let mut buf = String::new();
+    for ch in text.chars() {
+        if let Some(q) = in_quote {
+            if ch == q {
+                return Some(buf);
+            } else {
+                buf.push(ch);
+            }
+        } else if ch == '"' || ch == '\'' {
+            in_quote = Some(ch);
+        }
+    }
+    None
+}
+
+/// Parse a decorator line into a route if it matches common web frameworks.
+fn parse_route_decorator(line: &str, line_num: usize) -> Option<crate::types::RouteInfo> {
+    let lower = line.to_lowercase();
+    let mut framework = None;
+    let mut method = None;
+    let mut methods_param: Option<String> = None;
+
+    for (pat, m) in [
+        ("@app.get", "GET"),
+        ("@app.post", "POST"),
+        ("@app.put", "PUT"),
+        ("@app.delete", "DELETE"),
+        ("@app.patch", "PATCH"),
+        ("@router.get", "GET"),
+        ("@router.post", "POST"),
+        ("@router.put", "PUT"),
+        ("@router.delete", "DELETE"),
+        ("@router.patch", "PATCH"),
+        ("@api_router.get", "GET"),
+        ("@api_router.post", "POST"),
+        ("@api_router.put", "PUT"),
+        ("@api_router.delete", "DELETE"),
+        ("@api_router.patch", "PATCH"),
+    ] {
+        if lower.contains(pat) {
+            framework = Some("fastapi");
+            method = Some(m);
+            break;
+        }
+    }
+
+    if framework.is_none()
+        && (lower.contains("@app.route")
+            || lower.contains("@blueprint.route")
+            || lower.contains(".route("))
+    {
+        framework = Some("flask");
+        // Try to extract explicit methods list
+        if let Some(pos) = lower.find("methods")
+            && let Some(start) = line[pos..].find('[')
+            && let Some(end) = line[pos + start + 1..].find(']')
+        {
+            let body = &line[pos + start + 1..pos + start + 1 + end];
+            let tokens: Vec<String> = body
+                .split([',', ' ', '\t'])
+                .filter_map(|p| {
+                    let trimmed = p.trim().trim_matches(|c| c == '"' || c == '\'');
+                    if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(trimmed.to_uppercase())
+                    }
+                })
+                .collect();
+            if !tokens.is_empty() {
+                methods_param = Some(tokens.join(","));
+            }
+        }
+        method = Some(methods_param.as_deref().unwrap_or("route"));
+    }
+
+    let framework = framework?;
+    let method = method.unwrap_or("route");
+    let path = extract_first_string_literal(line);
+
+    Some(crate::types::RouteInfo {
+        framework: framework.to_string(),
+        method: method.to_string(),
+        path,
+        name: None,
+        line: line_num,
+    })
+}
+
 pub(crate) fn analyze_py_file(
     content: &str,
     path: &Path,
@@ -488,6 +715,8 @@ pub(crate) fn analyze_py_file(
     let mut pending_callback_decorator = false;
     let mut pending_framework_decorator = false;
     let mut pending_fixture_decorator = false;
+    let mut pending_routes: Vec<crate::types::RouteInfo> = Vec::new();
+    let mut pending_fixture_name: Option<String> = None;
     let mut in_docstring = false;
 
     // Set Python-specific metadata
@@ -556,10 +785,16 @@ pub(crate) fn analyze_py_file(
             if is_framework_decorator(trimmed) {
                 pending_framework_decorator = true;
             }
+            if let Some(route) = parse_route_decorator(trimmed, line_num) {
+                pending_routes.push(route);
+            }
             // pytest fixtures: treat next def as used
             if trimmed.contains("pytest.fixture") {
                 pending_fixture_decorator = true;
+                pending_fixture_name = None;
             }
+            // Extract type usages from decorator parameters (response_model=X, Depends(X))
+            extract_decorator_type_usages(trimmed, &mut analysis.local_uses);
             continue;
         }
 
@@ -709,16 +944,32 @@ pub(crate) fn analyze_py_file(
                 }
                 if pending_fixture_decorator && !name.is_empty() {
                     analysis.local_uses.push(name.to_string());
+                    pending_fixture_name = Some(name.to_string());
+                }
+                if !name.is_empty() && !pending_routes.is_empty() {
+                    for mut r in pending_routes.drain(..) {
+                        if r.name.is_none() {
+                            r.name = Some(name.to_string());
+                        }
+                        analysis.routes.push(r);
+                    }
+                } else {
+                    pending_routes.clear();
                 }
                 pending_callback_decorator = false;
                 pending_framework_decorator = false;
                 pending_fixture_decorator = false;
+                if let Some(fix) = pending_fixture_name.take() {
+                    analysis.pytest_fixtures.push(fix);
+                }
             } else if !trimmed.is_empty()
                 && !trimmed.starts_with('#')
                 && !trimmed.starts_with("class ")
             {
                 // Reset decorator flags if we hit a non-decorator, non-def, non-class line
                 pending_framework_decorator = false;
+                pending_routes.clear();
+                pending_fixture_name = None;
             }
         }
     }
@@ -792,6 +1043,11 @@ fn extract_type_hint_usages(content: &str, local_uses: &mut Vec<String>) {
         "TypedDict",
         "NewType",
         "cast",
+        // FastAPI dependency injection
+        "Depends",
+        "Security",
+        // Pydantic
+        "Field",
     ];
 
     // Keywords and builtins to skip
@@ -1706,6 +1962,10 @@ def client():
             analysis.local_uses.contains(&"client".to_string()),
             "pytest fixture should be marked as used"
         );
+        assert!(
+            analysis.pytest_fixtures.contains(&"client".to_string()),
+            "pytest fixture list should capture fixture name"
+        );
     }
 
     #[test]
@@ -1731,5 +1991,69 @@ def client():
             "MyClass not found in: {:?}",
             uses
         );
+    }
+
+    #[test]
+    fn captures_fastapi_route_metadata() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path();
+
+        let content = r#"
+from fastapi import APIRouter
+router = APIRouter()
+
+@router.get("/patients")
+def list_patients():
+    return []
+"#;
+
+        let analysis = analyze_py_file(
+            content,
+            &root.join("api.py"),
+            root,
+            Some(&py_exts()),
+            "api.py".to_string(),
+            &[root.to_path_buf()],
+            &HashSet::new(),
+        );
+
+        assert_eq!(analysis.routes.len(), 1);
+        let route = &analysis.routes[0];
+        assert_eq!(route.framework, "fastapi");
+        assert_eq!(route.method, "GET");
+        assert_eq!(route.path.as_deref(), Some("/patients"));
+        assert_eq!(route.name.as_deref(), Some("list_patients"));
+    }
+
+    #[test]
+    fn captures_flask_route_methods_list() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path();
+
+        let content = r#"
+from flask import Blueprint
+bp = Blueprint("bp", __name__)
+
+@bp.route("/ping", methods=["GET", "POST"])
+def ping():
+    return "ok"
+"#;
+
+        let analysis = analyze_py_file(
+            content,
+            &root.join("flask_app.py"),
+            root,
+            Some(&py_exts()),
+            "flask_app.py".to_string(),
+            &[root.to_path_buf()],
+            &HashSet::new(),
+        );
+
+        assert_eq!(analysis.routes.len(), 1);
+        let route = &analysis.routes[0];
+        assert_eq!(route.framework, "flask");
+        assert_eq!(route.method, "GET,POST");
+        assert_eq!(route.path.as_deref(), Some("/ping"));
+        assert_eq!(route.name.as_deref(), Some("ping"));
     }
 }

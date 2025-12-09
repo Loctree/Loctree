@@ -1311,52 +1311,188 @@ input[type="range"]::-webkit-slider-thumb {
     color: var(--theme-accent);
 }
 
+/* ============================================
+   Tree Component Styles
+   ============================================ */
+
 .tree-panel {
     display: flex;
     flex-direction: column;
     gap: 12px;
 }
+
 .tree-header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: 12px;
 }
+
+.tree-header h3 {
+    margin: 0;
+    white-space: nowrap;
+}
+
+.tree-controls {
+    display: flex;
+    gap: 4px;
+}
+
+.tree-btn {
+    padding: 6px 10px;
+    border: 1px solid var(--theme-border);
+    border-radius: 6px;
+    background: var(--theme-surface);
+    color: var(--theme-text);
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.15s ease;
+}
+
+.tree-btn:hover {
+    background: var(--theme-bg-surface-elevated);
+    border-color: var(--theme-border-strong);
+}
+
 .tree-filter {
     flex: 1;
-    padding: 8px 10px;
+    padding: 8px 12px;
     border: 1px solid var(--theme-border);
     border-radius: 8px;
     background: var(--theme-surface);
     color: var(--theme-text);
+    font-size: 13px;
 }
-.tree-list {
-    list-style: none;
-    padding-left: 0;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
+
+.tree-filter:focus {
+    outline: none;
+    border-color: var(--theme-accent);
 }
+
+.tree-container {
+    max-height: 600px;
+    overflow-y: auto;
+    padding-right: 8px;
+}
+
+.tree-node {
+    font-family: "JetBrains Mono", "SFMono-Regular", monospace;
+    font-size: 12px;
+}
+
 .tree-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 6px 8px;
-    border: 1px solid var(--theme-border);
-    border-radius: 8px;
-    background: var(--theme-surface);
-    font-family: "JetBrains Mono", "SFMono-Regular", monospace;
-    font-size: 12px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: default;
+    transition: background 0.1s ease;
 }
+
+.tree-row:hover {
+    background: var(--theme-bg-surface-elevated);
+}
+
+.tree-row-dir {
+    cursor: pointer;
+}
+
+.tree-row-dir:hover {
+    background: rgba(var(--theme-accent-rgb), 0.1);
+}
+
+.tree-left {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    flex: 1;
+}
+
+.tree-connector {
+    color: var(--theme-text-tertiary);
+    white-space: pre;
+    flex-shrink: 0;
+}
+
+.tree-chevron {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    font-size: 10px;
+    color: var(--theme-text-secondary);
+    transition: transform 0.15s ease;
+    flex-shrink: 0;
+}
+
+.tree-chevron.collapsed {
+    transform: rotate(0deg);
+}
+
+.tree-chevron:not(.collapsed) {
+    transform: rotate(90deg);
+}
+
+.tree-icon {
+    flex-shrink: 0;
+    font-size: 14px;
+}
+
 .tree-path {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    color: var(--theme-text);
 }
+
+.tree-highlight {
+    background: rgba(255, 200, 0, 0.3);
+    color: inherit;
+    padding: 0 2px;
+    border-radius: 2px;
+}
+
+.tree-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    margin-left: 12px;
+}
+
+.tree-loc-bar {
+    width: 60px;
+    height: 4px;
+    background: var(--theme-border);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.tree-loc-fill {
+    height: 100%;
+    background: var(--theme-accent);
+    border-radius: 2px;
+    transition: width 0.2s ease;
+}
+
 .tree-loc {
     color: var(--theme-text-tertiary);
-    margin-left: 12px;
+    font-size: 11px;
+    min-width: 60px;
+    text-align: right;
+}
+
+.tree-children {
+    overflow: hidden;
+    transition: max-height 0.2s ease, opacity 0.15s ease;
+}
+
+.tree-children.collapsed {
+    max-height: 0 !important;
+    opacity: 0;
+    pointer-events: none;
 }
 
 /* ============================================

@@ -54,7 +54,7 @@ pub struct GitContext {
 }
 
 /// Metadata about the snapshot
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct SnapshotMetadata {
     /// Schema version for compatibility checking
     #[serde(default)]

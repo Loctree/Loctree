@@ -33,8 +33,10 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tracing::info;
 
+use loctree::analyzer::crowd::detect_all_crowds_with_edges;
 use loctree::analyzer::cycles::find_cycles;
 use loctree::analyzer::dead_parrots::{DeadFilterConfig, find_dead_exports};
+use loctree::analyzer::twins::{build_symbol_registry, detect_exact_twins};
 use loctree::query;
 use loctree::snapshot::Snapshot;
 
@@ -522,6 +524,111 @@ impl LoctreeServer {
         });
 
         serde_json::to_string_pretty(&info)
+            .unwrap_or_else(|e| format!("Serialization error: {}", e))
+    }
+
+    /// Detect twins (dead parrots and exact duplicates).
+    #[tool(
+        name = "check_twins",
+        description = "Find dead parrots (exports with 0 imports) and exact twins (same symbol exported from multiple files)."
+    )]
+    async fn check_twins(&self) -> String {
+        if let Err(e) = self.maybe_reload().await {
+            return format!("Error reloading snapshot: {}", e);
+        }
+
+        let snapshot = self.snapshot.read().await;
+        let registry = build_symbol_registry(&snapshot.files);
+
+        // Dead parrots: symbols with 0 imports
+        let dead_parrots: Vec<_> = registry
+            .values()
+            .filter(|s| s.import_count == 0)
+            .map(|s| {
+                serde_json::json!({
+                    "name": s.name,
+                    "kind": s.kind,
+                    "file": s.file_path,
+                    "line": s.line
+                })
+            })
+            .collect();
+
+        // Exact twins: same name exported from different files
+        let exact_twins = detect_exact_twins(&snapshot.files);
+        let twins_json: Vec<_> = exact_twins
+            .iter()
+            .map(|t| {
+                serde_json::json!({
+                    "name": t.name,
+                    "location_count": t.locations.len(),
+                    "locations": t.locations.iter().map(|loc| serde_json::json!({
+                        "file": loc.file_path,
+                        "line": loc.line,
+                        "kind": loc.kind,
+                        "import_count": loc.import_count,
+                        "is_canonical": loc.is_canonical
+                    })).collect::<Vec<_>>()
+                })
+            })
+            .collect();
+
+        let result = serde_json::json!({
+            "dead_parrots": {
+                "count": dead_parrots.len(),
+                "symbols": dead_parrots.into_iter().take(50).collect::<Vec<_>>()
+            },
+            "exact_twins": {
+                "count": exact_twins.len(),
+                "twins": twins_json.into_iter().take(50).collect::<Vec<_>>()
+            }
+        });
+
+        serde_json::to_string_pretty(&result)
+            .unwrap_or_else(|e| format!("Serialization error: {}", e))
+    }
+
+    /// Detect functional crowds (clusters of files with similar purpose).
+    #[tool(
+        name = "check_crowds",
+        description = "Find crowds - groups of files that cluster around similar functionality, potentially indicating duplication."
+    )]
+    async fn check_crowds(&self) -> String {
+        if let Err(e) = self.maybe_reload().await {
+            return format!("Error reloading snapshot: {}", e);
+        }
+
+        let snapshot = self.snapshot.read().await;
+
+        // Build edges for transitive analysis
+        let edges: Vec<_> = snapshot.edges.clone();
+        let crowds = detect_all_crowds_with_edges(&snapshot.files, &edges);
+
+        let crowds_json: Vec<_> = crowds
+            .iter()
+            .filter(|c| c.score >= 3.0) // Only show significant crowds
+            .take(10)
+            .map(|c| {
+                serde_json::json!({
+                    "pattern": c.pattern,
+                    "score": c.score,
+                    "member_count": c.members.len(),
+                    "members": c.members.iter().take(5).map(|m| serde_json::json!({
+                        "file": m.file,
+                        "importer_count": m.importer_count
+                    })).collect::<Vec<_>>(),
+                    "issues": c.issues.iter().map(|i| format!("{:?}", i)).collect::<Vec<_>>()
+                })
+            })
+            .collect();
+
+        let result = serde_json::json!({
+            "crowd_count": crowds.len(),
+            "significant_crowds": crowds_json.len(),
+            "crowds": crowds_json
+        });
+
+        serde_json::to_string_pretty(&result)
             .unwrap_or_else(|e| format!("Serialization error: {}", e))
     }
 }

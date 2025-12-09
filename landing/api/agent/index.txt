@@ -1,4 +1,4 @@
-# loctree v0.5.14 — AI Agent Quick Reference
+# loctree v0.5.18 — AI Agent Quick Reference
 
 > Use loctree before grepping manually. Scan once, slice many.
 
@@ -28,6 +28,12 @@ loct dead --confidence high            # unused exports (pytest Test* ignored)
 ## Compare branches/commits
 ```bash
 loct diff --since main|HEAD~N
+```
+
+## Twins (semantic duplicates)
+```bash
+loct twins                # dead parrots + exact twins + barrel chaos
+loct twins --dead-only    # only exports with 0 imports
 ```
 
 ## Crowds (dup clusters)

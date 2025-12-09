@@ -35,6 +35,9 @@ loct --for-ai
 # Find circular imports
 loct cycles
 
+# Semantic duplicate analysis (dead parrots, twins, barrel chaos)
+loct twins
+
 # Detect dead exports
 loct dead --confidence high
 ```
@@ -193,6 +196,10 @@ loct impact src/utils/api.ts
 # Find a symbol across the codebase
 loct find useAuth
 
+# Twins analysis (dead parrots, exact twins, barrel chaos)
+loct twins
+loct twins --dead-only    # Only exports with 0 imports
+
 # List entry points
 loct lint --entrypoints
 ```
@@ -235,6 +242,7 @@ Modes:
   find                      Unified search (symbols, similar, impact)
   dead                      Unused exports (alias/barrel aware)
   cycles                    Circular imports
+  twins                     Semantic duplicates (dead parrots, exact twins, barrel chaos)
   commands                  Tauri FE↔BE bridges (missing/unused)
   events                    Emit/listen/races summary
   tree                      Directory tree with LOC counts

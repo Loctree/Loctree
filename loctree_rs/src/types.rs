@@ -120,6 +120,8 @@ pub struct Options {
     pub summary: bool,
     /// Max items in summary lists.
     pub summary_limit: usize,
+    /// If true, only show summary/top entries (suppress full tree dump).
+    pub summary_only: bool,
     /// Include dotfiles/directories.
     pub show_hidden: bool,
     /// Include gitignored files.
@@ -162,6 +164,7 @@ impl Default for Options {
             output: OutputMode::Human,
             summary: false,
             summary_limit: 50,
+            summary_only: false,
             show_hidden: false,
             show_ignored: false,
             loc_threshold: 500,
@@ -256,6 +259,18 @@ pub struct ImportEntry {
     /// True if placed inside a function/method (lazy import to break cycles).
     #[serde(default)]
     pub is_lazy: bool,
+    /// True if import starts with `crate::` (Rust only).
+    #[serde(default)]
+    pub is_crate_relative: bool,
+    /// True if import starts with `super::` (Rust only).
+    #[serde(default)]
+    pub is_super_relative: bool,
+    /// True if import starts with `self::` (Rust only).
+    #[serde(default)]
+    pub is_self_relative: bool,
+    /// Original raw path before resolution (Rust only).
+    #[serde(default)]
+    pub raw_path: String,
 }
 
 /// Type of import statement.
@@ -362,6 +377,23 @@ pub struct CommandPayloadCasing {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct StringLiteral {
     pub value: String,
+    pub line: usize,
+}
+
+/// Python/Backend route declaration (FastAPI/Flask/etc.)
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct RouteInfo {
+    /// Framework label (e.g., "fastapi", "flask")
+    pub framework: String,
+    /// HTTP method or decorator kind (GET/POST/route/etc.)
+    pub method: String,
+    /// Route path if extracted from decorator
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// Handler name (set when attached to a def)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// 1-based line number of the decorator
     pub line: usize,
 }
 
@@ -484,6 +516,14 @@ pub struct FileAnalysis {
     /// Type usages that appear in function signatures (parameters/returns).
     #[serde(default)]
     pub signature_uses: Vec<SignatureUse>,
+
+    /// Web route handlers detected in Python/other backends
+    #[serde(default)]
+    pub routes: Vec<RouteInfo>,
+
+    /// Pytest fixtures defined in this file
+    #[serde(default)]
+    pub pytest_fixtures: Vec<String>,
 }
 
 impl ImportEntry {
@@ -499,6 +539,10 @@ impl ImportEntry {
             resolution: ImportResolutionKind::Unknown,
             is_type_checking: false,
             is_lazy: false,
+            is_crate_relative: false,
+            is_super_relative: false,
+            is_self_relative: false,
+            raw_path: String::new(),
         }
     }
 }
@@ -544,6 +588,8 @@ impl FileAnalysis {
             is_namespace_package: false,
             local_uses: Vec::new(),
             signature_uses: Vec::new(),
+            routes: Vec::new(),
+            pytest_fixtures: Vec::new(),
         }
     }
 }

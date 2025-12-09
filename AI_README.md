@@ -1,4 +1,4 @@
-# loct — AI Agent Quick Reference (v0.5.14)
+# loct — AI Agent Quick Reference (v0.5.18)
 
 Static analysis for AI agents: scan once, slice many. Default `loct` writes `.loctree/<branch@sha>/snapshot.json`; use `loct report --serve` (or `loct lint --sarif`) when you need full artifacts (`analysis.json`, `report.html`, `report.sarif`, etc.).
 
@@ -32,15 +32,19 @@ loct events --json        # Emit/listen, ghost/orphan/races
 loct dead --confidence high  # unused exports (alias-aware)
 loct cycles                  # circular imports
 
-# 7) Crowd detection (functional duplicates)
+# 7) Twins analysis (semantic duplicates)
+loct twins                   # dead parrots + exact twins + barrel chaos
+loct twins --dead-only       # only exports with 0 imports
+
+# 8) Crowd detection (functional duplicates)
 loct crowd                   # auto-detect all crowds
 loct crowd message           # files clustering around "message"
 loct crowd --json            # JSON for AI agents
 
-# 8) Delta / diff
+# 9) Delta / diff
 loct diff --since main       # compare against another snapshot
 
-# 9) CI / policy
+# 10) CI / policy
 loct lint --fail --sarif > results.sarif
 ```
 
@@ -48,7 +52,7 @@ loct lint --fail --sarif > results.sarif
 
 ```bash
 cargo install loctree
-loct --version   # expect 0.5.14+
+loct --version   # expect 0.5.18+
 ```
 
 ## Auto-Detect Stack
@@ -69,6 +73,7 @@ loct --version   # expect 0.5.14+
 - **Impact**: `loct impact <file>`
 - **Dead code**: `loct dead --confidence high`
 - **Circular imports**: `loct cycles`
+- **Twins analysis**: `loct twins` (dead parrots, exact twins, barrel chaos)
 - **Functional crowds**: `loct crowd` (find similar files clustering around same functionality)
 - **Tauri FE↔BE**: `loct commands --missing`, `loct commands --unused`, `loct events --json`
 - **Delta between scans**: `loct diff --since <snapshot_id>`
@@ -79,6 +84,7 @@ loct --version   # expect 0.5.14+
 - Scan & cache: `loct` (writes `.loctree/<branch@sha>/snapshot.json`)
 - Slice for AI: `loct slice <file> [--consumers --json]`
 - Quick queries: `loct query who-imports <file>`, `loct query where-symbol <sym>`, `loct query component-of <file>`
+- Twins analysis: `loct twins` (dead parrots + exact twins + barrel chaos)
 - Analysis shortcuts: `loct -A --dead`, `loct -A --circular`, `loct -A --report report.html`
 - Diff snapshots: `loct diff --since <main|HEAD~N|snapshot_id>`
 - Serve report: `loct -A --report report.html --serve`
@@ -91,10 +97,22 @@ loct --version   # expect 0.5.14+
 - SARIF file integrates with GitHub/GitLab code scanning and IDEs.
 - SARIF includes `loctree://open?f=<file>&l=<line>` URLs for IDE integration.
 - Respect `.gitignore` by default; add `--scan-all` to include node_modules/target/.venv.
+- Events: set `LOCT_EVENT_ALIASES="rust://foo=tauri://foo,legacy_evt=new_evt"` to bridge cross-language names; self-emits with matching literals in the same file are treated as resolved to reduce orphan noise.
+
+## Rust-Specific Features (v0.5.17+)
+
+- **Crate-internal imports** — Resolves `use crate::foo::Bar`, `use super::Bar`, `use self::foo::Bar` for accurate dead code detection
+- **Same-file usage** — Detects when exported symbols like `BUFFER_SIZE` are used locally (in generics, type annotations, etc.)
+- **Nested brace imports** — Handles complex imports like `use crate::{foo::{A, B}, bar::C}`
+
+## SvelteKit-Specific Features (v0.5.17+)
+
+- **Virtual modules** — Resolves `$app/navigation`, `$app/stores`, `$lib/*` paths
+- **Runtime modules** — Maps SvelteKit runtime internals correctly
 
 ## Philosophy
 
-Know *why* it works (or doesn’t):
+Know *why* it works (or doesn't):
 - Import graphs over assumptions
 - Dead-code and barrel/alias awareness to cut false positives
 - Holographic slices so AI writes with real context, not guesses

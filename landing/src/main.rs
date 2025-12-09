@@ -1,6 +1,7 @@
 // loctree Landing Page — Leptos 0.8 Edition
 // Developed with 💀 by The Loctree Team (c)2025
 
+mod components;
 mod pages;
 mod sections;
 

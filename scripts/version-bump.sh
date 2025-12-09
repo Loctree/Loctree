@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Flexible version bump script with scoped targets.
-# Usage: ./scripts/version-bump.sh [--patch|--minor|--major] [--all|--loctree|--report|--landing|--memex|--server] [--dev] [--dry-run]
-# Defaults: --patch --all (unless --dev with no bump flag → keep version, add -dev)
+# Usage: ./scripts/version-bump.sh [--patch|--minor|--major] [--all|--loctree|--report|--landing|--memex|--server] [--dev|--rc] [--dry-run]
+# Defaults: --patch --all (unless --dev/--rc with no bump flag → keep version, add suffix)
 # Rules:
 #   - --all / --loctree update UI occurrences (reports footer, landing easter egg/version) via sync-version
 #   - --report / --landing do NOT touch UI occurrences
@@ -16,6 +16,7 @@ bump_type="patch"
 bump_flag_set=false
 scope="all"
 dev_suffix=false
+rc_suffix=false
 dry_run=false
 
 while [[ $# -gt 0 ]]; do
@@ -33,6 +34,10 @@ while [[ $# -gt 0 ]]; do
       dev_suffix=true
       shift
       ;;
+    --rc)
+      rc_suffix=true
+      shift
+      ;;
     --dry-run)
       dry_run=true
       shift
@@ -44,8 +49,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# If --dev is set without an explicit bump flag, keep current numeric version and just add -dev
+# If --dev or --rc is set without an explicit bump flag, keep current numeric version and just add suffix
 if $dev_suffix && ! $bump_flag_set; then
+  bump_type="none"
+fi
+if $rc_suffix && ! $bump_flag_set; then
   bump_type="none"
 fi
 
@@ -83,6 +91,7 @@ fi
 bump_version() {
   local current="$1" kind="$2"
   current="${current%-dev}" # strip existing -dev if present
+  current="${current%-rc}"  # strip existing -rc if present
   if [[ "$kind" == "none" ]]; then
     echo "$current"
     return
@@ -150,6 +159,14 @@ if $dev_suffix; then
   new_memex_ver="${new_memex_ver%-dev}-dev"
   new_server_ver="${new_server_ver%-dev}-dev"
   echo "Applying -dev suffix"
+fi
+if $rc_suffix; then
+  new_loctree_ver="${new_loctree_ver%-rc}-rc"
+  new_report_ver="${new_report_ver%-rc}-rc"
+  new_landing_ver="${new_landing_ver%-rc}-rc"
+  new_memex_ver="${new_memex_ver%-rc}-rc"
+  new_server_ver="${new_server_ver%-rc}-rc"
+  echo "Applying -rc suffix"
 fi
 if $dry_run; then
   echo "Dry-run: will skip publish/commit"

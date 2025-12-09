@@ -1,6 +1,6 @@
 [package]
 name = "loctree_memex"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2024"
 authors = ["Loctree <loct@loctree.io>"]
 description = "AI Memory integration for Loctree using rmcp_memex"

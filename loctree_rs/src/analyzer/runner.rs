@@ -30,10 +30,12 @@ const SCHEMA_NAME: &str = "loctree-json";
 const SCHEMA_VERSION: &str = "1.2.0";
 
 pub fn default_analyzer_exts() -> HashSet<String> {
-    ["ts", "tsx", "js", "jsx", "mjs", "cjs", "rs", "css", "py"]
-        .iter()
-        .map(|s| s.to_string())
-        .collect()
+    [
+        "ts", "tsx", "js", "jsx", "mjs", "cjs", "rs", "css", "py", "svelte", "vue",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
 }
 
 pub fn styles_preset_exts() -> HashSet<String> {
@@ -415,7 +417,21 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         super::cycles::print_cycles(&cycles, matches!(parsed.output, OutputMode::Json));
         if !lazy_cycles.is_empty() && !matches!(parsed.output, OutputMode::Json) {
             println!("\nLazy circular imports (info):");
+            println!(
+                "  These come from imports inside functions/methods; usually safe, but check init order if relevant."
+            );
             super::cycles::print_cycles(&lazy_cycles, false);
+            let lazy_edges: Vec<_> = all_graph_edges
+                .iter()
+                .filter(|(_, _, kind)| kind.contains("lazy"))
+                .take(5)
+                .collect();
+            if !lazy_edges.is_empty() {
+                println!("  Lazy edges (sample):");
+                for (from, to, kind) in lazy_edges {
+                    println!("    {} -> {} [{}]", from, to, kind);
+                }
+            }
         }
         return Ok(());
     }

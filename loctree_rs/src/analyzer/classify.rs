@@ -15,6 +15,7 @@ pub fn detect_language(ext: &str) -> String {
         "js" | "jsx" | "mjs" | "cjs" => "js".to_string(),
         "rs" => "rs".to_string(),
         "py" => "py".to_string(),
+        "dart" => "dart".to_string(),
         "css" => "css".to_string(),
         other => other.to_string(),
     }
@@ -27,6 +28,8 @@ fn is_test_path(path: &str) -> bool {
         || lower.contains(".spec.")
         || lower.ends_with("_test.rs")
         || lower.ends_with("_tests.rs")
+        || lower.ends_with("_test.go")
+        || lower.ends_with("_test.dart")
 }
 
 fn is_story_path(path: &str) -> bool {
@@ -138,6 +141,7 @@ mod tests {
         assert_eq!(detect_language("cjs"), "js");
         assert_eq!(detect_language("rs"), "rs");
         assert_eq!(detect_language("py"), "py");
+        assert_eq!(detect_language("go"), "go");
         assert_eq!(detect_language("css"), "css");
         assert_eq!(detect_language("html"), "html");
     }

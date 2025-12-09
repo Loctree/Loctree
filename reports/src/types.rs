@@ -661,6 +661,98 @@ pub struct DeadExport {
     pub open_url: Option<String>,
 }
 
+/// Twins analysis data (dead parrots, exact twins, barrel chaos)
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct TwinsData {
+    /// Dead parrots - symbols with 0 imports
+    pub dead_parrots: Vec<DeadParrot>,
+    /// Exact twins - symbols with same name in different files
+    pub exact_twins: Vec<ExactTwin>,
+    /// Barrel chaos analysis
+    pub barrel_chaos: BarrelChaos,
+}
+
+/// A dead parrot - symbol exported but never imported
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DeadParrot {
+    /// Symbol name
+    pub name: String,
+    /// File path where exported
+    pub file_path: String,
+    /// Line number
+    pub line: usize,
+    /// Symbol kind (function, type, const, class, etc.)
+    pub kind: String,
+}
+
+/// An exact twin - symbol with same name exported from multiple files
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ExactTwin {
+    /// Symbol name
+    pub name: String,
+    /// All locations where this symbol is exported
+    pub locations: Vec<TwinLocation>,
+}
+
+/// A location where an exact twin is found
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TwinLocation {
+    /// File path
+    pub file_path: String,
+    /// Line number
+    pub line: usize,
+    /// Export kind
+    pub kind: String,
+    /// Number of imports
+    pub import_count: usize,
+    /// True if this is the canonical (recommended) location
+    pub is_canonical: bool,
+}
+
+/// Barrel chaos analysis
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct BarrelChaos {
+    /// Directories missing barrel files
+    pub missing_barrels: Vec<MissingBarrel>,
+    /// Deep re-export chains
+    pub deep_chains: Vec<ReexportChain>,
+    /// Inconsistent import paths
+    pub inconsistent_paths: Vec<InconsistentImport>,
+}
+
+/// A directory missing a barrel file
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MissingBarrel {
+    /// Directory path
+    pub directory: String,
+    /// Number of files in directory
+    pub file_count: usize,
+    /// Number of external imports
+    pub external_import_count: usize,
+}
+
+/// A deep re-export chain
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ReexportChain {
+    /// Symbol name
+    pub symbol: String,
+    /// Chain of files (from consumer to definition)
+    pub chain: Vec<String>,
+    /// Depth of chain
+    pub depth: usize,
+}
+
+/// Inconsistent import path for a symbol
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct InconsistentImport {
+    /// Symbol name
+    pub symbol: String,
+    /// Canonical (most-used) path
+    pub canonical_path: String,
+    /// Alternative paths with usage counts
+    pub alternative_paths: Vec<(String, usize)>,
+}
+
 /// A complete report section for one analyzed directory.
 ///
 /// This is the main data structure passed to [`crate::render_report`].
@@ -737,4 +829,7 @@ pub struct ReportSection {
     /// Dead exports (exported but never imported)
     #[serde(default)]
     pub dead_exports: Vec<DeadExport>,
+    /// Twins analysis (dead parrots, exact twins, barrel chaos)
+    #[serde(default, alias = "twins_data")]
+    pub twins: Option<TwinsData>,
 }

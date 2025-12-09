@@ -1,5 +1,6 @@
 use serde::Serialize;
 
+use super::barrels::BarrelAnalysis;
 use super::crowd::types::Crowd;
 use super::dead_parrots::DeadExport;
 
@@ -209,6 +210,20 @@ pub struct ReportSection {
     /// Dead exports (exported but never imported)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dead_exports: Vec<DeadExport>,
+    /// Twins analysis data (dead parrots, exact twins, barrel chaos)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub twins_data: Option<TwinsData>,
+}
+
+/// Twins analysis data for the HTML report
+#[derive(Clone, Serialize)]
+pub struct TwinsData {
+    /// Dead parrots (0 imports) - uses SymbolEntry from twins module
+    pub dead_parrots: Vec<super::twins::SymbolEntry>,
+    /// Exact twins (same symbol exported from multiple files)
+    pub exact_twins: Vec<super::twins::ExactTwin>,
+    /// Barrel analysis (missing barrels, deep chains, inconsistent paths)
+    pub barrel_chaos: BarrelAnalysis,
 }
 
 #[cfg(test)]

@@ -151,6 +151,7 @@ mod tests {
             git_commit: None,
             crowds: Vec::new(),
             dead_exports: Vec::new(),
+            twins_data: None,
         };
 
         render_html_report(&out_path, &[section]).expect("render html");
@@ -197,6 +198,7 @@ mod tests {
             git_commit: None,
             crowds: Vec::new(),
             dead_exports: Vec::new(),
+            twins_data: None,
         };
 
         render_html_report(&out_path, &[section]).expect("render html");

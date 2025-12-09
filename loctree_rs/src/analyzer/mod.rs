@@ -23,6 +23,7 @@
 
 pub mod assets;
 pub mod ast_js;
+pub mod barrels;
 pub mod classify;
 pub mod coverage;
 pub mod crowd;
@@ -31,6 +32,7 @@ pub mod cycles;
 pub mod dead_parrots;
 pub mod entrypoints;
 pub mod for_ai;
+pub mod go;
 mod graph;
 pub mod html;
 mod insights;
@@ -50,6 +52,7 @@ pub mod scan;
 pub mod search;
 pub mod trace;
 mod tsconfig;
+pub mod twins;
 
 pub(super) fn offset_to_line(content: &str, offset: usize) -> usize {
     content[..offset].bytes().filter(|b| *b == b'\n').count() + 1

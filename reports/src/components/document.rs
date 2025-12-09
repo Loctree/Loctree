@@ -4,7 +4,7 @@
 
 use super::{
     Icon, ReportSectionView, ICON_ARROWS_CLOCKWISE, ICON_COPY, ICON_GHOST, ICON_GRAPH,
-    ICON_LIGHTNING, ICON_PLUG, ICON_SQUARES_FOUR, ICON_TREE_STRUCTURE, ICON_USERS,
+    ICON_LIGHTNING, ICON_PLUG, ICON_SQUARES_FOUR, ICON_TREE_STRUCTURE, ICON_TWINS, ICON_USERS,
 };
 use crate::styles::{CSP, REPORT_CSS};
 use crate::types::ReportSection;
@@ -87,6 +87,10 @@ pub fn ReportDocument(
                                 <Icon path=ICON_GHOST class="icon-sm" />
                                 "Dead Code"
                             </button>
+                            <button class="nav-item" data-tab="twins">
+                                <Icon path=ICON_TWINS class="icon-sm" />
+                                "Twins"
+                            </button>
                             <button class="nav-item" data-tab="graph">
                                 <Icon path=ICON_GRAPH class="icon-sm" />
                                 "Graph"
@@ -98,7 +102,7 @@ pub fn ReportDocument(
                         </nav>
 
                         <div class="app-footer">
-                            "loctree v0.5.16"
+                            "loctree v0.6.1-dev"
                             <br />
                             <span style="color:var(--theme-text-tertiary)">"Snapshot"</span>
                         </div>
@@ -143,6 +147,7 @@ fn GraphScripts(js_assets: JsAssets) -> impl IntoView {
             <script src=js_assets.cose_base_path.clone()></script>
             <script src=js_assets.cytoscape_cose_bilkent_path.clone()></script>
             <script>{include_str!("../graph_bootstrap.js")}</script>
+            <script>{include_str!("../twins_graph.js")}</script>
         })}
     }
 }
@@ -239,6 +244,31 @@ const APP_SCRIPT: &str = r#"
           const sidebarBtn = document.querySelector(`.sidebar-nav .nav-item[data-tab="${tabName}"]`);
           if (sidebarBtn) {
               sidebarBtn.click();
+          }
+      });
+  });
+
+  // 3. Twins Section Toggle - handles collapsible sections in Twins tab
+  document.querySelectorAll('.twins-section-header[data-toggle]').forEach(btn => {
+      btn.addEventListener('click', () => {
+          const targetId = btn.dataset.toggle;
+          const content = document.getElementById(targetId);
+          const toggle = btn.querySelector('.twins-section-toggle');
+
+          if (content) {
+              const isHidden = content.style.display === 'none';
+              content.style.display = isHidden ? 'block' : 'none';
+              if (toggle) {
+                  toggle.textContent = isHidden ? '▼' : '▶';
+              }
+
+              // Initialize Cytoscape graph when twins-exact-content is opened
+              if (isHidden && targetId === 'twins-exact-content' && window.__TWINS_DATA__) {
+                  const container = document.getElementById('twins-graph-container');
+                  if (container && typeof buildTwinsGraph === 'function') {
+                      buildTwinsGraph(window.__TWINS_DATA__, 'twins-graph-container');
+                  }
+              }
           }
       });
   });

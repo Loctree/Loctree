@@ -10,7 +10,7 @@
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 
-use super::report::{Confidence, ReportSection};
+use super::report::{Confidence, DupSeverity, RankedDup, ReportSection};
 use super::root_scan::normalize_module_id;
 use crate::types::{FileAnalysis, SignatureUse, SignatureUseKind};
 
@@ -29,6 +29,8 @@ pub struct ForAiReport {
     pub quick_wins: Vec<QuickWin>,
     /// Files with most connections (good context anchors)
     pub hub_files: Vec<HubFile>,
+    /// Agent-ready bundle with condensed lists (handlers, dupes, dead, dynamic, cycles)
+    pub bundle: AgentBundle,
 }
 
 /// Summary with counts and priority guidance
@@ -97,6 +99,87 @@ pub struct HubFile {
     pub slice_cmd: String,
 }
 
+/// Condensed agent bundle - one JSON instead of multiple artifacts.
+#[derive(Serialize)]
+pub struct AgentBundle {
+    pub handlers: AgentHandlerGroups,
+    pub duplicates: Vec<AgentDuplicate>,
+    pub dead_exports: Vec<AgentDeadExport>,
+    pub dynamic_imports: Vec<AgentDynamicImport>,
+    pub largest_files: Vec<AgentFile>,
+    pub cycles: Vec<AgentCycle>,
+}
+
+#[derive(Serialize, Default)]
+pub struct AgentHandlerGroups {
+    pub missing: Vec<AgentHandler>,
+    pub unused: Vec<AgentHandler>,
+    pub unregistered: Vec<AgentHandler>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct AgentHandler {
+    pub name: String,
+    pub status: String,
+    pub frontend: Vec<AgentLocation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backend: Option<AgentBackend>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct AgentBackend {
+    pub path: String,
+    pub line: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub symbol: Option<String>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct AgentLocation {
+    pub path: String,
+    pub line: usize,
+}
+
+#[derive(Serialize)]
+pub struct AgentDuplicate {
+    pub name: String,
+    pub canonical: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub canonical_line: Option<usize>,
+    pub score: usize,
+    pub severity: String,
+    pub files: usize,
+}
+
+#[derive(Serialize)]
+pub struct AgentDeadExport {
+    pub symbol: String,
+    pub file: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<usize>,
+    pub confidence: String,
+    pub reason: String,
+}
+
+#[derive(Serialize)]
+pub struct AgentDynamicImport {
+    pub file: String,
+    pub resolved: Vec<String>,
+    pub unresolved: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct AgentFile {
+    pub path: String,
+    pub loc: usize,
+}
+
+#[derive(Serialize)]
+pub struct AgentCycle {
+    pub kind: String,
+    pub members: Vec<String>,
+}
+
 /// Generate AI report from analysis results
 pub fn generate_for_ai_report(
     project_root: &str,
@@ -112,6 +195,7 @@ pub fn generate_for_ai_report(
     let section_refs = build_section_refs(sections);
     let quick_wins = extract_quick_wins(sections, analyses);
     let hub_files = find_hub_files(analyses);
+    let bundle = build_agent_bundle(sections, analyses);
 
     ForAiReport {
         project: project_root.to_string(),
@@ -120,6 +204,7 @@ pub fn generate_for_ai_report(
         sections: section_refs,
         quick_wins,
         hub_files,
+        bundle,
     }
 }
 
@@ -211,6 +296,184 @@ fn build_section_refs(sections: &[ReportSection]) -> Vec<ForAiSectionRef> {
             }
         })
         .collect()
+}
+
+fn build_agent_bundle(sections: &[ReportSection], analyses: &[FileAnalysis]) -> AgentBundle {
+    let handlers = build_handler_groups(sections);
+
+    let mut all_dups: Vec<RankedDup> = sections
+        .iter()
+        .flat_map(|s| s.ranked_dups.clone())
+        .collect();
+    all_dups.sort_by(|a, b| b.score.cmp(&a.score).then(a.name.cmp(&b.name)));
+    let mut seen_dup: HashSet<(String, String)> = HashSet::new();
+    let duplicates = all_dups
+        .into_iter()
+        .filter(|d| seen_dup.insert((d.name.clone(), d.canonical.clone())))
+        .take(20)
+        .map(|d| AgentDuplicate {
+            name: d.name,
+            canonical: d.canonical,
+            canonical_line: d.canonical_line,
+            score: d.score,
+            severity: severity_label(d.severity).to_string(),
+            files: d.files.len(),
+        })
+        .collect();
+
+    let mut seen_dead: HashSet<(String, String)> = HashSet::new();
+    let dead_exports = sections
+        .iter()
+        .flat_map(|s| s.dead_exports.clone())
+        .filter(|d| seen_dead.insert((d.file.clone(), d.symbol.clone())))
+        .take(50)
+        .map(|d| AgentDeadExport {
+            symbol: d.symbol,
+            file: d.file,
+            line: d.line,
+            confidence: d.confidence,
+            reason: d.reason,
+        })
+        .collect();
+
+    let dynamic_imports = sections
+        .iter()
+        .flat_map(|s| s.dynamic.clone())
+        .map(|(file, sources)| {
+            let mut resolved = Vec::new();
+            let mut unresolved = Vec::new();
+            for src in sources {
+                if is_resolved_dynamic(&src) {
+                    resolved.push(src);
+                } else {
+                    unresolved.push(src);
+                }
+            }
+            AgentDynamicImport {
+                file,
+                resolved,
+                unresolved,
+            }
+        })
+        .collect();
+
+    let mut largest_files: Vec<AgentFile> = analyses
+        .iter()
+        .map(|a| AgentFile {
+            path: a.path.clone(),
+            loc: a.loc,
+        })
+        .collect();
+    largest_files.sort_by(|a, b| b.loc.cmp(&a.loc).then(a.path.cmp(&b.path)));
+    largest_files.truncate(25);
+
+    let cycles = build_agent_cycles(sections);
+
+    AgentBundle {
+        handlers,
+        duplicates,
+        dead_exports,
+        dynamic_imports,
+        largest_files,
+        cycles,
+    }
+}
+
+fn build_handler_groups(sections: &[ReportSection]) -> AgentHandlerGroups {
+    let mut missing = Vec::new();
+    let mut unused = Vec::new();
+    let mut unregistered = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+
+    for bridge in sections.iter().flat_map(|s| s.command_bridges.iter()) {
+        // De-duplicate by command name to avoid repetition across roots
+        if !seen.insert(bridge.name.clone()) {
+            continue;
+        }
+
+        let handler = AgentHandler {
+            name: bridge.name.clone(),
+            status: bridge.status.clone(),
+            frontend: bridge
+                .fe_locations
+                .iter()
+                .map(|(path, line)| AgentLocation {
+                    path: path.clone(),
+                    line: *line,
+                })
+                .collect(),
+            backend: bridge
+                .be_location
+                .as_ref()
+                .map(|(path, line, symbol)| AgentBackend {
+                    path: path.clone(),
+                    line: *line,
+                    symbol: Some(symbol.clone()),
+                }),
+        };
+
+        match bridge.status.as_str() {
+            "missing_handler" => missing.push(handler),
+            "unused_handler" => unused.push(handler),
+            "unregistered_handler" => unregistered.push(handler),
+            _ => {}
+        }
+    }
+
+    AgentHandlerGroups {
+        missing,
+        unused,
+        unregistered,
+    }
+}
+
+fn build_agent_cycles(sections: &[ReportSection]) -> Vec<AgentCycle> {
+    let mut seen: HashSet<(String, String)> = HashSet::new();
+    let mut cycles = Vec::new();
+
+    for section in sections {
+        for cycle in &section.circular_imports {
+            let key = ("strict".to_string(), cycle.join("->"));
+            if seen.insert(key.clone()) {
+                cycles.push(AgentCycle {
+                    kind: key.0,
+                    members: cycle.clone(),
+                });
+            }
+        }
+        for cycle in &section.lazy_circular_imports {
+            let key = ("lazy".to_string(), cycle.join("->"));
+            if seen.insert(key.clone()) {
+                cycles.push(AgentCycle {
+                    kind: key.0,
+                    members: cycle.clone(),
+                });
+            }
+        }
+    }
+
+    cycles
+}
+
+fn is_resolved_dynamic(src: &str) -> bool {
+    let has_extension = src.ends_with(".ts")
+        || src.ends_with(".tsx")
+        || src.ends_with(".js")
+        || src.ends_with(".jsx")
+        || src.ends_with(".mjs")
+        || src.ends_with(".cjs")
+        || src.ends_with(".rs")
+        || src.ends_with(".py");
+    let has_path = src.contains('/') || src.starts_with("./") || src.starts_with("../");
+    has_extension || has_path
+}
+
+fn severity_label(severity: DupSeverity) -> &'static str {
+    match severity {
+        DupSeverity::CrossLangExpected => "cross_lang_expected",
+        DupSeverity::SamePackage => "same_package",
+        DupSeverity::SemanticConflict => "semantic_conflict",
+    }
 }
 
 fn extract_quick_wins(sections: &[ReportSection], analyses: &[FileAnalysis]) -> Vec<QuickWin> {
@@ -789,6 +1052,7 @@ mod tests {
             git_commit: None,
             crowds: vec![],
             dead_exports: vec![],
+            twins_data: None,
         }
     }
 
@@ -1230,6 +1494,10 @@ mod tests {
             resolution: ImportResolutionKind::Local,
             is_type_checking: false,
             is_lazy: false,
+            is_crate_relative: false,
+            is_super_relative: false,
+            is_self_relative: false,
+            raw_path: String::new(),
         });
 
         let findings = detect_opaque_passthrough_types(&[producer.clone(), consumer.clone()]);

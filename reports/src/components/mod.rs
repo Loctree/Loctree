@@ -57,6 +57,7 @@ mod quick_commands;
 mod section;
 mod tabs;
 mod tree;
+mod twins;
 
 pub use cascades::CascadesList;
 pub use commands::TauriCommandCoverage;
@@ -74,3 +75,4 @@ pub use quick_commands::QuickCommandsPanel;
 pub use section::ReportSectionView;
 pub use tabs::TabContent;
 pub use tree::TreeView;
+pub use twins::Twins;

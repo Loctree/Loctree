@@ -44,6 +44,35 @@ pub fn detect_stack(root: &Path) -> DetectedStack {
         detected_parts.push("Rust");
     }
 
+    // Check for Dart/Flutter (pubspec.yaml)
+    if root.join("pubspec.yaml").exists() {
+        result.extensions.insert("dart".to_string());
+        result.ignores.push(".dart_tool".to_string());
+        result.ignores.push("build".to_string());
+        result.ignores.push(".packages".to_string());
+        detected_parts.push("Dart/Flutter");
+    }
+
+    // Check for Go projects (go.mod or .go files)
+    if root.join("go.mod").exists()
+        || root
+            .read_dir()
+            .ok()
+            .map(|entries| {
+                entries.flatten().any(|entry| {
+                    entry
+                        .path()
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("go"))
+                })
+            })
+            .unwrap_or(false)
+    {
+        result.extensions.insert("go".to_string());
+        result.ignores.push("vendor".to_string());
+        detected_parts.push("Go");
+    }
+
     // Check for src-tauri/ -> Tauri preset (must check before generic TS)
     if root.join("src-tauri").exists() {
         result.preset_name = Some("tauri".to_string());
@@ -130,6 +159,59 @@ pub fn detect_stack(root: &Path) -> DetectedStack {
         result.ignores.push(".svelte-kit".to_string());
         if !detected_parts.contains(&"SvelteKit") {
             detected_parts.push("SvelteKit");
+        }
+    }
+
+    // Check for Vue projects (vue.config.*, vite.config.* with Vue, or .vue files in src/)
+    let vue_config_exists =
+        root.join("vue.config.js").exists() || root.join("vue.config.ts").exists();
+    let has_vue_files = root.join("src").exists()
+        && std::fs::read_dir(root.join("src"))
+            .map(|entries| {
+                entries.flatten().any(|e| {
+                    e.path()
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("vue"))
+                })
+            })
+            .unwrap_or(false);
+    // Also check packages/* for monorepos (common in Vue ecosystem)
+    let mut vue_in_subdir = false;
+    for subdir in ["packages", "packages-private", "apps"] {
+        let dir = root.join(subdir);
+        if dir.is_dir()
+            && let Ok(entries) = std::fs::read_dir(&dir)
+        {
+            for e in entries.flatten() {
+                let path = e.path();
+                if path.is_dir() {
+                    // Check for .vue files in this package's src/
+                    let pkg_src = path.join("src");
+                    if pkg_src.is_dir()
+                        && std::fs::read_dir(&pkg_src)
+                            .map(|entries| {
+                                entries.flatten().any(|e| {
+                                    e.path()
+                                        .extension()
+                                        .is_some_and(|ext| ext.eq_ignore_ascii_case("vue"))
+                                })
+                            })
+                            .unwrap_or(false)
+                    {
+                        vue_in_subdir = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if vue_in_subdir {
+            break;
+        }
+    }
+    if vue_config_exists || has_vue_files || vue_in_subdir {
+        result.extensions.insert("vue".to_string());
+        if !detected_parts.contains(&"Vue") {
+            detected_parts.push("Vue");
         }
     }
 

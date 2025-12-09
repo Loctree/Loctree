@@ -20,38 +20,47 @@ build-core:
 # Determine cargo bin dir
 CARGO_BIN ?= $(if $(CARGO_HOME),$(CARGO_HOME)/bin,$(HOME)/.cargo/bin)
 
-LOCKDIR ?= /tmp/loctree-make.lock.d
+LOCKFILE ?= /tmp/loctree-make.lock
 
 # Install loctree binaries (core only - no memex, no protobuf needed)
+# Lock is auto-cleaned on success, failure, or if stale (dead PID)
 install:
-	@echo "==> Acquiring build lock at $(LOCKDIR)..."
-	@if mkdir "$(LOCKDIR)" 2>/dev/null; then \
-		trap 'rmdir "$(LOCKDIR)"' EXIT INT TERM; \
-		set -e; \
-		cargo build --release -p loctree; \
-		mkdir -p "$(CARGO_BIN)"; \
-		install -m 755 target/release/loctree "$(CARGO_BIN)/loctree"; \
-		install -m 755 target/release/loct "$(CARGO_BIN)/loct"; \
-		echo "Installed: loct, loctree → $(CARGO_BIN)"; \
-	else \
-		echo "Another loctree build/install is running (lock: $(LOCKDIR)). Aborting."; \
-		exit 1; \
+	@if [ -f "$(LOCKFILE)" ]; then \
+		old_pid=$$(cat "$(LOCKFILE)" 2>/dev/null); \
+		if [ -n "$$old_pid" ] && kill -0 "$$old_pid" 2>/dev/null; then \
+			echo "Another build running (PID $$old_pid). Aborting."; \
+			exit 1; \
+		fi; \
+		echo "Removing stale lock (PID $$old_pid dead)"; \
+		rm -f "$(LOCKFILE)"; \
 	fi
+	@echo $$$$ > "$(LOCKFILE)"
+	@trap 'rm -f $(LOCKFILE)' EXIT; \
+	set -e; \
+	cargo build --release -p loctree; \
+	mkdir -p "$(CARGO_BIN)"; \
+	install -m 755 target/release/loctree "$(CARGO_BIN)/loctree"; \
+	install -m 755 target/release/loct "$(CARGO_BIN)/loct"; \
+	echo "Installed: loct, loctree → $(CARGO_BIN)"
 
 # Install everything including memex
 install-all: setup-protoc
-	@echo "==> Acquiring build lock at $(LOCKDIR)..."
-	@if mkdir "$(LOCKDIR)" 2>/dev/null; then \
-		trap 'rmdir "$(LOCKDIR)"' EXIT INT TERM; \
-		set -e; \
-		cargo install --path loctree_rs --force; \
-		cargo install --path loctree_server --force; \
-		cargo install --path rmcp_memex --force; \
-		echo "Installed: loct, loctree, loctree-server, rmcp_memex"; \
-	else \
-		echo "Another loctree build/install is running (lock: $(LOCKDIR)). Aborting."; \
-		exit 1; \
+	@if [ -f "$(LOCKFILE)" ]; then \
+		old_pid=$$(cat "$(LOCKFILE)" 2>/dev/null); \
+		if [ -n "$$old_pid" ] && kill -0 "$$old_pid" 2>/dev/null; then \
+			echo "Another build running (PID $$old_pid). Aborting."; \
+			exit 1; \
+		fi; \
+		echo "Removing stale lock (PID $$old_pid dead)"; \
+		rm -f "$(LOCKFILE)"; \
 	fi
+	@echo $$$$ > "$(LOCKFILE)"
+	@trap 'rm -f $(LOCKFILE)' EXIT; \
+	set -e; \
+	cargo install --path loctree_rs --force; \
+	cargo install --path loctree_server --force; \
+	cargo install --path rmcp_memex --force; \
+	echo "Installed: loct, loctree, loctree-server, rmcp_memex"
 
 # Setup protoc - check system or use Homebrew
 setup-protoc:
@@ -78,7 +87,7 @@ clean:
 
 # Remove stale build lock
 unlock:
-	@rm -rf "$(LOCKDIR)" && echo "Lock removed" || echo "No lock"
+	@rm -f "$(LOCKFILE)" && echo "Lock removed" || echo "No lock"
 
 # Help
 help:

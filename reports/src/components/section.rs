@@ -5,7 +5,7 @@
 use super::{
     AiInsightsPanel, AnalysisSummary, CascadesList, Crowds, Cycles, DeadCode,
     DuplicateExportsTable, DynamicImportsTable, GraphContainer, QuickCommandsPanel, TabContent,
-    TauriCommandCoverage, TreeView,
+    TauriCommandCoverage, TreeView, Twins,
 };
 use crate::types::ReportSection;
 use leptos::prelude::*;
@@ -46,6 +46,7 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
     let root_id_crowds = root_id_value.clone();
     let root_id_cycles = root_id_value.clone();
     let root_id_dead = root_id_value.clone();
+    let root_id_twins = root_id_value.clone();
     let root_id_graph = root_id_value.clone();
     let root_id_graph_tab = root_id_graph.clone();
     let root_id_graph_container = root_id_graph.clone();
@@ -197,6 +198,16 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
                 >
                     <div class="content-container">
                         <DeadCode dead_exports=section.dead_exports.clone() />
+                    </div>
+                </TabContent>
+
+                <TabContent
+                    root_id=root_id_twins
+                    tab_name="twins"
+                    active=false
+                >
+                    <div class="content-container">
+                        <Twins twins=section.twins.clone() />
                     </div>
                 </TabContent>
 

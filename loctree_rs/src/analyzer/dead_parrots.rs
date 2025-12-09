@@ -418,6 +418,25 @@ fn should_skip_dead_export_check(analysis: &FileAnalysis, config: DeadFilterConf
         return true;
     }
 
+    // Example/demo/fixture packages (library-mode noise)
+    const EXAMPLE_DIRS: &[&str] = &[
+        "/examples/",
+        "/example/",
+        "/samples/",
+        "/sample/",
+        "/demo/",
+        "/demos/",
+        "/playground/",
+        "/showcase/",
+    ];
+    if EXAMPLE_DIRS.iter().any(|d| path.contains(d)) {
+        return true;
+    }
+    // Lowercase check for testfixtures (common in codemods)
+    if path.to_ascii_lowercase().contains("testfixtures") {
+        return true;
+    }
+
     // TypeScript declaration files (.d.ts) - only contain type declarations
     if path.ends_with(".d.ts") {
         return true;
@@ -463,6 +482,29 @@ fn should_skip_dead_export_check(analysis: &FileAnalysis, config: DeadFilterConf
         "/hooks.",
     ];
     if FRAMEWORK_ENTRY_PATTERNS.iter().any(|p| path.contains(p)) {
+        return true;
+    }
+
+    // Virtual/module-runtime entrypoints (framework-provided consumers)
+    const RUNTIME_PATTERNS: &[&str] =
+        &["/.svelte-kit/", "/runtime/", "/app/router/", "/app/routes/"];
+    if (analysis.language == "ts" || analysis.language == "js")
+        && RUNTIME_PATTERNS.iter().any(|p| path.contains(p))
+    {
+        return true;
+    }
+
+    // Library barrels and public API surfaces (avoid flagging public exports)
+    if (path.ends_with("/index.ts")
+        || path.ends_with("/index.tsx")
+        || path.ends_with("/index.js")
+        || path.ends_with("/index.mjs")
+        || path.ends_with("/index.cjs")
+        || path.ends_with("/mod.ts")
+        || path.ends_with("/mod.js"))
+        && (analysis.language == "ts" || analysis.language == "js")
+        && (path.contains("/packages/") || path.contains("/libs/") || path.contains("/library/"))
+    {
         return true;
     }
 
@@ -629,6 +671,35 @@ fn is_svelte_component_api(file_path: &str, export_name: &str) -> bool {
     false
 }
 
+fn is_rust_const_table(analysis: &FileAnalysis) -> bool {
+    if analysis.language != "rs" {
+        return false;
+    }
+    let const_exports: Vec<_> = analysis
+        .exports
+        .iter()
+        .filter(|e| e.kind == "const")
+        .collect();
+    if const_exports.len() < 8 {
+        return false;
+    }
+
+    let shouting: usize = const_exports
+        .iter()
+        .filter(|e| {
+            let name = e.name.as_str();
+            !name.is_empty()
+                && name
+                    .chars()
+                    .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+        })
+        .count();
+
+    // Heuristic: mostly uppercase consts, very few non-const exports => treat as data table.
+    let non_const_exports = analysis.exports.len().saturating_sub(const_exports.len());
+    shouting * 4 >= const_exports.len() * 3 && non_const_exports <= 2
+}
+
 /// Find potentially dead (unused) exports in the codebase
 pub fn find_dead_exports(
     analyses: &[FileAnalysis],
@@ -640,6 +711,8 @@ pub fn find_dead_exports(
     let mut used_exports: HashSet<(String, String)> = HashSet::new();
     // Track all imported symbol names as fallback (handles $lib/, @scope/, monorepo paths)
     let mut all_imported_symbols: HashSet<String> = HashSet::new();
+    // Track crate-internal imports for Rust: (raw_path, symbol_name)
+    let mut crate_internal_imports: Vec<(String, String)> = Vec::new();
 
     for analysis in analyses {
         for imp in &analysis.imports {
@@ -663,7 +736,12 @@ pub fn find_dead_exports(
                 // Track all imported symbol names as fallback for unresolved/incorrectly resolved paths
                 // This catches symbols imported via $lib/, @scope/, or other aliases that may not resolve correctly
                 if !used_name.is_empty() {
-                    all_imported_symbols.insert(used_name);
+                    all_imported_symbols.insert(used_name.clone());
+                }
+
+                // Track crate-internal imports (crate::, super::, self::)
+                if imp.is_crate_relative || imp.is_super_relative || imp.is_self_relative {
+                    crate_internal_imports.push((imp.raw_path.clone(), used_name));
                 }
             }
         }
@@ -785,6 +863,10 @@ pub fn find_dead_exports(
             continue;
         }
 
+        if is_rust_const_table(analysis) {
+            continue;
+        }
+
         let path_norm = normalize_module_id(&analysis.path).as_key();
 
         // Skip if file is reachable from dynamic imports (directly or transitively)
@@ -870,6 +952,22 @@ pub fn find_dead_exports(
             let is_rust_path_qualified =
                 analysis.path.ends_with(".rs") && rust_path_qualified_symbols.contains(&exp.name);
 
+            // Check if this export is imported via crate-internal paths (crate::, super::, self::)
+            // Use fuzzy matching since nested brace imports may have symbol names with extra chars
+            let crate_import_count = crate_internal_imports
+                .iter()
+                .filter(|(raw_path, symbol)| {
+                    // Exact match or symbol contains the export name (handles "MENU_GAP}" matching "MENU_GAP")
+                    let symbol_matches = symbol == &exp.name
+                        || symbol.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '_')
+                            == exp.name
+                        || symbol.trim_start_matches(|c: char| !c.is_alphanumeric() && c != '_')
+                            == exp.name;
+                    symbol_matches && crate_import_matches_file(raw_path, &analysis.path, &exp.name)
+                })
+                .count();
+            let is_crate_imported = crate_import_count > 0;
+
             if !is_used
                 && !star_used
                 && !locally_used
@@ -877,6 +975,7 @@ pub fn find_dead_exports(
                 && !imported_by_name
                 && !is_svelte_api
                 && !is_rust_path_qualified
+                && !is_crate_imported
             {
                 let open_url = super::build_open_url(&analysis.path, exp.line, open_base);
 
@@ -884,7 +983,8 @@ pub fn find_dead_exports(
                 let reason = if is_rust_file {
                     format!(
                         "No imports found for '{}'. Checked: direct imports (0 matches), \
-                         star imports (none), local uses (none), Tauri handlers (not registered)",
+                         star imports (none), crate imports (0 matches), local uses (none), \
+                         Tauri handlers (not registered)",
                         exp.name
                     )
                 } else {
@@ -1142,6 +1242,97 @@ mod tests {
         assert!(
             result.is_empty(),
             "imports across JS/TSX extensions should prevent dead export marking"
+        );
+    }
+
+    #[test]
+    fn test_find_dead_exports_respects_crate_imports() {
+        let exporter = mock_file_with_exports("src/ui/constants.rs", vec!["MENU_GAP"]);
+        let mut importer = mock_file("src/main.rs");
+        let mut imp = ImportEntry::new(
+            "crate::ui::constants::MENU_GAP".to_string(),
+            ImportKind::Static,
+        );
+        imp.raw_path = "crate::ui::constants::MENU_GAP".to_string();
+        imp.is_crate_relative = true;
+        imp.symbols.push(ImportSymbol {
+            name: "MENU_GAP".to_string(),
+            alias: None,
+            is_default: false,
+        });
+        importer.imports.push(imp);
+
+        let result = find_dead_exports(
+            &[importer, exporter],
+            false,
+            None,
+            DeadFilterConfig::default(),
+        );
+        assert!(
+            result.is_empty(),
+            "crate-internal imports should prevent dead export marking. Found: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_find_dead_exports_respects_super_imports() {
+        let exporter = mock_file_with_exports("src/types.rs", vec!["Config"]);
+        let mut importer = mock_file("src/ui/widget.rs");
+        let mut imp = ImportEntry::new("super::types::Config".to_string(), ImportKind::Static);
+        imp.raw_path = "super::types::Config".to_string();
+        imp.is_super_relative = true;
+        imp.symbols.push(ImportSymbol {
+            name: "Config".to_string(),
+            alias: None,
+            is_default: false,
+        });
+        importer.imports.push(imp);
+
+        let result = find_dead_exports(
+            &[importer, exporter],
+            false,
+            None,
+            DeadFilterConfig::default(),
+        );
+        assert!(
+            result.is_empty(),
+            "super:: imports should prevent dead export marking. Found: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_crate_import_matches_file_basic() {
+        // Test basic crate:: import matching
+        assert!(
+            crate_import_matches_file(
+                "crate::ui::constants::MENU_GAP",
+                "src/ui/constants.rs",
+                "MENU_GAP"
+            ),
+            "should match crate::ui::constants with src/ui/constants.rs"
+        );
+
+        assert!(
+            crate_import_matches_file("crate::types::Config", "src/types.rs", "Config"),
+            "should match crate::types with src/types.rs"
+        );
+
+        assert!(
+            crate_import_matches_file("super::utils::helper", "utils.rs", "helper"),
+            "should match super::utils with utils.rs"
+        );
+
+        // Test non-matches
+        assert!(
+            !crate_import_matches_file("crate::ui::constants::X", "src/ui/layout.rs", "X"),
+            "should NOT match constants with layout.rs"
+        );
+
+        assert!(
+            !crate_import_matches_file("external::package::Foo", "src/foo.rs", "Foo"),
+            "should NOT match non-crate imports"
         );
     }
 
@@ -1556,4 +1747,109 @@ fn is_python_test_path(path: &str) -> bool {
             .rsplit('/')
             .next()
             .is_some_and(|name| name.starts_with("test_"))
+}
+
+/// Check if a crate-internal import (e.g., `use crate::foo::MENU_GAP`) might reference
+/// an export from the given file path.
+///
+/// This is a heuristic approach that handles ~80% of cases without full module resolution:
+/// - Extract the module path from the import (e.g., `foo` from `crate::foo::X`)
+/// - Check if the export file's name/path matches that module segment
+///
+/// Examples:
+/// - `use crate::ui::constants::MENU_GAP` matches `src/ui/constants.rs`
+/// - `use super::types::Config` matches `types.rs` in parent dir
+/// - `use self::utils::helper` matches `utils.rs` in same dir
+fn crate_import_matches_file(
+    import_raw_path: &str,
+    export_file_path: &str,
+    symbol_name: &str,
+) -> bool {
+    // Only handle Rust crate-internal imports
+    if !import_raw_path.starts_with("crate::")
+        && !import_raw_path.starts_with("super::")
+        && !import_raw_path.starts_with("self::")
+    {
+        return false;
+    }
+
+    // Normalize the export file path for matching
+    let export_normalized = export_file_path.replace('\\', "/");
+
+    // Extract module path segments from import
+    // e.g., "crate::ui::constants::MENU_GAP" -> ["ui", "constants"]
+    let import_segments: Vec<&str> = import_raw_path
+        .split("::")
+        .filter(|s| *s != "crate" && *s != "super" && *s != "self" && *s != symbol_name)
+        .collect();
+
+    if import_segments.is_empty() {
+        return false;
+    }
+
+    // Build potential module path patterns
+    // For "crate::ui::constants::X", we check if file ends with:
+    // - "ui/constants.rs"
+    // - "ui/constants/mod.rs"
+    // - just "constants.rs" (simple heuristic)
+
+    let module_path = import_segments.join("/");
+
+    // Check various patterns:
+    // 1. Full path match: "src/ui/constants.rs"
+    if export_normalized.contains(&format!("{}.rs", module_path))
+        || export_normalized.contains(&format!("{}/mod.rs", module_path))
+        || export_normalized.contains(&format!("{}/lib.rs", module_path))
+    {
+        return true;
+    }
+
+    // 2. Last segment match (simple heuristic): "constants.rs"
+    if let Some(last_segment) = import_segments.last() {
+        let file_stem = export_normalized
+            .rsplit('/')
+            .next()
+            .unwrap_or("")
+            .trim_end_matches(".rs");
+
+        if file_stem == *last_segment {
+            return true;
+        }
+    }
+
+    // 3. super:: relative match - check if export is in parent directory
+    if import_raw_path.starts_with("super::") && !import_segments.is_empty() {
+        // For super::types::Config, check if file name is "types.rs"
+        if let Some(first_segment) = import_segments.first() {
+            let file_name = export_normalized.rsplit('/').next().unwrap_or("");
+            if file_name == format!("{}.rs", first_segment) {
+                return true;
+            }
+        }
+    }
+
+    // 4. Fallback heuristic for complex nested imports like:
+    //    crate::{..., code_context_menus::{..., MENU_GAP}, ...}
+    // Check if BOTH the symbol name AND the file's module name appear in raw_path
+    let file_stem = export_normalized
+        .rsplit('/')
+        .next()
+        .unwrap_or("")
+        .trim_end_matches(".rs")
+        .trim_end_matches("/mod");
+
+    // Symbol must appear as a word boundary (not part of another identifier)
+    let symbol_pattern = format!(r"\b{}\b", regex::escape(symbol_name));
+    let module_pattern = format!(r"\b{}\b", regex::escape(file_stem));
+
+    if let (Ok(sym_re), Ok(mod_re)) = (
+        regex::Regex::new(&symbol_pattern),
+        regex::Regex::new(&module_pattern),
+    ) && sym_re.is_match(import_raw_path)
+        && mod_re.is_match(import_raw_path)
+    {
+        return true;
+    }
+
+    false
 }

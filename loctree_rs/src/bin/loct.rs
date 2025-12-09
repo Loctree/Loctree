@@ -1,4 +1,5 @@
 use std::any::Any;
+use std::fs;
 use std::panic;
 use std::path::PathBuf;
 
@@ -540,6 +541,33 @@ fn run_for_ai(root_list: &[PathBuf], parsed: &args::ParsedArgs) -> std::io::Resu
         .unwrap_or_else(|| ".".to_string());
 
     let report = generate_for_ai_report(&project_root, &report_sections, &global_analyses);
+
+    // Persist agent bundle to disk for single-file consumption
+    if parsed.output == OutputMode::Json
+        && let Some(root) = root_list.first()
+    {
+        let agent_path = root.join(".loctree").join("agent.json");
+        if let Some(dir) = agent_path.parent() {
+            if let Err(e) = fs::create_dir_all(dir) {
+                eprintln!("[loct][agent] Failed to create {}: {}", dir.display(), e);
+            } else {
+                match serde_json::to_vec_pretty(&report) {
+                    Ok(data) => {
+                        if let Err(e) = fs::write(&agent_path, data) {
+                            eprintln!(
+                                "[loct][agent] Failed to write {}: {}",
+                                agent_path.display(),
+                                e
+                            );
+                        } else {
+                            eprintln!("[loct][agent] Bundle saved to {}", agent_path.display());
+                        }
+                    }
+                    Err(e) => eprintln!("[loct][agent] Failed to serialize agent bundle: {e}"),
+                }
+            }
+        }
+    }
 
     // JSONL mode outputs one QuickWin per line for streaming agent consumption
     if parsed.output == OutputMode::Jsonl {

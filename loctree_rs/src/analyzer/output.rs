@@ -11,6 +11,7 @@ use crate::types::{FileAnalysis, ImportKind, ImportResolutionKind, OutputMode, R
 
 use super::CommandGap;
 use super::ReportSection;
+use super::barrels::analyze_barrel_chaos;
 use super::classify::language_from_path;
 use super::crowd::detect_all_crowds_with_edges;
 use super::cycles;
@@ -19,10 +20,10 @@ use super::graph::{MAX_GRAPH_EDGES, MAX_GRAPH_NODES, build_graph_data};
 use super::html::render_html_report;
 use super::insights::collect_ai_insights;
 use super::open_server::current_open_base;
-use super::report::CommandBridge;
-use super::report::TreeNode;
+use super::report::{CommandBridge, TreeNode, TwinsData};
 use super::root_scan::{RootContext, normalize_module_id};
 use super::scan::resolve_event_constants_across_files;
+use super::twins::{detect_exact_twins, find_dead_parrots};
 use super::{DupSeverity, RankedDup};
 
 fn build_tree(analyses: &[FileAnalysis], root_path: &std::path::Path) -> Vec<TreeNode> {
@@ -173,7 +174,7 @@ pub fn process_root_context(
         .map(|a| (a.path.clone(), a.clone()))
         .collect();
 
-    let duplicate_exports: Vec<_> = export_index
+    let _duplicate_exports: Vec<_> = export_index
         .into_iter()
         .filter(|(_, files)| files.len() > 1)
         .collect();
@@ -700,6 +701,67 @@ pub fn process_root_context(
         Vec::new()
     };
 
+    // Run twins analysis (dead parrots, exact twins, barrel chaos)
+    let twins_data = if !parsed.skip_dead_symbols {
+        // Find dead parrots (0 imports)
+        let twins_result = find_dead_parrots(&analyses, true);
+
+        // Detect exact twins (same symbol exported from multiple files)
+        let exact_twins = detect_exact_twins(&analyses);
+
+        // Analyze barrel chaos (missing barrels, deep chains, inconsistent paths)
+        // Build snapshot from analyses for barrel analysis
+        let snapshot_barrels: Vec<crate::snapshot::BarrelFile> = barrels
+            .iter()
+            .map(|b| crate::snapshot::BarrelFile {
+                path: b.path.clone(),
+                module_id: b.module_id.clone(),
+                reexport_count: b.reexport_count,
+                targets: b.targets.clone(),
+            })
+            .collect();
+
+        let snapshot = crate::snapshot::Snapshot {
+            metadata: crate::snapshot::SnapshotMetadata {
+                schema_version: String::new(),
+                generated_at: String::new(),
+                roots: vec![root_path.display().to_string()],
+                languages: languages.clone(),
+                file_count: analyses.len(),
+                total_loc: analyses.iter().map(|a| a.loc).sum(),
+                scan_duration_ms: 0,
+                resolver_config: None,
+                git_repo: None,
+                git_branch: None,
+                git_commit: None,
+                git_scan_id: None,
+            },
+            files: analyses.clone(),
+            edges: graph_edges
+                .iter()
+                .map(|(from, to, label)| crate::snapshot::GraphEdge {
+                    from: from.clone(),
+                    to: to.clone(),
+                    label: label.clone(),
+                })
+                .collect(),
+            export_index: std::collections::HashMap::new(),
+            command_bridges: Vec::new(),
+            event_bridges: Vec::new(),
+            barrels: snapshot_barrels,
+        };
+        let barrel_analysis = analyze_barrel_chaos(&snapshot);
+
+        // Use the types directly from twins and barrels modules
+        Some(TwinsData {
+            dead_parrots: twins_result.dead_parrots,
+            exact_twins,
+            barrel_chaos: barrel_analysis,
+        })
+    } else {
+        None
+    };
+
     let duplicate_clusters_count = clusters_json.len();
     let max_cluster_size = symbol_occurrences
         .values()
@@ -737,6 +799,46 @@ pub fn process_root_context(
             "selfImport": unique.len() < sources.len(),
         }));
     }
+
+    // Visibility toggles (noise reduction)
+    let duplicates_hidden = parsed.suppress_duplicates;
+    let dynamic_hidden = parsed.suppress_dynamic;
+    let filtered_ranked_for_output = if duplicates_hidden {
+        Vec::new()
+    } else {
+        filtered_ranked.clone()
+    };
+    let clusters_json_for_output = if duplicates_hidden {
+        Vec::new()
+    } else {
+        clusters_json.clone()
+    };
+    let top_clusters_for_output = if duplicates_hidden {
+        Vec::new()
+    } else {
+        top_clusters.clone()
+    };
+    let duplicate_clusters_count_for_output = if duplicates_hidden {
+        0
+    } else {
+        duplicate_clusters_count
+    };
+    let max_cluster_size_for_output = if duplicates_hidden {
+        0
+    } else {
+        max_cluster_size
+    };
+
+    let dynamic_imports_json_for_output = if dynamic_hidden {
+        Vec::new()
+    } else {
+        dynamic_imports_json.clone()
+    };
+    let dynamic_summary_for_output = if dynamic_hidden {
+        Vec::new()
+    } else {
+        dynamic_summary.clone()
+    };
 
     let generated_at = OffsetDateTime::now_utc()
         .format(&Rfc3339)
@@ -798,9 +900,9 @@ pub fn process_root_context(
                 "languages": languages_vec,
                 "filesAnalyzed": analyses.len(),
                 "summary": {
-                    "duplicateExports": filtered_ranked.len(),
+                    "duplicateExports": filtered_ranked_for_output.len(),
                     "reexportFiles": reexport_files.len(),
-                    "dynamicImports": dynamic_summary.len(),
+                    "dynamicImports": dynamic_summary_for_output.len(),
                 "commands": {
                     "frontendCalls": fe_commands.len(),
                     "backendHandlers": be_commands.len(),
@@ -813,8 +915,8 @@ pub fn process_root_context(
                         "risks": pipeline_risks.len(),
                     },
                     "clusters": {
-                        "duplicateCount": duplicate_clusters_count,
-                        "maxClusterSize": max_cluster_size,
+                        "duplicateCount": duplicate_clusters_count_for_output,
+                        "maxClusterSize": max_cluster_size_for_output,
                     },
                     "barrels": {
                         "count": barrels.len(),
@@ -822,7 +924,7 @@ pub fn process_root_context(
                     },
                 },
                 "topIssues": {
-                    "duplicateExports": filtered_ranked.iter().take(top_limit).map(|dup| json!({
+                    "duplicateExports": filtered_ranked_for_output.iter().take(top_limit).map(|dup| json!({
                         "name": dup.name,
                         "canonical": dup.canonical,
                         "canonicalLine": dup.canonical_line,
@@ -853,7 +955,7 @@ pub fn process_root_context(
                     "events": event_alerts,
                     "pipelineRisks": pipeline_risks.iter().take(top_limit).cloned().collect::<Vec<_>>(),
                     "deadSymbols": dead_symbols.iter().take(parsed.top_dead_symbols).cloned().collect::<Vec<_>>(),
-                    "duplicateClusters": top_clusters,
+                    "duplicateClusters": top_clusters_for_output,
                     "bridges": bridges_for_ai,
                     "barrels": barrels_json.iter().take(barrel_limit).cloned().collect::<Vec<_>>(),
                 },
@@ -889,7 +991,7 @@ pub fn process_root_context(
                 },
                 "languages": languages_vec,
                 "filesAnalyzed": analyses.len(),
-                "duplicateExports": filtered_ranked
+                "duplicateExports": filtered_ranked_for_output
                     .iter()
                     .map(|dup| json!({
                         "name": dup.name,
@@ -897,7 +999,7 @@ pub fn process_root_context(
                         "locations": dup.locations,
                     }))
                     .collect::<Vec<_>>(),
-                "duplicateExportsRanked": filtered_ranked
+                "duplicateExportsRanked": filtered_ranked_for_output
                     .iter()
                     .map(|dup| json!({
                         "name": dup.name,
@@ -920,7 +1022,7 @@ pub fn process_root_context(
                     .map(|(from, to)| json!({"from": from, "to": to}))
                     .collect::<Vec<_>>(),
                 "barrels": barrels_json,
-                "dynamicImports": dynamic_imports_json,
+                "dynamicImports": dynamic_imports_json_for_output,
                 "commands": {
                     "frontend": fe_commands.iter().map(|(k,v)| json!({"name": k, "locations": v})).collect::<Vec<_>>(),
                     "backend": be_commands.iter().map(|(k,v)| json!({"name": k, "locations": v})).collect::<Vec<_>>(),
@@ -957,7 +1059,7 @@ pub fn process_root_context(
                     "unregistered_handlers": unregistered_handlers.iter().map(|g| &g.name).collect::<Vec<_>>(),
                 },
                 "symbols": symbols_json,
-                "clusters": clusters_json,
+                "clusters": clusters_json_for_output,
                 "pipeline": pipeline_summary,
                 "aiViews": {
                     "defaultExportChains": default_export_chains,
@@ -980,9 +1082,9 @@ pub fn process_root_context(
                         "items": barrels_json,
                     },
                     "ciSummary": {
-                        "duplicateClustersCount": duplicate_clusters_count,
-                        "maxClusterSize": max_cluster_size,
-                        "topClusters": top_clusters,
+                        "duplicateClustersCount": duplicate_clusters_count_for_output,
+                        "maxClusterSize": max_cluster_size_for_output,
+                        "topClusters": top_clusters_for_output,
                     }
                 },
                 "files": files_json,
@@ -1005,9 +1107,17 @@ pub fn process_root_context(
 
         println!("Import/export analysis for {}/", root_path.display());
         println!("  Files analyzed: {}", analyses.len());
-        println!("  Duplicate exports: {}", filtered_ranked.len());
+        if duplicates_hidden {
+            println!("  Duplicate exports: (hidden by --no-duplicates)");
+        } else {
+            println!("  Duplicate exports: {}", filtered_ranked_for_output.len());
+        }
         println!("  Files with re-exports: {}", reexport_files.len());
-        println!("  Dynamic imports: {}", dynamic_summary.len());
+        if dynamic_hidden {
+            println!("  Dynamic imports: (hidden by --no-dynamic-imports)");
+        } else {
+            println!("  Dynamic imports: {}", dynamic_summary_for_output.len());
+        }
         if dead_symbols_total > 0 {
             println!(
                 "  Dead exports (high confidence): {}{}",
@@ -1020,7 +1130,7 @@ pub fn process_root_context(
             );
         }
 
-        if !duplicate_exports.is_empty() {
+        if !duplicates_hidden && !filtered_ranked_for_output.is_empty() {
             // Count silenced (cross-lang) duplicates
             let cross_lang_count = filtered_ranked
                 .iter()
@@ -1081,12 +1191,12 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
             }
         }
 
-        if !dynamic_summary.is_empty() {
+        if !dynamic_hidden && !dynamic_summary_for_output.is_empty() {
             println!(
                 "\nDynamic imports (showing up to {}):",
                 parsed.analyze_limit
             );
-            let mut sorted_dyn = dynamic_summary.clone();
+            let mut sorted_dyn = dynamic_summary_for_output.clone();
             sorted_dyn.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
             for (file, sources) in sorted_dyn.iter().take(parsed.analyze_limit) {
                 println!(
@@ -1214,6 +1324,7 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
             git_commit: git.and_then(|g| g.commit.clone()),
             crowds: crowds.clone(),
             dead_exports: dead_exports_for_report.clone(),
+            twins_data: twins_data.clone(),
         });
     }
 

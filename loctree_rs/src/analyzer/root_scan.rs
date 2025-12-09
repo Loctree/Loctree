@@ -332,6 +332,7 @@ fn scan_single_root(
         output: cfg.parsed.output,
         summary: cfg.parsed.summary,
         summary_limit: cfg.parsed.summary_limit,
+        summary_only: cfg.parsed.summary_only,
         show_hidden: cfg.parsed.show_hidden,
         show_ignored: false, // Only used in tree mode
         loc_threshold: cfg.parsed.loc_threshold,
@@ -552,7 +553,7 @@ fn scan_single_root(
                     resolve_js_relative(&file, root_path, spec, options.extensions.as_ref())
                 } else if matches!(
                     ext.as_str(),
-                    "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "svelte"
+                    "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "svelte" | "vue"
                 ) {
                     ts_resolver
                         .as_ref()
@@ -605,7 +606,7 @@ fn scan_single_root(
                             )
                         }
                     }
-                    "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "css" | "svelte" => {
+                    "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "css" | "svelte" | "vue" => {
                         if imp.source.starts_with('.') {
                             resolve_js_relative(
                                 &file,
@@ -988,6 +989,8 @@ fn is_index_like(path: &str) -> bool {
         || lowered.ends_with("/index.mjs")
         || lowered.ends_with("/index.cjs")
         || lowered.ends_with("/index.rs")
+        || lowered.ends_with("/index.svelte")
+        || lowered.ends_with("/index.vue")
 }
 
 /// Normalized module identifier with language context
@@ -1033,12 +1036,14 @@ pub(crate) fn normalize_module_id(path: &str) -> NormalizedModule {
 
     // Extract language family from extension (collapse TS/JS variants)
     for ext in [
-        ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".rs", ".py", ".css", ".svelte",
+        ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".rs", ".py", ".css", ".svelte", ".vue",
     ] {
         if let Some(stripped) = p.strip_suffix(ext) {
             p = stripped.to_string();
             lang = match ext {
-                ".ts" | ".tsx" | ".js" | ".jsx" | ".mjs" | ".cjs" | ".svelte" => "ts".to_string(),
+                ".ts" | ".tsx" | ".js" | ".jsx" | ".mjs" | ".cjs" | ".svelte" | ".vue" => {
+                    "ts".to_string()
+                }
                 ".rs" => "rs".to_string(),
                 ".py" => "py".to_string(),
                 ".css" => "css".to_string(),
@@ -1212,6 +1217,7 @@ pub fn scan_results_from_snapshot(snapshot: &Snapshot) -> ScanResults {
                 output: OutputMode::Human,
                 summary: false,
                 summary_limit: 5,
+                summary_only: false,
                 show_hidden: false,
                 show_ignored: false,
                 loc_threshold: 1000,
@@ -1800,6 +1806,8 @@ where = ["services"]
             ("file.rs", "rs"),
             ("file.py", "py"),
             ("file.css", "css"),
+            ("file.svelte", "ts"),
+            ("file.vue", "ts"),
         ];
 
         for (input, expected_lang) in extensions {
@@ -1863,5 +1871,25 @@ where = ["services"]
         // Different language should be different
         set.insert(mod3.clone());
         assert_eq!(set.len(), 2);
+    }
+
+    #[test]
+    fn test_is_index_like_vue_files() {
+        // Test that Vue index files are recognized
+        assert!(is_index_like("src/components/index.vue"));
+        assert!(is_index_like("components/index.vue"));
+        assert!(is_index_like("/absolute/path/index.vue"));
+
+        // Test case insensitivity
+        assert!(is_index_like("src/components/INDEX.VUE"));
+
+        // Non-index Vue files should return false
+        assert!(!is_index_like("src/components/Button.vue"));
+        assert!(!is_index_like("src/App.vue"));
+
+        // Other index files should still work
+        assert!(is_index_like("src/index.ts"));
+        assert!(is_index_like("src/index.js"));
+        assert!(is_index_like("src/index.svelte"));
     }
 }

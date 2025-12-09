@@ -12,18 +12,23 @@ on:
     - cron: '0 0 * * 0'  # Weekly on Sunday
 
 permissions:
+  contents: read
   security-events: write
 
 jobs:
   semgrep:
     name: Scan
     runs-on: ubuntu-latest
-    container:
-      image: semgrep/semgrep
 
     steps:
+      - name: Allow git in GitHub Actions workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Install Semgrep
+        run: python -m pip install --upgrade pip && pip install semgrep
 
       - name: Run Semgrep
         run: semgrep scan --config auto --config p/rust --config p/typescript --sarif --output semgrep.sarif .
@@ -31,7 +36,10 @@ jobs:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
 
       - name: Upload SARIF
-        uses: github/codeql-action/upload-sarif@v3
+        if: |
+          always() &&
+          github.event_name != 'pull_request' ||
+          github.event.pull_request.head.repo.fork == false
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: semgrep.sarif
-        if: always()
