@@ -22,18 +22,22 @@ Testing loctree on THE Python interpreter source - the reference implementation 
 ## Findings
 
 ### Dead Code Detection
-- **High Confidence**: 278 candidates
-- **False Positive Rate**: 100% (expected for stdlib)
+- **High Confidence**: 278 candidates (v0.6.1)
+- **False Positive Rate**: 100% without library mode
+- **With `--library-mode`**: Auto-detects stdlib, excludes `__all__` exports
 
-### Why 100% FP is Expected
+### Why Library Mode Matters (v0.6.x)
 
-All flagged exports are **public API** for external use:
+Without library mode, all flagged exports are **public API** for external use:
 - `calendar.APRIL` - Public API constant
 - `csv.DictWriter` - Core utility class
 - `ftplib.all_errors` - Used by urllib, socket, asyncio
 - `typing.override` - Used across stdlib
 
-**These are NOT dead** - they're exported for millions of Python programs!
+**v0.6.x improvements**:
+- Auto-detects `Lib/` directory as stdlib
+- Respects `__all__` declarations in modules
+- Use `--library-mode` for proper stdlib analysis
 
 ### Additional Findings
 - **Dead Parrots**: 172 classes/functions
@@ -56,20 +60,21 @@ loct cycles                       # Circular dependencies
 
 ## Verdict
 
-**NOT SUITABLE for stdlib analysis** - 100% FP expected for public library APIs.
+**LIBRARY MODE REQUIRED** - Use `--library-mode` for proper stdlib analysis (v0.6.x).
 
 ## Key Insights
 
 1. **Performance**: Fast and stable (33 files/sec)
-2. **Accuracy**: Not designed for public library APIs
-3. **Need**: `--library-mode` flag essential for stdlib/framework code
+2. **Accuracy**: Requires library mode for public API analysis
+3. **v0.6.x**: Auto-detection of stdlib, `__all__` tracking implemented
 
 ## Recommendations
 
 For Python stdlib/library analysis:
-- Implement `--library-mode` to exclude `__all__` exports
-- Parse `setup.py`/`pyproject.toml` for public API hints
-- Focus on internal modules (`_internal/`, `_impl/`)
+- Use `--library-mode` flag for automatic `__all__` exclusion
+- Auto-detects `Lib/` directory as Python stdlib
+- `pyproject.toml` parsing for public API hints
+- Focus on internal modules (`_internal/`, `_impl/`) for application code
 
 ---
 

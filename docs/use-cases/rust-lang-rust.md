@@ -35,9 +35,9 @@ The ultimate stress test for Rust analysis - analyzing THE Rust compiler source 
 - **High Confidence**: 1 finding (test fixture - intentional)
 - **False Positive Rate**: 0%
 
-### Circular Dependencies - MAJOR FINDING
+### Circular Dependencies - Architectural Analysis
 ```
-✓ Found 91 circular import cycles
+✓ Found 91 circular import cycles (intra-crate)
 ```
 
 **Notable cycles detected**:
@@ -60,7 +60,12 @@ The ultimate stress test for Rust analysis - analyzing THE Rust compiler source 
    tokenstream.rs → ast_traits.rs → util/parser.rs → visit.rs
    ```
 
-**Status**: These cycles are architectural necessities in the Rust compiler but are **not documented** in the rust-lang repository. Potential for upstream issue/discussion.
+**Manual Verification Result**: These are **NOT bugs** - they are normal Rust architecture:
+- All cycles are **intra-crate** (`crate::` imports within same library)
+- Rust allows modules within the same crate to mutually import each other
+- Compiler resolves via lazy name resolution + type checking post-resolution
+- This is fundamentally different from JavaScript/Python circular imports
+- **No upstream issue warranted** - this is standard Rust module organization
 
 ### Twins Analysis
 - **Exact Duplicates**: 7,918 (mostly test `main()` functions)
@@ -84,12 +89,23 @@ loct twins                        # Duplicate detection
 
 1. **Scalability Proven**: 35K files in 45 seconds
 2. **Accuracy Validated**: 0% FP on dead code
-3. **Cycle Detection**: Found 91 real architectural cycles
-4. **Production Ready**: Zero crashes, complete analysis
+3. **Cycle Detection**: Found 91 real architectural cycles (intra-crate, by design)
+4. **Zero Crashes**: Complete analysis on 558 MB codebase
 
-## Potential Upstream Contribution
+## Note on Intra-Crate Cycles
 
-The 91 circular dependencies detected are not documented in rust-lang/rust. Consider opening an issue to document these architectural patterns for contributor awareness.
+Unlike JavaScript/Python where circular imports can cause `undefined`/`None` at runtime, Rust's module system handles intra-crate cycles gracefully:
+
+```rust
+// This is VALID Rust - fmt imports cell, cell imports fmt
+// crate::fmt::mod.rs
+use crate::cell::Cell;
+
+// crate::cell.rs
+use crate::fmt::{Debug, Display};
+```
+
+Loctree correctly detects these architectural patterns but they should be interpreted as "module interdependencies" rather than "problematic cycles."
 
 ---
 

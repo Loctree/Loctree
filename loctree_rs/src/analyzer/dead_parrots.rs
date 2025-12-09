@@ -2173,6 +2173,45 @@ mod tests {
     }
 
     #[test]
+    fn test_weakmap_registry_skips_dead_exports() {
+        // Test that exports in files with WeakMap/WeakSet are not marked as dead
+        // This handles React DevTools and similar code where exports are stored dynamically
+
+        let weakmap_file = FileAnalysis {
+            path: "src/devtools.ts".to_string(),
+            language: "ts".to_string(),
+            has_weak_collections: true, // File contains new WeakMap() or new WeakSet()
+            exports: vec![
+                ExportSymbol::new(
+                    "registerComponent".to_string(),
+                    "function",
+                    "named",
+                    Some(10),
+                ),
+                ExportSymbol::new(
+                    "getComponentData".to_string(),
+                    "function",
+                    "named",
+                    Some(20),
+                ),
+            ],
+            ..Default::default()
+        };
+
+        // Simulate that these exports are NOT imported anywhere (would normally be dead)
+        // But they should not be flagged because the file has WeakMap/WeakSet
+
+        let analyses = vec![weakmap_file];
+        let result = find_dead_exports(&analyses, false, None, DeadFilterConfig::default());
+
+        assert!(
+            result.is_empty(),
+            "Exports in files with WeakMap/WeakSet should NOT be flagged as dead. Found: {:?}",
+            result
+        );
+    }
+
+    #[test]
     fn test_paths_match_exact() {
         assert!(paths_match("src/App.tsx", "src/App.tsx"));
         assert!(paths_match("foo.ts", "foo.ts"));
@@ -2361,7 +2400,9 @@ mod tests {
 #[cfg(test)]
 mod integration_tests {
     use super::*;
-    use crate::types::{ExportSymbol, ImportEntry, ImportKind, ImportSymbol};
+    use crate::types::{
+        ExportSymbol, ImportEntry, ImportKind, ImportSymbol, ReexportEntry, ReexportKind,
+    };
 
     #[test]
     fn test_recommendations_pdf_not_dead() {
@@ -2401,6 +2442,97 @@ mod integration_tests {
         assert!(
             result.is_empty(),
             "RecommendationsPDFTemplate should NOT be dead. Found: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_dts_reexport_marks_implementation_as_used() {
+        // Test the Svelte .d.ts re-export pattern (60% of FPs)
+        // Pattern: easing/index.d.ts re-exports from easing/index.js
+        // The exports in index.js should NOT be marked as dead
+
+        // Implementation file (.js)
+        let mut implementation = FileAnalysis {
+            path: "packages/svelte/src/easing/index.js".to_string(),
+            language: "js".to_string(),
+            ..Default::default()
+        };
+        implementation.exports = vec![
+            ExportSymbol::new("linear".to_string(), "function", "named", Some(1)),
+            ExportSymbol::new("backIn".to_string(), "function", "named", Some(5)),
+            ExportSymbol::new("backOut".to_string(), "function", "named", Some(10)),
+        ];
+
+        // Declaration file (.d.ts) that re-exports from implementation
+        let mut declaration = FileAnalysis {
+            path: "packages/svelte/src/easing/index.d.ts".to_string(),
+            language: "ts".to_string(),
+            ..Default::default()
+        };
+        declaration.reexports.push(ReexportEntry {
+            source: "./index.js".to_string(),
+            kind: ReexportKind::Named(vec![
+                "linear".to_string(),
+                "backIn".to_string(),
+                "backOut".to_string(),
+            ]),
+            resolved: Some("packages/svelte/src/easing/index.js".to_string()),
+        });
+
+        let result = find_dead_exports(
+            &[implementation, declaration],
+            false,
+            None,
+            DeadFilterConfig::default(),
+        );
+
+        // All easing functions should be marked as used (re-exported by .d.ts)
+        assert!(
+            result.is_empty(),
+            "Exports re-exported by .d.ts should NOT be marked as dead. Found dead: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_dts_star_reexport_marks_all_as_used() {
+        // Test .d.ts star re-export pattern
+        // Pattern: index.d.ts has `export * from './impl.js'`
+
+        let mut implementation = FileAnalysis {
+            path: "lib/impl.js".to_string(),
+            language: "js".to_string(),
+            ..Default::default()
+        };
+        implementation.exports = vec![
+            ExportSymbol::new("funcA".to_string(), "function", "named", Some(1)),
+            ExportSymbol::new("funcB".to_string(), "function", "named", Some(5)),
+            ExportSymbol::new("funcC".to_string(), "function", "named", Some(10)),
+        ];
+
+        let mut declaration = FileAnalysis {
+            path: "lib/index.d.ts".to_string(),
+            language: "ts".to_string(),
+            ..Default::default()
+        };
+        declaration.reexports.push(ReexportEntry {
+            source: "./impl.js".to_string(),
+            kind: ReexportKind::Star,
+            resolved: Some("lib/impl.js".to_string()),
+        });
+
+        let result = find_dead_exports(
+            &[implementation, declaration],
+            false,
+            None,
+            DeadFilterConfig::default(),
+        );
+
+        // All functions should be marked as used (star re-export from .d.ts)
+        assert!(
+            result.is_empty(),
+            "Exports re-exported via star by .d.ts should NOT be marked as dead. Found dead: {:?}",
             result
         );
     }

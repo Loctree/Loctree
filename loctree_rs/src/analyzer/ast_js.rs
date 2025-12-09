@@ -465,7 +465,10 @@ fn is_svelte_builtin(name: &str) -> bool {
 /// Check if file uses Flow type annotations
 /// Flow files start with // @flow or /* @flow */
 fn is_flow_file(content: &str) -> bool {
-    let first_1000 = &content[..content.len().min(1000)];
+    // Use floor_char_boundary to avoid panic on UTF-8 multi-byte characters
+    let end_idx = content.len().min(1000);
+    let safe_end = content.floor_char_boundary(end_idx);
+    let first_1000 = &content[..safe_end];
     first_1000.contains("@flow")
         || first_1000.contains("// @flow")
         || first_1000.contains("/* @flow */")
@@ -551,7 +554,6 @@ pub(crate) fn analyze_js_file_ast(
         source_text: content_to_parse,
         command_cfg,
         namespace_imports: HashMap::new(),
-        is_flow_file: is_flow,
     };
 
     visitor.visit_program(&ret.program);
@@ -625,8 +627,6 @@ struct JsVisitor<'a> {
     command_cfg: &'a CommandDetectionConfig,
     /// Map of namespace import aliases to their resolved paths: alias -> (source, resolved_path)
     namespace_imports: HashMap<String, (String, Option<String>)>,
-    /// Whether this file uses Flow type annotations
-    is_flow_file: bool,
 }
 
 impl<'a> JsVisitor<'a> {
@@ -2341,6 +2341,73 @@ export const myValue = 42;
         assert!(
             !analysis.is_flow_file,
             "File without @flow annotation should NOT be detected as Flow file"
+        );
+    }
+
+    /// Test WeakMap/WeakSet detection for registry pattern (React DevTools, etc.)
+    #[test]
+    fn test_weakmap_detection() {
+        let content = r#"
+            // React DevTools pattern: store component metadata in WeakMap
+            const componentMap = new WeakMap();
+            const stateMap = new WeakSet();
+
+            export function registerComponent(component) {
+                componentMap.set(component, { name: component.name });
+            }
+
+            export const MyComponent = () => <div>Hello</div>;
+        "#;
+
+        let analysis = analyze_js_file_ast(
+            content,
+            Path::new("src/devtools.tsx"), // Use .tsx for JSX support
+            Path::new("src"),
+            None,
+            None,
+            "devtools.tsx".to_string(),
+            &CommandDetectionConfig::default(),
+        );
+
+        assert!(
+            analysis.has_weak_collections,
+            "Should detect WeakMap/WeakSet usage"
+        );
+
+        // Should export 2 symbols
+        assert_eq!(analysis.exports.len(), 2);
+        assert!(
+            analysis
+                .exports
+                .iter()
+                .any(|e| e.name == "registerComponent")
+        );
+        assert!(analysis.exports.iter().any(|e| e.name == "MyComponent"));
+    }
+
+    /// Test that files without WeakMap/WeakSet don't get flagged
+    #[test]
+    fn test_no_weakmap_detection() {
+        let content = r#"
+            const cache = new Map();
+            export function getCached(key) {
+                return cache.get(key);
+            }
+        "#;
+
+        let analysis = analyze_js_file_ast(
+            content,
+            Path::new("src/cache.ts"),
+            Path::new("src"),
+            None,
+            None,
+            "cache.ts".to_string(),
+            &CommandDetectionConfig::default(),
+        );
+
+        assert!(
+            !analysis.has_weak_collections,
+            "Should NOT flag regular Map as WeakMap"
         );
     }
 }
