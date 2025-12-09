@@ -12,8 +12,8 @@ categories = ["development-tools", "command-line-utilities"]
 # MCP Protocol
 rmcp = { version = "0.10", features = ["server", "transport-io"] }
 
-# Loctree core (path for now, will be version after publish)
-loctree = { path = "../loctree_rs" }
+# Loctree core
+loctree = { version = "0.6.6", path = "../loctree_rs" }
 
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }
