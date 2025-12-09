@@ -2052,6 +2052,7 @@ export const greeting = message + ' World'
             import { useState as useStateHook, useEffect } from 'react';
             import DefaultExport from './module';
             import { originalName as renamedImport } from './utils';
+            import { default as DefaultWithAlias } from './other';
 
             // Use the imports (to avoid them being marked as unused in other analyses)
             MyComponent();
@@ -2059,6 +2060,7 @@ export const greeting = message + ' World'
             useEffect();
             DefaultExport();
             renamedImport();
+            DefaultWithAlias();
         "#;
 
         let analysis = analyze_js_file_ast(
@@ -2071,39 +2073,31 @@ export const greeting = message + ' World'
             &CommandDetectionConfig::default(),
         );
 
-        // Debug: print all imports
-        eprintln!("All imports:");
-        for (i, imp) in analysis.imports.iter().enumerate() {
-            eprintln!("  [{}] source={}, symbols={:?}", i, imp.source, imp.symbols);
-        }
-
-        // Find the react import
-        let react_import = analysis
+        // Find ALL react imports - they may be separate or merged depending on implementation
+        let react_imports: Vec<_> = analysis
             .imports
             .iter()
-            .find(|i| i.source == "react")
-            .expect("Should find react import");
+            .filter(|i| i.source == "react")
+            .collect();
 
-        eprintln!("React import has {} symbols", react_import.symbols.len());
+        // Collect all react symbols across all import entries
+        let all_react_symbols: Vec<_> = react_imports
+            .iter()
+            .flat_map(|i| i.symbols.iter())
+            .collect();
 
-        // Should have 2 symbols from react
+        // We should have 3 symbols from react: Component, useState, useEffect
         assert_eq!(
-            react_import.symbols.len(),
-            2,
-            "Should have 2 symbols from react"
+            all_react_symbols.len(),
+            3,
+            "Should have 3 symbols from react total"
         );
 
         // Check Component as MyComponent
-        let component_sym = react_import
-            .symbols
+        let component_sym = all_react_symbols
             .iter()
             .find(|s| s.name == "Component")
             .expect("Should find Component symbol");
-
-        assert_eq!(
-            component_sym.name, "Component",
-            "Original export name should be 'Component'"
-        );
         assert_eq!(
             component_sym.alias.as_deref(),
             Some("MyComponent"),
@@ -2115,8 +2109,7 @@ export const greeting = message + ' World'
         );
 
         // Check useState as useStateHook
-        let usestate_sym = react_import
-            .symbols
+        let usestate_sym = all_react_symbols
             .iter()
             .find(|s| s.name == "useState")
             .expect("Should find useState symbol");
@@ -2132,8 +2125,7 @@ export const greeting = message + ' World'
         );
 
         // Check useEffect (no alias)
-        let useeffect_sym = react_import
-            .symbols
+        let useeffect_sym = all_react_symbols
             .iter()
             .find(|s| s.name == "useEffect")
             .expect("Should find useEffect symbol");
@@ -2165,6 +2157,28 @@ export const greeting = message + ' World'
             original_sym.alias.as_deref(),
             Some("renamedImport"),
             "Alias should be 'renamedImport'"
+        );
+
+        // Check { default as DefaultWithAlias } pattern
+        let other_import = analysis
+            .imports
+            .iter()
+            .find(|i| i.source == "./other")
+            .expect("Should find ./other import");
+
+        let default_alias_sym = &other_import.symbols[0];
+        assert_eq!(
+            default_alias_sym.name, "default",
+            "Should track 'default' as the original export name"
+        );
+        assert_eq!(
+            default_alias_sym.alias.as_deref(),
+            Some("DefaultWithAlias"),
+            "Alias should be 'DefaultWithAlias'"
+        );
+        assert!(
+            !default_alias_sym.is_default,
+            "This is NOT a default import (uses named import syntax)"
         );
     }
 
