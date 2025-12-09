@@ -259,7 +259,7 @@ pub fn print_twins_human(result: &TwinsResult) {
         return;
     }
 
-    println!("🦜 DEAD PARROTS ({} found)", result.dead_parrots.len());
+    println!("DEAD PARROTS ({} found)", result.dead_parrots.len());
     println!();
 
     // Group by file for cleaner output

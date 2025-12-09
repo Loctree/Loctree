@@ -27,25 +27,40 @@ const BINARY_EXTENSIONS: &[&str] = &[
     "mp4", "avi", "mov", "wav",
 ];
 
+/// Source code extensions that should never be treated as binary
+const SOURCE_CODE_EXTENSIONS: &[&str] = &[
+    "rs", "ts", "tsx", "js", "jsx", "mjs", "cjs", "py", "go", "dart", "svelte", "vue", "css",
+    "scss", "less", "html", "json", "yaml", "yml", "toml", "md", "txt",
+];
+
 /// Check if a file is likely binary based on extension or magic bytes
 fn is_binary_file(path: &Path) -> bool {
-    // Check extension first (fast path)
-    if let Some(ext) = path.extension().and_then(|e| e.to_str())
-        && BINARY_EXTENSIONS.contains(&ext.to_lowercase().as_str())
-    {
-        return true;
+    // Check extension first
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        let ext_lower = ext.to_lowercase();
+
+        // Known binary extensions - definitely binary
+        if BINARY_EXTENSIONS.contains(&ext_lower.as_str()) {
+            return true;
+        }
+
+        // Known source code extensions - never binary (even with UTF-8 chars)
+        if SOURCE_CODE_EXTENSIONS.contains(&ext_lower.as_str()) {
+            return false;
+        }
     }
 
-    // Check magic bytes for unknown extensions
+    // Check magic bytes only for unknown extensions
     if let Ok(mut file) = std::fs::File::open(path) {
         use std::io::Read;
         let mut buffer = [0u8; 512];
-        if let Ok(n) = file.read(&mut buffer) {
-            // Check for null bytes or high percentage of non-ASCII
+        if let Ok(n) = file.read(&mut buffer)
+            && n > 0
+        {
+            // Only null bytes indicate true binary (executables, images, etc.)
+            // UTF-8 encoded text files may have non-ASCII but never null bytes
             let null_count = buffer[..n].iter().filter(|&&b| b == 0).count();
-            let non_ascii = buffer[..n].iter().filter(|&&b| b > 127).count();
-
-            if null_count > 0 || non_ascii as f64 / n as f64 > 0.3 {
+            if null_count > 0 {
                 return true;
             }
         }
