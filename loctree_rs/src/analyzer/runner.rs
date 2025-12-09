@@ -410,6 +410,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                 include_helpers: parsed.with_helpers,
                 library_mode,
                 example_globs: parsed.library_example_globs.clone(),
+                python_library_mode: parsed.python_library,
             },
         );
         // Apply --focus and --exclude-report filters to dead exports
@@ -548,6 +549,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                 include_helpers: parsed.with_helpers,
                 library_mode,
                 example_globs: parsed.library_example_globs.clone(),
+                python_library_mode: parsed.python_library,
             },
         );
 
@@ -720,6 +722,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                 include_helpers: parsed.with_helpers,
                 library_mode,
                 example_globs: parsed.library_example_globs.clone(),
+                python_library_mode: parsed.python_library,
             },
         );
         let dead_count = dead_exports.len();

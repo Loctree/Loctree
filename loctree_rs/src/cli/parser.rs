@@ -113,6 +113,10 @@ pub fn parse_command(args: &[String]) -> Result<Option<ParsedCommand>, String> {
                 global.library_mode = true;
                 i += 1;
             }
+            "--python-library" => {
+                global.python_library = true;
+                i += 1;
+            }
             "--help" | "-h" => {
                 // Help is special - if no subcommand yet, show main help
                 if subcommand.is_none() {

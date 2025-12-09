@@ -5286,7 +5286,7 @@ dependencies = [
 
 [[package]]
 name = "loctree"
-version = "0.6.2-dev"
+version = "0.6.3-dev"
 dependencies = [
  "anyhow",
  "assert_cmd",

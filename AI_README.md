@@ -1,6 +1,8 @@
-# loct — AI Agent Quick Reference (v0.5.18)
+# loct — AI Agent Quick Reference (v0.6.3-dev)
 
 Static analysis for AI agents: scan once, slice many. Default `loct` writes `.loctree/<branch@sha>/snapshot.json`; use `loct report --serve` (or `loct lint --sarif`) when you need full artifacts (`analysis.json`, `report.html`, `report.sarif`, etc.).
+
+**v0.6.x highlights**: Dart/Flutter support, improved dead code detection (WeakMap/WeakSet, Flow types, .d.ts re-exports), Python `__all__` tracking, library mode auto-detection.
 
 > **Full documentation:** [AI Agent's Manual](docs/tutorials/ai-agents-manual.md)
 
@@ -52,18 +54,20 @@ loct lint --fail --sarif > results.sarif
 
 ```bash
 cargo install loctree
-loct --version   # expect 0.5.18+
+loct --version   # expect 0.6.3-dev+
 ```
 
 ## Auto-Detect Stack
 
-| Marker          | Stack      | Auto-Ignores                |
-|-----------------|------------|-----------------------------|
-| `Cargo.toml`    | Rust       | `target/`                   |
-| `tsconfig.json` | TypeScript | `node_modules/`, `dist/`    |
-| `pyproject.toml`| Python     | `.venv/`, `__pycache__/`    |
-| `src-tauri/`    | Tauri      | All above                   |
-| `vite.config.*` | Vite       | `dist/`, `build/`           |
+| Marker          | Stack         | Auto-Ignores                | Languages |
+|-----------------|---------------|-----------------------------| --------- |
+| `Cargo.toml`    | Rust          | `target/`                   | Rust |
+| `tsconfig.json` | TypeScript    | `node_modules/`, `dist/`    | TS, JS, JSX, TSX |
+| `pyproject.toml`| Python        | `.venv/`, `__pycache__/`    | Python |
+| `src-tauri/`    | Tauri         | All above                   | TS, Rust |
+| `vite.config.*` | Vite          | `dist/`, `build/`           | Auto |
+| `pubspec.yaml`  | Dart/Flutter  | `.dart_tool/`, `build/`     | Dart |
+| `go.mod`        | Go            | `vendor/`                   | Go |
 
 ## What to Run (by goal)
 
@@ -109,6 +113,20 @@ loct --version   # expect 0.5.18+
 
 - **Virtual modules** — Resolves `$app/navigation`, `$app/stores`, `$lib/*` paths
 - **Runtime modules** — Maps SvelteKit runtime internals correctly
+
+## Dead Code Detection Improvements (v0.6.x)
+
+- **WeakMap/WeakSet Patterns** — Detects registry patterns (React DevTools, observability tools)
+- **Flow Type Annotations** — Understands Flow syntax alongside TypeScript
+- **Re-export Chains** — Tracks .d.ts files and barrel exports (Svelte, library types)
+- **Python `__all__`** — Respects public API declarations in Python modules
+- **Library Mode** — Auto-detects npm packages (package.json "exports") and Python stdlib (Lib/ directory)
+
+## Dart/Flutter Support (v0.6.x)
+
+- **Full language support** — Imports, exports, dead code detection
+- **Auto-detection** — Recognizes `pubspec.yaml`, ignores `.dart_tool/`, `build/`
+- **Package imports** — Resolves `package:` imports correctly
 
 ## Philosophy
 

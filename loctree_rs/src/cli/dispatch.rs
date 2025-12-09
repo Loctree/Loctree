@@ -29,6 +29,7 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
         ..Default::default()
     };
     parsed.library_mode = global.library_mode;
+    parsed.python_library = global.python_library;
 
     // Convert command-specific options
     match cmd {
@@ -1162,6 +1163,7 @@ fn handle_dead_command(opts: &DeadOptions, global: &GlobalOptions) -> DispatchRe
             include_helpers: opts.with_helpers,
             library_mode: global.library_mode,
             example_globs: Vec::new(),
+            python_library_mode: global.python_library,
         },
     );
 

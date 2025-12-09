@@ -2,7 +2,7 @@
 // Developed with 💀 by The Loctree Team (c)2025
 
 /// Version string used across the landing page (single source of truth)
-pub const VERSION: &str = "v0.6.2-dev";
+pub const VERSION: &str = "v0.6.3-dev";
 
 mod blog;
 mod cli_reference;

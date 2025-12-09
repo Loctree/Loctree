@@ -104,6 +104,8 @@ pub struct ParsedArgs {
     pub library_mode: bool,
     /// Additional example/demo globs to ignore in library mode
     pub library_example_globs: Vec<String>,
+    /// Python library mode: treat __all__ exports as public API
+    pub python_library: bool,
 }
 
 impl Default for ParsedArgs {
@@ -188,6 +190,7 @@ impl Default for ParsedArgs {
             force_full_scan: false,
             library_mode: false,
             library_example_globs: Vec::new(),
+            python_library: false,
         }
     }
 }

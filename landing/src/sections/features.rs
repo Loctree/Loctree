@@ -24,9 +24,9 @@ pub fn Features() -> impl IntoView {
                     />
                     <FeatureCard
                         icon="[2]"
-                        title="Auto-detect Stack"
-                        description="Detects Rust, TypeScript, Python, Tauri. Configures sensible ignores automatically."
-                        code=Some("Cargo.toml -> Rust | tsconfig.json -> TS")
+                        title="Multi-Language Support"
+                        description="Rust, Go, TypeScript/JavaScript, Python, Svelte, Vue, Dart/Flutter. Auto-detects stack and configures sensible ignores."
+                        code=Some("Supports 7+ languages with library mode")
                     />
                     <FeatureCard
                         icon="[3]"

@@ -444,6 +444,9 @@ loct events --ghosts      # Emits going nowhere
 - **Barrel files** - Understands `index.ts` re-exports
 - **Dynamic imports** - Tracks `import()` expressions
 - **JSX/TSX** - Full support
+- **Flow types** - Flow annotation support (v0.6.x)
+- **WeakMap/WeakSet patterns** - Registry pattern detection (v0.6.x)
+- **.d.ts re-exports** - Proper type-only re-export tracking (v0.6.x)
 
 ### SvelteKit
 
@@ -451,6 +454,7 @@ loct events --ghosts      # Emits going nowhere
 - **`$lib` alias** - Maps `$lib/*` to configured library path
 - **Runtime modules** - Correctly resolves SvelteKit internal runtime paths
 - **Server/client split** - Understands `.server.ts` and `+page.server.ts` patterns
+- **.d.ts re-exports** - Tracks Svelte component type exports (v0.6.x)
 
 ### Python
 
@@ -458,6 +462,8 @@ loct events --ghosts      # Emits going nowhere
 - **Typed packages** - PEP 561 `py.typed` marker detection
 - **Test detection** - Distinguishes test files from production
 - **Concurrency patterns** - Detects threading/asyncio/multiprocessing
+- **`__all__` tracking** - Respects public API declarations (v0.6.x)
+- **Library mode** - Auto-detects Python stdlib (Lib/ directory) (v0.6.x)
 
 ### Rust
 
@@ -467,6 +473,23 @@ loct events --ghosts      # Emits going nowhere
 - **Nested brace imports** - Handles complex imports like `use crate::{foo::{A, B}, bar::C}`
 - **Tauri integration** - `#[tauri::command]` detection
 - **Symbol-level blame** - Git blame for fn/struct/enum/impl
+
+### Go
+
+- **Package structure** - Understands Go package imports
+- **Cross-package references** - Accurate dead code detection across packages
+- **Standard library** - Stdlib imports tracked correctly
+
+### Dart/Flutter (v0.6.x)
+
+- **Package imports** - Resolves `package:` imports
+- **Auto-detection** - Recognizes `pubspec.yaml`, ignores `.dart_tool/`, `build/`
+- **Full language support** - Imports, exports, dead code detection
+
+### Vue
+
+- **Single File Components (SFC)** - `<script setup>` and `<script>` support
+- **Component analysis** - Tracks component usage and exports
 
 ---
 

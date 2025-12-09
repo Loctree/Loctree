@@ -102,7 +102,7 @@ pub fn ReportDocument(
                         </nav>
 
                         <div class="app-footer">
-                            "loctree v0.6.2-dev"
+                            "loctree v0.6.3-dev"
                             <br />
                             <span style="color:var(--theme-text-tertiary)">"Snapshot"</span>
                         </div>
