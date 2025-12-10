@@ -1,8 +1,8 @@
-# loct — AI Agent Quick Reference (v0.6.3-dev)
+# loct — AI Agent Quick Reference (v0.6.7)
 
 Static analysis for AI agents: scan once, slice many. Default `loct` writes `.loctree/<branch@sha>/snapshot.json`; use `loct report --serve` (or `loct lint --sarif`) when you need full artifacts (`analysis.json`, `report.html`, `report.sarif`, etc.).
 
-**v0.6.x highlights**: Dart/Flutter support, improved dead code detection (WeakMap/WeakSet, Flow types, .d.ts re-exports), Python `__all__` tracking, library mode auto-detection.
+**v0.6.7 highlights**: Bundle distribution analysis (`loct dist`) with symbol-level source map decoding, Dart/Flutter support, improved dead code detection.
 
 > **Full documentation:** [AI Agent's Manual](docs/tutorials/ai-agents-manual.md)
 
@@ -46,7 +46,10 @@ loct crowd --json            # JSON for AI agents
 # 9) Delta / diff
 loct diff --since main       # compare against another snapshot
 
-# 10) CI / policy
+# 10) Bundle analysis (verify tree-shaking)
+loct dist dist/bundle.js.map src/  # compare source vs bundle
+
+# 11) CI / policy
 loct lint --fail --sarif > results.sarif
 ```
 
@@ -54,7 +57,7 @@ loct lint --fail --sarif > results.sarif
 
 ```bash
 cargo install loctree
-loct --version   # expect 0.6.3-dev+
+loct --version   # expect 0.6.7+
 ```
 
 ## Auto-Detect Stack
@@ -79,6 +82,7 @@ loct --version   # expect 0.6.3-dev+
 - **Circular imports**: `loct cycles`
 - **Twins analysis**: `loct twins` (dead parrots, exact twins, barrel chaos)
 - **Functional crowds**: `loct crowd` (find similar files clustering around same functionality)
+- **Bundle analysis**: `loct dist <sourcemap> <srcdir>` (verify tree-shaking, symbol-level)
 - **Tauri FE↔BE**: `loct commands --missing`, `loct commands --unused`, `loct events --json`
 - **Delta between scans**: `loct diff --since <snapshot_id>`
 - **CI guardrails**: `loct lint --fail --sarif > results.sarif`
@@ -89,6 +93,7 @@ loct --version   # expect 0.6.3-dev+
 - Slice for AI: `loct slice <file> [--consumers --json]`
 - Quick queries: `loct query who-imports <file>`, `loct query where-symbol <sym>`, `loct query component-of <file>`
 - Twins analysis: `loct twins` (dead parrots + exact twins + barrel chaos)
+- Bundle dist: `loct dist dist/bundle.js.map src/` (symbol-level dead export detection)
 - Analysis shortcuts: `loct -A --dead`, `loct -A --circular`, `loct -A --report report.html`
 - Diff snapshots: `loct diff --since <main|HEAD~N|snapshot_id>`
 - Serve report: `loct -A --report report.html --serve`

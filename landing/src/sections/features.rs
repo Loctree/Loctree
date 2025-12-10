@@ -124,6 +124,12 @@ pub fn Features() -> impl IntoView {
                         description="Model Context Protocol server for AI agents. Claude, Cursor, and other MCP clients get native access to slices, dead code, and crowd detection."
                         code=Some("loctree-mcp stdio")
                     />
+                    <FeatureCard
+                        icon="[19]"
+                        title="Bundle Distribution Analysis"
+                        description="Verify tree-shaking effectiveness. Parse source maps with VLQ decoding to find exports that exist in source but are eliminated from production bundles."
+                        code=Some("loct dist dist/bundle.js.map src/")
+                    />
                 </div>
             </div>
         </section>

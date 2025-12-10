@@ -1275,7 +1275,8 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
     }
 
     let mut report_section = None;
-    if parsed.report_path.is_some() {
+    // Build ReportSection for HTML reports OR for agent feed (--for-agent-feed/--agent-json)
+    if parsed.report_path.is_some() || parsed.for_agent_feed {
         let mut sorted_dyn = dynamic_summary.clone();
         sorted_dyn.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
         let insights = collect_ai_insights(

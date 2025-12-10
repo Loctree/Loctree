@@ -6,6 +6,20 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+## [0.6.7] - 2025-12-10
+
+### Added
+- **Bundle distribution analysis (`loct dist`)**: Analyze production bundles using source maps to find truly dead exports
+  - Symbol-level detection via VLQ Base64 decoding of source map mappings
+  - File-level fallback when source maps lack `names` array
+  - Compare source exports vs bundled symbols to verify tree-shaking effectiveness
+  - Usage: `loct dist dist/bundle.js.map src/`
+
+### Technical
+- Full VLQ (Variable Length Quantity) Base64 decoder for source map v3 format
+- Delta-encoded position parsing for accurate symbol mapping
+- 11 new unit tests for dist module
+
 ## [0.6.3-dev] - 2025-12-08
 
 ### Added

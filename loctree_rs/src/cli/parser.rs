@@ -922,6 +922,7 @@ OPTIONS:
                        Show only missing handlers (FE calls → no BE)
     --unused, --unused-only
                        Show only unused handlers (BE exists → no FE calls)
+    --limit <N>        Maximum results to show (default: unlimited)
     --no-duplicates    Hide duplicate export sections in CLI output
     --no-dynamic-imports Hide dynamic import sections in CLI output
     --help, -h         Show this help message
@@ -930,7 +931,8 @@ EXAMPLES:
     loct commands                     # Show all command bridges
     loct commands --missing           # Only missing handlers
     loct commands --name patient_*    # Commands matching pattern
-    loct commands --unused            # Unused backend commands"
+    loct commands --unused            # Unused backend commands
+    loct commands --limit 10 --json   # First 10 as JSON"
             .to_string());
     }
 
@@ -962,6 +964,17 @@ EXAMPLES:
             "--no-dynamic-imports" => {
                 opts.suppress_dynamic = true;
                 i += 1;
+            }
+            "--limit" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--limit requires a number".to_string())?;
+                opts.limit = Some(
+                    value
+                        .parse()
+                        .map_err(|_| format!("Invalid limit value: {}", value))?,
+                );
+                i += 2;
             }
             _ if !arg.starts_with('-') => {
                 opts.roots.push(PathBuf::from(arg));

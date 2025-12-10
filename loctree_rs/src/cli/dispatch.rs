@@ -1326,8 +1326,22 @@ fn handle_commands_command(opts: &CommandsOptions, global: &GlobalOptions) -> Di
         bridges.retain(|b| b.has_handler && !b.is_called);
     }
 
+    // Apply limit if specified
+    let total_before_limit = bridges.len();
+    if let Some(limit) = opts.limit {
+        bridges.truncate(limit);
+    }
+
     if let Some(s) = spinner {
-        s.finish_success(&format!("Found {} command bridge(s)", bridges.len()));
+        if opts.limit.is_some() && total_before_limit > bridges.len() {
+            s.finish_success(&format!(
+                "Showing {} of {} command bridge(s)",
+                bridges.len(),
+                total_before_limit
+            ));
+        } else {
+            s.finish_success(&format!("Found {} command bridge(s)", bridges.len()));
+        }
     }
 
     // Output results

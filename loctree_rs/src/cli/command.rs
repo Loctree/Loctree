@@ -347,6 +347,9 @@ pub struct CommandsOptions {
 
     /// Suppress dynamic import sections (noise reduction)
     pub suppress_dynamic: bool,
+
+    /// Maximum number of results to show (for limiting large outputs)
+    pub limit: Option<usize>,
 }
 
 /// Options for the `routes` command.
@@ -1004,13 +1007,15 @@ OPTIONS:
     --name <FILTER>      Regex filter on command name
     --missing-only       Show only missing handlers
     --unused-only        Show only unused handlers
+    --limit <N>          Maximum results to show (default: unlimited)
     --no-duplicates      Hide duplicate sections in CLI output
     --no-dynamic-imports Hide dynamic import sections in CLI output
     --help, -h           Show this help message
 
 EXAMPLES:
     loct commands
-    loct commands --missing-only";
+    loct commands --missing-only
+    loct commands --limit 10 --json";
 
 const EVENTS_HELP: &str = "loct events - Show event flow and issues
 

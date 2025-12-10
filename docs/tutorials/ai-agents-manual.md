@@ -293,6 +293,34 @@ loct diff --since main              # Compare against main branch snapshot
 - New/removed dead exports
 - Changed graph edges
 
+### `loct dist`
+
+Bundle distribution analysis — verify tree-shaking by comparing source exports against production bundles using source maps.
+
+```bash
+loct dist dist/bundle.js.map src/   # Analyze bundle vs source
+```
+
+**Output:**
+```
+✓ Found 4 dead export(s) (67%)
+Bundle Analysis:
+  Source exports:  6
+  Bundled exports: 2
+  Dead exports:    4
+  Reduction:       67%
+  Analysis level:  symbol
+
+Dead Exports (not in bundle):
+  deadFunction (function) in index.ts:5
+  DEAD_CONST (var) in index.ts:10
+```
+
+**Features:**
+- Symbol-level detection via VLQ Base64 decoding of source map mappings
+- File-level fallback when source maps lack `names` array
+- Verifies bundler (Vite/Webpack/esbuild) actually eliminated dead code
+
 ### `loct query`
 
 Quick graph queries without full analysis.

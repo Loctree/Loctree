@@ -40,6 +40,9 @@ loct twins
 
 # Detect dead exports
 loct dead --confidence high
+
+# Verify tree-shaking in production bundles
+loct dist dist/bundle.js.map src/
 ```
 
 ## Why loctree?
