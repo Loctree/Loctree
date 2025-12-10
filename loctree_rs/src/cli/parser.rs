@@ -13,7 +13,7 @@ use crate::types::ColorMode;
 const SUBCOMMANDS: &[&str] = &[
     "auto", "agent", "scan", "tree", "slice", "find", "dead", "unused", "cycles", "commands",
     "events", "info", "lint", "report", "help", "query", "diff", "memex", "crowd", "twins",
-    "routes",
+    "routes", "dist",
 ];
 
 /// Check if an argument looks like a new-style subcommand.
@@ -210,6 +210,7 @@ pub fn parse_command(args: &[String]) -> Result<Option<ParsedCommand>, String> {
         Some("memex") => parse_memex_command(&remaining_args)?,
         Some("crowd") => parse_crowd_command(&remaining_args)?,
         Some("twins") => parse_twins_command(&remaining_args)?,
+        Some("dist") => parse_dist_command(&remaining_args)?,
         Some(unknown) => {
             return Err(format!(
                 "Unknown command '{}'. Run 'loct --help' for available commands.",
@@ -1738,6 +1739,86 @@ EXAMPLES:
     }
 
     Ok(Command::Twins(opts))
+}
+
+fn parse_dist_command(args: &[String]) -> Result<Command, String> {
+    // Check for help flag first
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        return Err("loct dist - Analyze bundle distribution using source maps
+
+USAGE:
+    loct dist --source-map <PATH> --src <DIR>
+
+DESCRIPTION:
+    Compares source code exports with bundled JavaScript to find truly dead exports.
+    Uses source maps to detect code that was completely tree-shaken out by the bundler.
+
+OPTIONS:
+    --source-map <PATH>    Path to source map file (e.g., dist/main.js.map)
+    --src <DIR>            Source directory to scan (e.g., src/)
+    --help, -h             Show this help message
+
+EXAMPLES:
+    loct dist --source-map dist/main.js.map --src src/
+    loct dist --source-map build/app.js.map --src app/src/"
+            .to_string());
+    }
+
+    let mut opts = DistOptions::default();
+    let mut i = 0;
+
+    while i < args.len() {
+        let arg = &args[i];
+        match arg.as_str() {
+            "--source-map" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--source-map requires a path".to_string())?;
+                opts.source_map = Some(PathBuf::from(value));
+                i += 2;
+            }
+            "--src" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--src requires a directory path".to_string())?;
+                opts.src = Some(PathBuf::from(value));
+                i += 2;
+            }
+            _ if !arg.starts_with('-') => {
+                // Positional: first is source-map, second is src
+                if opts.source_map.is_none() {
+                    opts.source_map = Some(PathBuf::from(arg));
+                } else if opts.src.is_none() {
+                    opts.src = Some(PathBuf::from(arg));
+                } else {
+                    return Err(format!(
+                        "Unexpected argument '{}'. dist takes --source-map and --src.",
+                        arg
+                    ));
+                }
+                i += 1;
+            }
+            _ => {
+                return Err(format!("Unknown option '{}' for 'dist' command.", arg));
+            }
+        }
+    }
+
+    if opts.source_map.is_none() {
+        return Err(
+            "'dist' command requires --source-map <path>. Usage: loct dist --source-map dist/main.js.map --src src/"
+                .to_string(),
+        );
+    }
+
+    if opts.src.is_none() {
+        return Err(
+            "'dist' command requires --src <dir>. Usage: loct dist --source-map dist/main.js.map --src src/"
+                .to_string(),
+        );
+    }
+
+    Ok(Command::Dist(opts))
 }
 
 // ============================================================================

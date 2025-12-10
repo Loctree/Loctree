@@ -159,6 +159,12 @@ pub enum Command {
     /// Builds a registry of all exported symbols and their import counts.
     /// Dead parrots are symbols with 0 imports - candidates for removal.
     Twins(TwinsOptions),
+
+    /// Analyze bundle distribution using source maps.
+    ///
+    /// Compares source exports with bundled code to find truly dead exports
+    /// that were tree-shaken out by the bundler.
+    Dist(DistOptions),
 }
 
 impl Default for Command {
@@ -511,6 +517,17 @@ pub struct TwinsOptions {
     pub dead_only: bool,
 }
 
+/// Options for the `dist` command.
+/// Analyzes bundle distribution using source maps.
+#[derive(Debug, Clone, Default)]
+pub struct DistOptions {
+    /// Path to source map file (.js.map)
+    pub source_map: Option<PathBuf>,
+
+    /// Source directory to scan for exports
+    pub src: Option<PathBuf>,
+}
+
 /// Options for the `help` command.
 #[derive(Debug, Clone, Default)]
 pub struct HelpOptions {
@@ -640,6 +657,7 @@ impl Command {
             Command::Memex(_) => "memex",
             Command::Crowd(_) => "crowd",
             Command::Twins(_) => "twins",
+            Command::Dist(_) => "dist",
         }
     }
 
@@ -666,6 +684,7 @@ impl Command {
             Command::Crowd(_) => "Detect functional crowds (similar files clustering)",
             Command::Twins(_) => "Show symbol registry and dead parrots (0 imports)",
             Command::Routes(_) => "List backend/web routes (FastAPI/Flask)",
+            Command::Dist(_) => "Analyze bundle distribution using source maps",
         }
     }
 
@@ -696,6 +715,10 @@ impl Command {
                 "Detect functional crowds around a pattern",
             ),
             ("twins", "Dead parrots, exact twins, barrel chaos analysis"),
+            (
+                "dist <map> <src>",
+                "Analyze bundle distribution using source maps",
+            ),
         ];
 
         let mut help = String::new();
@@ -744,6 +767,7 @@ impl Command {
             "crowd" => Some(CROWD_HELP),
             "twins" => Some(TWINS_HELP),
             "routes" => Some(ROUTES_HELP),
+            "dist" => Some(DIST_HELP),
             _ => None,
         }
     }
@@ -1147,6 +1171,43 @@ DESCRIPTION:
 
 OPTIONS:
     --help, -h          Show this help message";
+
+const DIST_HELP: &str = "loct dist - Analyze bundle distribution using source maps
+
+USAGE:
+    loct dist --source-map <PATH> --src <DIR>
+
+DESCRIPTION:
+    Compares source code exports with bundled JavaScript to find truly dead exports.
+    Uses source maps to detect code that was completely tree-shaken out by the bundler.
+
+    This is different from regular dead code detection:
+    - Regular: Finds exports with 0 imports in your source code
+    - Dist: Finds exports removed from the production bundle
+
+    Useful for:
+    - Validating tree-shaking effectiveness
+    - Finding code that can be safely removed
+    - Understanding bundle size optimizations
+
+OPTIONS:
+    --source-map <PATH>    Path to source map file (e.g., dist/main.js.map)
+    --src <DIR>            Source directory to scan (e.g., src/)
+    --help, -h             Show this help message
+
+EXAMPLES:
+    loct dist --source-map dist/main.js.map --src src/
+    loct dist --source-map build/app.js.map --src app/src/
+
+OUTPUT (JSON):
+    {
+      \"sourceExports\": 500,
+      \"bundledExports\": 120,
+      \"deadExports\": [
+        { \"file\": \"src/utils.ts\", \"line\": 42, \"name\": \"unusedHelper\" }
+      ],
+      \"reduction\": \"76%\"
+    }";
 
 // ============================================================================
 // Tests

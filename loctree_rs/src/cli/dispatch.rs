@@ -275,6 +275,10 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
         Command::Routes(_) => {
             // Routes is handled specially in dispatch_command
         }
+
+        Command::Dist(_) => {
+            // Dist is handled specially in dispatch_command
+        }
     }
 
     parsed
@@ -363,6 +367,9 @@ pub fn dispatch_command(parsed_cmd: &ParsedCommand) -> DispatchResult {
         }
         Command::Lint(opts) => {
             return handle_lint_command(opts, &parsed_cmd.global);
+        }
+        Command::Dist(opts) => {
+            return handle_dist_command(opts, &parsed_cmd.global);
         }
         // Note: Command::Report falls through to ParsedArgs flow to use full analysis pipeline
         // which includes twins data, graph visualization, and proper Leptos SSR rendering
@@ -1692,6 +1699,102 @@ fn handle_lint_command(opts: &LintOptions, global: &GlobalOptions) -> DispatchRe
     }
 
     DispatchResult::Exit(exit_code)
+}
+
+/// Handle the dist command - analyze bundle using source maps
+fn handle_dist_command(opts: &DistOptions, global: &GlobalOptions) -> DispatchResult {
+    use crate::analyzer::dist::analyze_distribution;
+
+    let spinner = if !global.quiet && !global.json {
+        Some(Spinner::new("Analyzing bundle distribution..."))
+    } else {
+        None
+    };
+
+    let source_map_path = match &opts.source_map {
+        Some(p) => p.clone(),
+        None => {
+            if let Some(s) = spinner {
+                s.finish_error("--source-map is required");
+            } else {
+                eprintln!("[loct][error] --source-map is required");
+            }
+            return DispatchResult::Exit(1);
+        }
+    };
+
+    let src_path = match &opts.src {
+        Some(p) => p.clone(),
+        None => {
+            if let Some(s) = spinner {
+                s.finish_error("--src is required");
+            } else {
+                eprintln!("[loct][error] --src is required");
+            }
+            return DispatchResult::Exit(1);
+        }
+    };
+
+    // Run dist analysis (uses its own scanning, doesn't need snapshot)
+    match analyze_distribution(&source_map_path, &src_path) {
+        Ok(result) => {
+            if let Some(s) = spinner {
+                s.finish_success(&format!(
+                    "Found {} dead export(s) ({})",
+                    result.dead_exports.len(),
+                    result.reduction
+                ));
+            }
+
+            if global.json {
+                match serde_json::to_string_pretty(&result) {
+                    Ok(json) => println!("{}", json),
+                    Err(e) => {
+                        eprintln!("[loct][error] Failed to serialize results: {}", e);
+                        return DispatchResult::Exit(1);
+                    }
+                }
+            } else {
+                println!("Bundle Analysis:");
+                println!("  Source exports:  {}", result.source_exports);
+                println!("  Bundled exports: {}", result.bundled_exports);
+                println!("  Dead exports:    {}", result.dead_exports.len());
+                println!("  Reduction:       {}", result.reduction);
+                println!(
+                    "  Analysis level:  {}",
+                    if result.symbol_level {
+                        "symbol"
+                    } else {
+                        "file"
+                    }
+                );
+                println!();
+
+                if !result.dead_exports.is_empty() {
+                    println!("Dead Exports (not in bundle):");
+                    for export in result.dead_exports.iter().take(20) {
+                        println!(
+                            "  {} ({}) in {}:{}",
+                            export.name, export.kind, export.file, export.line
+                        );
+                    }
+                    if result.dead_exports.len() > 20 {
+                        println!("  ... and {} more", result.dead_exports.len() - 20);
+                    }
+                }
+            }
+
+            DispatchResult::Exit(0)
+        }
+        Err(e) => {
+            if let Some(s) = spinner {
+                s.finish_error(&format!("Analysis failed: {}", e));
+            } else {
+                eprintln!("[loct][error] {}", e);
+            }
+            DispatchResult::Exit(1)
+        }
+    }
 }
 
 #[cfg(test)]

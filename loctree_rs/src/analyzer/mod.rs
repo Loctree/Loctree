@@ -32,6 +32,7 @@ mod css;
 pub mod cycles;
 pub mod dart;
 pub mod dead_parrots;
+pub mod dist;
 pub mod entrypoints;
 pub mod for_ai;
 pub mod go;
