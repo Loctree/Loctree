@@ -56,6 +56,7 @@ pub fn is_test_path(path: &str) -> bool {
 ///
 /// # Examples
 /// ```
+/// use loctree::analyzer::classify::should_exclude_from_reports;
 /// assert!(should_exclude_from_reports("tests/fixtures/foo.rs"));
 /// assert!(should_exclude_from_reports("src/__tests__/bar.spec.ts"));
 /// assert!(should_exclude_from_reports("src/__mocks__/api.ts"));
