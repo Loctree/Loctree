@@ -52,12 +52,17 @@ pub struct TwinsResult {
 ///
 /// Counts how many times each symbol is imported across the codebase.
 pub fn build_symbol_registry(analyses: &[FileAnalysis]) -> HashMap<(String, String), SymbolEntry> {
+    use crate::analyzer::classify::should_exclude_from_reports;
     let mut registry: HashMap<(String, String), SymbolEntry> = HashMap::new();
 
     // First pass: Register all exports
     for analysis in analyses {
         // Skip test files to avoid pytest/Jest fixtures being treated as dead parrots
         if analysis.is_test {
+            continue;
+        }
+        // Skip test fixtures and mock files
+        if should_exclude_from_reports(&analysis.path) {
             continue;
         }
         for export in &analysis.exports {

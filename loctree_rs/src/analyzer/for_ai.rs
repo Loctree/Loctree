@@ -471,8 +471,10 @@ fn is_resolved_dynamic(src: &str) -> bool {
 fn severity_label(severity: DupSeverity) -> &'static str {
     match severity {
         DupSeverity::CrossLangExpected => "cross_lang_expected",
+        DupSeverity::ReExportOrGeneric => "reexport_or_generic",
         DupSeverity::SamePackage => "same_package",
-        DupSeverity::SemanticConflict => "semantic_conflict",
+        DupSeverity::CrossModule => "cross_module",
+        DupSeverity::CrossCrate => "cross_crate",
     }
 }
 
@@ -1321,7 +1323,7 @@ mod tests {
             canonical: "src/types/user.ts".to_string(),
             canonical_line: Some(10),
             refactors: vec!["Move all imports to src/types/user.ts".to_string()],
-            severity: DupSeverity::SemanticConflict,
+            severity: DupSeverity::CrossCrate,
             is_cross_lang: false,
             packages: vec!["types".to_string(), "models".to_string(), "api".to_string()],
             reason: "Symbol in 3 different packages".to_string(),

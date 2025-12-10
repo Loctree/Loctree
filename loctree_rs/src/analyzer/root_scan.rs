@@ -546,29 +546,33 @@ fn scan_single_root(
             .unwrap_or(false);
 
         loc_map.insert(analysis.path.clone(), analysis.loc);
-        for exp in &analysis.exports {
-            if exp.kind == "reexport" {
-                continue;
+        // Exclude test fixtures from export index to avoid false positive duplicates
+        let is_test_fixture = super::classify::should_exclude_from_reports(&analysis.path);
+        if !is_test_fixture {
+            for exp in &analysis.exports {
+                if exp.kind == "reexport" {
+                    continue;
+                }
+                if exp.export_type == "default" {
+                    continue;
+                }
+                let name_lc = exp.name.to_lowercase();
+                let is_decl = [".d.ts", ".d.tsx", ".d.mts", ".d.cts"]
+                    .iter()
+                    .any(|ext| analysis.path.ends_with(ext));
+                if is_decl && name_lc == "default" {
+                    continue;
+                }
+                let ignored = cfg.ignore_exact.contains(&name_lc)
+                    || cfg.ignore_prefixes.iter().any(|p| name_lc.starts_with(p));
+                if ignored {
+                    continue;
+                }
+                export_index
+                    .entry(exp.name.clone())
+                    .or_default()
+                    .push(analysis.path.clone());
             }
-            if exp.export_type == "default" {
-                continue;
-            }
-            let name_lc = exp.name.to_lowercase();
-            let is_decl = [".d.ts", ".d.tsx", ".d.mts", ".d.cts"]
-                .iter()
-                .any(|ext| analysis.path.ends_with(ext));
-            if is_decl && name_lc == "default" {
-                continue;
-            }
-            let ignored = cfg.ignore_exact.contains(&name_lc)
-                || cfg.ignore_prefixes.iter().any(|p| name_lc.starts_with(p));
-            if ignored {
-                continue;
-            }
-            export_index
-                .entry(exp.name.clone())
-                .or_default()
-                .push(analysis.path.clone());
         }
         for re in &analysis.reexports {
             // Re-export edges are useful for cycle detection and barrel awareness.
@@ -677,7 +681,9 @@ fn scan_single_root(
                 }
             }
         }
-        if !is_excluded_for_commands {
+        // Exclude test fixtures from command analysis to avoid false positives
+        let is_test_fixture = super::classify::should_exclude_from_reports(&analysis.path);
+        if !is_excluded_for_commands && !is_test_fixture {
             for call in &analysis.command_calls {
                 let mut key = call.name.clone();
                 if let Some(stripped) = key.strip_suffix("_command") {
@@ -799,6 +805,11 @@ fn scan_single_root(
 
     let mut ranked_dups: Vec<RankedDup> = Vec::new();
     for (name, files) in &duplicate_exports {
+        // Skip generic method names that are expected to be duplicated across different types
+        if is_generic_method(name) {
+            continue;
+        }
+
         let all_rs = files.iter().all(|f| f.ends_with(".rs"));
         let all_d_ts = files.iter().all(|f| {
             f.ends_with(".d.ts")
@@ -806,6 +817,7 @@ fn scan_single_root(
                 || f.ends_with(".d.mts")
                 || f.ends_with(".d.cts")
         });
+        // Keep the old filter for backward compatibility (though now redundant)
         if (name == "new" && all_rs) || (name == "default" && all_d_ts) {
             continue;
         }
@@ -1178,6 +1190,10 @@ pub fn scan_results_from_snapshot(snapshot: &Snapshot) -> ScanResults {
         let mut export_index: ExportIndex = HashMap::new();
         for analysis in &root_analyses {
             for export in &analysis.exports {
+                // Skip re-exports - they're not duplicate definitions
+                if export.kind == "reexport" {
+                    continue;
+                }
                 export_index
                     .entry(export.name.clone())
                     .or_default()
@@ -1340,6 +1356,34 @@ const DTO_WHITELIST: &[&str] = &[
 /// System constants expected across languages
 const SYSTEM_CONSTANTS: &[&str] = &["touch_id", "keychain", "app_name", "version", "default"];
 
+/// Generic method/function names that should be excluded from duplicate detection.
+/// These are common patterns across different types/structs and not actual duplicates.
+const GENERIC_METHOD_NAMES: &[&str] = &[
+    "new",     // Constructor pattern (Rust, Python __new__, etc.)
+    "default", // Default trait implementation
+    "from",    // From trait / factory pattern
+    "into",    // Into trait / conversion
+    "clone",   // Clone trait
+    "process", // Too generic - processing logic
+    "load",    // Too generic - loading data
+    "save",    // Too generic - saving data
+    "run",     // Too generic - execution
+    "init",    // Too generic - initialization
+    "build",   // Builder pattern
+    "execute", // Too generic - execution
+    "handle",  // Too generic - event handling
+    "create",  // Too generic - factory pattern
+    "update",  // Too generic - mutation
+    "delete",  // Too generic - removal
+    "get",     // Too generic - getter
+    "set",     // Too generic - setter
+];
+
+/// Check if a name is a generic method that should be excluded from duplicate detection
+fn is_generic_method(name: &str) -> bool {
+    GENERIC_METHOD_NAMES.contains(&name)
+}
+
 /// Detect language family from file path
 fn detect_language(path: &str) -> &'static str {
     let ext = path.rsplit('.').next().unwrap_or("");
@@ -1371,6 +1415,31 @@ fn extract_package(path: &str) -> String {
         .nth(1)
         .map(|s| s.to_string())
         .unwrap_or_else(|| "root".to_string())
+}
+
+/// Extract crate/npm package root from path
+/// Returns the crate name or package directory (e.g., "rmcp_mux", "rmcp_memex", "loctree_rs")
+fn extract_crate_root(path: &str) -> String {
+    let parts: Vec<&str> = path.split('/').collect();
+
+    // For monorepo structures like:
+    // - "rmcp_mux/src/..." -> "rmcp_mux"
+    // - "loctree_rs/src/..." -> "loctree_rs"
+    // - "packages/frontend/src/..." -> "packages/frontend"
+
+    // Take first meaningful directory component
+    if parts.is_empty() {
+        return "root".to_string();
+    }
+
+    // Skip leading . or empty parts
+    for part in &parts {
+        if !part.is_empty() && *part != "." && *part != ".." {
+            return part.to_string();
+        }
+    }
+
+    "root".to_string()
 }
 
 /// Check if symbol name matches DTO whitelist
@@ -1417,6 +1486,7 @@ fn is_config_file(path: &str) -> bool {
 fn compute_severity(name: &str, files: &[String], packages: &[String]) -> (DupSeverity, String) {
     let cross_lang = is_cross_lang(files);
     let whitelisted = is_whitelisted_dto(name);
+    let is_generic = is_generic_method(name);
 
     // Count config files
     let config_count = files.iter().filter(|f| is_config_file(f)).count();
@@ -1425,10 +1495,19 @@ fn compute_severity(name: &str, files: &[String], packages: &[String]) -> (DupSe
 
     // Severity 0: Config file exports (default, new, etc.)
     // These are expected to be duplicated across config files
-    if all_config || (mostly_config && (name == "default" || name == "new")) {
+    if all_config || (mostly_config && (name == "default" || is_generic)) {
         return (
             DupSeverity::CrossLangExpected,
             "Config file export".to_string(),
+        );
+    }
+
+    // Severity 1: Generic methods (new, from, clone, etc.) - usually OK
+    // These are common patterns and not real duplicates
+    if is_generic {
+        return (
+            DupSeverity::ReExportOrGeneric,
+            format!("Generic method/pattern: {}", name),
         );
     }
 
@@ -1452,12 +1531,26 @@ fn compute_severity(name: &str, files: &[String], packages: &[String]) -> (DupSe
         );
     }
 
-    // Severity 2: Semantic conflict - same name in different semantic contexts
+    // HIGHEST SEVERITY 4: Cross-crate duplicates (REAL ISSUES!)
+    // Same symbol name in DIFFERENT crates/packages
+    // Example: HostKind enum defined in both rmcp_mux and rmcp_memex
+    let crate_roots: HashSet<String> = files.iter().map(|f| extract_crate_root(f)).collect();
+    let cross_crate = crate_roots.len() > 1;
+
+    if cross_crate {
+        let crate_list: Vec<String> = crate_roots.iter().cloned().collect();
+        return (
+            DupSeverity::CrossCrate,
+            format!("Cross-crate duplicate in: {}", crate_list.join(", ")),
+        );
+    }
+
+    // Severity 3: Cross-module duplicates (same crate, different modules)
     // e.g., Attachment in icons/ vs hooks/
     if packages.len() >= 3 {
         return (
-            DupSeverity::SemanticConflict,
-            format!("Symbol in {} different packages", packages.len()),
+            DupSeverity::CrossModule,
+            format!("Symbol in {} different modules", packages.len()),
         );
     }
 
@@ -1475,7 +1568,7 @@ fn compute_severity(name: &str, files: &[String], packages: &[String]) -> (DupSe
     });
     if has_ui && has_logic && !whitelisted {
         return (
-            DupSeverity::SemanticConflict,
+            DupSeverity::CrossModule,
             "UI vs logic context mismatch".to_string(),
         );
     }

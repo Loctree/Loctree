@@ -216,6 +216,35 @@ code, pre { font-family: var(--font-mono); }
     border-color: var(--theme-border-strong);
 }
 
+/* Test Toggle Button */
+.test-toggle-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    width: 100%;
+    padding: 8px 12px;
+    border-radius: var(--radius-sm);
+    background: var(--theme-hover);
+    border: 1px solid var(--theme-border);
+    color: var(--theme-text-secondary);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.test-toggle-btn:hover {
+    background: var(--theme-hover-strong);
+    color: var(--theme-text-primary);
+    border-color: var(--theme-border-strong);
+}
+
+#test-toggle-icon {
+    font-size: 16px;
+    transition: opacity 0.2s ease;
+}
+
 /* Show sun icon in dark mode, moon icon in light mode */
 .theme-icon-light { display: block; }
 .theme-icon-dark { display: none; }

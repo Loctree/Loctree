@@ -487,6 +487,10 @@ pub fn process_root_context(
             if analysis.is_test {
                 continue;
             }
+            // Exclude test fixtures from duplicate reports
+            if super::classify::should_exclude_from_reports(&analysis.path) {
+                continue;
+            }
             if exp.export_type == "default" {
                 continue;
             }
@@ -1168,8 +1172,10 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
                     .collect();
                 // Severity label
                 let severity_label = match dup.severity {
-                    DupSeverity::SemanticConflict => "[CONFLICT]",
+                    DupSeverity::CrossCrate => "[CROSS_CRATE]",
+                    DupSeverity::CrossModule => "[CROSS_MODULE]",
                     DupSeverity::SamePackage => "[SAME_PKG]",
+                    DupSeverity::ReExportOrGeneric => "[REEXPORT]",
                     DupSeverity::CrossLangExpected => "[CROSS_LANG]",
                 };
                 // Cross-lang indicator

@@ -111,11 +111,15 @@ pub struct DupLocation {
 pub enum DupSeverity {
     /// Cross-language expected (Rust↔TS DTOs) - noise
     CrossLangExpected = 0,
-    /// Same-package TS duplicate - potential issue
+    /// Re-exports and generic names (new, from, clone) - usually OK
+    ReExportOrGeneric = 1,
+    /// Same-package duplicate - potential issue
     #[default]
-    SamePackage = 1,
-    /// Semantic conflict (different meanings) - needs attention
-    SemanticConflict = 2,
+    SamePackage = 2,
+    /// Same symbol in different modules/packages - worth reviewing
+    CrossModule = 3,
+    /// Same symbol in different crates/packages - REAL issue
+    CrossCrate = 4,
 }
 
 #[derive(Clone, Serialize)]

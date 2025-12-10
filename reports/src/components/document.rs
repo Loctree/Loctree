@@ -3,7 +3,7 @@
 //! Implements the App Shell layout with Sidebar and Main Content areas.
 
 use super::{
-    Icon, ReportSectionView, ICON_ARROWS_CLOCKWISE, ICON_COPY, ICON_GHOST, ICON_GRAPH,
+    Icon, ReportSectionView, ICON_ARROWS_CLOCKWISE, ICON_COPY, ICON_FLASK, ICON_GHOST, ICON_GRAPH,
     ICON_LIGHTNING, ICON_PLUG, ICON_SQUARES_FOUR, ICON_TREE_STRUCTURE, ICON_TWINS, ICON_USERS,
 };
 use crate::styles::{CSP, REPORT_CSS};
@@ -102,9 +102,15 @@ pub fn ReportDocument(
                         </nav>
 
                         <div class="app-footer">
-                            "loctree v0.6.7"
-                            <br />
-                            <span style="color:var(--theme-text-tertiary)">"Snapshot"</span>
+                            <button id="toggle-tests-btn" class="test-toggle-btn" title="Toggle test file visibility">
+                                <span id="test-toggle-icon"><Icon path=ICON_FLASK size="16" /></span>
+                                <span id="test-toggle-text">"Hide Tests"</span>
+                            </button>
+                            <div style="margin-top: 8px; font-size: 11px;">
+                                "loctree v0.6.7"
+                                <br />
+                                <span style="color:var(--theme-text-tertiary)">"Snapshot"</span>
+                            </div>
                         </div>
                     </aside>
 
@@ -272,5 +278,42 @@ const APP_SCRIPT: &str = r#"
           }
       });
   });
+
+  // 4. Test Files Toggle - Hide/Show test file rows
+  const toggleTestsBtn = document.getElementById('toggle-tests-btn');
+  const toggleIcon = document.getElementById('test-toggle-icon');
+  const toggleText = document.getElementById('test-toggle-text');
+
+  // Initialize state from localStorage
+  const testsHidden = localStorage.getItem('loctree-hide-tests') === 'true';
+
+  const updateTestsVisibility = (hide) => {
+    const testItems = document.querySelectorAll('[data-is-test="true"]');
+    testItems.forEach(el => {
+      el.style.display = hide ? 'none' : '';
+    });
+
+    // Update button state
+    if (toggleText) {
+      toggleText.textContent = hide ? 'Show Tests' : 'Hide Tests';
+    }
+    if (toggleIcon) {
+      toggleIcon.style.opacity = hide ? '0.5' : '1';
+    }
+
+    // Save to localStorage
+    localStorage.setItem('loctree-hide-tests', hide ? 'true' : 'false');
+  };
+
+  // Apply initial state
+  updateTestsVisibility(testsHidden);
+
+  // Add click handler
+  if (toggleTestsBtn) {
+    toggleTestsBtn.addEventListener('click', () => {
+      const currentlyHidden = localStorage.getItem('loctree-hide-tests') === 'true';
+      updateTestsVisibility(!currentlyHidden);
+    });
+  }
 })();
 "#;

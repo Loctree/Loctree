@@ -114,3 +114,6 @@ pub const ICON_ARROWS_IN: &str = "M144,96V48a8,8,0,0,1,16,0V76.69l42.34-42.35a8,
 
 /// Twins icon (copy with people - for dead parrots & exact twins)
 pub const ICON_TWINS: &str = ICON_COPY;
+
+/// Flask/TestTube icon for test files (Phosphor Flask)
+pub const ICON_FLASK: &str = "M223.59,199.73,160,93.78V32h8a8,8,0,0,0,0-16H88a8,8,0,0,0,0,16h8V93.78L32.41,199.73A16,16,0,0,0,46.41,224H209.59a16,16,0,0,0,14-24.27ZM109.59,105.42l6.41-11.08V32h24V94.34l6.41,11.08L128,133.08ZM46.41,208l54.09-93.44L128,159.57l27.5-45L209.59,208Z";
