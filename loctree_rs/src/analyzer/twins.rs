@@ -355,6 +355,51 @@ pub struct ExactTwin {
     pub locations: Vec<TwinLocation>,
 }
 
+/// Generic method names that should be excluded from twin detection
+const GENERIC_METHOD_NAMES: &[&str] = &[
+    "new",
+    "default",
+    "from",
+    "into",
+    "clone",
+    "process",
+    "load",
+    "save",
+    "run",
+    "init",
+    "build",
+    "execute",
+    "create",
+    "update",
+    "delete",
+    "get",
+    "set",
+    "handle",
+    "render",
+    "parse",
+    "format",
+    "serialize",
+    "deserialize",
+    "start",
+    "stop",
+    "reset",
+    "clear",
+    "close",
+    "open",
+    "read",
+    "write",
+    "send",
+    "receive",
+    "connect",
+    "disconnect",
+    "validate",
+    "configure",
+];
+
+fn is_generic_method(name: &str) -> bool {
+    GENERIC_METHOD_NAMES.contains(&name)
+}
+
 /// Detect exact twins: symbols with the same name exported from different files
 pub fn detect_exact_twins(analyses: &[FileAnalysis]) -> Vec<ExactTwin> {
     let registry = build_symbol_registry(analyses);
@@ -363,6 +408,10 @@ pub fn detect_exact_twins(analyses: &[FileAnalysis]) -> Vec<ExactTwin> {
     let mut symbol_map: HashMap<String, Vec<(String, usize, String, usize)>> = HashMap::new();
 
     for ((file_path, symbol_name), entry) in &registry {
+        // Skip re-exports - they're intentional API design, not duplicates
+        if entry.kind == "reexport" || entry.kind == "re-export" {
+            continue;
+        }
         symbol_map.entry(symbol_name.clone()).or_default().push((
             file_path.clone(),
             entry.line,
@@ -375,7 +424,12 @@ pub fn detect_exact_twins(analyses: &[FileAnalysis]) -> Vec<ExactTwin> {
     let mut twins: Vec<ExactTwin> = Vec::new();
 
     for (name, locations_raw) in symbol_map {
-        // Skip if only one location
+        // Skip generic method names (new, from, clone, etc.)
+        if is_generic_method(&name) {
+            continue;
+        }
+
+        // Skip if only one location (not a duplicate)
         if locations_raw.len() <= 1 {
             continue;
         }
