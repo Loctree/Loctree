@@ -418,4 +418,56 @@ mod tests {
         assert!(cycle.iter().any(|p| p.contains("utils/a")));
         assert!(cycle.iter().any(|p| p.contains("utils/b")));
     }
+
+    #[test]
+    fn single_node_not_reported_as_cycle() {
+        // A node with no outgoing edges should not be a cycle
+        let edges = vec![("a.rs".to_string(), "b.rs".to_string(), "import".to_string())];
+        let cycles = find_cycles(&edges);
+        // No cycles expected - just a -> b with no return edge
+        assert!(cycles.is_empty());
+    }
+
+    #[test]
+    fn real_two_node_cycle_detected() {
+        let edges = vec![
+            ("a.rs".to_string(), "b.rs".to_string(), "import".to_string()),
+            ("b.rs".to_string(), "a.rs".to_string(), "import".to_string()),
+        ];
+        let cycles = find_cycles(&edges);
+        assert_eq!(cycles.len(), 1);
+        assert!(cycles[0].len() >= 2);
+    }
+
+    #[test]
+    fn single_node_not_reported_with_lazy() {
+        use super::find_cycles_with_lazy;
+        // Single-direction edge should not create a cycle
+        let edges = vec![("a.rs".to_string(), "b.rs".to_string(), "import".to_string())];
+        let (cycles, _) = find_cycles_with_lazy(&edges);
+        assert!(cycles.is_empty());
+    }
+
+    #[test]
+    fn real_two_node_cycle_detected_with_lazy() {
+        use super::find_cycles_with_lazy;
+        let edges = vec![
+            ("a.rs".to_string(), "b.rs".to_string(), "import".to_string()),
+            ("b.rs".to_string(), "a.rs".to_string(), "import".to_string()),
+        ];
+        let (cycles, _) = find_cycles_with_lazy(&edges);
+        assert_eq!(cycles.len(), 1);
+        assert!(cycles[0].len() >= 2);
+    }
+
+    #[test]
+    fn detects_self_loop_with_lazy() {
+        use super::find_cycles_with_lazy;
+        // Self-loop should be detected as a cycle (single node importing itself)
+        let edges = vec![("a.rs".to_string(), "a.rs".to_string(), "import".to_string())];
+        let (cycles, _) = find_cycles_with_lazy(&edges);
+        assert_eq!(cycles.len(), 1, "Self-loop should be detected as a cycle");
+        assert_eq!(cycles[0].len(), 1, "Self-loop cycle should have 1 node");
+        assert_eq!(cycles[0][0], "a.rs");
+    }
 }
