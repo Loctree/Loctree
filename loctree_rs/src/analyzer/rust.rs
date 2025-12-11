@@ -895,8 +895,57 @@ pub(crate) fn analyze_rust_file(
                 .insert(name.as_str().to_string(), val.as_str().to_string());
         }
     }
-    let resolve_event = |token: &str| -> (String, Option<String>, String) {
+
+    // Check if a token looks like a valid Tauri event name (not a Rust literal/keyword).
+    // Returns true if the token should be filtered out (is NOT a valid event name).
+    let is_invalid_event_identifier = |token: &str| -> bool {
+        // Filter out Rust keywords and common literals
+        const RUST_KEYWORDS: &[&str] = &[
+            "true", "false", "None", "Some", "Ok", "Err", "self", "Self", "super", "crate",
+        ];
+
+        if RUST_KEYWORDS.contains(&token) {
+            return true;
+        }
+
+        // Filter out tokens that look like module paths (contain ::)
+        // These are likely enum variants or associated items, not event names
+        if token.contains("::") {
+            return true;
+        }
+
+        // Filter out single lowercase words that look like crate/module names
+        // Valid event names typically use kebab-case, snake_case with underscores,
+        // or have mixed case. Single lowercase words without separators are
+        // more likely to be crate names (e.g., "gix", "tokio", "serde")
+        if token.chars().all(|c| c.is_ascii_lowercase()) && token.len() <= 8 {
+            return true;
+        }
+
+        // Filter out PascalCase identifiers without underscores or hyphens
+        // These are likely type names (Mode, AppState, etc.) not event names.
+        // Event names typically use kebab-case, snake_case, or SCREAMING_SNAKE_CASE.
+        // A single PascalCase word is almost never an event name.
+        if let Some(first) = token.chars().next()
+            && first.is_ascii_uppercase()
+        {
+            // Check if it's a simple PascalCase identifier (no underscores/hyphens)
+            let has_separator = token.contains('_') || token.contains('-');
+            let is_all_caps = token.chars().all(|c| !c.is_ascii_lowercase());
+
+            // Filter out if it's PascalCase without separators and not all caps
+            if !has_separator && !is_all_caps {
+                return true;
+            }
+        }
+
+        false
+    };
+
+    let resolve_event = |token: &str| -> Option<(String, Option<String>, String)> {
         let trimmed = token.trim();
+
+        // String literals are always valid event names
         if (trimmed.starts_with('"') && trimmed.ends_with('"'))
             || (trimmed.starts_with('\'') && trimmed.ends_with('\''))
         {
@@ -904,48 +953,60 @@ pub(crate) fn analyze_rust_file(
                 .trim_start_matches(['"', '\''])
                 .trim_end_matches(['"', '\''])
                 .to_string();
-            return (name, Some(trimmed.to_string()), "literal".to_string());
+            return Some((name, Some(trimmed.to_string()), "literal".to_string()));
         }
+
+        // Check if it's a known const
         if let Some(val) = analysis.event_consts.get(trimmed) {
-            return (val.clone(), Some(trimmed.to_string()), "const".to_string());
+            return Some((val.clone(), Some(trimmed.to_string()), "const".to_string()));
         }
-        (
+
+        // For identifiers, apply filtering
+        if is_invalid_event_identifier(trimmed) {
+            return None;
+        }
+
+        Some((
             trimmed.to_string(),
             Some(trimmed.to_string()),
             "ident".to_string(),
-        )
+        ))
     };
 
     for caps in regex_event_emit_rust().captures_iter(content) {
         if let Some(target) = caps.name("target") {
-            let (name, raw_name, source_kind) = resolve_event(target.as_str());
-            let payload = caps
-                .name("payload")
-                .map(|p| p.as_str().trim().trim_end_matches(')').trim().to_string())
-                .filter(|s| !s.is_empty());
-            let line = offset_to_line(content, caps.get(0).map(|m| m.start()).unwrap_or(0));
-            event_emits.push(EventRef {
-                raw_name,
-                name,
-                line,
-                kind: format!("emit_{}", source_kind),
-                awaited: false,
-                payload,
-            });
+            // Skip if resolve_event filters out this identifier
+            if let Some((name, raw_name, source_kind)) = resolve_event(target.as_str()) {
+                let payload = caps
+                    .name("payload")
+                    .map(|p| p.as_str().trim().trim_end_matches(')').trim().to_string())
+                    .filter(|s| !s.is_empty());
+                let line = offset_to_line(content, caps.get(0).map(|m| m.start()).unwrap_or(0));
+                event_emits.push(EventRef {
+                    raw_name,
+                    name,
+                    line,
+                    kind: format!("emit_{}", source_kind),
+                    awaited: false,
+                    payload,
+                });
+            }
         }
     }
     for caps in regex_event_listen_rust().captures_iter(content) {
         if let Some(target) = caps.name("target") {
-            let (name, raw_name, source_kind) = resolve_event(target.as_str());
-            let line = offset_to_line(content, caps.get(0).map(|m| m.start()).unwrap_or(0));
-            event_listens.push(EventRef {
-                raw_name,
-                name,
-                line,
-                kind: format!("listen_{}", source_kind),
-                awaited: false,
-                payload: None,
-            });
+            // Skip if resolve_event filters out this identifier
+            if let Some((name, raw_name, source_kind)) = resolve_event(target.as_str()) {
+                let line = offset_to_line(content, caps.get(0).map(|m| m.start()).unwrap_or(0));
+                event_listens.push(EventRef {
+                    raw_name,
+                    name,
+                    line,
+                    kind: format!("listen_{}", source_kind),
+                    awaited: false,
+                    payload: None,
+                });
+            }
         }
     }
 
