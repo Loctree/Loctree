@@ -202,6 +202,40 @@ Circular import detected:
   src/a.ts → src/b.ts → src/c.ts → src/a.ts
 ```
 
+### `loct twins`
+
+Semantic duplicate analysis — finds dead parrots, exact twins, and barrel chaos.
+
+```bash
+loct twins           # Full analysis: dead parrots + exact twins + barrel chaos
+loct twins --dead-only    # Only exports with 0 imports
+loct twins --path src/    # Analyze specific path
+```
+
+**What it detects:**
+
+1. **Dead Parrots** — exports with zero imports (Monty Python reference: code that's "just resting")
+   ```
+   DEAD PARROTS (75 symbols with 0 imports)
+     ├─ ChatPanelTabs (reexport:6) - 0 imports
+     ├─ update_profile (reexport:0) - 0 imports
+     └─ ...
+   ```
+
+2. **Exact Twins** — same symbol name exported from multiple files
+   ```
+   EXACT TWINS (150 duplicates)
+     ├─ "Button" exported from:
+     │   src/components/Button.tsx
+     │   src/ui/Button.tsx
+     └─ ...
+   ```
+
+3. **Barrel Chaos** — barrel file issues
+   - Missing `index.ts` in directories with many external imports
+   - Deep re-export chains (A → B → C → D)
+   - Inconsistent import paths (same symbol imported via different paths)
+
 ### `loct commands`
 
 Tauri FE↔BE command coverage.
@@ -258,6 +292,34 @@ loct diff --since main              # Compare against main branch snapshot
 - New/resolved circular imports
 - New/removed dead exports
 - Changed graph edges
+
+### `loct dist`
+
+Bundle distribution analysis — verify tree-shaking by comparing source exports against production bundles using source maps.
+
+```bash
+loct dist dist/bundle.js.map src/   # Analyze bundle vs source
+```
+
+**Output:**
+```
+✓ Found 4 dead export(s) (67%)
+Bundle Analysis:
+  Source exports:  6
+  Bundled exports: 2
+  Dead exports:    4
+  Reduction:       67%
+  Analysis level:  symbol
+
+Dead Exports (not in bundle):
+  deadFunction (function) in index.ts:5
+  DEAD_CONST (var) in index.ts:10
+```
+
+**Features:**
+- Symbol-level detection via VLQ Base64 decoding of source map mappings
+- File-level fallback when source maps lack `names` array
+- Verifies bundler (Vite/Webpack/esbuild) actually eliminated dead code
 
 ### `loct query`
 
@@ -410,6 +472,17 @@ loct events --ghosts      # Emits going nowhere
 - **Barrel files** - Understands `index.ts` re-exports
 - **Dynamic imports** - Tracks `import()` expressions
 - **JSX/TSX** - Full support
+- **Flow types** - Flow annotation support (v0.6.x)
+- **WeakMap/WeakSet patterns** - Registry pattern detection (v0.6.x)
+- **.d.ts re-exports** - Proper type-only re-export tracking (v0.6.x)
+
+### SvelteKit
+
+- **Virtual modules** - Resolves `$app/navigation`, `$app/stores`, `$app/environment`, `$app/paths`
+- **`$lib` alias** - Maps `$lib/*` to configured library path
+- **Runtime modules** - Correctly resolves SvelteKit internal runtime paths
+- **Server/client split** - Understands `.server.ts` and `+page.server.ts` patterns
+- **.d.ts re-exports** - Tracks Svelte component type exports (v0.6.x)
 
 ### Python
 
@@ -417,12 +490,34 @@ loct events --ghosts      # Emits going nowhere
 - **Typed packages** - PEP 561 `py.typed` marker detection
 - **Test detection** - Distinguishes test files from production
 - **Concurrency patterns** - Detects threading/asyncio/multiprocessing
+- **`__all__` tracking** - Respects public API declarations (v0.6.x)
+- **Library mode** - Auto-detects Python stdlib (Lib/ directory) (v0.6.x)
 
 ### Rust
 
-- **Crate structure** - Understands `mod` declarations
+- **Crate structure** - Understands `mod` declarations and module hierarchy
+- **Crate-internal imports** - Resolves `use crate::foo::Bar`, `use super::Bar`, `use self::foo::Bar`
+- **Same-file usage** - Detects when exported symbols are used locally (e.g., `BUFFER_SIZE` in generics like `fn foo::<BUFFER_SIZE>()`)
+- **Nested brace imports** - Handles complex imports like `use crate::{foo::{A, B}, bar::C}`
 - **Tauri integration** - `#[tauri::command]` detection
 - **Symbol-level blame** - Git blame for fn/struct/enum/impl
+
+### Go
+
+- **Package structure** - Understands Go package imports
+- **Cross-package references** - Accurate dead code detection across packages
+- **Standard library** - Stdlib imports tracked correctly
+
+### Dart/Flutter (v0.6.x)
+
+- **Package imports** - Resolves `package:` imports
+- **Auto-detection** - Recognizes `pubspec.yaml`, ignores `.dart_tool/`, `build/`
+- **Full language support** - Imports, exports, dead code detection
+
+### Vue
+
+- **Single File Components (SFC)** - `<script setup>` and `<script>` support
+- **Component analysis** - Tracks component usage and exports
 
 ---
 
@@ -529,6 +624,7 @@ loct cycles --json | jq '.[] | select(.files | length > 2)'
 | Impact analysis | `loct impact <file>` |
 | Dead code | `loct dead --confidence high` |
 | Circular imports | `loct cycles` |
+| Twins analysis | `loct twins` |
 | FE↔BE gaps | `loct commands --missing` |
 | Who imports file | `loct query who-imports <file>` |
 | Where is symbol | `loct query where-symbol <name>` |

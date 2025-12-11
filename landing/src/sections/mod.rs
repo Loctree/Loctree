@@ -2,7 +2,7 @@
 // Developed with 💀 by The Loctree Team (c)2025
 
 /// Version string used across the landing page (single source of truth)
-pub const VERSION: &str = "v0.5.13";
+pub const VERSION: &str = "v0.6.8";
 
 mod blog;
 mod cli_reference;
@@ -12,6 +12,7 @@ mod footer;
 mod for_agents;
 mod hero;
 mod install;
+mod manual;
 mod nav;
 mod real_world;
 mod slice_demo;
@@ -25,6 +26,7 @@ pub use footer::Footer;
 pub use for_agents::ForAgents;
 pub use hero::Hero;
 pub use install::InstallSection;
+pub use manual::Manual;
 pub use nav::Nav;
 pub use real_world::RealWorldResults;
 pub use slice_demo::SliceDemo;

@@ -1,68 +1,62 @@
-# loctree v0.5.9 — AI Agent Quick Reference
+# loctree v0.6.3-dev — AI Agent Quick Reference
 
-> You have access to loctree for codebase analysis.
-> Use these commands BEFORE reading files manually or grepping.
-
-**Scan once, slice many.** Capture structure, extract focused context.
+> Use loctree before grepping manually. Scan once, slice many.
 
 ## Install & Scan
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Loctree/Loctree/main/tools/install.sh | sh
-loct             # creates .loctree/ with snapshot + reports
+cargo install loctree
+loct             # snapshot + reports to .loctree/
+loct --for-ai    # project overview JSON for agents
 ```
 
-## Quick Queries (no full scan needed)
+## Quick Queries (no full rescan)
 ```bash
 loct query who-imports <file>     # files that import target
 loct query where-symbol <name>    # find symbol definitions
 loct query component-of <file>    # graph component containing file
+loct find --similar <Name>        # avoid dup components
 ```
 
-## Before creating new components
+## Refactors / Impact
 ```bash
-loct find --similar <Name>        # find similar (avoid duplicates)
-loct query where-symbol <Name>    # check if exists
-```
-
-## Before refactoring
-```bash
-loct slice <file> --consumers --json  # what depends on it
-loct find --impact <file>             # what breaks if removed
-loct cycles                           # detect import cycles
+loct slice <file> --consumers --json   # dependent context
+loct find --impact <file>              # what breaks if removed
+loct cycles                            # circular imports (lazy imports tagged as info)
+loct dead --confidence high            # unused exports (pytest Test* ignored)
 ```
 
 ## Compare branches/commits
 ```bash
-loct diff --since main            # compare against main branch
-loct diff --since HEAD~5          # delta since 5 commits ago
+loct diff --since main|HEAD~N
 ```
 
-## Dead code detection
+## Twins (semantic duplicates)
 ```bash
-loct dead --confidence high       # unused exports (safe to remove)
+loct twins                # dead parrots + exact twins + barrel chaos
+loct twins --dead-only    # only exports with 0 imports
 ```
 
-## Focused AI context
+## Crowds (dup clusters)
 ```bash
-loct slice <file> --consumers --json | claude
-loct --for-ai                     # project overview JSON
+loct crowd             # auto-detect crowds
+loct crowd message     # crowd around a pattern
 ```
 
-## Tauri FE<>BE coverage
+## Tauri FE↔BE coverage
 ```bash
-loct commands --missing           # FE calls without BE handlers
-loct commands --unused            # BE handlers without FE calls
-loct trace <handler>              # investigate handler usage
+loct commands --missing   # FE calls without BE handlers
+loct commands --unused    # BE handlers without FE calls
+loct trace <handler>      # inspect handler usage
 ```
 
-## CI pipeline checks
+## CI pipeline
 ```bash
 loct lint --fail --sarif > results.sarif
 ```
 
 ## IDE Integration
 ```
-loctree://open?f=<file>&l=<line>  # clickable URLs in SARIF output
+loctree://open?f=<file>&l=<line>  # clickable in SARIF
 ```
 
 ---

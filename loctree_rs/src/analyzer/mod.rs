@@ -7,6 +7,7 @@
 //! - [`py`] - Python import/export analysis
 //! - [`rust`] - Rust analysis (Tauri commands, mod statements)
 //! - [`css`] - CSS/SCSS dependency tracking
+//! - [`dart`] - Dart/Flutter import/export analysis (lightweight)
 //!
 //! ## Analysis Features
 //! - [`cycles`] - Circular import detection (Tarjan's SCC algorithm)
@@ -23,13 +24,18 @@
 
 pub mod assets;
 pub mod ast_js;
+pub mod barrels;
 pub mod classify;
 pub mod coverage;
+pub mod crowd;
 mod css;
 pub mod cycles;
+pub mod dart;
 pub mod dead_parrots;
+pub mod dist;
 pub mod entrypoints;
 pub mod for_ai;
+pub mod go;
 mod graph;
 pub mod html;
 mod insights;
@@ -47,8 +53,10 @@ pub mod rust;
 pub mod sarif;
 pub mod scan;
 pub mod search;
+pub mod test_coverage;
 pub mod trace;
 mod tsconfig;
+pub mod twins;
 
 pub(super) fn offset_to_line(content: &str, offset: usize) -> usize {
     content[..offset].bytes().filter(|b| *b == b'\n').count() + 1
@@ -76,7 +84,7 @@ pub fn build_open_url(file: &str, line: Option<usize>, open_base: Option<&str>) 
 
 #[allow(unused_imports)]
 pub use report::{
-    AiInsight, CommandGap, DupLocation, GraphComponent, GraphData, GraphNode, RankedDup,
-    ReportSection,
+    AiInsight, CommandGap, DupLocation, DupSeverity, GraphComponent, GraphData, GraphNode,
+    RankedDup, ReportSection,
 };
 pub use runner::run_import_analyzer;

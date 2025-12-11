@@ -1,0 +1,52 @@
+rules:
+  # Secrets and credential patterns (skip this file)
+  - id: local.secrets.generic
+    languages: [generic]
+    message: Possible secret/credential detected
+    severity: ERROR
+    paths:
+      exclude:
+        - "**/.semgrep.yaml"
+    patterns:
+      - pattern-either:
+          - pattern: /AIza[0-9A-Za-z\-_]{35}/
+          - pattern: /ghp_[0-9A-Za-z]{36}/
+          - pattern: /sk-[A-Za-z0-9]{32,}/
+          - pattern: /(?i)AWS_SECRET_ACCESS_KEY\s*=\s*[A-Za-z0-9\/\+=]{40}/
+          - pattern: /(?i)AWS_ACCESS_KEY_ID\s*=\s*AKIA[0-9A-Z]{16}/
+          - pattern: /(?i)PASSWORD\s*=\s*[^\\s]+/
+          - pattern: /(?i)SECRET\s*=\s*[^\\s]+/
+
+  # CI hygiene: disallow sleep in Rust tests
+  - id: local.ci.no-sleep-in-tests
+    languages: [rust]
+    message: Avoid sleep in tests (flaky/slow CI)
+    severity: WARNING
+    patterns:
+      - pattern: sleep(...)
+
+  # Rust: avoid unwrap on File::open
+  - id: local.rust.no-file-open-unwrap
+    languages: [rust]
+    message: Avoid unwrap() on File::open to prevent crashes
+    severity: WARNING
+    patterns:
+      - pattern: File::open(...).unwrap()
+
+  # Rust: avoid generic unwrap
+  - id: local.rust.no-unwrap
+    languages: [rust]
+    message: Avoid unwrap(); use ? or expect with context
+    severity: WARNING
+    patterns:
+      - pattern: $X.unwrap()
+
+  # Bash: disallow curl|bash style installers
+  - id: local.bash.no-curl-pipe-sh
+    languages: [bash]
+    message: Avoid piping curl/wget output to shell
+    severity: ERROR
+    patterns:
+      - pattern-either:
+          - pattern: curl ... | sh
+          - pattern: wget ... | sh

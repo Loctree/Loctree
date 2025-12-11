@@ -116,10 +116,17 @@ customCommandWrapper("another_cmd", options);
             .collect();
         assert!(generics.iter().any(|g| g.contains("Foo.Bar")));
 
-        // exports should include defaults and named
+        // exports should include defaults (named "default") and named exports
         let export_names: Vec<_> = analysis.exports.iter().map(|e| e.name.clone()).collect();
         assert!(export_names.contains(&"localValue".to_string()));
-        assert!(export_names.contains(&"MyComp".to_string()));
+        // Default exports are now named "default", original name in export_type
+        assert!(export_names.contains(&"default".to_string()));
+        assert!(
+            analysis
+                .exports
+                .iter()
+                .any(|e| e.name == "default" && e.export_type == "MyComp")
+        );
         assert!(export_names.contains(&"namedA".to_string()));
     }
 
@@ -248,11 +255,13 @@ import Baz from "./component";
             &CommandDetectionConfig::default(),
         );
 
-        // The export should be stored with kind "default"
+        // The export should be stored with name "default" for matching with `import X from`
+        // The original function name is preserved in export_type
         assert_eq!(exporter.exports.len(), 1);
         let export = &exporter.exports[0];
-        assert_eq!(export.name, "MyComponent");
+        assert_eq!(export.name, "default");
         assert_eq!(export.kind, "default");
+        assert_eq!(export.export_type, "MyComponent");
 
         // All three imports should be marked as default imports
         // even though they have different names (Foo, Bar, Baz)

@@ -52,6 +52,70 @@ pub fn find_cycles(edges: &[(String, String, String)]) -> Vec<Vec<String>> {
         .collect()
 }
 
+/// Return (strict_cycles, lazy_cycles), where:
+/// - strict_cycles exclude edges marked as "lazy_import" or "type_import"
+/// - lazy_cycles are cycles that disappear once lazy imports are removed and that include a lazy edge
+pub fn find_cycles_with_lazy(
+    edges: &[(String, String, String)],
+) -> (Vec<Vec<String>>, Vec<Vec<String>>) {
+    let strict_edges: Vec<_> = edges
+        .iter()
+        .filter(|(_, _, kind)| kind != "lazy_import" && kind != "type_import")
+        .cloned()
+        .collect();
+    let strict_cycles = find_cycles(&strict_edges);
+
+    let edges_no_type: Vec<_> = edges
+        .iter()
+        .filter(|(_, _, kind)| kind != "type_import")
+        .cloned()
+        .collect();
+    let all_cycles = find_cycles(&edges_no_type);
+
+    let lazy_edge_set: HashSet<(String, String)> = edges_no_type
+        .iter()
+        .filter(|(_, _, kind)| kind == "lazy_import")
+        .map(|(a, b, _)| (a.clone(), b.clone()))
+        .collect();
+
+    let normalize = |cycle: &[String]| {
+        let mut sorted = cycle.to_vec();
+        sorted.sort();
+        sorted.join("|")
+    };
+    let strict_keys: HashSet<String> = strict_cycles.iter().map(|c| normalize(c)).collect();
+    let mut seen = HashSet::new();
+    let mut lazy_cycles = Vec::new();
+
+    for cycle in all_cycles {
+        let key = normalize(&cycle);
+        if strict_keys.contains(&key) || seen.contains(&key) {
+            continue;
+        }
+        let mut has_lazy = false;
+        for pair in cycle.windows(2) {
+            if pair.len() == 2 && lazy_edge_set.contains(&(pair[0].clone(), pair[1].clone())) {
+                has_lazy = true;
+                break;
+            }
+        }
+        // wrap edge
+        if !has_lazy && cycle.len() > 1 {
+            let last = cycle.last().unwrap();
+            let first = cycle.first().unwrap();
+            if lazy_edge_set.contains(&(last.clone(), first.clone())) {
+                has_lazy = true;
+            }
+        }
+        if has_lazy {
+            seen.insert(key);
+            lazy_cycles.push(cycle);
+        }
+    }
+
+    (strict_cycles, lazy_cycles)
+}
+
 fn find_cycles_normalized(edges: &[(String, String)]) -> Vec<Vec<String>> {
     let mut adj: HashMap<String, Vec<String>> = HashMap::new();
     let mut all_nodes = HashSet::new();

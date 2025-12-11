@@ -30,7 +30,7 @@
 //! let js_assets = JsAssets::default();
 //!
 //! // Render to HTML string
-//! let html = render_report(&[section], &js_assets);
+//! let html = render_report(&[section], &js_assets, false);
 //!
 //! // Write to file
 //! std::fs::write("report.html", html).unwrap();
@@ -83,6 +83,7 @@ use types::ReportSection;
 ///
 /// * `sections` - Slice of report sections to render
 /// * `js_assets` - Paths to JavaScript assets for graph visualization
+/// * `has_tauri` - Whether to show Tauri coverage tab (only for Tauri projects)
 ///
 /// # Returns
 ///
@@ -99,12 +100,12 @@ use types::ReportSection;
 ///     ..Default::default()
 /// };
 ///
-/// let html = render_report(&[section], &JsAssets::default());
+/// let html = render_report(&[section], &JsAssets::default(), false);
 /// assert!(html.starts_with("<!DOCTYPE html>"));
 /// ```
-pub fn render_report(sections: &[ReportSection], js_assets: &JsAssets) -> String {
+pub fn render_report(sections: &[ReportSection], js_assets: &JsAssets, has_tauri: bool) -> String {
     let doc = view! {
-        <ReportDocument sections=sections.to_vec() js_assets=js_assets.clone() />
+        <ReportDocument sections=sections.to_vec() js_assets=js_assets.clone() has_tauri=has_tauri />
     };
 
     let html = doc.to_html();
@@ -169,7 +170,7 @@ mod tests {
     fn renders_empty_report() {
         let sections: Vec<ReportSection> = vec![];
         let assets = JsAssets::default();
-        let html = render_report(&sections, &assets);
+        let html = render_report(&sections, &assets, false);
 
         assert!(html.starts_with("<!DOCTYPE html>"));
         assert!(html.contains("<html"));
@@ -184,7 +185,7 @@ mod tests {
             ..Default::default()
         };
         let assets = JsAssets::default();
-        let html = render_report(&[section], &assets);
+        let html = render_report(&[section], &assets, false);
 
         assert!(html.contains("test-root"));
         assert!(html.contains("42"));

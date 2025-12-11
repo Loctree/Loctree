@@ -768,7 +768,7 @@
       filtered.forEach((comp) => {
         const sample = comp.sample || (comp.nodes && comp.nodes[0]) || "";
         const sampleHref = openBase ? `${openBase}/open?f=${encodeURIComponent(sample)}&l=1` : null;
-        const warn = comp.detached ? " ⚠️" : "";
+        const warn = comp.detached ? " (detached)" : "";
         const edgeCount = comp.edges !== undefined ? comp.edges : comp.edge_count;
 
         // Build table row using safe DOM APIs (no innerHTML with user data)

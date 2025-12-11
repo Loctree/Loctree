@@ -48,6 +48,10 @@ pub fn CliReference() -> impl IntoView {
                             <code class="cli-cmd">"loct diff --since <id>"</code>
                             <span class="cli-desc">"Compare snapshots, show delta"</span>
                         </div>
+                        <div class="cli-item">
+                            <code class="cli-cmd">"loct dist <map> <src>"</code>
+                            <span class="cli-desc">"Bundle analysis via source maps"</span>
+                        </div>
                     </div>
 
                     <div class="cli-group">

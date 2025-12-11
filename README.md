@@ -35,8 +35,14 @@ loct --for-ai
 # Find circular imports
 loct cycles
 
+# Semantic duplicate analysis (dead parrots, twins, barrel chaos)
+loct twins
+
 # Detect dead exports
 loct dead --confidence high
+
+# Verify tree-shaking in production bundles
+loct dist dist/bundle.js.map src/
 ```
 
 ## Why loctree?
@@ -132,6 +138,20 @@ loct --for-ai
 }
 ```
 
+### Multi-Language Support
+
+loctree supports comprehensive analysis across multiple languages:
+
+| Language | Status | Key Features |
+|----------|--------|--------------|
+| **Rust** | Exceptional | 0% false positives on rust-lang/rust (35,387 files, ~787 files/sec) |
+| **Go** | Perfect | ~0% false positives on golang/go (17,182 files) |
+| **TypeScript/JavaScript** | Full | JSX/TSX support, React patterns, Flow annotations, WeakMap/WeakSet patterns |
+| **Python** | Full | Library mode with stdlib auto-detection, `__all__` tracking |
+| **Svelte** | Full | .d.ts re-export tracking, component analysis |
+| **Vue** | Full | Component analysis, SFC support |
+| **Dart/Flutter** | Full | Complete language support (new in v0.6.x) |
+
 ### Auto-Detect Stack
 
 loctree automatically detects your project type:
@@ -139,10 +159,11 @@ loctree automatically detects your project type:
 | Marker | Stack | Auto-Ignores | Extensions |
 |--------|-------|--------------|------------|
 | `Cargo.toml` | Rust | `target/` | `.rs` |
-| `tsconfig.json` | TypeScript | `node_modules/` | `.ts`, `.tsx` |
+| `tsconfig.json` | TypeScript | `node_modules/` | `.ts`, `.tsx`, `.jsx` |
 | `pyproject.toml` | Python | `.venv/`, `__pycache__/` | `.py` |
 | `src-tauri/` | Tauri | All above | `.ts`, `.tsx`, `.rs` |
 | `vite.config.*` | Vite | `dist/` | Auto |
+| `pubspec.yaml` | Dart/Flutter | `.dart_tool/`, `build/` | `.dart` |
 
 ### Tauri Command Coverage
 
@@ -181,10 +202,10 @@ Find problems before they become tech debt:
 loct find ChatSurface
 # Found: ChatPanel (distance: 2), ChatWindow (distance: 3)
 
-# Find potentially unused exports
+# Find potentially unused exports (improved detection in v0.6.x)
 loct dead --confidence high
 
-# Detect circular import cycles
+# Detect circular import cycles (with visualization in reports)
 loct cycles
 
 # Analyze impact of changing a file
@@ -192,6 +213,54 @@ loct impact src/utils/api.ts
 
 # Find a symbol across the codebase
 loct find useAuth
+
+# Twins analysis (dead parrots, exact twins, barrel chaos)
+loct twins
+loct twins --dead-only    # Only exports with 0 imports
+```
+
+**Enhanced Dead Code Detection (v0.6.x):**
+- **Registry Pattern Support** - Detects WeakMap/WeakSet usage (React DevTools, observability tools)
+- **Flow Type Annotations** - Understands Flow syntax alongside TypeScript
+- **Re-export Chains** - Tracks .d.ts files and barrel exports (Svelte, library types)
+- **Python `__all__`** - Respects public API declarations in Python modules
+- **Library Mode Intelligence** - Auto-detects npm packages and Python stdlib to exclude public APIs
+
+```bash
+# Example: Python stdlib analysis
+loct dead --library-mode
+# Skips: __all__ exports, Lib/ directory public APIs
+
+# Example: npm package analysis
+loct dead
+# Auto-detects: package.json "exports" field, excludes public API
+
+## Library / Framework Mode
+
+loctree intelligently handles libraries and frameworks to avoid false positives:
+
+**Automatic Detection:**
+- **npm packages** with `exports` field in package.json
+- **Python stdlib** detection via `Lib/` directory and `__all__` exports
+- **Public API exclusion** - Exports in public APIs are not flagged as dead code
+
+**Manual Activation:**
+```bash
+loct --library-mode
+# or in .loctree/config.toml:
+library_mode = true
+```
+
+**Features:**
+- Ignores example sandboxes, demos, playgrounds, kitchen-sink, docs/examples
+- Tracks `__all__` for Python public API boundaries
+- Customizable via `library_example_globs` in config
+- Outputs `.loctree/report.html` and `.loctree/analysis.json` automatically
+
+**Advanced Pattern Detection:**
+- WeakMap/WeakSet registry patterns (e.g., React DevTools)
+- Flow type annotations
+- TypeScript .d.ts re-export chains
 
 # List entry points
 loct lint --entrypoints
@@ -207,9 +276,15 @@ loct report --graph --output report.html
 
 Features:
 - Interactive Cytoscape.js dependency graphs
-- Tabbed navigation (Duplicates, Cascades, Commands, Graph)
+- Tabbed navigation (Duplicates, Cascades, Commands, Graph, Cycles)
 - AI Summary panel with quick wins
+- Circular dependency visualization
 - Dark mode support
+
+**Smoke Test Results:**
+- **rust-lang/rust**: 35,387 files analyzed in ~45s (787 files/sec), 91 circular dependencies detected
+- **facebook/react**: 3,951 files in 49s (81 files/sec), 8 circular dependencies found
+- **golang/go**: 17,182 files analyzed with ~0% false positives
 
 ### CI Pipeline Checks
 
@@ -235,6 +310,7 @@ Modes:
   find                      Unified search (symbols, similar, impact)
   dead                      Unused exports (alias/barrel aware)
   cycles                    Circular imports
+  twins                     Semantic duplicates (dead parrots, exact twins, barrel chaos)
   commands                  Tauri FE↔BE bridges (missing/unused)
   events                    Emit/listen/races summary
   tree                      Directory tree with LOC counts

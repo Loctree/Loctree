@@ -304,6 +304,7 @@ pub fn run_tree(root_list: &[PathBuf], parsed: &crate::args::ParsedArgs) -> io::
         output: parsed.output,
         summary: parsed.summary,
         summary_limit: parsed.summary_limit,
+        summary_only: parsed.summary_only,
         show_hidden: parsed.show_hidden,
         show_ignored: parsed.show_ignored,
         loc_threshold: parsed.loc_threshold,
@@ -389,17 +390,32 @@ pub fn run_tree(root_list: &[PathBuf], parsed: &crate::args::ParsedArgs) -> io::
         });
 
         if matches!(root_options.output, OutputMode::Json | OutputMode::Jsonl) {
-            let entries_json: Vec<_> = entries
-                .iter()
-                .map(|entry| {
-                    json!({
-                        "path": entry.relative_path,
-                        "type": if entry.is_dir { "dir" } else { "file" },
-                        "loc": entry.loc,
-                        "isLarge": entry.is_large,
+            let entries_json: Vec<_> = if root_options.summary_only {
+                sorted_large
+                    .iter()
+                    .take(root_options.summary_limit)
+                    .map(|entry| {
+                        json!({
+                            "path": entry.path,
+                            "type": "file",
+                            "loc": entry.loc,
+                            "isLarge": true,
+                        })
                     })
-                })
-                .collect();
+                    .collect()
+            } else {
+                entries
+                    .iter()
+                    .map(|entry| {
+                        json!({
+                            "path": entry.relative_path,
+                            "type": if entry.is_dir { "dir" } else { "file" },
+                            "loc": entry.loc,
+                            "isLarge": entry.is_large,
+                        })
+                    })
+                    .collect()
+            };
 
             let payload = json!({
                 "root": root_path,
@@ -441,6 +457,38 @@ pub fn run_tree(root_list: &[PathBuf], parsed: &crate::args::ParsedArgs) -> io::
             } else {
                 json_results.push(payload);
             }
+            continue;
+        }
+
+        if root_options.summary_only && matches!(root_options.output, OutputMode::Human) {
+            if idx > 0 {
+                println!();
+            }
+
+            let root_name = root_path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| root_path.display().to_string());
+
+            println!("{}/", root_name);
+            if sorted_large.is_empty() {
+                println!(
+                    "No files exceed the large-file threshold ({} LOC).",
+                    root_options.loc_threshold
+                );
+            } else {
+                println!(
+                    "Top {} files (>= {} LOC):",
+                    root_options.summary_limit, root_options.loc_threshold
+                );
+                for item in sorted_large.iter().take(root_options.summary_limit) {
+                    println!("  {} ({} LOC)", item.path, item.loc);
+                }
+            }
+            println!(
+                "\nSummary: directories: {}, files: {}, files with LOC: {}, total LOC: {}",
+                stats.directories, stats.files, stats.files_with_loc, stats.total_loc
+            );
             continue;
         }
 

@@ -46,8 +46,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            loctree_rs/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('loctree_rs/Cargo.lock') }}
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
       - uses: dtolnay/rust-toolchain@stable
@@ -81,8 +81,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            loctree_rs/target
-          key: ubuntu-cargo-coverage-${{ hashFiles('loctree_rs/Cargo.lock') }}
+            target
+          key: ubuntu-cargo-coverage-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
             ubuntu-cargo-coverage-
 

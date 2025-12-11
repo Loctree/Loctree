@@ -43,6 +43,9 @@
 
 mod cascades;
 mod commands;
+mod crowds;
+mod cycles;
+mod dead_code;
 mod document;
 mod duplicates;
 mod dynamic_imports;
@@ -54,9 +57,13 @@ mod quick_commands;
 mod section;
 mod tabs;
 mod tree;
+mod twins;
 
 pub use cascades::CascadesList;
 pub use commands::TauriCommandCoverage;
+pub use crowds::Crowds;
+pub use cycles::Cycles;
+pub use dead_code::DeadCode;
 pub use document::ReportDocument;
 pub use duplicates::DuplicateExportsTable;
 pub use dynamic_imports::DynamicImportsTable;
@@ -68,3 +75,4 @@ pub use quick_commands::QuickCommandsPanel;
 pub use section::ReportSectionView;
 pub use tabs::TabContent;
 pub use tree::TreeView;
+pub use twins::Twins;

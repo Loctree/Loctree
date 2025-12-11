@@ -165,7 +165,7 @@ fn main() {
     };
 
     // Render
-    let html = render_report(&[section], &js_assets);
+    let html = render_report(&[section], &js_assets, false);
 
     // Write
     let output_path = "graph_report.html";

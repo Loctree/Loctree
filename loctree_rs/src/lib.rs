@@ -55,12 +55,12 @@
 //!
 //! See the [README](https://github.com/Loctree/Loctree) for full documentation.
 
-#![doc(html_root_url = "https://docs.rs/loctree/0.5.13")]
+#![doc(html_root_url = "https://docs.rs/loctree/0.6.8")]
 #![doc(
-    html_favicon_url = "https://raw.githubusercontent.com/Loctree/Loctree/main/assets/loctree-logo.svg"
+    html_favicon_url = "https://raw.githubusercontent.com/Loctree/Loctree/main/assets/loctree-badge.svg"
 )]
 #![doc(
-    html_logo_url = "https://raw.githubusercontent.com/Loctree/Loctree/main/assets/loctree-logo.svg"
+    html_logo_url = "https://raw.githubusercontent.com/Loctree/Loctree/main/assets/loctree-badge.svg"
 )]
 
 // ============================================================================
@@ -257,6 +257,18 @@ pub mod diff;
 /// println!("Found {} importers", result.results.len());
 /// ```
 pub mod query;
+
+/// Memex module for AI agent context management.
+///
+/// Provides semantic codebase exploration and context extraction for AI agents.
+/// Requires the `memex` feature flag (heavy dependencies).
+#[cfg(feature = "memex")]
+pub mod memex;
+
+/// Progress UI utilities (spinners, status messages).
+///
+/// Provides Black-style visual feedback for CLI operations.
+pub mod progress;
 
 // ============================================================================
 // Re-exports for convenience

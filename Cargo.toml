@@ -1,0 +1,55 @@
+[workspace]
+resolver = "2"
+members = [
+    "loctree_rs",
+    "loctree_server",
+    "loctree_memex",
+    "rmcp_memex",
+    "rmcp_mux",
+    "reports",
+    "landing",
+]
+
+# Note: rmcp_memex requires protobuf for lancedb
+# Use `make build` to auto-install protobuf, or run:
+#   brew install protobuf (macOS)
+#   apt install protobuf-compiler (Linux)
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+authors = ["Loctree <loct@loctree.io>"]
+
+[workspace.dependencies]
+# Core
+tokio = { version = "1.0", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+thiserror = "2.0"
+
+# CLI
+clap = { version = "4.4", features = ["derive"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+# MCP
+rmcp = { version = "0.10", features = ["server"] }
+
+# Async
+futures = "0.3"
+
+# The local crates (for inter-crate dependencies)
+loctree = { path = "loctree_rs" }
+
+# Release profile - good defaults for all crates
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+# WASM crates need size optimization - override when building with trunk/wasm-pack
+# trunk uses its own Trunk.toml for wasm-opt settings
