@@ -557,7 +557,16 @@ fn is_git_dirty(root: &Path) -> Option<bool> {
 }
 
 /// Run the init command: scan the project and save snapshot
-pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
+///
+/// # Arguments
+/// * `root_list` - List of root directories to scan
+/// * `parsed` - Parsed command-line arguments
+/// * `quiet_summary` - If true, skip printing the summary (useful for internal scans like dist mode)
+pub fn run_init_with_options(
+    root_list: &[PathBuf],
+    parsed: &ParsedArgs,
+    quiet_summary: bool,
+) -> io::Result<()> {
     use crate::analyzer::coverage::{compute_command_gaps, normalize_cmd_name};
     use crate::analyzer::root_scan::{ScanConfig, scan_roots};
     use crate::analyzer::runner::default_analyzer_exts;
@@ -886,8 +895,10 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
     // Save snapshot
     snapshot.save(&snapshot_root)?;
 
-    // Print summary
-    snapshot.print_summary(&snapshot_root);
+    // Print summary (unless quiet mode)
+    if !quiet_summary {
+        snapshot.print_summary(&snapshot_root);
+    }
 
     // Auto mode: emit full artifact set into ./.loctree to avoid extra commands
     if parsed.auto_outputs {
@@ -907,6 +918,14 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
     }
 
     Ok(())
+}
+
+/// Run the init command: scan the project and save snapshot
+///
+/// This is a convenience wrapper around `run_init_with_options` with default behavior
+/// (prints summary). For internal scans that should be quiet, use `run_init_with_options` directly.
+pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
+    run_init_with_options(root_list, parsed, false)
 }
 
 /// In auto mode, generate the full set of analysis artifacts inside ./.loctree

@@ -265,7 +265,8 @@ pub fn load_or_scan_src(src_dir: &Path) -> Result<Snapshot, String> {
                 use_gitignore: true,
                 ..Default::default()
             };
-            crate::snapshot::run_init(&[PathBuf::from(src_dir)], &parsed)
+            // Use quiet mode to suppress command bridge summary (not relevant for dist analysis)
+            crate::snapshot::run_init_with_options(&[PathBuf::from(src_dir)], &parsed, true)
                 .map_err(|e| format!("Failed to scan source directory: {}", e))?;
             Snapshot::load(src_dir)
                 .map_err(|e| format!("Failed to load snapshot after scan: {}", e))

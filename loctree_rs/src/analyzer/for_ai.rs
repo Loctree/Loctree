@@ -39,6 +39,8 @@ pub struct ForAiSummary {
     pub files_analyzed: usize,
     pub total_loc: usize,
     pub dead_exports: usize,
+    pub duplicate_exports: usize,
+    pub circular_imports: usize,
     pub missing_handlers: usize,
     pub unregistered_handlers: usize,
     pub unused_handlers: usize,
@@ -209,9 +211,15 @@ pub fn generate_for_ai_report(
 }
 
 fn compute_summary(sections: &[ReportSection], analyses: &[FileAnalysis]) -> ForAiSummary {
-    let files_analyzed: usize = sections.iter().map(|s| s.files_analyzed).sum();
+    // When sections are empty but we have analyses (e.g., --full-scan), use analyses.len()
+    let files_analyzed: usize = if sections.is_empty() {
+        analyses.len()
+    } else {
+        sections.iter().map(|s| s.files_analyzed).sum()
+    };
     let total_loc: usize = analyses.iter().map(|a| a.loc).sum();
-    let dead_exports: usize = sections.iter().map(|s| s.ranked_dups.len()).sum();
+    let dead_exports: usize = sections.iter().map(|s| s.dead_exports.len()).sum();
+    let duplicate_exports: usize = sections.iter().map(|s| s.ranked_dups.len()).sum();
     let missing_handlers: usize = sections.iter().map(|s| s.missing_handlers.len()).sum();
     let unregistered_handlers: usize = sections.iter().map(|s| s.unregistered_handlers.len()).sum();
     let unused_handlers: usize = sections.iter().map(|s| s.unused_handlers.len()).sum();
@@ -222,6 +230,7 @@ fn compute_summary(sections: &[ReportSection], analyses: &[FileAnalysis]) -> For
         .count();
     let cascade_imports: usize = sections.iter().map(|s| s.cascades.len()).sum();
     let dynamic_imports: usize = sections.iter().map(|s| s.dynamic.len()).sum();
+    let circular_imports: usize = sections.iter().map(|s| s.circular_imports.len()).sum();
 
     // Generate priority message
     let priority = if missing_handlers > 0 {
@@ -236,29 +245,49 @@ fn compute_summary(sections: &[ReportSection], analyses: &[FileAnalysis]) -> For
         )
     } else if unused_high_confidence > 0 {
         format!(
-            "CLEANUP: {} unused handlers (high confidence) can be safely removed. {} dead exports to consolidate.",
-            unused_high_confidence, dead_exports
+            "CLEANUP: {} unused handlers (high confidence) can be safely removed. {} dead exports, {} duplicate exports.",
+            unused_high_confidence, dead_exports, duplicate_exports
         )
     } else if dead_exports > 0 {
         format!(
+            "TECH DEBT: {} dead exports (unused). {} duplicate exports across files.",
+            dead_exports, duplicate_exports
+        )
+    } else if duplicate_exports > 0 {
+        format!(
             "TECH DEBT: {} duplicate exports across files. Consider consolidating to reduce confusion.",
-            dead_exports
+            duplicate_exports
+        )
+    } else if circular_imports > 0 {
+        format!(
+            "TECH DEBT: {} circular import cycles. Consider refactoring to break cycles.",
+            circular_imports
         )
     } else {
         "HEALTHY: No critical issues found. Good job!".to_string()
     };
 
-    // Health score (simple heuristic)
+    // Health score (weighted heuristic):
+    // - Missing handlers: 20 points each (critical runtime errors)
+    // - Unregistered handlers: 15 points each (won't work but defined)
+    // - Unused handlers (high confidence): 5 points each (dead code)
+    // - Dead exports: 2 points each (unused exports)
+    // - Duplicate exports: 1 point per 5 (naming confusion)
+    // - Circular imports: 3 points each (architectural smell)
     let issue_penalty = missing_handlers * 20
         + unregistered_handlers * 15
         + unused_high_confidence * 5
-        + (dead_exports / 10).min(20);
+        + dead_exports * 2
+        + (duplicate_exports / 5).min(20)
+        + circular_imports * 3;
     let health_score = 100u8.saturating_sub(issue_penalty.min(100) as u8);
 
     ForAiSummary {
         files_analyzed,
         total_loc,
         dead_exports,
+        duplicate_exports,
+        circular_imports,
         missing_handlers,
         unregistered_handlers,
         unused_handlers,
@@ -1067,6 +1096,25 @@ mod tests {
 
         assert_eq!(summary.files_analyzed, 0);
         assert_eq!(summary.total_loc, 0);
+        assert_eq!(summary.health_score, 100);
+        assert!(summary.priority.contains("HEALTHY"));
+    }
+
+    #[test]
+    fn test_compute_summary_empty_sections_with_analyses() {
+        // Bug fix test: when sections are empty but analyses exist (e.g., --full-scan),
+        // files_analyzed should be populated from analyses.len()
+        let sections: Vec<ReportSection> = vec![];
+        let analyses = vec![
+            mock_file("src/a.ts", 100),
+            mock_file("src/b.ts", 200),
+            mock_file("src/c.rs", 50),
+        ];
+
+        let summary = compute_summary(&sections, &analyses);
+
+        assert_eq!(summary.files_analyzed, 3);
+        assert_eq!(summary.total_loc, 350);
         assert_eq!(summary.health_score, 100);
         assert!(summary.priority.contains("HEALTHY"));
     }
