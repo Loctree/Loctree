@@ -113,8 +113,12 @@ pub(crate) fn regex_rust_pub_const_like(kind: &str) -> Regex {
         // This naturally excludes "const fn/unsafe/async" which have lowercase keywords
         r#"([A-Z][A-Za-z0-9_]*)"#
     } else {
-        // For static, just capture the identifier name
-        r#"([A-Za-z0-9_]+)"#
+        // For static, we need to:
+        // 1. Skip optional 'mut' keyword (for static mut)
+        // 2. Skip 'ref' keyword (used in lazy_static! macro: pub static ref FOO)
+        // 3. Then capture the actual identifier name (uppercase for constants)
+        // The negative lookahead (?!ref\b|mut\b) ensures we don't capture these keywords
+        r#"(?:mut\s+)?(?:ref\s+)?([A-Z][A-Za-z0-9_]*)"#
     };
     let pattern = format!(r#"pub\s*(?:\([^)]*\)\s*)?{}\s+{}"#, kind, suffix);
     regex(&pattern)

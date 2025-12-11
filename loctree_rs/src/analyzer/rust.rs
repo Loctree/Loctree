@@ -3096,4 +3096,68 @@ pub const BUFFER_SIZE: usize = 480;
             const_exports
         );
     }
+
+    #[test]
+    fn lazy_static_ref_not_detected_as_export() {
+        // lazy_static! macro uses "pub static ref NAME" syntax
+        // The "ref" should NOT be detected as the export name
+        let content = r#"
+use lazy_static::lazy_static;
+
+lazy_static! {
+    pub static ref AI_HEALTH: RwLock<HashMap<String, bool>> = RwLock::new(HashMap::new());
+    pub static ref CONFIG: Config = Config::default();
+    static ref PRIVATE_CACHE: Cache = Cache::new();
+}
+
+pub static mut GLOBAL_COUNTER: u32 = 0;
+pub static REGULAR_STATIC: &str = "hello";
+"#;
+
+        let analysis = analyze_rust_file(content, "src/health.rs".to_string(), &[]);
+        let export_names: Vec<_> = analysis.exports.iter().map(|e| e.name.clone()).collect();
+
+        // "ref" should NOT be detected as an export (it's a keyword in lazy_static!)
+        assert!(
+            !export_names.contains(&"ref".to_string()),
+            "Should NOT detect 'ref' as export. Got: {:?}",
+            export_names
+        );
+
+        // "mut" should NOT be detected as an export
+        assert!(
+            !export_names.contains(&"mut".to_string()),
+            "Should NOT detect 'mut' as export. Got: {:?}",
+            export_names
+        );
+
+        // The actual static names SHOULD be detected
+        assert!(
+            export_names.contains(&"AI_HEALTH".to_string()),
+            "Should detect 'AI_HEALTH' from lazy_static!. Got: {:?}",
+            export_names
+        );
+        assert!(
+            export_names.contains(&"CONFIG".to_string()),
+            "Should detect 'CONFIG' from lazy_static!. Got: {:?}",
+            export_names
+        );
+        assert!(
+            export_names.contains(&"REGULAR_STATIC".to_string()),
+            "Should detect regular 'REGULAR_STATIC'. Got: {:?}",
+            export_names
+        );
+        assert!(
+            export_names.contains(&"GLOBAL_COUNTER".to_string()),
+            "Should detect 'GLOBAL_COUNTER' from static mut. Got: {:?}",
+            export_names
+        );
+
+        // Private statics (without pub) should NOT be detected
+        assert!(
+            !export_names.contains(&"PRIVATE_CACHE".to_string()),
+            "Should NOT detect private 'PRIVATE_CACHE'. Got: {:?}",
+            export_names
+        );
+    }
 }

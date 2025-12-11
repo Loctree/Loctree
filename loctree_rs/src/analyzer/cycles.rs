@@ -355,7 +355,7 @@ pub fn print_cycles_classified(classified_cycles: &[ClassifiedCycle], json_outpu
     }
     println!("Cycles Analysis:");
     let mut classes: Vec<_> = by_class.keys().collect();
-    classes.sort_by(|a, b| b.severity().cmp(&a.severity()));
+    classes.sort_by_key(|c| std::cmp::Reverse(c.severity()));
     for cls in &classes {
         let cycles = &by_class[cls];
         println!(
