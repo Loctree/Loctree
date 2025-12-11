@@ -1361,6 +1361,16 @@ input[type="range"]::-webkit-slider-thumb {
     white-space: nowrap;
 }
 
+.tree-stats {
+    font-size: 13px;
+    color: var(--theme-text-muted);
+    padding: 4px 10px;
+    background: var(--theme-surface);
+    border-radius: 12px;
+    border: 1px solid var(--theme-border);
+    cursor: help;
+}
+
 .tree-controls {
     display: flex;
     gap: 4px;
@@ -1398,7 +1408,8 @@ input[type="range"]::-webkit-slider-thumb {
 }
 
 .tree-container {
-    max-height: 600px;
+    max-height: calc(100vh - 280px);
+    min-height: 400px;
     overflow-y: auto;
     padding-right: 8px;
 }
