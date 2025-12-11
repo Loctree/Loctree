@@ -79,6 +79,13 @@ fn detect_crowd_internal(
                 })
                 .collect();
 
+            // Find the FileAnalysis for this path to get is_test flag
+            let is_test = files
+                .iter()
+                .find(|f| &f.path == path)
+                .map(|f| f.is_test)
+                .unwrap_or(false);
+
             CrowdMember {
                 file: path.clone(),
                 match_reason: MatchReason::NameMatch {
@@ -86,6 +93,7 @@ fn detect_crowd_internal(
                 },
                 importer_count,
                 similarity_scores,
+                is_test,
             }
         })
         .collect();

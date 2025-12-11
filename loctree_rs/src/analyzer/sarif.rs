@@ -271,6 +271,7 @@ mod tests {
                 symbol
             ),
             open_url: None,
+            is_test: false,
         }
     }
 

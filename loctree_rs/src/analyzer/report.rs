@@ -217,6 +217,9 @@ pub struct ReportSection {
     /// Twins analysis data (dead parrots, exact twins, barrel chaos)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub twins_data: Option<TwinsData>,
+    /// Test coverage gaps (handlers/events without tests)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub coverage_gaps: Vec<super::coverage_gaps::CoverageGap>,
 }
 
 /// Twins analysis data for the HTML report

@@ -145,6 +145,9 @@ pub struct DeadExport {
     /// IDE integration URL (loctree://open?f={file}&l={line})
     #[serde(skip_serializing_if = "Option::is_none")]
     pub open_url: Option<String>,
+    /// Whether this is a test file
+    #[serde(default)]
+    pub is_test: bool,
 }
 
 /// Controls which files are considered during dead-export detection.
@@ -1361,6 +1364,7 @@ pub fn find_dead_exports(
                     },
                     reason,
                     open_url: Some(open_url),
+                    is_test: analysis.is_test,
                 });
             }
         }
@@ -2011,6 +2015,7 @@ mod tests {
             confidence: "high".to_string(),
             reason: "No imports found for 'unused'. Checked: resolved imports (0 matches), star re-exports (none), local references (none)".to_string(),
             open_url: Some("loctree://open?f=src%2Futils.ts&l=10".to_string()),
+            is_test: false,
         }];
         // Should not panic
         print_dead_exports(&dead, OutputMode::Json, false, 20);
@@ -2025,6 +2030,7 @@ mod tests {
             confidence: "high".to_string(),
             reason: "No imports found for 'unused'. Checked: resolved imports (0 matches), star re-exports (none), local references (none)".to_string(),
             open_url: None,
+            is_test: false,
         }];
         // Should not panic
         print_dead_exports(&dead, OutputMode::Human, false, 20);
@@ -2041,6 +2047,7 @@ mod tests {
                 confidence: "high".to_string(),
                 reason: format!("No imports found for 'unused{}'. Checked: resolved imports (0 matches), star re-exports (none), local references (none)", i),
                 open_url: Some(format!("loctree://open?f=src%2Ffile{}.ts&l={}", i, i)),
+                is_test: false,
             })
             .collect();
         // Should truncate to limit and show "... and N more"

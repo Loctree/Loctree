@@ -34,7 +34,13 @@ pub fn find_cycles(edges: &[(String, String, String)]) -> Vec<Vec<String>> {
         canonical
             .entry(norm_to.clone())
             .or_insert_with(|| to.clone());
-        normalized_edges.push((norm_from, norm_to));
+
+        // Skip FALSE self-loops created by normalization (e.g., a.ts -> a.js becomes a:ts -> a:ts)
+        // These are not real cycles, just artifacts of collapsing file extensions.
+        // BUT keep REAL self-loops where from == to in the original (file imports itself)
+        if norm_from != norm_to || from == to {
+            normalized_edges.push((norm_from, norm_to));
+        }
     }
 
     // Run Tarjan on normalized module ids
@@ -152,11 +158,16 @@ fn find_cycles_normalized(edges: &[(String, String)]) -> Vec<Vec<String>> {
             if scc.len() > 1 {
                 return true;
             }
-            // Check self loop
-            if let Some(node) = scc.first()
-                && let Some(neighbors) = adj.get(node)
+            // Check self loop for single-node SCC
+            if scc.len() == 1
+                && let Some(node) = scc.first()
             {
-                return neighbors.contains(node);
+                if let Some(neighbors) = adj.get(node) {
+                    // Only report if the node has a self-edge
+                    return neighbors.contains(node);
+                }
+                // Node has no outgoing edges at all - not a cycle
+                return false;
             }
             false
         })
@@ -469,5 +480,108 @@ mod tests {
         assert_eq!(cycles.len(), 1, "Self-loop should be detected as a cycle");
         assert_eq!(cycles[0].len(), 1, "Self-loop cycle should have 1 node");
         assert_eq!(cycles[0][0], "a.rs");
+    }
+
+    #[test]
+    fn no_false_single_node_cycles_from_normalization() {
+        // Test case: Same file referenced with different extensions shouldn't create false cycle
+        // This happens when TS/JS normalization collapses variants
+        let edges = vec![
+            ("a.ts".to_string(), "b.ts".to_string(), "import".to_string()),
+            (
+                "a.tsx".to_string(),
+                "c.ts".to_string(),
+                "import".to_string(),
+            ),
+        ];
+        let cycles = find_cycles(&edges);
+        // Should find NO cycles because:
+        // - a.ts and a.tsx normalize to a:ts (same node in graph)
+        // - There's no cycle, just two different outgoing edges from the same normalized node
+        // - This should NOT be reported as a single-node cycle
+        assert!(
+            cycles.is_empty(),
+            "Normalization collision should not create false single-node cycles"
+        );
+    }
+
+    #[test]
+    fn no_single_node_cycle_without_self_loop() {
+        // A node in a DAG (with outgoing edges but no self-loop) should not be reported as a cycle
+        let edges = vec![
+            (
+                "branch.rs".to_string(),
+                "commit.rs".to_string(),
+                "import".to_string(),
+            ),
+            (
+                "commit.rs".to_string(),
+                "user.rs".to_string(),
+                "import".to_string(),
+            ),
+        ];
+        let cycles = find_cycles(&edges);
+        // Should find NO cycles - this is a simple chain A -> B -> C
+        assert!(
+            cycles.is_empty(),
+            "Simple chain without cycles should report no cycles"
+        );
+    }
+
+    #[test]
+    fn real_cycle_with_multiple_nodes() {
+        // A real cycle should still be detected
+        let edges = vec![
+            ("a.rs".to_string(), "b.rs".to_string(), "import".to_string()),
+            ("b.rs".to_string(), "c.rs".to_string(), "import".to_string()),
+            ("c.rs".to_string(), "a.rs".to_string(), "import".to_string()),
+        ];
+        let cycles = find_cycles(&edges);
+        assert_eq!(cycles.len(), 1, "Real 3-node cycle should be detected");
+        assert_eq!(cycles[0].len(), 3, "Cycle should have 3 nodes");
+    }
+
+    #[test]
+    fn gitbutler_like_scenario() {
+        // Mimics GitButler repo structure:
+        // Many files with imports but no cycles
+        let edges = vec![
+            (
+                "crates/but-core/src/branch.rs".to_string(),
+                "crates/but-core/src/types.rs".to_string(),
+                "import".to_string(),
+            ),
+            (
+                "crates/but-core/src/commit.rs".to_string(),
+                "crates/but-core/src/types.rs".to_string(),
+                "import".to_string(),
+            ),
+            (
+                "crates/but-core/src/user.rs".to_string(),
+                "crates/but-core/src/types.rs".to_string(),
+                "import".to_string(),
+            ),
+        ];
+        let cycles = find_cycles(&edges);
+        // Should find NO cycles - these are just multiple files importing the same common module
+        assert!(
+            cycles.is_empty(),
+            "No false single-file cycles should be reported in DAG"
+        );
+    }
+
+    #[test]
+    fn node_with_outgoing_edges_but_no_cycle() {
+        // A node that has outgoing edges but is not part of any cycle
+        let edges = vec![
+            ("a.rs".to_string(), "b.rs".to_string(), "import".to_string()),
+            ("a.rs".to_string(), "c.rs".to_string(), "import".to_string()),
+        ];
+        let cycles = find_cycles(&edges);
+        // Should find NO cycles
+        assert!(
+            cycles.is_empty(),
+            "Node with only outgoing edges (no cycle) should not be reported"
+        );
     }
 }

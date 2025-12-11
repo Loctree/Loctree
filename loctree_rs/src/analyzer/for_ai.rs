@@ -1084,6 +1084,7 @@ mod tests {
             crowds: vec![],
             dead_exports: vec![],
             twins_data: None,
+            coverage_gaps: vec![],
         }
     }
 

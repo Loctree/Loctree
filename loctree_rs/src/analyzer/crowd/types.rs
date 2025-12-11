@@ -34,6 +34,9 @@ pub struct CrowdMember {
     pub importer_count: usize,
     /// Similarity scores with other crowd members (file_path, similarity_score)
     pub similarity_scores: Vec<(String, f32)>,
+    /// Whether this is a test file
+    #[serde(default)]
+    pub is_test: bool,
 }
 
 /// Why a file matched the crowd pattern

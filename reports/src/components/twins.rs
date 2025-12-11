@@ -144,8 +144,9 @@ fn DeadParrotsTable(dead_parrots: Vec<DeadParrot>) -> impl IntoView {
                 {files.into_iter().flat_map(|file| {
                     let parrots = by_file.get(&file).unwrap().clone();
                     parrots.into_iter().map(move |parrot| {
+                        let is_test_attr = if parrot.is_test { "true" } else { "false" };
                         view! {
-                            <tr>
+                            <tr data-is-test=is_test_attr>
                                 <td class="file-cell">
                                     <code>{parrot.file_path.clone()}</code>
                                 </td>

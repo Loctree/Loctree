@@ -43,6 +43,7 @@
 
 mod cascades;
 mod commands;
+mod coverage;
 mod crowds;
 mod cycles;
 mod dead_code;
@@ -61,6 +62,7 @@ mod twins;
 
 pub use cascades::CascadesList;
 pub use commands::TauriCommandCoverage;
+pub use coverage::Coverage;
 pub use crowds::Crowds;
 pub use cycles::Cycles;
 pub use dead_code::DeadCode;

@@ -155,6 +155,7 @@ mod tests {
             crowds: Vec::new(),
             dead_exports: Vec::new(),
             twins_data: None,
+            coverage_gaps: Vec::new(),
         };
 
         render_html_report(&out_path, &[section]).expect("render html");
@@ -202,6 +203,7 @@ mod tests {
             crowds: Vec::new(),
             dead_exports: Vec::new(),
             twins_data: None,
+            coverage_gaps: Vec::new(),
         };
 
         render_html_report(&out_path, &[section]).expect("render html");

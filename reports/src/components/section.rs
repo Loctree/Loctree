@@ -3,7 +3,7 @@
 //! Implements the "Section View" layout with a sticky header and scrollable content.
 
 use super::{
-    AiInsightsPanel, AnalysisSummary, CascadesList, Crowds, Cycles, DeadCode,
+    AiInsightsPanel, AnalysisSummary, CascadesList, Coverage, Crowds, Cycles, DeadCode,
     DuplicateExportsTable, DynamicImportsTable, GraphContainer, QuickCommandsPanel, TabContent,
     TauriCommandCoverage, TreeView, Twins,
 };
@@ -47,6 +47,7 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
     let root_id_cycles = root_id_value.clone();
     let root_id_dead = root_id_value.clone();
     let root_id_twins = root_id_value.clone();
+    let root_id_coverage = root_id_value.clone();
     let root_id_graph = root_id_value.clone();
     let root_id_graph_tab = root_id_graph.clone();
     let root_id_graph_container = root_id_graph.clone();
@@ -208,6 +209,16 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
                 >
                     <div class="content-container">
                         <Twins twins=section.twins.clone() />
+                    </div>
+                </TabContent>
+
+                <TabContent
+                    root_id=root_id_coverage
+                    tab_name="coverage"
+                    active=false
+                >
+                    <div class="content-container">
+                        <Coverage coverage_gaps=section.coverage_gaps.clone() />
                     </div>
                 </TabContent>
 

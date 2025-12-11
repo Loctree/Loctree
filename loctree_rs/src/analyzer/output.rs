@@ -13,6 +13,7 @@ use super::CommandGap;
 use super::ReportSection;
 use super::barrels::analyze_barrel_chaos;
 use super::classify::language_from_path;
+use super::coverage_gaps::find_coverage_gaps;
 use super::crowd::detect_all_crowds_with_edges;
 use super::cycles;
 use super::dead_parrots::{DeadFilterConfig, find_dead_exports};
@@ -1305,6 +1306,51 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
 
         let tree = build_tree(&analyses, &root_path);
 
+        // Compute coverage gaps by building a minimal snapshot
+        let coverage_gaps = {
+            use crate::snapshot::{
+                CommandBridge as SnapshotCommandBridge, EventBridge, Snapshot, SnapshotMetadata,
+            };
+
+            // Convert command_bridges to snapshot format
+            let snapshot_command_bridges: Vec<SnapshotCommandBridge> = command_bridges
+                .iter()
+                .map(|cb| {
+                    let has_handler = cb.be_location.is_some();
+                    let is_called = !cb.fe_locations.is_empty();
+                    let backend_handler = cb
+                        .be_location
+                        .as_ref()
+                        .map(|(path, line, _)| (path.clone(), *line));
+                    let frontend_calls = cb.fe_locations.clone();
+
+                    SnapshotCommandBridge {
+                        name: cb.name.clone(),
+                        has_handler,
+                        is_called,
+                        backend_handler,
+                        frontend_calls,
+                    }
+                })
+                .collect();
+
+            // Build event bridges from analyses (emit/listen patterns)
+            let event_bridges: Vec<EventBridge> = Vec::new(); // TODO: extract from analyses if available
+
+            // Create minimal snapshot for coverage analysis
+            let snapshot = Snapshot {
+                metadata: SnapshotMetadata::default(),
+                files: analyses.clone(),
+                edges: Vec::new(),
+                export_index: HashMap::new(),
+                command_bridges: snapshot_command_bridges,
+                event_bridges,
+                barrels: Vec::new(),
+            };
+
+            find_coverage_gaps(&snapshot)
+        };
+
         report_section = Some(ReportSection {
             insights,
             root: root_path.display().to_string(),
@@ -1336,6 +1382,7 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
             crowds: crowds.clone(),
             dead_exports: dead_exports_for_report.clone(),
             twins_data: twins_data.clone(),
+            coverage_gaps,
         });
     }
 
@@ -1353,7 +1400,17 @@ pub fn write_report(
     if let Some(dir) = report_path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    render_html_report(report_path, sections)?;
+    // Show spinner during HTML generation (can be slow for large codebases)
+    let spinner = if !verbose {
+        Some(crate::progress::Spinner::new("Generating HTML report..."))
+    } else {
+        None
+    };
+    let result = render_html_report(report_path, sections);
+    if let Some(s) = spinner {
+        s.finish_clear();
+    }
+    result?;
     // Show relative path for cleaner output (with ./ prefix for consistency)
     let display_path = std::env::current_dir()
         .ok()

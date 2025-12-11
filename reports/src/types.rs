@@ -567,6 +567,9 @@ pub struct CrowdMember {
     /// Similarity scores with other members (file, score)
     #[serde(default)]
     pub similarity_scores: Vec<(String, f32)>,
+    /// Whether this is a test file
+    #[serde(default)]
+    pub is_test: bool,
 }
 
 /// A group of files with similar names/patterns.
@@ -595,6 +598,7 @@ pub struct CrowdMember {
 ///             },
 ///             importer_count: 15,
 ///             similarity_scores: vec![],
+///             is_test: false,
 ///         },
 ///         CrowdMember {
 ///             file: "src/components/Message.tsx".into(),
@@ -603,6 +607,7 @@ pub struct CrowdMember {
 ///             },
 ///             importer_count: 8,
 ///             similarity_scores: vec![],
+///             is_test: false,
 ///         },
 ///     ],
 ///     score: 6.5,
@@ -643,6 +648,7 @@ pub struct Crowd {
 ///     confidence: "very-high".into(),
 ///     reason: "No imports found in codebase".into(),
 ///     open_url: Some("loctree://open?f=src/utils/legacy.ts&l=42".into()),
+///     is_test: false,
 /// };
 /// ```
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -659,6 +665,58 @@ pub struct DeadExport {
     pub reason: String,
     /// Optional URL for opening in editor (loctree://open protocol)
     pub open_url: Option<String>,
+    /// Whether this is a test file
+    #[serde(default)]
+    pub is_test: bool,
+}
+
+/// A gap in test coverage
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CoverageGap {
+    /// Type of gap (handler_without_test, event_without_test, etc.)
+    pub kind: GapKind,
+    /// Target symbol/handler name
+    pub target: String,
+    /// Location (file:line)
+    pub location: String,
+    /// Severity level
+    pub severity: Severity,
+    /// Recommendation message
+    pub recommendation: String,
+    /// Additional context
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
+    /// Related file paths
+    #[serde(default)]
+    pub files: Vec<String>,
+}
+
+/// Type of coverage gap
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GapKind {
+    /// Handler used in production but not tested
+    HandlerWithoutTest,
+    /// Event emitted in production but not tested
+    EventWithoutTest,
+    /// Export used in production but not tested
+    ExportWithoutTest,
+    /// Tested but not used in production (suspicious)
+    TestedButUnused,
+}
+
+/// Severity level for coverage gaps
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Severity {
+    /// Critical - Handler without test (can break runtime)
+    Critical,
+    /// High - Event without test (data flow issues)
+    High,
+    /// Medium - Export without test (integration gaps)
+    Medium,
+    /// Low - Tested but unused (cleanup candidate)
+    Low,
 }
 
 /// Twins analysis data (dead parrots, exact twins, barrel chaos)
@@ -683,6 +741,9 @@ pub struct DeadParrot {
     pub line: usize,
     /// Symbol kind (function, type, const, class, etc.)
     pub kind: String,
+    /// Whether this is a test file
+    #[serde(default)]
+    pub is_test: bool,
 }
 
 /// An exact twin - symbol with same name exported from multiple files
@@ -832,4 +893,7 @@ pub struct ReportSection {
     /// Twins analysis (dead parrots, exact twins, barrel chaos)
     #[serde(default, alias = "twins_data")]
     pub twins: Option<TwinsData>,
+    /// Test coverage gaps (handlers/events without tests)
+    #[serde(default)]
+    pub coverage_gaps: Vec<CoverageGap>,
 }

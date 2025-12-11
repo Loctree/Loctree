@@ -91,6 +91,10 @@ pub fn ReportDocument(
                                 <Icon path=ICON_TWINS class="icon-sm" />
                                 "Twins"
                             </button>
+                            <button class="nav-item" data-tab="coverage">
+                                <Icon path=ICON_FLASK class="icon-sm" />
+                                "Coverage"
+                            </button>
                             <button class="nav-item" data-tab="graph">
                                 <Icon path=ICON_GRAPH class="icon-sm" />
                                 "Graph"
@@ -154,6 +158,7 @@ fn GraphScripts(js_assets: JsAssets) -> impl IntoView {
             <script src=js_assets.cytoscape_cose_bilkent_path.clone()></script>
             <script>{include_str!("../graph_bootstrap.js")}</script>
             <script>{include_str!("../twins_graph.js")}</script>
+            <script>{include_str!("../crowds_graph.js")}</script>
         })}
     }
 }
@@ -273,6 +278,31 @@ const APP_SCRIPT: &str = r#"
                   const container = document.getElementById('twins-graph-container');
                   if (container && typeof buildTwinsGraph === 'function') {
                       buildTwinsGraph(window.__TWINS_DATA__, 'twins-graph-container');
+                  }
+              }
+          }
+      });
+  });
+
+  // 3b. Crowds Graph Toggle - handles graph view in Crowds tab
+  document.querySelectorAll('.crowds-section-header[data-toggle]').forEach(btn => {
+      btn.addEventListener('click', () => {
+          const targetId = btn.dataset.toggle;
+          const content = document.getElementById(targetId);
+          const toggle = btn.querySelector('.crowds-graph-toggle');
+
+          if (content) {
+              const isHidden = content.style.display === 'none';
+              content.style.display = isHidden ? 'block' : 'none';
+              if (toggle) {
+                  toggle.textContent = isHidden ? '▼' : '▶';
+              }
+
+              // Initialize Cytoscape graph when crowds-graph-content is opened
+              if (isHidden && targetId === 'crowds-graph-content' && window.__CROWDS_DATA__) {
+                  const container = document.getElementById('crowds-graph-container');
+                  if (container && typeof buildCrowdsGraph === 'function') {
+                      buildCrowdsGraph(window.__CROWDS_DATA__, 'crowds-graph-container');
                   }
               }
           }

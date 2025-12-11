@@ -120,8 +120,10 @@ fn DeadCodeTable(
                         _ => "Medium",
                     };
 
+                    let is_test_attr = if export.is_test { "true" } else { "false" };
+
                     view! {
-                        <tr class=confidence_class>
+                        <tr class=confidence_class data-is-test=is_test_attr>
                             <td class="file-cell">
                                 {if let Some(url) = &export.open_url {
                                     view! {
