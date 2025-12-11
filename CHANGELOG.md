@@ -6,6 +6,35 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+## [0.6.9] - 2025-12-11
+
+### Added
+- **Test coverage analysis (`loct coverage`)**: Structural test coverage for Tauri apps
+  - Cross-references production usage (FE invoke/emit) with test imports
+  - CRITICAL: Handlers called from production but not tested
+  - HIGH: Events emitted but not tested
+  - MEDIUM: Exports without test imports
+  - LOW: Tested but unused (potential dead test code)
+  - Usage: `loct coverage`, `loct coverage --handlers`, `loct coverage --json`
+
+- **`--limit` option for commands**: Control output size for large codebases
+  - `loct commands --limit 10 --json` - First 10 command bridges
+
+### Improved
+- **Duplicate detection accuracy**: Dramatically reduced false positives
+  - Re-exports (`pub use`) no longer counted as duplicates (was ~80% noise)
+  - Generic method names (`new`, `from`, `clone`, etc.) filtered out
+  - Test fixtures excluded from analysis reports
+  - Cross-crate duplicates now surfaced first (real issues)
+
+- **Agent bundle (`loct agent`)**: Fixed `files_analyzed: 0` bug
+  - ReportSection now built for `--for-agent-feed` mode
+  - Summary stats correctly populated
+
+### Fixed
+- **JS assets pollution**: Fixed cytoscape.min.js files being written to repo root
+  - Now only writes to actual report directory, not current directory
+
 ## [0.6.7] - 2025-12-10
 
 ### Added

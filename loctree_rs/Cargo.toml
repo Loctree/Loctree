@@ -1,6 +1,6 @@
 [package]
 name = "loctree"
-version = "0.6.8"
+version = "0.6.9"
 edition = "2024"
 default-run = "loctree"
 authors = ["Loctree <loct@loctree.io>"]
@@ -31,7 +31,7 @@ regex = "1.12"
 globset = "0.4"
 heck = "0.5"
 time = { version = "0.3", features = ["formatting"] }
-report-leptos = { version = "0.1.1", path = "../reports" }
+report-leptos = { version = "0.1.9", path = "../reports" }
 git2 = "0.20"
 toml = "0.8"
 urlencoding = "2.1"
@@ -47,7 +47,8 @@ oxc_semantic = "0.100.0"
 tempfile = "3"
 
 # AI Memory integration (memex command) - optional, pulls heavy deps (datafusion)
-rmcp-memex = { path = "../rmcp_memex", optional = true }
+# rmcp-memex not yet on crates.io - disabled for publish
+# rmcp-memex = { path = "../rmcp_memex", optional = true }
 tokio = { version = "1.0", features = ["rt-multi-thread"] }
 
 # Progress UI (spinners, progress bars)
@@ -66,4 +67,4 @@ regex = "1.12"
 
 [features]
 default = []
-memex = ["rmcp-memex"]
+memex = []  # placeholder - rmcp-memex not yet on crates.io, feature flag exists but does nothing

@@ -181,6 +181,23 @@ loct commands
 - **Unused handlers** — Registered handlers never invoked from frontend
 - **React lazy detection** — Tracks `React.lazy()` dynamic imports
 
+### Test Coverage Analysis
+
+Structural test coverage based on import analysis (no runtime instrumentation):
+
+```bash
+loct coverage                        # All coverage gaps
+loct coverage --handlers             # Only Tauri handler gaps
+loct coverage --min-severity high    # Filter by severity
+loct coverage --json                 # JSON output for CI
+```
+
+Identifies coverage gaps by severity:
+- **CRITICAL** — Handlers called in production but not tested
+- **HIGH** — Events emitted but not tested
+- **MEDIUM** — Exports used in production without test imports
+- **LOW** — Tested but unused code (cleanup candidates)
+
 ### Tree Mode
 
 Fast directory tree with LOC counts:
