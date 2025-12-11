@@ -27,6 +27,7 @@ pub mod ast_js;
 pub mod barrels;
 pub mod classify;
 pub mod coverage;
+pub mod coverage_gaps;
 pub mod crowd;
 mod css;
 pub mod cycles;

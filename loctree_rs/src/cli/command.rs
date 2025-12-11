@@ -165,6 +165,12 @@ pub enum Command {
     /// Compares source exports with bundled code to find truly dead exports
     /// that were tree-shaken out by the bundler.
     Dist(DistOptions),
+
+    /// Analyze test coverage gaps.
+    ///
+    /// Cross-references production usage (FE invoke/emit) with test imports
+    /// to find handlers and events without test coverage.
+    Coverage(CoverageOptions),
 }
 
 impl Default for Command {
@@ -350,6 +356,22 @@ pub struct CommandsOptions {
 
     /// Maximum number of results to show (for limiting large outputs)
     pub limit: Option<usize>,
+}
+
+/// Options for the `coverage` command (test coverage analysis).
+#[derive(Debug, Clone, Default)]
+pub struct CoverageOptions {
+    /// Root directories to analyze
+    pub roots: Vec<PathBuf>,
+
+    /// Show only handler coverage gaps
+    pub handlers_only: bool,
+
+    /// Show only event coverage gaps
+    pub events_only: bool,
+
+    /// Filter by minimum severity (critical/high/medium/low)
+    pub min_severity: Option<String>,
 }
 
 /// Options for the `routes` command.
@@ -661,6 +683,7 @@ impl Command {
             Command::Crowd(_) => "crowd",
             Command::Twins(_) => "twins",
             Command::Dist(_) => "dist",
+            Command::Coverage(_) => "coverage",
         }
     }
 
@@ -688,6 +711,7 @@ impl Command {
             Command::Twins(_) => "Show symbol registry and dead parrots (0 imports)",
             Command::Routes(_) => "List backend/web routes (FastAPI/Flask)",
             Command::Dist(_) => "Analyze bundle distribution using source maps",
+            Command::Coverage(_) => "Analyze test coverage gaps (structural coverage)",
         }
     }
 
@@ -722,6 +746,7 @@ impl Command {
                 "dist <map> <src>",
                 "Analyze bundle distribution using source maps",
             ),
+            ("coverage", "Analyze test coverage gaps (structural)"),
         ];
 
         let mut help = String::new();
@@ -771,6 +796,7 @@ impl Command {
             "twins" => Some(TWINS_HELP),
             "routes" => Some(ROUTES_HELP),
             "dist" => Some(DIST_HELP),
+            "coverage" => Some(COVERAGE_HELP),
             _ => None,
         }
     }
@@ -1213,6 +1239,49 @@ OUTPUT (JSON):
       ],
       \"reduction\": \"76%\"
     }";
+
+const COVERAGE_HELP: &str = "loct coverage - Analyze test coverage gaps (structural coverage)
+
+USAGE:
+    loct coverage [OPTIONS] [PATHS...]
+
+DESCRIPTION:
+    Performs structural test coverage analysis by cross-referencing:
+    - Frontend invoke/emit calls (what the app uses)
+    - Backend handlers and events (what the app exposes)
+    - Test file imports (what tests actually cover)
+
+    Unlike line coverage tools, this shows:
+    - Which handlers have no corresponding tests
+    - Which events are emitted but never tested
+    - Which exports are tested but never used in production
+
+    This is semantic coverage - not 'how many lines' but 'what functionality'.
+
+OPTIONS:
+    --handlers-only       Only show handler gaps (skip events/exports)
+    --events-only         Only show event gaps (skip handlers/exports)
+    --min-severity <LVL>  Filter by minimum severity: critical, high, medium, low
+    --json                Output as JSON for programmatic use
+    --help, -h            Show this help message
+
+ARGUMENTS:
+    [PATHS...]            Root directories to scan (default: current directory)
+
+EXAMPLES:
+    loct coverage                          # Show all coverage gaps
+    loct coverage --handlers-only          # Focus on untested handlers
+    loct coverage --min-severity high      # Only critical/high issues
+    loct coverage --json                   # Machine-readable output
+
+OUTPUT:
+    Groups findings by severity:
+    - CRITICAL: Handlers without any test (used in production!)
+    - HIGH: Events emitted but never tested
+    - MEDIUM: Exports without test imports
+    - LOW: Tests that import unused code
+
+    Each gap shows the source location and usage context.";
 
 // ============================================================================
 // Tests

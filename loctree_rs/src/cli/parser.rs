@@ -13,7 +13,7 @@ use crate::types::ColorMode;
 const SUBCOMMANDS: &[&str] = &[
     "auto", "agent", "scan", "tree", "slice", "find", "dead", "unused", "cycles", "commands",
     "events", "info", "lint", "report", "help", "query", "diff", "memex", "crowd", "twins",
-    "routes", "dist",
+    "routes", "dist", "coverage",
 ];
 
 /// Check if an argument looks like a new-style subcommand.
@@ -211,6 +211,7 @@ pub fn parse_command(args: &[String]) -> Result<Option<ParsedCommand>, String> {
         Some("crowd") => parse_crowd_command(&remaining_args)?,
         Some("twins") => parse_twins_command(&remaining_args)?,
         Some("dist") => parse_dist_command(&remaining_args)?,
+        Some("coverage") => parse_coverage_command(&remaining_args)?,
         Some(unknown) => {
             return Err(format!(
                 "Unknown command '{}'. Run 'loct --help' for available commands.",
@@ -1832,6 +1833,79 @@ EXAMPLES:
     }
 
     Ok(Command::Dist(opts))
+}
+
+fn parse_coverage_command(args: &[String]) -> Result<Command, String> {
+    // Check for help flag first
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        return Err("loct coverage - Analyze test coverage gaps
+
+USAGE:
+    loct coverage [OPTIONS] [PATHS...]
+
+DESCRIPTION:
+    Cross-references production usage (FE invoke/emit calls) with test imports
+    to find handlers and events without test coverage.
+
+    Identifies:
+    - Handlers called from production but not tested (CRITICAL)
+    - Events emitted in production but not tested (HIGH)
+    - Code used in production without test imports (MEDIUM)
+    - Tested code not used in production (LOW - potential dead code)
+
+OPTIONS:
+    --handlers       Show only handler coverage gaps
+    --events         Show only event coverage gaps
+    --min-severity <LEVEL>
+                     Filter by minimum severity (critical/high/medium/low)
+    --json           Output as JSON
+    --help, -h       Show this help message
+
+EXAMPLES:
+    loct coverage                          # All coverage gaps
+    loct coverage --handlers               # Only handler gaps
+    loct coverage --events                 # Only event gaps
+    loct coverage --min-severity critical  # Only critical issues
+    loct coverage --json                   # JSON output for CI"
+            .to_string());
+    }
+
+    let mut opts = CoverageOptions::default();
+    let mut i = 0;
+
+    while i < args.len() {
+        let arg = &args[i];
+        match arg.as_str() {
+            "--handlers" => {
+                opts.handlers_only = true;
+                i += 1;
+            }
+            "--events" => {
+                opts.events_only = true;
+                i += 1;
+            }
+            "--min-severity" => {
+                let value = args.get(i + 1).ok_or_else(|| {
+                    "--min-severity requires a value (critical/high/medium/low)".to_string()
+                })?;
+                opts.min_severity = Some(value.clone());
+                i += 2;
+            }
+            _ if !arg.starts_with('-') => {
+                opts.roots.push(PathBuf::from(arg));
+                i += 1;
+            }
+            _ => {
+                return Err(format!("Unknown option '{}' for 'coverage' command.", arg));
+            }
+        }
+    }
+
+    if opts.roots.is_empty() {
+        opts.roots.push(PathBuf::from("."));
+    }
+
+    Ok(Command::Coverage(opts))
 }
 
 // ============================================================================

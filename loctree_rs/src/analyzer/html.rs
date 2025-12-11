@@ -10,8 +10,11 @@ use super::assets::{
 
 /// Render HTML report using Leptos SSR
 pub(crate) fn render_html_report(path: &Path, sections: &[ReportSection]) -> io::Result<()> {
+    // Only write JS assets if there's an actual parent directory (not empty path)
     if let Some(dir) = path.parent() {
-        write_js_assets(dir)?;
+        if !dir.as_os_str().is_empty() {
+            write_js_assets(dir)?;
+        }
     }
 
     // Convert loctree types to report-leptos types via JSON serialization
