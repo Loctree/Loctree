@@ -1208,7 +1208,7 @@ fn handle_dead_command(opts: &DeadOptions, global: &GlobalOptions) -> DispatchRe
 
 /// Handle the cycles command - detect circular imports
 fn handle_cycles_command(opts: &CyclesOptions, global: &GlobalOptions) -> DispatchResult {
-    use crate::analyzer::cycles::{find_cycles_with_lazy, print_cycles};
+    use crate::analyzer::cycles::{find_cycles_classified_with_lazy, print_cycles_classified};
     use std::path::Path;
 
     // Show spinner unless in quiet/json mode
@@ -1244,29 +1244,29 @@ fn handle_cycles_command(opts: &CyclesOptions, global: &GlobalOptions) -> Dispat
         .map(|e| (e.from.clone(), e.to.clone(), e.label.clone()))
         .collect();
 
-    // Find cycles
-    let (cycles, lazy_cycles) = find_cycles_with_lazy(&edges);
+    // Find and classify cycles
+    let (classified_cycles, classified_lazy_cycles) = find_cycles_classified_with_lazy(&edges);
 
     if let Some(s) = spinner {
-        let total = cycles.len() + lazy_cycles.len();
+        let total = classified_cycles.len() + classified_lazy_cycles.len();
         s.finish_success(&format!(
             "Found {} cycle(s) ({} strict, {} lazy)",
             total,
-            cycles.len(),
-            lazy_cycles.len()
+            classified_cycles.len(),
+            classified_lazy_cycles.len()
         ));
     }
 
     // Output results
     let json_output = global.json;
-    print_cycles(&cycles, json_output);
+    print_cycles_classified(&classified_cycles, json_output);
 
-    if !lazy_cycles.is_empty() && !json_output {
+    if !classified_lazy_cycles.is_empty() && !json_output {
         println!("\nLazy circular imports (info):");
         println!(
             "  Detected via imports inside functions/methods; usually safe but review if init order matters."
         );
-        print_cycles(&lazy_cycles, false);
+        print_cycles_classified(&classified_lazy_cycles, false);
 
         // Show the lazy edges that participated (sample)
         let lazy_edges: Vec<_> = edges

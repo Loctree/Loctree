@@ -84,6 +84,7 @@ pub fn build_open_url(file: &str, line: Option<usize>, open_base: Option<&str>) 
 }
 
 #[allow(unused_imports)]
+pub use cycles::{ClassifiedCycle, CycleClassification};
 pub use report::{
     AiInsight, CommandGap, DupLocation, DupSeverity, GraphComponent, GraphData, GraphNode,
     RankedDup, ReportSection,

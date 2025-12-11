@@ -6,9 +6,189 @@
 use std::cmp::min;
 use std::collections::{HashMap, HashSet};
 
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::root_scan::normalize_module_id;
+
+/// Classification of a cycle's nature and severity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CycleClassification {
+    HardBidirectional,
+    ModuleSelfReference,
+    TraitBased,
+    CfgGated,
+    FanPattern,
+    WildcardImport,
+    Unknown,
+}
+
+impl CycleClassification {
+    pub fn severity(&self) -> u8 {
+        match self {
+            CycleClassification::HardBidirectional => 3,
+            CycleClassification::WildcardImport => 2,
+            CycleClassification::CfgGated => 1,
+            CycleClassification::ModuleSelfReference => 0,
+            CycleClassification::TraitBased => 0,
+            CycleClassification::FanPattern => 0,
+            CycleClassification::Unknown => 2,
+        }
+    }
+    pub fn severity_label(&self) -> &'static str {
+        match self.severity() {
+            3 => "high",
+            2 => "medium",
+            1 => "low",
+            _ => "info",
+        }
+    }
+    pub fn severity_icon(&self) -> &'static str {
+        match self.severity() {
+            3 | 2 => "⚠️ ",
+            _ => "ℹ️ ",
+        }
+    }
+    pub fn description(&self) -> &'static str {
+        match self {
+            CycleClassification::HardBidirectional => "blocks decoupling",
+            CycleClassification::WildcardImport => "implicit coupling",
+            CycleClassification::CfgGated => "conditional, low impact",
+            CycleClassification::ModuleSelfReference => "Rust pattern, OK",
+            CycleClassification::TraitBased => "architectural, OK",
+            CycleClassification::FanPattern => "not true cycle",
+            CycleClassification::Unknown => "needs review",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClassifiedCycle {
+    pub nodes: Vec<String>,
+    pub classification: CycleClassification,
+    pub has_wildcard: bool,
+    pub is_cfg_gated: bool,
+}
+
+impl ClassifiedCycle {
+    pub fn new(nodes: Vec<String>, edges: &[(String, String, String)]) -> Self {
+        let classification = classify_cycle(&nodes, edges);
+        let has_wildcard = check_has_wildcard(&nodes, edges);
+        let is_cfg_gated = check_is_cfg_gated(&nodes, edges);
+        ClassifiedCycle {
+            nodes,
+            classification,
+            has_wildcard,
+            is_cfg_gated,
+        }
+    }
+}
+
+fn classify_cycle(nodes: &[String], edges: &[(String, String, String)]) -> CycleClassification {
+    if check_is_cfg_gated(nodes, edges) {
+        return CycleClassification::CfgGated;
+    }
+    if check_has_wildcard(nodes, edges) {
+        return CycleClassification::WildcardImport;
+    }
+    if is_module_self_reference(nodes) {
+        return CycleClassification::ModuleSelfReference;
+    }
+    if is_fan_pattern(nodes, edges) {
+        return CycleClassification::FanPattern;
+    }
+    if nodes.len() == 2 {
+        return CycleClassification::HardBidirectional;
+    }
+    if is_hard_bidirectional(nodes, edges) {
+        return CycleClassification::HardBidirectional;
+    }
+    CycleClassification::Unknown
+}
+
+fn check_has_wildcard(nodes: &[String], edges: &[(String, String, String)]) -> bool {
+    let node_set: HashSet<&str> = nodes.iter().map(|s| s.as_str()).collect();
+    edges.iter().any(|(from, to, kind)| {
+        node_set.contains(from.as_str())
+            && node_set.contains(to.as_str())
+            && kind.contains("wildcard")
+    })
+}
+
+fn check_is_cfg_gated(nodes: &[String], edges: &[(String, String, String)]) -> bool {
+    let node_set: HashSet<&str> = nodes.iter().map(|s| s.as_str()).collect();
+    edges.iter().any(|(from, to, kind)| {
+        node_set.contains(from.as_str())
+            && node_set.contains(to.as_str())
+            && (kind.contains("cfg") || kind.contains("conditional"))
+    })
+}
+
+fn is_module_self_reference(nodes: &[String]) -> bool {
+    if nodes.len() != 2 {
+        return false;
+    }
+    is_parent_child_module(&nodes[0], &nodes[1]) || is_parent_child_module(&nodes[1], &nodes[0])
+}
+
+fn is_parent_child_module(parent: &str, child: &str) -> bool {
+    let p = parent
+        .replace('\\', "/")
+        .trim_end_matches(".rs")
+        .trim_end_matches("/mod")
+        .to_string();
+    let c = child.replace('\\', "/").trim_end_matches(".rs").to_string();
+    if c.starts_with(&format!("{}/", p)) {
+        return true;
+    }
+    let parent_dir = if parent.ends_with("/mod.rs") {
+        parent.trim_end_matches("/mod.rs")
+    } else if parent.ends_with(".rs") {
+        parent.trim_end_matches(".rs")
+    } else {
+        parent
+    };
+    let child_dir = child.rsplit_once('/').map(|(d, _)| d).unwrap_or(child);
+    parent_dir == child_dir && parent != child
+}
+
+fn is_fan_pattern(nodes: &[String], edges: &[(String, String, String)]) -> bool {
+    if nodes.len() < 3 {
+        return false;
+    }
+    let node_set: HashSet<&str> = nodes.iter().map(|s| s.as_str()).collect();
+    let mut incoming: HashMap<&str, usize> = HashMap::new();
+    let mut outgoing: HashMap<&str, usize> = HashMap::new();
+    for (from, to, _) in edges {
+        if node_set.contains(from.as_str()) && node_set.contains(to.as_str()) {
+            *incoming.entry(to.as_str()).or_default() += 1;
+            *outgoing.entry(from.as_str()).or_default() += 1;
+        }
+    }
+    nodes.iter().any(|n| {
+        incoming.get(n.as_str()).copied().unwrap_or(0) >= nodes.len() / 2
+            && outgoing.get(n.as_str()).copied().unwrap_or(0) <= 2
+    })
+}
+
+fn is_hard_bidirectional(nodes: &[String], edges: &[(String, String, String)]) -> bool {
+    if nodes.len() < 2 {
+        return false;
+    }
+    let node_set: HashSet<&str> = nodes.iter().map(|s| s.as_str()).collect();
+    let mut has_in: HashSet<&str> = HashSet::new();
+    let mut has_out: HashSet<&str> = HashSet::new();
+    for (from, to, _) in edges {
+        if node_set.contains(from.as_str()) && node_set.contains(to.as_str()) {
+            has_out.insert(from.as_str());
+            has_in.insert(to.as_str());
+        }
+    }
+    nodes
+        .iter()
+        .all(|n| has_in.contains(n.as_str()) && has_out.contains(n.as_str()))
+}
 
 struct TarjanData {
     index: usize,
@@ -120,6 +300,111 @@ pub fn find_cycles_with_lazy(
     }
 
     (strict_cycles, lazy_cycles)
+}
+
+/// Find cycles and return them as classified cycles with metadata.
+///
+/// This is a convenience wrapper around `find_cycles()` that automatically
+/// classifies each cycle using `ClassifiedCycle::new()`.
+pub fn find_cycles_classified(edges: &[(String, String, String)]) -> Vec<ClassifiedCycle> {
+    let raw_cycles = find_cycles(edges);
+    raw_cycles
+        .into_iter()
+        .map(|nodes| ClassifiedCycle::new(nodes, edges))
+        .collect()
+}
+
+/// Find cycles (strict and lazy) and return them as classified cycles.
+///
+/// Returns `(strict_cycles, lazy_cycles)` where both are classified with metadata.
+/// - `strict_cycles`: Excludes lazy_import and type_import edges
+/// - `lazy_cycles`: Cycles that only exist when lazy imports are included
+pub fn find_cycles_classified_with_lazy(
+    edges: &[(String, String, String)],
+) -> (Vec<ClassifiedCycle>, Vec<ClassifiedCycle>) {
+    let (strict, lazy) = find_cycles_with_lazy(edges);
+    (
+        strict
+            .into_iter()
+            .map(|n| ClassifiedCycle::new(n, edges))
+            .collect(),
+        lazy.into_iter()
+            .map(|n| ClassifiedCycle::new(n, edges))
+            .collect(),
+    )
+}
+
+pub fn print_cycles_classified(classified_cycles: &[ClassifiedCycle], json_output: bool) {
+    if json_output {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &serde_json::json!({ "classifiedCycles": classified_cycles })
+            )
+            .unwrap()
+        );
+        return;
+    }
+    if classified_cycles.is_empty() {
+        println!("No circular imports detected.");
+        return;
+    }
+    let mut by_class: HashMap<CycleClassification, Vec<&ClassifiedCycle>> = HashMap::new();
+    for c in classified_cycles {
+        by_class.entry(c.classification).or_default().push(c);
+    }
+    println!("Cycles Analysis:");
+    let mut classes: Vec<_> = by_class.keys().collect();
+    classes.sort_by(|a, b| b.severity().cmp(&a.severity()));
+    for cls in &classes {
+        let cycles = &by_class[cls];
+        println!(
+            "├── {:22} {:3}  {}  ({})",
+            format!("{:?}:", cls),
+            cycles.len(),
+            cls.severity_icon(),
+            cls.description()
+        );
+    }
+    let actionable = classified_cycles
+        .iter()
+        .filter(|c| c.classification.severity() >= 2)
+        .count();
+    let info = classified_cycles
+        .iter()
+        .filter(|c| c.classification.severity() < 2)
+        .count();
+    println!(
+        "└── Total: {} cycles ({} actionable, {} informational)\n",
+        classified_cycles.len(),
+        actionable,
+        info
+    );
+    let mut num = 1;
+    for cls in &classes {
+        for c in &by_class[cls] {
+            let mut nodes = c.nodes.clone();
+            nodes.reverse();
+            let s = if nodes.len() > 12 {
+                format!(
+                    "{} -> ... ({} intermediate) ... -> {}",
+                    nodes[..5].join(" -> "),
+                    nodes.len() - 10,
+                    nodes[nodes.len() - 5..].join(" -> ")
+                )
+            } else {
+                nodes.join(" -> ")
+            };
+            println!(
+                "Cycle {} [{:?}] ({} files):\n  {}\n",
+                num,
+                c.classification,
+                c.nodes.len(),
+                s
+            );
+            num += 1;
+        }
+    }
 }
 
 fn find_cycles_normalized(edges: &[(String, String)]) -> Vec<Vec<String>> {
@@ -582,6 +867,107 @@ mod tests {
         assert!(
             cycles.is_empty(),
             "Node with only outgoing edges (no cycle) should not be reported"
+        );
+    }
+
+    #[test]
+    fn test_classify_hard_bidirectional() {
+        use super::{CycleClassification, find_cycles_classified};
+        let edges = vec![
+            ("a.rs".to_string(), "b.rs".to_string(), "import".to_string()),
+            ("b.rs".to_string(), "a.rs".to_string(), "import".to_string()),
+        ];
+        let classified = find_cycles_classified(&edges);
+        assert_eq!(classified.len(), 1);
+        assert_eq!(
+            classified[0].classification,
+            CycleClassification::HardBidirectional
+        );
+        assert_eq!(classified[0].classification.severity(), 3);
+    }
+
+    #[test]
+    fn test_classify_module_self_reference() {
+        use super::{CycleClassification, find_cycles_classified};
+        let edges = vec![
+            (
+                "src/mod.rs".to_string(),
+                "src/helper.rs".to_string(),
+                "import".to_string(),
+            ),
+            (
+                "src/helper.rs".to_string(),
+                "src/mod.rs".to_string(),
+                "import".to_string(),
+            ),
+        ];
+        let classified = find_cycles_classified(&edges);
+        assert_eq!(classified.len(), 1);
+        assert_eq!(
+            classified[0].classification,
+            CycleClassification::ModuleSelfReference
+        );
+        assert_eq!(classified[0].classification.severity(), 0);
+    }
+
+    #[test]
+    fn test_classify_wildcard_import() {
+        use super::{CycleClassification, find_cycles_classified};
+        let edges = vec![
+            (
+                "a.rs".to_string(),
+                "b.rs".to_string(),
+                "wildcard".to_string(),
+            ),
+            ("b.rs".to_string(), "a.rs".to_string(), "import".to_string()),
+        ];
+        let classified = find_cycles_classified(&edges);
+        assert_eq!(classified.len(), 1);
+        assert_eq!(
+            classified[0].classification,
+            CycleClassification::WildcardImport
+        );
+        assert_eq!(classified[0].classification.severity(), 2);
+        assert!(classified[0].has_wildcard);
+    }
+
+    #[test]
+    fn test_classify_cfg_gated() {
+        use super::{CycleClassification, find_cycles_classified};
+        let edges = vec![
+            ("a.rs".to_string(), "b.rs".to_string(), "cfg".to_string()),
+            ("b.rs".to_string(), "a.rs".to_string(), "import".to_string()),
+        ];
+        let classified = find_cycles_classified(&edges);
+        assert_eq!(classified.len(), 1);
+        assert_eq!(classified[0].classification, CycleClassification::CfgGated);
+        assert_eq!(classified[0].classification.severity(), 1);
+        assert!(classified[0].is_cfg_gated);
+    }
+
+    #[test]
+    fn test_severity_levels() {
+        use super::CycleClassification;
+        assert_eq!(CycleClassification::HardBidirectional.severity(), 3);
+        assert_eq!(CycleClassification::WildcardImport.severity(), 2);
+        assert_eq!(CycleClassification::Unknown.severity(), 2);
+        assert_eq!(CycleClassification::CfgGated.severity(), 1);
+        assert_eq!(CycleClassification::ModuleSelfReference.severity(), 0);
+        assert_eq!(CycleClassification::TraitBased.severity(), 0);
+        assert_eq!(CycleClassification::FanPattern.severity(), 0);
+
+        assert_eq!(
+            CycleClassification::HardBidirectional.severity_label(),
+            "high"
+        );
+        assert_eq!(
+            CycleClassification::WildcardImport.severity_label(),
+            "medium"
+        );
+        assert_eq!(CycleClassification::CfgGated.severity_label(), "low");
+        assert_eq!(
+            CycleClassification::ModuleSelfReference.severity_label(),
+            "info"
         );
     }
 }
