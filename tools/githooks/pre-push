@@ -144,7 +144,7 @@ node tools/tests/loctree-node.test.mjs
 
 echo ""
 echo "[20/23] Python tests..."
-python3 tools/tests/test_loctree_py_unit.py
+python3.13 tools/tests/test_loctree_py_unit.py
 node tools/tests/loctree-py.test.mjs
 
 # Run Rust integration tests
