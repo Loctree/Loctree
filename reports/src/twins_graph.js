@@ -453,11 +453,14 @@
         // Stats
         const statsDiv = document.createElement('div');
         statsDiv.style.cssText = 'margin-bottom: 8px; font-size: 11px; opacity: 0.9;';
-        statsDiv.innerHTML = `
-          <div>Exports: ${data.exportCount}</div>
-          <div>Dead Parrots: ${data.deadParrotCount}</div>
-          <div>Connections: ${node.degree()}</div>
-        `;
+        const createStatDiv = (text) => {
+          const div = document.createElement('div');
+          div.textContent = text;
+          return div;
+        };
+        statsDiv.appendChild(createStatDiv('Exports: ' + data.exportCount));
+        statsDiv.appendChild(createStatDiv('Dead Parrots: ' + data.deadParrotCount));
+        statsDiv.appendChild(createStatDiv('Connections: ' + node.degree()));
         tooltip.appendChild(statsDiv);
 
         // Dead parrots list
@@ -619,11 +622,17 @@
     // Stats display
     const statsDiv = document.createElement('div');
     statsDiv.style.cssText = 'display: flex; gap: 16px; margin-right: auto;';
-    statsDiv.innerHTML = `
-      <span><strong>Files:</strong> ${stats.totalFiles}</span>
-      <span><strong>Twins:</strong> ${stats.totalTwins}</span>
-      <span><strong>Dead Parrots:</strong> ${stats.totalDeadParrots}</span>
-    `;
+    const createStatSpan = (label, value) => {
+      const span = document.createElement('span');
+      const strong = document.createElement('strong');
+      strong.textContent = label + ':';
+      span.appendChild(strong);
+      span.appendChild(document.createTextNode(' ' + value));
+      return span;
+    };
+    statsDiv.appendChild(createStatSpan('Files', stats.totalFiles));
+    statsDiv.appendChild(createStatSpan('Twins', stats.totalTwins));
+    statsDiv.appendChild(createStatSpan('Dead Parrots', stats.totalDeadParrots));
     toolbar.appendChild(statsDiv);
 
     // Layout selector
