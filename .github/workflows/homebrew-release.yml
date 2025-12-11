@@ -1,0 +1,83 @@
+name: Update Homebrew Formula
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to bump (e.g., 0.6.8)'
+        required: true
+        type: string
+
+env:
+  FORMULA_NAME: loctree
+
+jobs:
+  homebrew:
+    name: Bump Homebrew Formula
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Extract version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            # Extract from release tag (v0.6.8 -> 0.6.8)
+            VERSION="${{ github.event.release.tag_name }}"
+            VERSION="${VERSION#v}"
+            VERSION="${VERSION#loctree-v}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Detected version: $VERSION"
+
+      - name: Bump Homebrew formula
+        uses: mislav/bump-homebrew-formula-action@v3
+        with:
+          formula-name: ${{ env.FORMULA_NAME }}
+          # crates.io download URL pattern
+          download-url: https://crates.io/api/v1/crates/loctree/${{ steps.version.outputs.version }}/download
+          homebrew-tap: Homebrew/homebrew-core
+          # Optional: commit message customization
+          commit-message: |
+            ${{ env.FORMULA_NAME }} ${{ steps.version.outputs.version }}
+
+            Created by automated release workflow
+        env:
+          # IMPORTANT: This requires a Personal Access Token with 'repo' and 'workflow' scopes
+          # stored as a repository secret named HOMEBREW_GITHUB_API_TOKEN
+          #
+          # To create:
+          # 1. Go to https://github.com/settings/tokens/new
+          # 2. Select scopes: 'repo' and 'workflow'
+          # 3. Generate token
+          # 4. Add to repo secrets as HOMEBREW_GITHUB_API_TOKEN
+          COMMITTER_TOKEN: ${{ secrets.HOMEBREW_GITHUB_API_TOKEN }}
+
+      - name: Report success
+        if: success()
+        run: |
+          echo "✅ Successfully created PR to Homebrew/homebrew-core"
+          echo "Formula: ${{ env.FORMULA_NAME }}"
+          echo "Version: ${{ steps.version.outputs.version }}"
+          echo ""
+          echo "Next steps:"
+          echo "1. Check https://github.com/Homebrew/homebrew-core/pulls"
+          echo "2. Monitor the PR for CI results"
+          echo "3. Address any feedback from Homebrew maintainers"
+
+      - name: Report failure
+        if: failure()
+        run: |
+          echo "❌ Failed to create Homebrew PR"
+          echo ""
+          echo "Common issues:"
+          echo "1. HOMEBREW_GITHUB_API_TOKEN not set or lacks permissions"
+          echo "2. Formula already exists and conflicts"
+          echo "3. Download URL not accessible"
+          echo "4. Version mismatch between tag and crates.io"
+          echo ""
+          echo "Check the action logs above for details"

@@ -1891,91 +1891,89 @@ fn handle_coverage_command(opts: &CoverageOptions, global: &GlobalOptions) -> Di
                 return DispatchResult::Exit(1);
             }
         }
+    } else if gaps.is_empty() {
+        println!("✅ No coverage gaps found - all production code is tested!");
     } else {
-        if gaps.is_empty() {
-            println!("✅ No coverage gaps found - all production code is tested!");
-        } else {
-            println!("Test Coverage Gaps ({} found):\n", gaps.len());
+        println!("Test Coverage Gaps ({} found):\n", gaps.len());
 
-            // Group by severity
-            let critical: Vec<_> = gaps
-                .iter()
-                .filter(|g| matches!(g.severity, Severity::Critical))
-                .collect();
-            let high: Vec<_> = gaps
-                .iter()
-                .filter(|g| matches!(g.severity, Severity::High))
-                .collect();
-            let medium: Vec<_> = gaps
-                .iter()
-                .filter(|g| matches!(g.severity, Severity::Medium))
-                .collect();
-            let low: Vec<_> = gaps
-                .iter()
-                .filter(|g| matches!(g.severity, Severity::Low))
-                .collect();
+        // Group by severity
+        let critical: Vec<_> = gaps
+            .iter()
+            .filter(|g| matches!(g.severity, Severity::Critical))
+            .collect();
+        let high: Vec<_> = gaps
+            .iter()
+            .filter(|g| matches!(g.severity, Severity::High))
+            .collect();
+        let medium: Vec<_> = gaps
+            .iter()
+            .filter(|g| matches!(g.severity, Severity::Medium))
+            .collect();
+        let low: Vec<_> = gaps
+            .iter()
+            .filter(|g| matches!(g.severity, Severity::Low))
+            .collect();
 
-            if !critical.is_empty() {
-                println!("CRITICAL - Handlers without tests ({}):", critical.len());
-                for gap in critical.iter().take(10) {
-                    println!("  ❌ {} ({})", gap.target, gap.location);
-                    println!("     {}", gap.recommendation);
-                }
-                if critical.len() > 10 {
-                    println!("  ... and {} more", critical.len() - 10);
-                }
-                println!();
+        if !critical.is_empty() {
+            println!("CRITICAL - Handlers without tests ({}):", critical.len());
+            for gap in critical.iter().take(10) {
+                println!("  ❌ {} ({})", gap.target, gap.location);
+                println!("     {}", gap.recommendation);
             }
-
-            if !high.is_empty() {
-                println!("HIGH - Events without tests ({}):", high.len());
-                for gap in high.iter().take(10) {
-                    println!("  ⚠️  {} ({})", gap.target, gap.location);
-                    println!("     {}", gap.recommendation);
-                }
-                if high.len() > 10 {
-                    println!("  ... and {} more", high.len() - 10);
-                }
-                println!();
+            if critical.len() > 10 {
+                println!("  ... and {} more", critical.len() - 10);
             }
-
-            if !medium.is_empty() {
-                println!("MEDIUM - Exports without tests ({}):", medium.len());
-                for gap in medium.iter().take(5) {
-                    println!("  📦 {} ({})", gap.target, gap.location);
-                }
-                if medium.len() > 5 {
-                    println!("  ... and {} more", medium.len() - 5);
-                }
-                println!();
-            }
-
-            if !low.is_empty() {
-                println!("LOW - Tested but unused ({}):", low.len());
-                for gap in low.iter().take(5) {
-                    println!("  🧪 {} ({})", gap.target, gap.location);
-                }
-                if low.len() > 5 {
-                    println!("  ... and {} more", low.len() - 5);
-                }
-                println!();
-            }
-
-            // Summary
-            let handler_count = gaps
-                .iter()
-                .filter(|g| matches!(g.kind, GapKind::HandlerWithoutTest))
-                .count();
-            let event_count = gaps
-                .iter()
-                .filter(|g| matches!(g.kind, GapKind::EventWithoutTest))
-                .count();
-            println!(
-                "Summary: {} handlers, {} events without test coverage",
-                handler_count, event_count
-            );
-            println!("\nRun `loct coverage --json` for machine-readable output.");
+            println!();
         }
+
+        if !high.is_empty() {
+            println!("HIGH - Events without tests ({}):", high.len());
+            for gap in high.iter().take(10) {
+                println!("  ⚠️  {} ({})", gap.target, gap.location);
+                println!("     {}", gap.recommendation);
+            }
+            if high.len() > 10 {
+                println!("  ... and {} more", high.len() - 10);
+            }
+            println!();
+        }
+
+        if !medium.is_empty() {
+            println!("MEDIUM - Exports without tests ({}):", medium.len());
+            for gap in medium.iter().take(5) {
+                println!("  📦 {} ({})", gap.target, gap.location);
+            }
+            if medium.len() > 5 {
+                println!("  ... and {} more", medium.len() - 5);
+            }
+            println!();
+        }
+
+        if !low.is_empty() {
+            println!("LOW - Tested but unused ({}):", low.len());
+            for gap in low.iter().take(5) {
+                println!("  🧪 {} ({})", gap.target, gap.location);
+            }
+            if low.len() > 5 {
+                println!("  ... and {} more", low.len() - 5);
+            }
+            println!();
+        }
+
+        // Summary
+        let handler_count = gaps
+            .iter()
+            .filter(|g| matches!(g.kind, GapKind::HandlerWithoutTest))
+            .count();
+        let event_count = gaps
+            .iter()
+            .filter(|g| matches!(g.kind, GapKind::EventWithoutTest))
+            .count();
+        println!(
+            "Summary: {} handlers, {} events without test coverage",
+            handler_count, event_count
+        );
+        println!("\nRun `loct coverage --json` for machine-readable output.");
     }
 
     DispatchResult::Exit(0)

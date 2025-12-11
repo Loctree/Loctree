@@ -16,7 +16,10 @@
 ## Quick Start
 
 ```bash
-# Install from crates.io (preferred)
+# Install via Homebrew (macOS/Linux) - PR pending
+brew install loctree  # Coming soon!
+
+# Or install from crates.io
 cargo install loctree
 
 # Scan your project (auto-detects stack)
@@ -348,6 +351,12 @@ Common:
 
 ## Installation
 
+### macOS (Homebrew) - pending review
+
+```bash
+brew install loctree
+```
+
 ### From crates.io (Recommended)
 
 ```bash
@@ -360,12 +369,6 @@ cargo install loctree
 git clone https://github.com/Loctree/Loctree
 cd loctree/loctree_rs
 cargo install --path .
-```
-
-### Crates.io install (recommended)
-
-```bash
-cargo install loctree
 ```
 
 ## Project Structure
