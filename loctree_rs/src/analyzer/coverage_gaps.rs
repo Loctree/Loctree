@@ -12,6 +12,7 @@
 //!
 //! Developed with 💀 by The Loctree Team (c)2025
 
+use super::classify::is_test_path;
 use crate::snapshot::{CommandBridge, EventBridge, Snapshot};
 use crate::types::FileAnalysis;
 use serde::Serialize;
@@ -94,28 +95,9 @@ pub fn find_coverage_gaps(snapshot: &Snapshot) -> Vec<CoverageGap> {
 fn detect_test_files(files: &[FileAnalysis]) -> HashSet<String> {
     files
         .iter()
-        .filter(|f| is_test_file(&f.path))
+        .filter(|f| is_test_path(&f.path))
         .map(|f| f.path.clone())
         .collect()
-}
-
-/// Check if a file path is a test file
-fn is_test_file(path: &str) -> bool {
-    // Common test patterns
-    path.contains("__tests__")
-        || path.contains("/tests/")
-        || path.contains("/test/")
-        || path.ends_with(".test.ts")
-        || path.ends_with(".test.tsx")
-        || path.ends_with(".test.js")
-        || path.ends_with(".test.jsx")
-        || path.ends_with(".spec.ts")
-        || path.ends_with(".spec.tsx")
-        || path.ends_with(".spec.js")
-        || path.ends_with(".spec.jsx")
-        || path.ends_with("_test.rs")
-        || path.ends_with("_test.py")
-        || path.contains("/test_")
 }
 
 /// Build index of what test files import

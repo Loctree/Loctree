@@ -37,13 +37,14 @@ fn build_tree(analyses: &[FileAnalysis], root_path: &std::path::Path) -> Vec<Tre
     let mut paths: Vec<(Vec<String>, usize)> = analyses
         .iter()
         .map(|a| {
-            let rel = std::path::Path::new(&a.path)
-                .strip_prefix(root_path)
-                .unwrap_or_else(|_| std::path::Path::new(&a.path))
+            let file_path = std::path::Path::new(&a.path);
+            // Try to strip root_path prefix for both absolute and relative paths
+            let rel = file_path.strip_prefix(root_path).unwrap_or(file_path);
+            let parts: Vec<_> = rel
                 .iter()
                 .map(|p| p.to_string_lossy().to_string())
-                .collect::<Vec<_>>();
-            (rel, a.loc)
+                .collect();
+            (parts, a.loc)
         })
         .collect();
     paths.sort_by(|a, b| a.0.cmp(&b.0));

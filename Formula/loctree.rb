@@ -11,8 +11,8 @@
 class Loctree < Formula
   desc "Fast, language-aware codebase analyzer for detecting dead exports and circular imports"
   homepage "https://loctree.io"
-  url "https://crates.io/api/v1/crates/loctree/0.6.8/download"
-  sha256 "REPLACE_WITH_ACTUAL_SHA256"
+  url "https://crates.io/api/v1/crates/loctree/0.6.10/download"
+  sha256 "b97228ccf82ed224c2ccdf43010baab280cb0cc7a29004928bcf430472727d7e"
   license "MIT"
   head "https://github.com/Loctree/Loctree-suite.git", branch: "main"
 
