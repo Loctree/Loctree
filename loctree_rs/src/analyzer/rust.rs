@@ -2475,6 +2475,7 @@ pub struct CustomType {
     #[test]
     fn crate_module_map_resolves_crate_prefix() {
         // Create a temporary directory structure for testing
+        // nosemgrep: rust.lang.security.temp-dir.temp-dir
         let temp_dir = std::env::temp_dir().join("loctree_test_crate");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(temp_dir.join("src/foo")).unwrap();
@@ -2530,6 +2531,7 @@ pub struct CustomType {
 
     #[test]
     fn crate_module_map_resolves_super() {
+        // nosemgrep: rust.lang.security.temp-dir.temp-dir
         let temp_dir = std::env::temp_dir().join("loctree_test_super");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(temp_dir.join("src/foo")).unwrap();
@@ -2567,6 +2569,7 @@ pub struct CustomType {
 
     #[test]
     fn crate_module_map_resolves_self() {
+        // nosemgrep: rust.lang.security.temp-dir.temp-dir
         let temp_dir = std::env::temp_dir().join("loctree_test_self");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(temp_dir.join("src/foo")).unwrap();
@@ -2600,6 +2603,7 @@ pub struct CustomType {
 
     #[test]
     fn crate_module_map_resolves_relative_imports() {
+        // nosemgrep: rust.lang.security.temp-dir.temp-dir
         let temp_dir = std::env::temp_dir().join("loctree_test_relative");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(temp_dir.join("src")).unwrap();
@@ -2630,6 +2634,7 @@ pub struct CustomType {
     #[test]
     fn crate_module_map_handles_mod_dir_structure() {
         // Test the foo/mod.rs convention
+        // nosemgrep: rust.lang.security.temp-dir.temp-dir
         let temp_dir = std::env::temp_dir().join("loctree_test_mod_dir");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(temp_dir.join("src/foo")).unwrap();
@@ -2657,6 +2662,7 @@ pub struct CustomType {
     #[test]
     fn crate_module_map_handles_type_imports() {
         // Test that we can resolve imports with type names (last segment)
+        // nosemgrep: rust.lang.security.temp-dir.temp-dir
         let temp_dir = std::env::temp_dir().join("loctree_test_types");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(temp_dir.join("src")).unwrap();

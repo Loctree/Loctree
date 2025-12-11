@@ -442,6 +442,7 @@
 
       clearTimeout(nodeHoverTimeout);
       nodeHoverTimeout = setTimeout(() => {
+        // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method -- SAFETY: clearing tooltip with empty string, no user input
         tooltip.innerHTML = ''; // Clear previous
 
         // File path
@@ -515,6 +516,7 @@
 
       clearTimeout(edgeHoverTimeout);
       edgeHoverTimeout = setTimeout(() => {
+        // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method -- SAFETY: clearing tooltip with empty string, no user input
         tooltip.innerHTML = '';
 
         const titleDiv = document.createElement('div');
@@ -638,10 +640,12 @@
     // Layout selector
     const layoutLabel = document.createElement('label');
     layoutLabel.style.cssText = 'display: flex; gap: 6px; align-items: center;';
+    // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method -- SAFETY: static HTML label with no user input
     layoutLabel.innerHTML = '<span>Layout:</span>';
 
     const layoutSelect = document.createElement('select');
     layoutSelect.style.cssText = 'background: #1a1a2e; color: #fff; border: 1px solid #444; padding: 4px 8px; border-radius: 4px;';
+    // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method -- SAFETY: static dropdown options with no user input
     layoutSelect.innerHTML = `
       <option value="cose">Force (COSE)</option>
       <option value="cose-bilkent">Force (Bilkent)</option>

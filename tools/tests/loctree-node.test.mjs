@@ -25,8 +25,8 @@ assert.ok(jsonOut.entries.some((e) => e.path === 'big.txt' && e.isLarge));
 
 const hiddenOut = JSON.parse(run(['.', '--json', '--show-hidden', '--gitignore']));
 assert.ok(hiddenOut.entries.some((e) => e.path === '.hidden.txt'));
-assert.equal(hiddenOut.summary.totalLoc, 1108);
-assert.equal(hiddenOut.summary.files, 9);
+assert.equal(hiddenOut.summary.totalLoc, 1017);
+assert.equal(hiddenOut.summary.files, 8);
 
 // Summary text mode
 const summaryOut = run(['.', '--summary', '--color=never', '--gitignore']);

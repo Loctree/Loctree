@@ -269,6 +269,9 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("time went backwards")
             .as_nanos();
+        // nosemgrep: rust.lang.security.temp-dir-usage.temp-dir-usage
+        // Safe usage: Creating unique temporary test files with nanosecond timestamp suffix
+        // to prevent collisions. This is test-only code for icon loading verification.
         std::env::temp_dir().join(format!("{}-{}", name, nanos))
     }
 

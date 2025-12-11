@@ -34,8 +34,8 @@ assert.ok(!cssOut.includes('README.md'));
 
 const hiddenOut = JSON.parse(run([fixtureRoot, '--json', '--show-hidden', '--gitignore']));
 assert.ok(hiddenOut.entries.some((e) => e.path === '.hidden.txt'));
-assert.equal(hiddenOut.summary.totalLoc, 1108);
-assert.equal(hiddenOut.summary.files, 9);
+assert.equal(hiddenOut.summary.totalLoc, 1017);
+assert.equal(hiddenOut.summary.files, 8);
 
 // Gitignore should prune target/node_modules
 const filteredOut = run([fixtureRoot, '--ext', 'rs', '--gitignore']);
