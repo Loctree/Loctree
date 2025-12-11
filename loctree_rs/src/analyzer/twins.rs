@@ -487,6 +487,9 @@ pub fn print_exact_twins_human(twins: &[ExactTwin]) {
 
     println!("👯 EXACT TWINS ({} found)", twins.len());
     println!();
+    println!("  Multiple exports share the same name. CANONICAL = most imported version.");
+    println!("  Consider: Consolidate duplicates, or rename if they serve different purposes.");
+    println!();
 
     for twin in twins {
         println!("  Symbol: {}", twin.name);
@@ -497,13 +500,28 @@ pub fn print_exact_twins_human(twins: &[ExactTwin]) {
                 loc.file_path, loc.line, loc.kind, loc.import_count, canonical_marker
             );
         }
+        // Add suggestion based on import counts
+        let zero_import_count = twin
+            .locations
+            .iter()
+            .filter(|l| l.import_count == 0)
+            .count();
+        if zero_import_count > 0 && zero_import_count < twin.locations.len() {
+            println!(
+                "    └─ 💡 {} location(s) have 0 imports - candidates for removal or consolidation",
+                zero_import_count
+            );
+        }
         println!();
     }
 
     println!("Summary:");
-    println!("  Total exact twins: {}", twins.len());
+    println!("  Total symbol groups with twins: {}", twins.len());
     let total_dups: usize = twins.iter().map(|t| t.locations.len()).sum();
-    println!("  Total duplicate exports: {}", total_dups);
+    println!("  Total duplicate definitions: {}", total_dups);
+    println!();
+    println!("  Note: Twins in FE↔BE projects (TS + Rust) are often intentional type mirrors.");
+    println!("  Verify if duplicates serve the same purpose before consolidating.");
 }
 
 /// Print exact twins in JSON format

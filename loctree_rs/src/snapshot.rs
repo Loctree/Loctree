@@ -1234,6 +1234,9 @@ pub(crate) fn write_auto_artifacts(
                 "locations": gap.locations.iter().map(|(path, line)| {
                     json!({ "path": path, "line": line })
                 }).collect::<Vec<_>>(),
+                "why": format!("Frontend calls invoke('{}') but no #[tauri::command] handler found", gap.name),
+                "impact": "Runtime error: 'command {} not found' when invoked from frontend",
+                "suggestedFix": "Create handler with #[tauri::command] and register in invoke_handler![]",
             })
         }).collect::<Vec<_>>(),
         "unusedHandlers": global_unused_handlers.iter().map(|gap| {
@@ -1244,6 +1247,9 @@ pub(crate) fn write_auto_artifacts(
                     json!({ "path": path, "line": line })
                 }).collect::<Vec<_>>(),
                 "confidence": gap.confidence.as_ref().map(|c| format!("{:?}", c)),
+                "why": format!("Handler '{}' is registered but no invoke() calls found in frontend", gap.name),
+                "impact": "Dead code - handler exists but is never called",
+                "suggestedFix": "If intentionally unused (e.g., for tests), ignore. Otherwise, remove handler.",
             })
         }).collect::<Vec<_>>(),
         "unregisteredHandlers": global_unregistered_handlers.iter().map(|gap| {
@@ -1253,6 +1259,9 @@ pub(crate) fn write_auto_artifacts(
                 "locations": gap.locations.iter().map(|(path, line)| {
                     json!({ "path": path, "line": line })
                 }).collect::<Vec<_>>(),
+                "why": format!("#[tauri::command] fn {}() found but NOT in invoke_handler![] macro", gap.name),
+                "impact": "Command exists but is unreachable from frontend - invoke() calls will fail",
+                "suggestedFix": "Add to invoke_handler![] in main.rs or lib.rs, or remove if unused",
             })
         }).collect::<Vec<_>>(),
         "summary": {

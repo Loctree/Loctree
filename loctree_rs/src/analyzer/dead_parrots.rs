@@ -1337,18 +1337,23 @@ pub fn find_dead_exports(
             {
                 let open_url = super::build_open_url(&analysis.path, exp.line, open_base);
 
-                // Build human-readable reason
+                // Build human-readable reason with context for user decision
                 let reason = if is_rust_file {
                     format!(
-                        "No imports found for '{}'. Checked: direct imports (0 matches), \
-                         star imports (none), crate imports (0 matches), local uses (none), \
-                         Tauri handlers (not registered)",
+                        "Exported symbol '{}' has no detected usages. \
+                         Checked: use statements (0), path-qualified calls (0), \
+                         crate:: imports (0), Tauri invoke_handler (not found). \
+                         Consider: If this is a public API consumed externally, it's expected. \
+                         If internal-only, consider removing or making private.",
                         exp.name
                     )
                 } else {
                     format!(
-                        "No imports found for '{}'. Checked: resolved imports (0 matches), \
-                         star re-exports (none), local references (none)",
+                        "Exported symbol '{}' has no detected imports. \
+                         Checked: import statements (0), re-exports (0), \
+                         dynamic imports (0), JSX references (0). \
+                         Consider: If used via barrel exports or external packages, verify manually. \
+                         If truly unused, safe to remove.",
                         exp.name
                     )
                 };

@@ -1395,12 +1395,30 @@ fn handle_commands_command(opts: &CommandsOptions, global: &GlobalOptions) -> Di
                 }
 
                 if !bridge.has_handler && bridge.is_called {
+                    println!(
+                        "    ⚠️  Why: Frontend calls invoke('{}') but no #[tauri::command] found in Rust.",
+                        bridge.name
+                    );
+                    println!(
+                        "    Impact: This command will fail at runtime with 'command not found' error."
+                    );
                     if let Some((file, line)) = bridge.frontend_calls.first() {
                         println!("    First callsite: {}:{}", file, line);
                     }
                     println!(
+                        "    Suggested fix: Add handler to src-tauri/src/commands/ and register in invoke_handler![]"
+                    );
+                    println!(
                         "    Stub: #[tauri::command] pub async fn {}(...) -> Result<(), String> {{ todo!() }}",
                         bridge.name
+                    );
+                } else if bridge.has_handler && !bridge.is_called {
+                    println!(
+                        "    ℹ️  Why: #[tauri::command] defined but no invoke('{}') calls found in frontend.",
+                        bridge.name
+                    );
+                    println!(
+                        "    Consider: If intentionally unused, remove handler. If needed, add frontend call."
                     );
                 }
 
