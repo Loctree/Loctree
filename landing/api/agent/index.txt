@@ -1,4 +1,4 @@
-# loctree v0.6.3-dev — AI Agent Quick Reference
+# loctree v0.6.15 — AI Agent Quick Reference
 
 > Use loctree before grepping manually. Scan once, slice many.
 
@@ -15,6 +15,17 @@ loct query who-imports <file>     # files that import target
 loct query where-symbol <name>    # find symbol definitions
 loct query component-of <file>    # graph component containing file
 loct find --similar <Name>        # avoid dup components
+```
+
+## jq-style Queries (NEW!)
+```bash
+loct '.metadata'                  # extract snapshot metadata
+loct '.files | length'            # count files
+loct '.edges[] | select(.from | contains("api"))'  # filter edges
+loct '.command_bridges | map(.name)'   # list Tauri commands
+loct '.files[] | select(.loc > 500)' -c   # large files, compact
+# Flags: -r (raw), -c (compact), -e (exit status), --arg, --argjson
+# Use --snapshot <path> to specify snapshot file
 ```
 
 ## Refactors / Impact

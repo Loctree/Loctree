@@ -288,6 +288,11 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
         Command::Coverage(_) => {
             // Coverage is handled specially in dispatch_command
         }
+
+        Command::JqQuery(_) => {
+            // JqQuery is handled specially in dispatch_command
+            // It doesn't use ParsedArgs, will be handled by jaq executor
+        }
     }
 
     parsed
@@ -385,6 +390,9 @@ pub fn dispatch_command(parsed_cmd: &ParsedCommand) -> DispatchResult {
         }
         Command::Coverage(opts) => {
             return handle_coverage_command(opts, &parsed_cmd.global);
+        }
+        Command::JqQuery(opts) => {
+            return handle_jq_query_command(opts, &parsed_cmd.global);
         }
         // Note: Command::Report falls through to ParsedArgs flow to use full analysis pipeline
         // which includes twins data, graph visualization, and proper Leptos SSR rendering
@@ -2232,6 +2240,87 @@ fn handle_coverage_command(opts: &CoverageOptions, global: &GlobalOptions) -> Di
             handler_count, event_count
         );
         println!("\nRun `loct coverage --json` for machine-readable output.");
+    }
+
+    DispatchResult::Exit(0)
+}
+
+/// Handle the jq query command - execute jaq filter on snapshot
+fn handle_jq_query_command(
+    opts: &super::command::JqQueryOptions,
+    _global: &GlobalOptions,
+) -> DispatchResult {
+    use crate::jaq_query::{JaqExecutor, format_output};
+    use crate::snapshot::Snapshot;
+
+    // Find snapshot path
+    let snapshot_path = match Snapshot::find_latest_snapshot(opts.snapshot_path.as_deref()) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("[loct][error] {}", e);
+            eprintln!("[loct][hint] Run 'loct scan' first to create a snapshot.");
+            return DispatchResult::Exit(1);
+        }
+    };
+
+    // Load snapshot from file directly
+    // snapshot_path is like .loctree/branch@commit/snapshot.json
+    // We need to read it directly, not through Snapshot::load which expects project root
+    let snapshot_json = match std::fs::read_to_string(&snapshot_path) {
+        Ok(content) => match serde_json::from_str::<crate::snapshot::Snapshot>(&content) {
+            Ok(snap) => match serde_json::to_value(&snap) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("[loct][error] Failed to serialize snapshot: {}", e);
+                    return DispatchResult::Exit(1);
+                }
+            },
+            Err(e) => {
+                eprintln!("[loct][error] Failed to parse snapshot: {}", e);
+                return DispatchResult::Exit(1);
+            }
+        },
+        Err(e) => {
+            eprintln!("[loct][error] Failed to read snapshot file: {}", e);
+            return DispatchResult::Exit(1);
+        }
+    };
+
+    // Execute the jaq filter
+    let executor = JaqExecutor::new();
+    let results = match executor.execute(
+        &opts.filter,
+        &snapshot_json,
+        &opts.string_args,
+        &opts.json_args,
+    ) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[loct][error] Filter execution failed: {}", e);
+            return DispatchResult::Exit(1);
+        }
+    };
+
+    // Output results
+    for result in &results {
+        let output = format_output(result, opts.raw_output, opts.compact_output);
+        println!("{}", output);
+    }
+
+    // Exit status mode: exit 1 if no results or all results are false/null
+    if opts.exit_status {
+        if results.is_empty() {
+            return DispatchResult::Exit(1);
+        }
+
+        // Check if all results are false or null
+        let all_false_or_null = results
+            .iter()
+            .all(|v| v.is_null() || (v.as_bool().is_some() && !v.as_bool().unwrap()));
+
+        if all_false_or_null {
+            return DispatchResult::Exit(1);
+        }
     }
 
     DispatchResult::Exit(0)

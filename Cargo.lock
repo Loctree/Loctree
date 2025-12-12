@@ -3692,6 +3692,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "hifijson"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0a7763b98ba8a24f59e698bf9ab197e7676c640d6455d1580b4ce7dc560f0f0d"
+
+[[package]]
 name = "hmac"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4218,6 +4224,46 @@ name = "itoa"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4a5f13b858c8d314ee3e8f639011f7ccefe71f97f96e50151fb991f267928e2c"
+
+[[package]]
+name = "jaq-core"
+version = "2.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77526a72eb79412c29fd141767a6549bbfcb1cb40e00556fe16532d5e878e098"
+dependencies = [
+ "dyn-clone",
+ "once_cell",
+ "typed-arena",
+]
+
+[[package]]
+name = "jaq-json"
+version = "1.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "01dbdbd07b076e8403abac68ce7744d93e2ecd953bbc44bf77bf00e1e81172bc"
+dependencies = [
+ "foldhash",
+ "hifijson",
+ "indexmap 2.12.1",
+ "jaq-core",
+ "jaq-std",
+]
+
+[[package]]
+name = "jaq-std"
+version = "2.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c264fe397c981705976c71f1bfe020382b9eda52ae950e57fe885e147bdd67d"
+dependencies = [
+ "aho-corasick",
+ "base64 0.22.1",
+ "chrono",
+ "jaq-core",
+ "libm",
+ "log",
+ "regex-lite",
+ "urlencoding",
+]
 
 [[package]]
 name = "jiff"
@@ -5297,6 +5343,9 @@ dependencies = [
  "globset",
  "heck 0.5.0",
  "indicatif",
+ "jaq-core",
+ "jaq-json",
+ "jaq-std",
  "json-five",
  "once_cell",
  "oxc_allocator",
@@ -9589,6 +9638,12 @@ checksum = "d3d6cc09e1a99c7e01f2afe4953789311a1c50baebbdac5b477ecf78e2e92a5b"
 dependencies = [
  "pom",
 ]
+
+[[package]]
+name = "typed-arena"
+version = "2.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6af6ae20167a9ece4bcb41af5b80f8a1f1df981f6391189ce00fd257af04126a"
 
 [[package]]
 name = "typed-builder"

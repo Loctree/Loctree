@@ -60,6 +60,11 @@ uuid = { version = "1.0", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 colored = "2.1"
 
+# jq-compatible filtering for query mode
+jaq-core = "2.2"
+jaq-std = "2.1"
+jaq-json = "1.1"
+
 [dev-dependencies]
 assert_cmd = "2.0"
 predicates = "3.1"

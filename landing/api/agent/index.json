@@ -1,6 +1,6 @@
 {
   "name": "loctree",
-  "version": "0.6.14",
+  "version": "0.6.15",
   "tagline": "Scan once, slice many.",
   "description": "AI-oriented codebase analyzer. Use BEFORE reading files manually.",
   "install": {
@@ -88,6 +88,26 @@
     "twins_dead_only": {
       "cmd": "loct twins --dead-only",
       "desc": "Only exports with 0 imports (dead parrots)"
+    },
+    "jq_metadata": {
+      "cmd": "loct '.metadata'",
+      "desc": "Extract snapshot metadata (jq-style query)"
+    },
+    "jq_file_count": {
+      "cmd": "loct '.files | length'",
+      "desc": "Count files in codebase"
+    },
+    "jq_filter_edges": {
+      "cmd": "loct '.edges[] | select(.from | contains(\"pattern\"))'",
+      "desc": "Filter edges by pattern"
+    },
+    "jq_commands": {
+      "cmd": "loct '.command_bridges | map(.name)'",
+      "desc": "List all Tauri command names"
+    },
+    "jq_large_files": {
+      "cmd": "loct '.files[] | select(.loc > 500)' -c",
+      "desc": "Find files with >500 LOC (compact output)"
     }
   },
   "workflows": {
@@ -96,7 +116,8 @@
     "debugging_tauri": ["trace", "commands_missing", "commands_unused"],
     "compare_branches": ["diff"],
     "find_crowds": ["crowd_auto", "crowd_pattern"],
-    "cleanup_dead_code": ["twins", "dead_code"]
+    "cleanup_dead_code": ["twins", "dead_code"],
+    "explore_snapshot": ["jq_metadata", "jq_file_count", "jq_filter_edges"]
   },
   "ide_integration": {
     "url_scheme": "loctree://open?f=<file>&l=<line>",

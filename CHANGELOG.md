@@ -6,6 +6,17 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+### Added
+- **jq-style query mode** — Query snapshot data directly with jq syntax
+  - `loct '.metadata'` — Extract metadata from snapshot
+  - `loct '.files | length'` — Count files in codebase
+  - `loct '.edges[] | select(.from | contains("api"))'` — Filter edges
+  - Uses jaq (Rust-native jq implementation) for zero external dependencies
+  - Flags: `-r` (raw), `-c` (compact), `-e` (exit status), `--arg`, `--argjson`
+  - Auto-discovers latest snapshot from `.loctree/*/snapshot.json`
+  - Explicit snapshot: `loct '.files' --snapshot path/to/snapshot.json`
+  - Usage: `loct '<filter>' [flags]` — filter must come before flags
+
 ## [0.6.9] - 2025-12-11
 
 ### Added

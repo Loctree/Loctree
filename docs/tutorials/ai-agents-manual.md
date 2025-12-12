@@ -343,6 +343,69 @@ loct query where-symbol useAuth
 loct query component-of src/orphan.ts
 ```
 
+### jq-style Queries (v0.6.15+)
+
+Query snapshot data directly using jq syntax. Uses jaq (Rust-native jq implementation) for zero external dependencies.
+
+```bash
+loct '<filter>' [options]
+```
+
+**Basic Usage:**
+```bash
+loct '.metadata'                    # Extract snapshot metadata
+loct '.files | length'              # Count files in codebase
+loct '.edges | length'              # Count import edges
+loct '.command_bridges | length'    # Count Tauri commands
+```
+
+**Filtering:**
+```bash
+# Find all edges from api/ directory
+loct '.edges[] | select(.from | contains("api"))'
+
+# Find large files (>500 LOC)
+loct '.files[] | select(.loc > 500)'
+
+# Get all file paths
+loct '.files[].path' -r
+
+# List Tauri command names
+loct '.command_bridges | map(.name)'
+```
+
+**Options:**
+| Flag | Description |
+|------|-------------|
+| `-r`, `--raw` | Raw output (no JSON quotes for strings) |
+| `-c`, `--compact` | Compact output (one line per result) |
+| `-e`, `--exit-status` | Exit 1 if result is false/null |
+| `--arg <name> <val>` | Bind string variable |
+| `--argjson <name> <json>` | Bind JSON variable |
+| `--snapshot <path>` | Use specific snapshot file |
+
+**Variable Binding:**
+```bash
+# Find edges from specific file
+loct '.edges[] | select(.from == $file)' --arg file 'src/api.ts'
+
+# Files with LOC above threshold
+loct '.files[] | select(.loc > $min)' --argjson min 300
+```
+
+**Important:** Filter must come before flags:
+```bash
+# ✅ Correct
+loct '.edges[]' --arg file 'foo.ts'
+
+# ❌ Won't work
+loct --arg file 'foo.ts' '.edges[]'
+```
+
+**Snapshot Discovery:**
+- Auto-discovers newest `.loctree/*/snapshot.json` by modification time
+- Use `--snapshot path/to/snapshot.json` to specify explicitly
+
 ---
 
 ## Agent Bundle for CI
@@ -628,6 +691,7 @@ loct cycles --json | jq '.[] | select(.files | length > 2)'
 | FE↔BE gaps | `loct commands --missing` |
 | Who imports file | `loct query who-imports <file>` |
 | Where is symbol | `loct query where-symbol <name>` |
+| jq query | `loct '.files \| length'`, `loct '.metadata'` |
 | Delta since snapshot | `loct diff --since <id>` |
 | CI lint | `loct lint --fail --sarif` |
 | Git blame | `loct git blame <file>` |

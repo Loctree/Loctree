@@ -21,6 +21,32 @@ pub fn is_subcommand(arg: &str) -> bool {
     SUBCOMMANDS.contains(&arg)
 }
 
+/// Check if argument looks like a jq filter expression
+fn is_jq_filter(arg: &str) -> bool {
+    let trimmed = arg.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    // Starts with . [ or { = jq filter
+    if trimmed.starts_with('.') || trimmed.starts_with('[') || trimmed.starts_with('{') {
+        // But not path-like ./foo or .\foo
+        if trimmed.starts_with("./") || trimmed.starts_with(".\\") {
+            return false;
+        }
+        // If it's a dotfile that exists on disk, treat as path
+        if trimmed.starts_with('.')
+            && !trimmed.contains('[')
+            && !trimmed.contains('|')
+            && std::path::Path::new(trimmed).exists()
+        {
+            return false;
+        }
+        return true;
+    }
+    false
+}
+
 /// Check if the argument list appears to use new-style subcommands.
 ///
 /// Returns true if the first non-flag argument is a known subcommand,
@@ -52,8 +78,8 @@ pub fn uses_new_syntax(args: &[String]) -> bool {
         if arg.starts_with('-') {
             return false;
         }
-        // First positional argument - check if it's a subcommand
-        return is_subcommand(arg);
+        // First positional argument - check if it's a subcommand or jq filter
+        return is_subcommand(arg) || is_jq_filter(arg);
     }
     // No arguments = default to auto (new syntax)
     true
@@ -76,6 +102,12 @@ pub fn parse_command(args: &[String]) -> Result<Option<ParsedCommand>, String> {
     let mut global = GlobalOptions::default();
     let mut remaining_args: Vec<String> = Vec::new();
     let mut subcommand: Option<String> = None;
+
+    // Check for jq-style query before extracting global options
+    // This allows: loct '.metadata' to work without conflicts
+    if !args.is_empty() && is_jq_filter(&args[0]) {
+        return parse_jq_query_command(args, &global).map(Some);
+    }
 
     // First pass: extract global options and find subcommand
     let mut i = 0;
@@ -2005,6 +2037,117 @@ EXAMPLES:
     Ok(Command::Coverage(opts))
 }
 
+fn parse_jq_query_command(
+    args: &[String],
+    global: &GlobalOptions,
+) -> Result<ParsedCommand, String> {
+    if args.is_empty() {
+        return Err("jq query requires a filter expression".to_string());
+    }
+
+    let mut opts = JqQueryOptions::default();
+
+    // First arg should be the filter
+    let mut i = if is_jq_filter(&args[0]) {
+        opts.filter = args[0].clone();
+        1
+    } else {
+        return Err(format!("Expected jq filter expression, got: '{}'", args[0]));
+    };
+
+    // Parse remaining jq-specific flags
+    while i < args.len() {
+        let arg = &args[i];
+        match arg.as_str() {
+            "-r" | "--raw-output" => {
+                opts.raw_output = true;
+                i += 1;
+            }
+            "-c" | "--compact-output" => {
+                opts.compact_output = true;
+                i += 1;
+            }
+            "-e" | "--exit-status" => {
+                opts.exit_status = true;
+                i += 1;
+            }
+            "--arg" => {
+                let name = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--arg requires a name and value".to_string())?;
+                let value = args
+                    .get(i + 2)
+                    .ok_or_else(|| "--arg requires a name and value".to_string())?;
+                opts.string_args.push((name.clone(), value.clone()));
+                i += 3;
+            }
+            "--argjson" => {
+                let name = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--argjson requires a name and JSON value".to_string())?;
+                let json_value = args
+                    .get(i + 2)
+                    .ok_or_else(|| "--argjson requires a name and JSON value".to_string())?;
+                opts.json_args.push((name.clone(), json_value.clone()));
+                i += 3;
+            }
+            "--snapshot" => {
+                let path = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--snapshot requires a path".to_string())?;
+                opts.snapshot_path = Some(PathBuf::from(path));
+                i += 2;
+            }
+            "--help" | "-h" => {
+                return Err("loct jq - Query snapshot with jq-style filters
+
+USAGE:
+    loct '<filter>' [OPTIONS]
+
+DESCRIPTION:
+    Execute jq-style filter expressions on the latest snapshot JSON.
+    Automatically finds the most recent snapshot in .loctree/ directory.
+
+    The filter syntax follows jq conventions:
+    - .metadata          Extract metadata field
+    - .files[]           Iterate over files array
+    - .files[0]          Get first file
+    - .[\"key\"]           Access key with special characters
+
+OPTIONS:
+    -r, --raw-output         Output raw strings, not JSON
+    -c, --compact-output     Compact JSON output (no pretty-printing)
+    -e, --exit-status        Set exit code based on output (0 if truthy)
+    --arg <name> <value>     Pass string variable to filter
+    --argjson <name> <json>  Pass JSON variable to filter
+    --snapshot <path>        Use specific snapshot file instead of latest
+    --help, -h               Show this help message
+
+EXAMPLES:
+    loct '.metadata'                    # Extract metadata
+    loct '.files | length'              # Count files
+    loct '.files[] | .path'             # List all file paths
+    loct '.metadata.total_loc' -r       # Raw number output
+    loct '.files[] | select(.lang == \"ts\")' -c  # Find TypeScript files
+    loct --snapshot .loctree/snap-abc123.json '.metadata'  # Query specific snapshot
+
+GLOBAL OPTIONS:
+    --json           Output as JSON (default for jq mode)
+    --quiet          Suppress warnings
+    --verbose        Show debug info
+
+NOTE: This command requires jaq library (built with --features jq)"
+                    .to_string());
+            }
+            _ => {
+                return Err(format!("Unknown option '{}' for jq query mode", arg));
+            }
+        }
+    }
+
+    Ok(ParsedCommand::new(Command::JqQuery(opts), global.clone()))
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -2162,6 +2305,87 @@ mod tests {
             assert!(opts.pattern.is_none());
         } else {
             panic!("Expected Crowd command");
+        }
+    }
+
+    #[test]
+    fn test_is_jq_filter() {
+        // Valid jq filters
+        assert!(is_jq_filter(".metadata"));
+        assert!(is_jq_filter(".files[]"));
+        assert!(is_jq_filter(".files[0]"));
+        assert!(is_jq_filter("[.files]"));
+        assert!(is_jq_filter("{foo: .bar}"));
+        assert!(is_jq_filter(".foo | .bar"));
+
+        // Not jq filters
+        assert!(!is_jq_filter("./foo"));
+        assert!(!is_jq_filter(".\\foo"));
+        assert!(!is_jq_filter("scan"));
+        assert!(!is_jq_filter("--help"));
+        assert!(!is_jq_filter(""));
+    }
+
+    #[test]
+    fn test_parse_jq_query_basic() {
+        let args = vec![".metadata".into()];
+        let result = parse_command(&args).unwrap().unwrap();
+        assert_eq!(result.command.name(), "jq");
+        if let Command::JqQuery(opts) = result.command {
+            assert_eq!(opts.filter, ".metadata");
+            assert!(!opts.raw_output);
+            assert!(!opts.compact_output);
+        } else {
+            panic!("Expected JqQuery command");
+        }
+    }
+
+    #[test]
+    fn test_parse_jq_query_with_flags() {
+        let args = vec![".files[]".into(), "-r".into(), "-c".into()];
+        let result = parse_command(&args).unwrap().unwrap();
+        if let Command::JqQuery(opts) = result.command {
+            assert_eq!(opts.filter, ".files[]");
+            assert!(opts.raw_output);
+            assert!(opts.compact_output);
+        } else {
+            panic!("Expected JqQuery command");
+        }
+    }
+
+    #[test]
+    fn test_parse_jq_query_with_arg() {
+        let args = vec![
+            ".metadata".into(),
+            "--arg".into(),
+            "name".into(),
+            "value".into(),
+        ];
+        let result = parse_command(&args).unwrap().unwrap();
+        if let Command::JqQuery(opts) = result.command {
+            assert_eq!(opts.string_args.len(), 1);
+            assert_eq!(opts.string_args[0].0, "name");
+            assert_eq!(opts.string_args[0].1, "value");
+        } else {
+            panic!("Expected JqQuery command");
+        }
+    }
+
+    #[test]
+    fn test_parse_jq_query_with_snapshot() {
+        let args = vec![
+            ".metadata".into(),
+            "--snapshot".into(),
+            ".loctree/snap.json".into(),
+        ];
+        let result = parse_command(&args).unwrap().unwrap();
+        if let Command::JqQuery(opts) = result.command {
+            assert_eq!(
+                opts.snapshot_path,
+                Some(PathBuf::from(".loctree/snap.json"))
+            );
+        } else {
+            panic!("Expected JqQuery command");
         }
     }
 }

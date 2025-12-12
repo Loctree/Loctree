@@ -181,6 +181,13 @@ pub enum Command {
     ///
     /// Output is friendly and non-judgmental - these are hints, not verdicts.
     Sniff(SniffOptions),
+
+    /// Query snapshot with jq-style filters (loct '.metadata').
+    ///
+    /// Runs jq-style filter expressions on the latest snapshot JSON.
+    /// Supports standard jq flags: -r (raw), -c (compact), -e (exit status),
+    /// --arg (string vars), --argjson (JSON vars), --snapshot (explicit path).
+    JqQuery(JqQueryOptions),
 }
 
 impl Default for Command {
@@ -586,6 +593,25 @@ pub struct SniffOptions {
     pub min_crowd_size: Option<usize>,
 }
 
+/// Options for jq-style query mode (loct '.filter')
+#[derive(Debug, Clone, Default)]
+pub struct JqQueryOptions {
+    /// The jq filter expression
+    pub filter: String,
+    /// Raw string output (-r)
+    pub raw_output: bool,
+    /// Compact JSON output (-c)
+    pub compact_output: bool,
+    /// Exit status mode (-e)
+    pub exit_status: bool,
+    /// String variable bindings: (name, value)
+    pub string_args: Vec<(String, String)>,
+    /// JSON variable bindings: (name, json_string)
+    pub json_args: Vec<(String, String)>,
+    /// Explicit snapshot path
+    pub snapshot_path: Option<std::path::PathBuf>,
+}
+
 /// Options for the `help` command.
 #[derive(Debug, Clone, Default)]
 pub struct HelpOptions {
@@ -718,6 +744,7 @@ impl Command {
             Command::Dist(_) => "dist",
             Command::Coverage(_) => "coverage",
             Command::Sniff(_) => "sniff",
+            Command::JqQuery(_) => "jq",
         }
     }
 
@@ -747,6 +774,7 @@ impl Command {
             Command::Dist(_) => "Analyze bundle distribution using source maps",
             Command::Coverage(_) => "Analyze test coverage gaps (structural coverage)",
             Command::Sniff(_) => "Sniff for code smells (twins + dead parrots + crowds)",
+            Command::JqQuery(_) => "Query snapshot with jq-style filters (loct '.filter')",
         }
     }
 

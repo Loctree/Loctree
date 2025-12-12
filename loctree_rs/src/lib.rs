@@ -270,6 +270,11 @@ pub mod memex;
 /// Provides Black-style visual feedback for CLI operations.
 pub mod progress;
 
+/// jaq query execution for filtering snapshot data.
+///
+/// Provides jq-compatible filtering using the jaq library.
+pub mod jaq_query;
+
 // ============================================================================
 // Re-exports for convenience
 // ============================================================================

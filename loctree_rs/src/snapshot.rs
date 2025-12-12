@@ -364,6 +364,96 @@ impl Snapshot {
         }
     }
 
+    /// Find the most recent snapshot in .loctree/*/snapshot.json
+    ///
+    /// This function is useful for query mode where we want to automatically
+    /// discover the latest snapshot without requiring explicit path specification.
+    ///
+    /// # Arguments
+    /// * `explicit_path` - If provided, use this path directly instead of searching
+    ///
+    /// # Returns
+    /// * `Ok(PathBuf)` - Path to the snapshot file
+    /// * `Err(String)` - Helpful error message if no snapshot found
+    ///
+    /// # Example
+    /// ```ignore
+    /// // Auto-discover latest snapshot
+    /// let path = Snapshot::find_latest_snapshot(None)?;
+    ///
+    /// // Use explicit path
+    /// let path = Snapshot::find_latest_snapshot(Some(Path::new(".loctree/main@abc123/snapshot.json")))?;
+    /// ```
+    pub fn find_latest_snapshot(explicit_path: Option<&Path>) -> Result<PathBuf, String> {
+        // If explicit path provided, validate and return it
+        if let Some(path) = explicit_path {
+            if path.exists() {
+                return Ok(path.to_path_buf());
+            } else {
+                return Err(format!(
+                    "Snapshot not found at '{}'. Run `loct scan` first.",
+                    path.display()
+                ));
+            }
+        }
+
+        // Search for .loctree directory starting from current directory
+        let cwd = std::env::current_dir()
+            .map_err(|e| format!("Failed to get current directory: {}", e))?;
+
+        let loctree_root = match Self::find_loctree_root(&cwd) {
+            Some(root) => root,
+            None => {
+                return Err(
+                    "No .loctree directory found. Run `loct scan` first to create a snapshot."
+                        .to_string(),
+                );
+            }
+        };
+
+        let loctree_dir = loctree_root.join(SNAPSHOT_DIR);
+
+        // Collect all snapshot.json files in .loctree/*/snapshot.json
+        let mut snapshots: Vec<(PathBuf, std::time::SystemTime)> = Vec::new();
+
+        // Check for legacy snapshot at .loctree/snapshot.json
+        let legacy_path = loctree_dir.join(SNAPSHOT_FILE);
+        if legacy_path.exists()
+            && let Ok(meta) = fs::metadata(&legacy_path)
+            && let Ok(mtime) = meta.modified()
+        {
+            snapshots.push((legacy_path, mtime));
+        }
+
+        // Check for branch@sha subdirectories: .loctree/*/snapshot.json
+        if let Ok(entries) = fs::read_dir(&loctree_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    let snapshot_path = path.join(SNAPSHOT_FILE);
+                    if snapshot_path.exists()
+                        && let Ok(meta) = fs::metadata(&snapshot_path)
+                        && let Ok(mtime) = meta.modified()
+                    {
+                        snapshots.push((snapshot_path, mtime));
+                    }
+                }
+            }
+        }
+
+        if snapshots.is_empty() {
+            return Err(format!(
+                "No snapshots found in '{}'. Run `loct scan` first.",
+                loctree_dir.display()
+            ));
+        }
+
+        // Sort by mtime (newest first) and return the most recent
+        snapshots.sort_by(|a, b| b.1.cmp(&a.1));
+
+        Ok(snapshots.into_iter().next().unwrap().0)
+    }
+
     /// Save snapshot to disk
     pub fn save(&self, root: &Path) -> io::Result<()> {
         // If a snapshot already exists for the same branch/commit, skip rewriting.
@@ -1594,5 +1684,146 @@ mod tests {
             loaded.export_index.get("Button").unwrap(),
             &vec!["src/Button.tsx".to_string()]
         );
+    }
+
+    #[test]
+    fn test_find_latest_snapshot_explicit_path_exists() {
+        let tmp = TempDir::new().expect("create temp dir");
+        let snapshot_path = tmp.path().join(SNAPSHOT_DIR).join(SNAPSHOT_FILE);
+
+        // Create snapshot directory and file
+        std::fs::create_dir_all(snapshot_path.parent().unwrap()).expect("create dir");
+        let snapshot = Snapshot::new(vec!["src".to_string()]);
+        let json = serde_json::to_string_pretty(&snapshot).unwrap();
+        std::fs::write(&snapshot_path, json).expect("write snapshot");
+
+        // Should return the explicit path
+        let result = Snapshot::find_latest_snapshot(Some(&snapshot_path));
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), snapshot_path);
+    }
+
+    #[test]
+    fn test_find_latest_snapshot_explicit_path_not_exists() {
+        let result =
+            Snapshot::find_latest_snapshot(Some(Path::new("/nonexistent/path/snapshot.json")));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("Snapshot not found"));
+        assert!(err.contains("Run `loct scan` first"));
+    }
+
+    #[test]
+    fn test_find_latest_snapshot_picks_newest_by_mtime() {
+        let tmp = TempDir::new().expect("create temp dir");
+        let loctree_dir = tmp.path().join(SNAPSHOT_DIR);
+
+        // Create two branch@sha subdirectories with snapshots
+        let old_dir = loctree_dir.join("main@old123");
+        let new_dir = loctree_dir.join("main@new456");
+        std::fs::create_dir_all(&old_dir).expect("create old dir");
+        std::fs::create_dir_all(&new_dir).expect("create new dir");
+
+        let old_snapshot_path = old_dir.join(SNAPSHOT_FILE);
+        let new_snapshot_path = new_dir.join(SNAPSHOT_FILE);
+
+        // Write old snapshot first
+        let snapshot = Snapshot::new(vec!["src".to_string()]);
+        let json = serde_json::to_string_pretty(&snapshot).unwrap();
+        std::fs::write(&old_snapshot_path, &json).expect("write old snapshot");
+
+        // Wait a tiny bit to ensure mtime difference
+        std::thread::sleep(std::time::Duration::from_millis(10));
+
+        // Write new snapshot
+        std::fs::write(&new_snapshot_path, &json).expect("write new snapshot");
+
+        // Change to temp directory so find_loctree_root works
+        let original_dir = std::env::current_dir().expect("get cwd");
+        std::env::set_current_dir(tmp.path()).expect("set cwd");
+
+        let result = Snapshot::find_latest_snapshot(None);
+
+        // Restore original directory
+        std::env::set_current_dir(original_dir).expect("restore cwd");
+
+        assert!(result.is_ok());
+        let found_path = result.unwrap();
+        // Should find the newer snapshot
+        assert!(
+            found_path.to_string_lossy().contains("new456"),
+            "Expected newest snapshot, got: {}",
+            found_path.display()
+        );
+    }
+
+    #[test]
+    fn test_find_latest_snapshot_no_loctree_dir() {
+        let tmp = TempDir::new().expect("create temp dir");
+        // No .loctree directory
+
+        // Change to temp directory
+        let original_dir = std::env::current_dir().expect("get cwd");
+        std::env::set_current_dir(tmp.path()).expect("set cwd");
+
+        let result = Snapshot::find_latest_snapshot(None);
+
+        // Restore original directory
+        std::env::set_current_dir(original_dir).expect("restore cwd");
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("No .loctree directory found"));
+        assert!(err.contains("Run `loct scan` first"));
+    }
+
+    #[test]
+    fn test_find_latest_snapshot_empty_loctree_dir() {
+        let tmp = TempDir::new().expect("create temp dir");
+        // Create empty .loctree directory (no snapshots)
+        std::fs::create_dir(tmp.path().join(SNAPSHOT_DIR)).expect("create .loctree");
+
+        // Change to temp directory
+        let original_dir = std::env::current_dir().expect("get cwd");
+        std::env::set_current_dir(tmp.path()).expect("set cwd");
+
+        let result = Snapshot::find_latest_snapshot(None);
+
+        // Restore original directory
+        std::env::set_current_dir(original_dir).expect("restore cwd");
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("No snapshots found"));
+        assert!(err.contains("Run `loct scan` first"));
+    }
+
+    #[test]
+    fn test_find_latest_snapshot_legacy_path() {
+        let tmp = TempDir::new().expect("create temp dir");
+        let loctree_dir = tmp.path().join(SNAPSHOT_DIR);
+
+        // Create legacy snapshot at .loctree/snapshot.json (not in subdirectory)
+        std::fs::create_dir_all(&loctree_dir).expect("create .loctree dir");
+        let legacy_path = loctree_dir.join(SNAPSHOT_FILE);
+
+        let snapshot = Snapshot::new(vec!["src".to_string()]);
+        let json = serde_json::to_string_pretty(&snapshot).unwrap();
+        std::fs::write(&legacy_path, json).expect("write legacy snapshot");
+
+        // Change to temp directory
+        let original_dir = std::env::current_dir().expect("get cwd");
+        std::env::set_current_dir(tmp.path()).expect("set cwd");
+
+        let result = Snapshot::find_latest_snapshot(None);
+
+        // Restore original directory
+        std::env::set_current_dir(original_dir).expect("restore cwd");
+
+        assert!(result.is_ok());
+        // Compare canonicalized paths to handle /private/var vs /var on macOS
+        let found = result.unwrap().canonicalize().unwrap_or_default();
+        let expected = legacy_path.canonicalize().unwrap_or_default();
+        assert_eq!(found, expected);
     }
 }

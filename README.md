@@ -46,6 +46,11 @@ loct dead --confidence high
 
 # Verify tree-shaking in production bundles
 loct dist dist/bundle.js.map src/
+
+# jq-style queries on snapshot data (NEW!)
+loct '.metadata'                    # extract metadata
+loct '.files | length'              # count files
+loct '.edges[] | select(.from | contains("api"))'  # filter
 ```
 
 ## Why loctree?
@@ -338,7 +343,16 @@ Modes:
   lint --fail --sarif       CI guardrails / SARIF output
   diff --since <id>         Compare snapshots, show delta
   query <kind> <target>     Quick queries (who-imports, where-symbol, component-of)
+  '<filter>'                jq-style query on snapshot (e.g., '.metadata', '.files | length')
   --for-ai                  AI-optimized hierarchical JSON (legacy flag)
+
+jq Query options:
+  -r, --raw                 Raw output (no JSON quotes for strings)
+  -c, --compact             Compact output (one line per result)
+  -e, --exit-status         Exit 1 if result is false/null
+  --arg <name> <value>      Bind string variable
+  --argjson <name> <json>   Bind JSON variable
+  --snapshot <path>         Use specific snapshot file
 
 Find options:
   --similar <query>         Similar components/symbols
