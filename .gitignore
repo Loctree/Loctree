@@ -49,3 +49,9 @@ GEMINI.md
 brave-mcp-servers-report.md
 reports/report.html
 /loctree_rs/src/.loctree
+
+# npm package - downloaded binaries (keep placeholders)
+/bin/*.tar.gz
+/bin/*.zip
+# Keep placeholder scripts but ignore actual binaries that overwrite them
+# (they have no extension on Unix, .exe on Windows)
