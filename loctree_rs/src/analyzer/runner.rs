@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use crate::args::{ParsedArgs, preset_ignore_symbols};
 use crate::config::LoctreeConfig;
-use crate::snapshot::Snapshot;
+use crate::snapshot::{Snapshot, SnapshotMetadata};
 use crate::types::OutputMode;
 
 use super::ReportSection;
@@ -556,6 +556,25 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         // Get circular imports
         let (circular_imports, _lazy) = super::cycles::find_cycles_with_lazy(&all_graph_edges);
 
+        // Build minimal snapshot for SARIF enrichment (blast radius, consumer count)
+        use crate::snapshot::GraphEdge;
+        let minimal_snapshot = Snapshot {
+            metadata: SnapshotMetadata::default(),
+            files: vec![],
+            edges: all_graph_edges
+                .iter()
+                .map(|(from, to, label)| GraphEdge {
+                    from: from.clone(),
+                    to: to.clone(),
+                    label: label.clone(),
+                })
+                .collect(),
+            export_index: Default::default(),
+            command_bridges: vec![],
+            event_bridges: vec![],
+            barrels: vec![],
+        };
+
         super::sarif::print_sarif(super::sarif::SarifInputs {
             duplicate_exports: &all_ranked_dups,
             missing_handlers: &global_missing_handlers,
@@ -563,6 +582,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             dead_exports: &dead_exports,
             circular_imports: &circular_imports,
             pipeline_summary: &pipeline_summary,
+            snapshot: Some(&minimal_snapshot),
         })
         .map_err(|err| io::Error::other(format!("Failed to serialize SARIF: {err}")))?;
         return Ok(());

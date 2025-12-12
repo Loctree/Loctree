@@ -1181,6 +1181,24 @@ pub(crate) fn write_auto_artifacts(
         },
     );
 
+    // Build minimal snapshot for SARIF enrichment (blast radius, consumer count)
+    let minimal_snapshot = Snapshot {
+        metadata: SnapshotMetadata::default(),
+        files: vec![],
+        edges: all_graph_edges
+            .iter()
+            .map(|(from, to, label)| GraphEdge {
+                from: from.clone(),
+                to: to.clone(),
+                label: label.clone(),
+            })
+            .collect(),
+        export_index: Default::default(),
+        command_bridges: vec![],
+        event_bridges: vec![],
+        barrels: vec![],
+    };
+
     let sarif_content = generate_sarif_string(SarifInputs {
         duplicate_exports: &all_ranked_dups,
         missing_handlers: &global_missing_handlers,
@@ -1188,6 +1206,7 @@ pub(crate) fn write_auto_artifacts(
         dead_exports: &dead_exports,
         circular_imports: &cycles,
         pipeline_summary: &pipeline_summary,
+        snapshot: Some(&minimal_snapshot),
     })
     .map_err(|err| io::Error::other(format!("Failed to serialize SARIF: {err}")))?;
     write_atomic(&sarif_path, sarif_content)?;

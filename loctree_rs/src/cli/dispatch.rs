@@ -272,6 +272,11 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
             // as it doesn't go through ParsedArgs
         }
 
+        Command::Sniff(_) => {
+            // Sniff is handled specially in dispatch_command
+            // as it doesn't go through ParsedArgs
+        }
+
         Command::Routes(_) => {
             // Routes is handled specially in dispatch_command
         }
@@ -353,6 +358,9 @@ pub fn dispatch_command(parsed_cmd: &ParsedCommand) -> DispatchResult {
         }
         Command::Twins(opts) => {
             return handle_twins_command(opts, &parsed_cmd.global);
+        }
+        Command::Sniff(opts) => {
+            return handle_sniff_command(opts, &parsed_cmd.global);
         }
         Command::Dead(opts) => {
             return handle_dead_command(opts, &parsed_cmd.global);
@@ -1127,6 +1135,238 @@ fn handle_twins_command(
 
         if has_issues && output_mode == crate::types::OutputMode::Human {
             println!("{}", format_barrel_analysis(&barrel_analysis));
+        }
+    }
+
+    DispatchResult::Exit(0)
+}
+
+/// Handle the sniff command - aggregate code smells
+fn handle_sniff_command(
+    opts: &super::command::SniffOptions,
+    global: &GlobalOptions,
+) -> DispatchResult {
+    use crate::analyzer::crowd::detect_all_crowds_with_edges;
+    use crate::analyzer::twins::{detect_exact_twins, find_dead_parrots};
+    use std::path::Path;
+
+    // Show spinner unless in quiet/json mode
+    let spinner = if !global.quiet && !global.json {
+        Some(Spinner::new("Sniffing for code smells..."))
+    } else {
+        None
+    };
+
+    // Load snapshot (auto-scan if missing)
+    let root = opts.path.as_deref().unwrap_or(Path::new("."));
+
+    let snapshot = match load_or_create_snapshot(root, global) {
+        Ok(s) => s,
+        Err(e) => {
+            if let Some(s) = spinner {
+                s.finish_error(&format!("Failed to load snapshot: {}", e));
+            } else {
+                eprintln!("[loct][error] {}", e);
+            }
+            return DispatchResult::Exit(1);
+        }
+    };
+
+    // Filter files based on include_tests
+    let files: Vec<_> = if opts.include_tests {
+        snapshot.files.clone()
+    } else {
+        snapshot
+            .files
+            .iter()
+            .filter(|f| !is_test_file(&f.path))
+            .cloned()
+            .collect()
+    };
+
+    // Collect all findings
+    let mut twins_count = 0;
+    let mut dead_count = 0;
+    let mut crowds_count = 0;
+
+    let twins = if !opts.crowds_only && !opts.dead_only {
+        let t = detect_exact_twins(&files);
+        twins_count = t.len();
+        Some(t)
+    } else {
+        None
+    };
+
+    let dead_parrots = if !opts.crowds_only && !opts.twins_only {
+        let result = find_dead_parrots(&files, false);
+        dead_count = result.dead_parrots.len();
+        Some(result)
+    } else {
+        None
+    };
+
+    let crowds = if !opts.twins_only && !opts.dead_only {
+        let mut c = detect_all_crowds_with_edges(&files, &snapshot.edges);
+        if let Some(min_size) = opts.min_crowd_size {
+            c.retain(|crowd| crowd.members.len() >= min_size);
+        }
+        crowds_count = c.len();
+        Some(c)
+    } else {
+        None
+    };
+
+    let total_smells = twins_count + dead_count + crowds_count;
+
+    if let Some(s) = spinner {
+        s.finish_success(&format!("Found {} code smell(s)", total_smells));
+    }
+
+    // Output results
+    if global.json {
+        // JSON output
+        let output = serde_json::json!({
+            "twins": twins.as_ref().map(|t| t.iter().map(|twin| {
+                serde_json::json!({
+                    "name": twin.name,
+                    "locations": twin.locations.iter().map(|loc| {
+                        serde_json::json!({
+                            "file": loc.file_path,
+                            "line": loc.line,
+                            "kind": loc.kind,
+                        })
+                    }).collect::<Vec<_>>(),
+                })
+            }).collect::<Vec<_>>()),
+            "dead_parrots": dead_parrots.as_ref().map(|dp| dp.dead_parrots.iter().map(|e| {
+                serde_json::json!({
+                    "name": e.name,
+                    "file": e.file_path,
+                    "line": e.line,
+                    "kind": e.kind,
+                })
+            }).collect::<Vec<_>>()),
+            "crowds": crowds.as_ref().map(|c| c.iter().map(|crowd| {
+                serde_json::json!({
+                    "pattern": crowd.pattern,
+                    "size": crowd.members.len(),
+                    "members": crowd.members.iter().map(|m| m.file.clone()).collect::<Vec<_>>(),
+                })
+            }).collect::<Vec<_>>()),
+            "summary": {
+                "twins": twins_count,
+                "dead_parrots": dead_count,
+                "crowds": crowds_count,
+                "total": total_smells,
+            }
+        });
+
+        match serde_json::to_string_pretty(&output) {
+            Ok(json) => println!("{}", json),
+            Err(e) => {
+                eprintln!("[loct][error] Failed to serialize results: {}", e);
+                return DispatchResult::Exit(1);
+            }
+        }
+    } else {
+        // Human-readable output with friendly tone
+        println!("🐕 SNIFFING FOR CODE SMELLS...\n");
+
+        // Twins section
+        if let Some(ref twins_list) = twins
+            && !twins_list.is_empty()
+        {
+            println!(
+                "📍 TWINS (same name, different files) - {} found",
+                twins_count
+            );
+            println!("   Consider: consolidate or rename to avoid import confusion\n");
+
+            for twin in twins_list.iter().take(20) {
+                println!("   {} ({} locations)", twin.name, twin.locations.len());
+                for loc in &twin.locations {
+                    println!("   ├─ {}:{}", loc.file_path, loc.line);
+                }
+                println!();
+            }
+
+            if twins_list.len() > 20 {
+                println!("   ... and {} more twin groups\n", twins_list.len() - 20);
+            }
+        }
+
+        // Dead parrots section
+        if let Some(ref dp_result) = dead_parrots
+            && !dp_result.dead_parrots.is_empty()
+        {
+            println!("📍 DEAD PARROTS (unused exports) - {} found", dead_count);
+            println!("   Consider: remove if truly unused, or document if external API\n");
+
+            // Group by file
+            let mut by_file: std::collections::HashMap<
+                String,
+                Vec<&crate::analyzer::twins::SymbolEntry>,
+            > = std::collections::HashMap::new();
+            for entry in &dp_result.dead_parrots {
+                by_file
+                    .entry(entry.file_path.clone())
+                    .or_default()
+                    .push(entry);
+            }
+
+            let mut files: Vec<_> = by_file.keys().collect();
+            files.sort();
+
+            for file in files.iter().take(10) {
+                let entries = &by_file[*file];
+                for entry in entries.iter().take(3) {
+                    println!("   {} in {}:{}", entry.name, entry.file_path, entry.line);
+                }
+                if entries.len() > 3 {
+                    println!("   ... and {} more in {}", entries.len() - 3, file);
+                }
+            }
+
+            if files.len() > 10 {
+                println!(
+                    "   ... and {} more files with dead exports",
+                    files.len() - 10
+                );
+            }
+            println!();
+        }
+
+        // Crowds section
+        if let Some(ref crowds_list) = crowds
+            && !crowds_list.is_empty()
+        {
+            println!("📍 CROWDS (similar files) - {} groups", crowds_count);
+            println!("   Consider: these files share many dependencies, possible duplication\n");
+
+            for (idx, crowd) in crowds_list.iter().take(5).enumerate() {
+                println!("   Group {}: {} pattern", idx + 1, crowd.pattern);
+                for member in crowd.members.iter().take(5) {
+                    println!("   ├─ {}", member.file);
+                }
+                if crowd.members.len() > 5 {
+                    println!("   └─ ... and {} more", crowd.members.len() - 5);
+                }
+                println!();
+            }
+
+            if crowds_list.len() > 5 {
+                println!("   ... and {} more crowd groups\n", crowds_list.len() - 5);
+            }
+        }
+
+        // Summary
+        println!(
+            "Summary: {} smells found. These are hints, not verdicts - you decide what matters.",
+            total_smells
+        );
+
+        if total_smells == 0 {
+            println!("\n✅ No code smells detected - codebase looks clean!");
         }
     }
 

@@ -4,20 +4,47 @@ use super::barrels::BarrelAnalysis;
 use super::crowd::types::Crowd;
 use super::dead_parrots::DeadExport;
 
-/// Confidence level for unused handler detection.
-/// HIGH = no string literal matches found (likely truly unused)
-/// LOW = string literal matches found (may be used dynamically)
+/// Confidence level for dead export and handler detection.
+///
+/// CERTAIN (🔴) - Will definitely break/is definitely unused
+///   - Unregistered handlers (has #[tauri::command] but NOT in invoke_handler![])
+///   - Missing handlers (FE calls invoke() but no handler exists)
+///
+/// HIGH (🟡) - Very likely unused, worth fixing
+///   - Export with 0 imports across all scanned files
+///   - Handler registered but 0 invoke() calls found
+///
+/// SMELL (🟢) - Worth checking, might be intentional
+///   - Twins (same name in multiple files)
+///   - Low import count relative to codebase size
+///   - String literal matches found (may be used dynamically)
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub enum Confidence {
+    /// CERTAIN - Will definitely break/is definitely unused
+    Certain,
+    /// HIGH - Very likely unused, worth fixing
     High,
-    Low,
+    /// SMELL - Worth checking, might be intentional
+    Smell,
+}
+
+impl Confidence {
+    /// Get emoji indicator for this confidence level
+    pub fn emoji(&self) -> &'static str {
+        match self {
+            Confidence::Certain => "🔴",
+            Confidence::High => "🟡",
+            Confidence::Smell => "🟢",
+        }
+    }
 }
 
 impl std::fmt::Display for Confidence {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Confidence::Certain => write!(f, "CERTAIN"),
             Confidence::High => write!(f, "HIGH"),
-            Confidence::Low => write!(f, "LOW"),
+            Confidence::Smell => write!(f, "SMELL"),
         }
     }
 }
@@ -239,20 +266,33 @@ mod tests {
     use crate::snapshot::CommandBridge;
 
     #[test]
+    fn confidence_display_certain() {
+        assert_eq!(format!("{}", Confidence::Certain), "CERTAIN");
+    }
+
+    #[test]
     fn confidence_display_high() {
         assert_eq!(format!("{}", Confidence::High), "HIGH");
     }
 
     #[test]
-    fn confidence_display_low() {
-        assert_eq!(format!("{}", Confidence::Low), "LOW");
+    fn confidence_display_smell() {
+        assert_eq!(format!("{}", Confidence::Smell), "SMELL");
     }
 
     #[test]
     fn confidence_equality() {
+        assert_eq!(Confidence::Certain, Confidence::Certain);
         assert_eq!(Confidence::High, Confidence::High);
-        assert_eq!(Confidence::Low, Confidence::Low);
-        assert_ne!(Confidence::High, Confidence::Low);
+        assert_eq!(Confidence::Smell, Confidence::Smell);
+        assert_ne!(Confidence::High, Confidence::Smell);
+    }
+
+    #[test]
+    fn confidence_emoji() {
+        assert_eq!(Confidence::Certain.emoji(), "🔴");
+        assert_eq!(Confidence::High.emoji(), "🟡");
+        assert_eq!(Confidence::Smell.emoji(), "🟢");
     }
 
     #[test]

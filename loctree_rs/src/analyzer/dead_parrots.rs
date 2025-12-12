@@ -1439,8 +1439,23 @@ pub fn print_dead_exports(
                 Some(line) => format!("{}:{}", item.file, line),
                 None => item.file.clone(),
             };
-            println!("  - {} in {}", item.symbol, location);
-            println!("    Reason: {}", item.reason);
+
+            // Map confidence string to emoji
+            let emoji = match item.confidence.as_str() {
+                "certain" => "🔴",
+                "high" | "very-high" => "🟡",
+                "medium" | "smell" => "🟢",
+                _ => "⚪",
+            };
+
+            println!(
+                "  {} {} - {} in {}",
+                emoji,
+                item.confidence.to_uppercase(),
+                item.symbol,
+                location
+            );
+            println!("     {}", item.reason);
         }
         if count > limit {
             println!("  ... and {} more", count - limit);

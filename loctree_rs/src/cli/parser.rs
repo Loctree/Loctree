@@ -13,7 +13,7 @@ use crate::types::ColorMode;
 const SUBCOMMANDS: &[&str] = &[
     "auto", "agent", "scan", "tree", "slice", "find", "dead", "unused", "cycles", "commands",
     "events", "info", "lint", "report", "help", "query", "diff", "memex", "crowd", "twins",
-    "routes", "dist", "coverage",
+    "routes", "dist", "coverage", "sniff",
 ];
 
 /// Check if an argument looks like a new-style subcommand.
@@ -210,6 +210,7 @@ pub fn parse_command(args: &[String]) -> Result<Option<ParsedCommand>, String> {
         Some("memex") => parse_memex_command(&remaining_args)?,
         Some("crowd") => parse_crowd_command(&remaining_args)?,
         Some("twins") => parse_twins_command(&remaining_args)?,
+        Some("sniff") => parse_sniff_command(&remaining_args)?,
         Some("dist") => parse_dist_command(&remaining_args)?,
         Some("coverage") => parse_coverage_command(&remaining_args)?,
         Some(unknown) => {
@@ -1753,6 +1754,102 @@ EXAMPLES:
     }
 
     Ok(Command::Twins(opts))
+}
+
+fn parse_sniff_command(args: &[String]) -> Result<Command, String> {
+    // Check for help flag first
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        return Err("loct sniff - Sniff for code smells (aggregate analysis)
+
+USAGE:
+    loct sniff [OPTIONS]
+
+DESCRIPTION:
+    Aggregates all smell-level findings worth checking:
+
+    Twins:        Same symbol name in multiple files
+                  - Can cause import confusion
+
+    Dead Parrots: Exports with 0 imports
+                  - Potentially unused code
+
+    Crowds:       Files with similar dependency patterns
+                  - Possible duplication or fragmentation
+
+    Output is friendly and non-judgmental. These are hints, not verdicts.
+
+OPTIONS:
+    --path <DIR>           Root directory to analyze (default: current directory)
+    --dead-only            Show only dead parrots (skip twins and crowds)
+    --twins-only           Show only twins (skip dead parrots and crowds)
+    --crowds-only          Show only crowds (skip twins and dead parrots)
+    --include-tests        Include test files in analysis (default: false)
+    --min-crowd-size <N>   Minimum crowd size to report (default: 2)
+    --help, -h             Show this help message
+
+EXAMPLES:
+    loct sniff                    # Full code smell analysis
+    loct sniff --dead-only        # Only dead parrots
+    loct sniff --twins-only       # Only duplicate names
+    loct sniff --crowds-only      # Only similar file clusters
+    loct sniff --include-tests    # Include test files
+    loct sniff --json             # Machine-readable output"
+            .to_string());
+    }
+
+    let mut opts = SniffOptions::default();
+    let mut i = 0;
+
+    while i < args.len() {
+        let arg = &args[i];
+        match arg.as_str() {
+            "--path" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--path requires a directory".to_string())?;
+                opts.path = Some(PathBuf::from(value));
+                i += 2;
+            }
+            "--dead-only" => {
+                opts.dead_only = true;
+                i += 1;
+            }
+            "--twins-only" => {
+                opts.twins_only = true;
+                i += 1;
+            }
+            "--crowds-only" => {
+                opts.crowds_only = true;
+                i += 1;
+            }
+            "--include-tests" => {
+                opts.include_tests = true;
+                i += 1;
+            }
+            "--min-crowd-size" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--min-crowd-size requires a number".to_string())?;
+                opts.min_crowd_size = Some(
+                    value
+                        .parse::<usize>()
+                        .map_err(|_| format!("Invalid number for --min-crowd-size: {}", value))?,
+                );
+                i += 2;
+            }
+            _ => {
+                // Treat as path if no flag prefix
+                if !arg.starts_with('-') {
+                    opts.path = Some(PathBuf::from(arg));
+                    i += 1;
+                } else {
+                    return Err(format!("Unknown option '{}' for 'sniff' command.", arg));
+                }
+            }
+        }
+    }
+
+    Ok(Command::Sniff(opts))
 }
 
 fn parse_dist_command(args: &[String]) -> Result<Command, String> {

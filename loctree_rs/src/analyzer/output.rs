@@ -1242,9 +1242,9 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
                     .filter(|g| g.confidence == Some(Confidence::High))
                     .map(|g| g.name.clone())
                     .collect();
-                let low_conf: Vec<_> = unused_handlers
+                let smell_conf: Vec<_> = unused_handlers
                     .iter()
-                    .filter(|g| g.confidence == Some(Confidence::Low))
+                    .filter(|g| g.confidence == Some(Confidence::Smell))
                     .collect();
 
                 if !high_conf.is_empty() {
@@ -1253,9 +1253,9 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
                         high_conf.join(", ")
                     );
                 }
-                if !low_conf.is_empty() {
-                    println!("  Unused handlers (LOW confidence - possible dynamic usage):");
-                    for g in &low_conf {
+                if !smell_conf.is_empty() {
+                    println!("  Unused handlers (SMELL confidence - possible dynamic usage):");
+                    for g in &smell_conf {
                         let matches_note = if !g.string_literal_matches.is_empty() {
                             format!(
                                 " ({} string literal matches)",

@@ -171,6 +171,16 @@ pub enum Command {
     /// Cross-references production usage (FE invoke/emit) with test imports
     /// to find handlers and events without test coverage.
     Coverage(CoverageOptions),
+
+    /// Sniff for code smells (twins + dead parrots + crowds).
+    ///
+    /// Aggregates all smell-level findings worth checking:
+    /// - Twins: same symbol name in multiple files
+    /// - Dead parrots: exports with 0 imports
+    /// - Crowds: files with similar dependency patterns
+    ///
+    /// Output is friendly and non-judgmental - these are hints, not verdicts.
+    Sniff(SniffOptions),
 }
 
 impl Default for Command {
@@ -553,6 +563,29 @@ pub struct DistOptions {
     pub src: Option<PathBuf>,
 }
 
+/// Options for the `sniff` command.
+/// Aggregates code smell findings (twins, dead parrots, crowds).
+#[derive(Debug, Clone, Default)]
+pub struct SniffOptions {
+    /// Root directory to analyze (defaults to current directory)
+    pub path: Option<PathBuf>,
+
+    /// Show only dead parrots (skip twins and crowds)
+    pub dead_only: bool,
+
+    /// Show only twins (skip dead parrots and crowds)
+    pub twins_only: bool,
+
+    /// Show only crowds (skip twins and dead parrots)
+    pub crowds_only: bool,
+
+    /// Include test files in analysis (default: false)
+    pub include_tests: bool,
+
+    /// Minimum crowd size to report (default: 2)
+    pub min_crowd_size: Option<usize>,
+}
+
 /// Options for the `help` command.
 #[derive(Debug, Clone, Default)]
 pub struct HelpOptions {
@@ -684,6 +717,7 @@ impl Command {
             Command::Twins(_) => "twins",
             Command::Dist(_) => "dist",
             Command::Coverage(_) => "coverage",
+            Command::Sniff(_) => "sniff",
         }
     }
 
@@ -712,6 +746,7 @@ impl Command {
             Command::Routes(_) => "List backend/web routes (FastAPI/Flask)",
             Command::Dist(_) => "Analyze bundle distribution using source maps",
             Command::Coverage(_) => "Analyze test coverage gaps (structural coverage)",
+            Command::Sniff(_) => "Sniff for code smells (twins + dead parrots + crowds)",
         }
     }
 
@@ -742,6 +777,7 @@ impl Command {
                 "Detect functional crowds around a pattern",
             ),
             ("twins", "Dead parrots, exact twins, barrel chaos analysis"),
+            ("sniff", "Code smells (twins + dead parrots + crowds)"),
             (
                 "dist <map> <src>",
                 "Analyze bundle distribution using source maps",
@@ -797,6 +833,7 @@ impl Command {
             "routes" => Some(ROUTES_HELP),
             "dist" => Some(DIST_HELP),
             "coverage" => Some(COVERAGE_HELP),
+            "sniff" => Some(SNIFF_HELP),
             _ => None,
         }
     }
@@ -1282,6 +1319,51 @@ OUTPUT:
     - LOW: Tests that import unused code
 
     Each gap shows the source location and usage context.";
+
+const SNIFF_HELP: &str = "loct sniff - Sniff for code smells (aggregate analysis)
+
+USAGE:
+    loct sniff [OPTIONS]
+
+DESCRIPTION:
+    Aggregates all smell-level findings worth checking:
+
+    Twins:        Same symbol name in multiple files
+                  - Can cause import confusion
+
+    Dead Parrots: Exports with 0 imports
+                  - Potentially unused code
+
+    Crowds:       Files with similar dependency patterns
+                  - Possible duplication or fragmentation
+
+    Output is friendly and non-judgmental. These are hints, not verdicts.
+
+OPTIONS:
+    --path <DIR>           Root directory to analyze (default: current directory)
+    --dead-only            Show only dead parrots (skip twins and crowds)
+    --twins-only           Show only twins (skip dead parrots and crowds)
+    --crowds-only          Show only crowds (skip twins and dead parrots)
+    --include-tests        Include test files in analysis (default: false)
+    --min-crowd-size <N>   Minimum crowd size to report (default: 2)
+    --json                 Output as JSON for programmatic use
+    --help, -h             Show this help message
+
+EXAMPLES:
+    loct sniff                    # Full code smell analysis
+    loct sniff --dead-only        # Only dead parrots
+    loct sniff --twins-only       # Only duplicate names
+    loct sniff --crowds-only      # Only similar file clusters
+    loct sniff --include-tests    # Include test files
+    loct sniff --json             # Machine-readable output
+
+OUTPUT:
+    Aggregates three types of code smells:
+    - TWINS: Same symbol exported from multiple files
+    - DEAD PARROTS: Exports with 0 imports
+    - CROWDS: Files clustering around similar functionality
+
+    Each section provides actionable suggestions for consolidation or cleanup.";
 
 // ============================================================================
 // Tests
