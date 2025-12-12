@@ -1,6 +1,6 @@
 [package]
 name = "report-leptos"
-version = "0.1.10"
+version = "0.1.11"
 edition = "2021"
 authors = ["Loctree <loct@loctree.io>"]
 description = "Leptos SSR renderer for generating static HTML reports - beautiful, interactive, type-safe"
