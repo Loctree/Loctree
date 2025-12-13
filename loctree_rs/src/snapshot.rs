@@ -401,7 +401,13 @@ impl Snapshot {
         let cwd = std::env::current_dir()
             .map_err(|e| format!("Failed to get current directory: {}", e))?;
 
-        let loctree_root = match Self::find_loctree_root(&cwd) {
+        Self::find_latest_snapshot_in(&cwd)
+    }
+
+    /// Find latest snapshot starting from a given root directory.
+    /// This is the core implementation used by `find_latest_snapshot` and tests.
+    pub fn find_latest_snapshot_in(root: &Path) -> Result<PathBuf, String> {
+        let loctree_root = match Self::find_loctree_root(root) {
             Some(root) => root,
             None => {
                 return Err(
@@ -1746,14 +1752,8 @@ mod tests {
         // Write new snapshot
         std::fs::write(&new_snapshot_path, &json).expect("write new snapshot");
 
-        // Change to temp directory so find_loctree_root works
-        let original_dir = std::env::current_dir().expect("get cwd");
-        std::env::set_current_dir(tmp.path()).expect("set cwd");
-
-        let result = Snapshot::find_latest_snapshot(None);
-
-        // Restore original directory
-        std::env::set_current_dir(original_dir).expect("restore cwd");
+        // Use find_latest_snapshot_in to avoid changing global cwd (thread-safe)
+        let result = Snapshot::find_latest_snapshot_in(tmp.path());
 
         assert!(result.is_ok());
         let found_path = result.unwrap();
@@ -1770,14 +1770,8 @@ mod tests {
         let tmp = TempDir::new().expect("create temp dir");
         // No .loctree directory
 
-        // Change to temp directory
-        let original_dir = std::env::current_dir().expect("get cwd");
-        std::env::set_current_dir(tmp.path()).expect("set cwd");
-
-        let result = Snapshot::find_latest_snapshot(None);
-
-        // Restore original directory
-        std::env::set_current_dir(original_dir).expect("restore cwd");
+        // Use find_latest_snapshot_in to avoid changing global cwd (thread-safe)
+        let result = Snapshot::find_latest_snapshot_in(tmp.path());
 
         assert!(result.is_err());
         let err = result.unwrap_err();
@@ -1791,14 +1785,8 @@ mod tests {
         // Create empty .loctree directory (no snapshots)
         std::fs::create_dir(tmp.path().join(SNAPSHOT_DIR)).expect("create .loctree");
 
-        // Change to temp directory
-        let original_dir = std::env::current_dir().expect("get cwd");
-        std::env::set_current_dir(tmp.path()).expect("set cwd");
-
-        let result = Snapshot::find_latest_snapshot(None);
-
-        // Restore original directory
-        std::env::set_current_dir(original_dir).expect("restore cwd");
+        // Use find_latest_snapshot_in to avoid changing global cwd (thread-safe)
+        let result = Snapshot::find_latest_snapshot_in(tmp.path());
 
         assert!(result.is_err());
         let err = result.unwrap_err();
@@ -1819,14 +1807,8 @@ mod tests {
         let json = serde_json::to_string_pretty(&snapshot).unwrap();
         std::fs::write(&legacy_path, json).expect("write legacy snapshot");
 
-        // Change to temp directory
-        let original_dir = std::env::current_dir().expect("get cwd");
-        std::env::set_current_dir(tmp.path()).expect("set cwd");
-
-        let result = Snapshot::find_latest_snapshot(None);
-
-        // Restore original directory
-        std::env::set_current_dir(original_dir).expect("restore cwd");
+        // Use find_latest_snapshot_in to avoid changing global cwd (thread-safe)
+        let result = Snapshot::find_latest_snapshot_in(tmp.path());
 
         assert!(result.is_ok());
         // Compare canonicalized paths to handle /private/var vs /var on macOS
