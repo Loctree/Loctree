@@ -571,10 +571,10 @@ fn handle_auto_scan_base_diff(
 
     // Ensure cleanup happens even if we encounter errors
     let cleanup = || {
-        if let Err(e) = git_repo.remove_worktree(&worktree_path) {
-            if !global.quiet {
-                eprintln!("[loct][warning] Failed to remove worktree: {}", e);
-            }
+        if let Err(e) = git_repo.remove_worktree(&worktree_path)
+            && !global.quiet
+        {
+            eprintln!("[loct][warning] Failed to remove worktree: {}", e);
         }
     };
 

@@ -158,23 +158,19 @@ fn collect_changed_paths(
     for event in events {
         for path in &event.paths {
             // Skip if gitignored
-            if let Some(checker) = gitignore {
-                if checker.is_ignored(path) {
-                    continue;
-                }
+            if let Some(checker) = gitignore
+                && checker.is_ignored(path)
+            {
+                continue;
             }
 
             // Skip if wrong extension
             if let Some(exts) = extensions {
-                if let Some(ext) = path.extension() {
-                    if let Some(ext_str) = ext.to_str() {
-                        if !exts.iter().any(|e| e == ext_str) {
-                            continue;
-                        }
-                    } else {
-                        continue;
-                    }
-                } else {
+                let has_matching_ext = path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|ext_str| exts.iter().any(|e| e == ext_str));
+                if !has_matching_ext {
                     continue;
                 }
             }
@@ -213,23 +209,19 @@ fn count_tracked_files(
                 let path = entry.path();
 
                 // Skip if gitignored
-                if let Some(checker) = gitignore {
-                    if checker.is_ignored(path) {
-                        continue;
-                    }
+                if let Some(checker) = gitignore
+                    && checker.is_ignored(path)
+                {
+                    continue;
                 }
 
                 // Skip if wrong extension
                 if let Some(exts) = extensions {
-                    if let Some(ext) = path.extension() {
-                        if let Some(ext_str) = ext.to_str() {
-                            if !exts.iter().any(|e| e == ext_str) {
-                                continue;
-                            }
-                        } else {
-                            continue;
-                        }
-                    } else {
+                    let has_matching_ext = path
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .is_some_and(|ext_str| exts.iter().any(|e| e == ext_str));
+                    if !has_matching_ext {
                         continue;
                     }
                 }

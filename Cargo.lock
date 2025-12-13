@@ -5390,7 +5390,7 @@ dependencies = [
 
 [[package]]
 name = "loctree"
-version = "0.6.15"
+version = "0.6.16"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -5430,7 +5430,7 @@ dependencies = [
 
 [[package]]
 name = "loctree-landing"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "console_error_panic_hook",
  "js-sys",
@@ -5442,7 +5442,7 @@ dependencies = [
 
 [[package]]
 name = "loctree_memex"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5459,7 +5459,7 @@ dependencies = [
 
 [[package]]
 name = "loctree_server"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "anyhow",
  "clap",
@@ -7847,7 +7847,7 @@ checksum = "7a2d987857b319362043e95f5353c0535c1f58eec5336fdfcf626430af7def58"
 
 [[package]]
 name = "report-leptos"
-version = "0.1.12"
+version = "0.1.13"
 dependencies = [
  "leptos",
  "pretty_assertions",

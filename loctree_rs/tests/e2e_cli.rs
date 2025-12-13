@@ -709,22 +709,30 @@ mod impact_mode {
         let fixture = fixtures_path().join("simple_ts");
         ensure_snapshot(&fixture);
 
+        // Nonexistent file returns success with "safe to remove" message
+        // (no dependencies means safe to remove/doesn't exist)
         loctree()
             .current_dir(&fixture)
             .args(["impact", "nonexistent.ts"])
             .assert()
-            .failure();
+            .success()
+            .stdout(predicate::str::contains("Safe to remove"));
     }
 
     #[test]
-    fn impact_without_snapshot_fails() {
+    fn impact_without_snapshot_auto_scans() {
         let temp = TempDir::new().unwrap();
+        // Create minimal file structure
+        std::fs::create_dir_all(temp.path().join("src")).unwrap();
+        std::fs::write(temp.path().join("src/test.ts"), "export const x = 1;").unwrap();
 
+        // Without snapshot, impact command auto-scans first (good UX)
         loctree()
             .current_dir(temp.path())
             .args(["impact", "src/test.ts"])
             .assert()
-            .failure();
+            .success()
+            .stderr(predicate::str::contains("running initial scan"));
     }
 }
 

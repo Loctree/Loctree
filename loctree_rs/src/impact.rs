@@ -89,10 +89,10 @@ pub fn analyze_impact(snapshot: &Snapshot, target: &str, options: &ImpactOptions
 
     while let Some((current, depth, chain)) = queue.pop_front() {
         // Check depth limit
-        if let Some(max) = options.max_depth {
-            if depth >= max {
-                continue;
-            }
+        if let Some(max) = options.max_depth
+            && depth >= max
+        {
+            continue;
         }
 
         // Find all files that import the current file
@@ -155,7 +155,7 @@ fn build_reverse_dependency_map(snapshot: &Snapshot) -> HashMap<String, Vec<(Str
         let to = normalize_path(&edge.to);
         let label = edge.label.clone();
 
-        map.entry(to).or_insert_with(Vec::new).push((from, label));
+        map.entry(to).or_default().push((from, label));
     }
 
     map
@@ -215,10 +215,7 @@ pub fn format_impact_text(result: &ImpactResult) -> String {
         // Group by depth for better readability
         let mut by_depth: HashMap<usize, Vec<&ImpactEntry>> = HashMap::new();
         for entry in &result.transitive_consumers {
-            by_depth
-                .entry(entry.depth)
-                .or_insert_with(Vec::new)
-                .push(entry);
+            by_depth.entry(entry.depth).or_default().push(entry);
         }
 
         let mut depths: Vec<usize> = by_depth.keys().copied().collect();
