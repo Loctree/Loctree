@@ -2535,9 +2535,9 @@ pub struct CustomType {
 
     #[test]
     fn crate_module_map_resolves_crate_prefix() {
-        // Create a temporary directory structure for testing
-        let temp_dir = std::env::temp_dir().join("loctree_test_crate");
-        let _ = std::fs::remove_dir_all(&temp_dir);
+        // Create a unique temporary directory structure for testing
+        let temp = tempfile::TempDir::new().unwrap();
+        let temp_dir = temp.path().to_path_buf();
         std::fs::create_dir_all(temp_dir.join("src/foo")).unwrap();
 
         // Create lib.rs with module declarations
@@ -2584,15 +2584,13 @@ pub struct CustomType {
             resolved.as_ref().map(|p| p.to_str().unwrap()),
             Some("src/foo/nested.rs")
         );
-
-        // Cleanup
-        let _ = std::fs::remove_dir_all(&temp_dir);
+        // TempDir cleans up automatically
     }
 
     #[test]
     fn crate_module_map_resolves_super() {
-        let temp_dir = std::env::temp_dir().join("loctree_test_super");
-        let _ = std::fs::remove_dir_all(&temp_dir);
+        let temp = tempfile::TempDir::new().unwrap();
+        let temp_dir = temp.path().to_path_buf();
         std::fs::create_dir_all(temp_dir.join("src/foo")).unwrap();
 
         // Create lib.rs
@@ -2621,15 +2619,13 @@ pub struct CustomType {
             resolved.as_ref().map(|p| p.to_str().unwrap()),
             Some("src/foo.rs")
         );
-
-        // Cleanup
-        let _ = std::fs::remove_dir_all(&temp_dir);
+        // TempDir cleans up automatically
     }
 
     #[test]
     fn crate_module_map_resolves_self() {
-        let temp_dir = std::env::temp_dir().join("loctree_test_self");
-        let _ = std::fs::remove_dir_all(&temp_dir);
+        let temp = tempfile::TempDir::new().unwrap();
+        let temp_dir = temp.path().to_path_buf();
         std::fs::create_dir_all(temp_dir.join("src/foo")).unwrap();
 
         // Create lib.rs
@@ -2654,15 +2650,13 @@ pub struct CustomType {
             resolved.as_ref().map(|p| p.to_str().unwrap()),
             Some("src/foo/bar.rs")
         );
-
-        // Cleanup
-        let _ = std::fs::remove_dir_all(&temp_dir);
+        // TempDir cleans up automatically
     }
 
     #[test]
     fn crate_module_map_resolves_relative_imports() {
-        let temp_dir = std::env::temp_dir().join("loctree_test_relative");
-        let _ = std::fs::remove_dir_all(&temp_dir);
+        let temp = tempfile::TempDir::new().unwrap();
+        let temp_dir = temp.path().to_path_buf();
         std::fs::create_dir_all(temp_dir.join("src")).unwrap();
 
         // Create lib.rs
@@ -2684,15 +2678,14 @@ pub struct CustomType {
             Some("src/bar.rs")
         );
 
-        // Cleanup
-        let _ = std::fs::remove_dir_all(&temp_dir);
+        // TempDir cleans up automatically
     }
 
     #[test]
     fn crate_module_map_handles_mod_dir_structure() {
         // Test the foo/mod.rs convention
-        let temp_dir = std::env::temp_dir().join("loctree_test_mod_dir");
-        let _ = std::fs::remove_dir_all(&temp_dir);
+        let temp = tempfile::TempDir::new().unwrap();
+        let temp_dir = temp.path().to_path_buf();
         std::fs::create_dir_all(temp_dir.join("src/foo")).unwrap();
 
         // Create lib.rs
@@ -2711,15 +2704,14 @@ pub struct CustomType {
             Some("src/foo/mod.rs")
         );
 
-        // Cleanup
-        let _ = std::fs::remove_dir_all(&temp_dir);
+        // TempDir cleans up automatically
     }
 
     #[test]
     fn crate_module_map_handles_type_imports() {
         // Test that we can resolve imports with type names (last segment)
-        let temp_dir = std::env::temp_dir().join("loctree_test_types");
-        let _ = std::fs::remove_dir_all(&temp_dir);
+        let temp = tempfile::TempDir::new().unwrap();
+        let temp_dir = temp.path().to_path_buf();
         std::fs::create_dir_all(temp_dir.join("src")).unwrap();
 
         // Create lib.rs
@@ -2742,9 +2734,7 @@ pub struct CustomType {
             resolved.as_ref().map(|p| p.to_str().unwrap()),
             Some("src/types.rs")
         );
-
-        // Cleanup
-        let _ = std::fs::remove_dir_all(&temp_dir);
+        // TempDir cleans up automatically
     }
 
     #[test]
