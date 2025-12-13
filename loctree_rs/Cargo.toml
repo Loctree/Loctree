@@ -65,6 +65,10 @@ jaq-core = "2.2"
 jaq-std = "2.1"
 jaq-json = "1.1"
 
+# Watch mode for live snapshot refresh
+notify = "7.0"
+notify-debouncer-full = "0.4"
+
 [dev-dependencies]
 assert_cmd = "2.0"
 predicates = "3.1"

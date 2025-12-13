@@ -252,6 +252,11 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
             // as it doesn't go through ParsedArgs
         }
 
+        Command::Impact(_) => {
+            // Impact is handled specially in dispatch_command
+            // as it doesn't go through ParsedArgs
+        }
+
         Command::Diff(_) => {
             // Diff is handled specially in dispatch_command
             // as it doesn't go through ParsedArgs
@@ -350,6 +355,10 @@ pub fn dispatch_command(parsed_cmd: &ParsedCommand) -> DispatchResult {
             // Execute query and return result
             return handle_query_command(opts, &parsed_cmd.global);
         }
+        Command::Impact(opts) => {
+            // Execute impact analysis and return result
+            return handle_impact_command(opts, &parsed_cmd.global);
+        }
         Command::Diff(opts) => {
             // Execute diff and return result
             return handle_diff_command(opts, &parsed_cmd.global);
@@ -393,6 +402,9 @@ pub fn dispatch_command(parsed_cmd: &ParsedCommand) -> DispatchResult {
         }
         Command::JqQuery(opts) => {
             return handle_jq_query_command(opts, &parsed_cmd.global);
+        }
+        Command::Scan(opts) if opts.watch => {
+            return handle_scan_watch_command(opts, &parsed_cmd.global);
         }
         // Note: Command::Report falls through to ParsedArgs flow to use full analysis pipeline
         // which includes twins data, graph visualization, and proper Leptos SSR rendering
@@ -459,6 +471,271 @@ fn handle_query_command(opts: &QueryOptions, global: &GlobalOptions) -> Dispatch
     DispatchResult::Exit(0)
 }
 
+fn handle_impact_command(opts: &ImpactCommandOptions, global: &GlobalOptions) -> DispatchResult {
+    use crate::impact::{ImpactOptions, analyze_impact, format_impact_text};
+    use std::path::Path;
+
+    // Load snapshot (auto-scan if missing)
+    let root = opts.root.as_deref().unwrap_or(Path::new("."));
+    let snapshot = match load_or_create_snapshot(root, global) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[loct][error] {}", e);
+            return DispatchResult::Exit(1);
+        }
+    };
+
+    // Build impact analysis options
+    let impact_opts = ImpactOptions {
+        max_depth: opts.depth,
+        include_reexports: true,
+    };
+
+    // Analyze impact
+    let result = analyze_impact(&snapshot, &opts.target, &impact_opts);
+
+    // Output results
+    if global.json {
+        // JSON output
+        match serde_json::to_string_pretty(&result) {
+            Ok(json) => println!("{}", json),
+            Err(e) => {
+                eprintln!("[loct][error] Failed to serialize results: {}", e);
+                return DispatchResult::Exit(1);
+            }
+        }
+    } else {
+        // Human-readable output
+        let output = format_impact_text(&result);
+        print!("{}", output);
+    }
+
+    DispatchResult::Exit(0)
+}
+
+/// Handle auto-scan-base diff: create worktree, scan, compare, cleanup
+fn handle_auto_scan_base_diff(
+    opts: &DiffOptions,
+    global: &GlobalOptions,
+    since_path: &str,
+) -> DispatchResult {
+    use crate::diff::SnapshotDiff;
+    use crate::git::GitRepo;
+    use crate::snapshot::Snapshot;
+    use std::path::Path;
+    use tempfile::TempDir;
+
+    // Discover git repository
+    let git_repo = match GitRepo::discover(Path::new(".")) {
+        Ok(repo) => repo,
+        Err(e) => {
+            eprintln!("[loct][error] Not a git repository: {}", e);
+            eprintln!("[loct][hint] --auto-scan-base requires a git repository");
+            return DispatchResult::Exit(1);
+        }
+    };
+
+    // Verify target branch exists
+    if let Err(e) = git_repo.resolve_ref(since_path) {
+        eprintln!(
+            "[loct][error] Failed to resolve branch '{}': {}",
+            since_path, e
+        );
+        eprintln!("[loct][hint] Ensure the branch/commit exists");
+        return DispatchResult::Exit(1);
+    }
+
+    if !global.quiet {
+        eprintln!("[loct] Creating temporary worktree for '{}'...", since_path);
+    }
+
+    // Create temporary directory for worktree
+    let temp_dir = match TempDir::new() {
+        Ok(dir) => dir,
+        Err(e) => {
+            eprintln!("[loct][error] Failed to create temp directory: {}", e);
+            return DispatchResult::Exit(1);
+        }
+    };
+
+    let worktree_path = temp_dir
+        .path()
+        .join(format!("loctree-diff-{}", since_path.replace('/', "-")));
+
+    // Create worktree
+    if let Err(e) = git_repo.create_worktree(since_path, &worktree_path) {
+        eprintln!("[loct][error] Failed to create worktree: {}", e);
+        eprintln!("[loct][hint] Ensure branch exists and worktree can be created");
+        return DispatchResult::Exit(1);
+    }
+
+    // Ensure cleanup happens even if we encounter errors
+    let cleanup = || {
+        if let Err(e) = git_repo.remove_worktree(&worktree_path) {
+            if !global.quiet {
+                eprintln!("[loct][warning] Failed to remove worktree: {}", e);
+            }
+        }
+    };
+
+    // Scan the worktree
+    if !global.quiet {
+        eprintln!("[loct] Scanning worktree...");
+    }
+
+    // Scan the worktree using run_init
+    let worktree_snapshot = {
+        use crate::args::ParsedArgs;
+
+        let parsed = ParsedArgs {
+            verbose: global.verbose,
+            use_gitignore: true,
+            ..Default::default()
+        };
+
+        let root_list = vec![worktree_path.clone()];
+
+        if let Err(e) = crate::snapshot::run_init(&root_list, &parsed) {
+            eprintln!("[loct][error] Failed to scan worktree: {}", e);
+            cleanup();
+            return DispatchResult::Exit(1);
+        }
+
+        // Load the snapshot we just created
+        match Snapshot::load(&worktree_path) {
+            Ok(snap) => snap,
+            Err(e) => {
+                eprintln!("[loct][error] Failed to load worktree snapshot: {}", e);
+                cleanup();
+                return DispatchResult::Exit(1);
+            }
+        }
+    };
+
+    // Load current snapshot
+    let current_snapshot = match Snapshot::load(Path::new(".")) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[loct][error] Failed to load current snapshot: {}", e);
+            eprintln!("[loct][hint] Run 'loct scan' first to create a snapshot.");
+            cleanup();
+            return DispatchResult::Exit(1);
+        }
+    };
+
+    // Get changed files using git diff
+    let changed_files = match git_repo.changed_files(since_path, "HEAD") {
+        Ok(files) => files,
+        Err(e) => {
+            if !global.quiet {
+                eprintln!("[loct][warning] Failed to get changed files: {}", e);
+            }
+            vec![]
+        }
+    };
+
+    // Get commit info
+    let from_commit = git_repo.get_commit_info(since_path).ok();
+    let to_commit = git_repo.get_commit_info("HEAD").ok();
+
+    // Compare snapshots
+    let diff = SnapshotDiff::compare(
+        &worktree_snapshot,
+        &current_snapshot,
+        from_commit,
+        to_commit,
+        &changed_files,
+    );
+
+    // Cleanup worktree
+    cleanup();
+
+    if !global.quiet {
+        eprintln!("[loct] Worktree cleaned up");
+    }
+
+    // Output results
+    if global.json || opts.jsonl {
+        // JSON/JSONL output
+        if opts.jsonl {
+            match serde_json::to_string(&diff) {
+                Ok(json) => println!("{}", json),
+                Err(e) => {
+                    eprintln!("[loct][error] Failed to serialize diff: {}", e);
+                    return DispatchResult::Exit(1);
+                }
+            }
+        } else {
+            match serde_json::to_string_pretty(&diff) {
+                Ok(json) => println!("{}", json),
+                Err(e) => {
+                    eprintln!("[loct][error] Failed to serialize diff: {}", e);
+                    return DispatchResult::Exit(1);
+                }
+            }
+        }
+    } else {
+        // Human-readable output
+        println!("Snapshot Diff (auto-scanned):");
+        println!("  From: {} (scanned in worktree)", since_path);
+        println!("  To:   (current)");
+        println!();
+        println!("Summary: {}", diff.impact.summary);
+        println!("Risk Score: {:.2}", diff.impact.risk_score);
+        println!();
+
+        if !diff.files.added.is_empty() {
+            println!("Files Added ({}):", diff.files.added.len());
+            for path in diff.files.added.iter().take(20) {
+                println!("  + {}", path.display());
+            }
+            if diff.files.added.len() > 20 {
+                println!("  ... and {} more", diff.files.added.len() - 20);
+            }
+            println!();
+        }
+
+        if !diff.files.removed.is_empty() {
+            println!("Files Removed ({}):", diff.files.removed.len());
+            for path in diff.files.removed.iter().take(20) {
+                println!("  - {}", path.display());
+            }
+            if diff.files.removed.len() > 20 {
+                println!("  ... and {} more", diff.files.removed.len() - 20);
+            }
+            println!();
+        }
+
+        if !diff.files.modified.is_empty() {
+            println!("Files Modified ({}):", diff.files.modified.len());
+            for path in diff.files.modified.iter().take(20) {
+                println!("  ~ {}", path.display());
+            }
+            if diff.files.modified.len() > 20 {
+                println!("  ... and {} more", diff.files.modified.len() - 20);
+            }
+            println!();
+        }
+
+        if !diff.exports.removed.is_empty() {
+            println!("Exports Removed ({}):", diff.exports.removed.len());
+            for export in diff.exports.removed.iter().take(10) {
+                println!(
+                    "  - {} ({}) in {}",
+                    export.name,
+                    export.kind,
+                    export.file.display()
+                );
+            }
+            if diff.exports.removed.len() > 10 {
+                println!("  ... and {} more", diff.exports.removed.len() - 10);
+            }
+        }
+    }
+
+    DispatchResult::Exit(0)
+}
+
 /// Handle the diff command directly
 fn handle_diff_command(opts: &DiffOptions, global: &GlobalOptions) -> DispatchResult {
     use crate::diff::SnapshotDiff;
@@ -474,6 +751,11 @@ fn handle_diff_command(opts: &DiffOptions, global: &GlobalOptions) -> DispatchRe
         eprintln!("[loct][hint] try: loct diff --since <snapshot_path|branch@sha|HEAD~N>");
         return DispatchResult::Exit(1);
     };
+
+    // Handle --auto-scan-base: create worktree, scan, compare, cleanup
+    if opts.auto_scan_base {
+        return handle_auto_scan_base_diff(opts, global, since_path);
+    }
 
     // Load "from" snapshot
     let from_snapshot = match Snapshot::load(Path::new(since_path)) {
@@ -2079,6 +2361,69 @@ fn handle_dist_command(opts: &DistOptions, global: &GlobalOptions) -> DispatchRe
             } else {
                 eprintln!("[loct][error] {}", e);
             }
+            DispatchResult::Exit(1)
+        }
+    }
+}
+
+/// Handle the scan command with watch mode
+fn handle_scan_watch_command(opts: &ScanOptions, global: &GlobalOptions) -> DispatchResult {
+    use crate::detect::apply_detected_stack;
+    use crate::fs_utils::GitIgnoreChecker;
+    use crate::watch::{WatchConfig, watch_and_rescan};
+    use std::time::Duration;
+
+    // Build ParsedArgs for scanning
+    let mut parsed_args = command_to_parsed_args(&Command::Scan(opts.clone()), global);
+
+    // Auto-detect stack if first root exists
+    let roots = if opts.roots.is_empty() {
+        vec![PathBuf::from(".")]
+    } else {
+        opts.roots.clone()
+    };
+
+    if let Some(root) = roots.first() {
+        let mut library_mode = parsed_args.library_mode;
+        apply_detected_stack(
+            root,
+            &mut parsed_args.extensions,
+            &mut parsed_args.ignore_patterns,
+            &mut parsed_args.tauri_preset,
+            &mut library_mode,
+            parsed_args.verbose,
+        );
+        parsed_args.library_mode = library_mode;
+    }
+
+    // Build gitignore checker
+    let gitignore = if parsed_args.use_gitignore
+        && let Some(root) = roots.first()
+    {
+        GitIgnoreChecker::new(root)
+    } else {
+        None
+    };
+
+    // Convert extensions from HashSet to Vec
+    let extensions = parsed_args
+        .extensions
+        .as_ref()
+        .map(|set| set.iter().cloned().collect::<Vec<String>>());
+
+    // Build watch config
+    let config = WatchConfig {
+        roots,
+        debounce_duration: Duration::from_millis(500),
+        extensions,
+        gitignore,
+    };
+
+    // Start watching
+    match watch_and_rescan(config, &parsed_args) {
+        Ok(_) => DispatchResult::Exit(0),
+        Err(e) => {
+            eprintln!("[watch] Error: {}", e);
             DispatchResult::Exit(1)
         }
     }

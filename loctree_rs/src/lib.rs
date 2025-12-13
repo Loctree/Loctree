@@ -275,6 +275,17 @@ pub mod progress;
 /// Provides jq-compatible filtering using the jaq library.
 pub mod jaq_query;
 
+/// Impact analysis module for understanding file dependencies.
+///
+/// Analyzes "what breaks if you modify/remove this file" by traversing
+/// the reverse dependency graph to find all direct and transitive consumers.
+pub mod impact;
+
+/// Watch mode for live snapshot refresh during iterative development.
+///
+/// Provides file system watching with debouncing and incremental re-scanning.
+pub mod watch;
+
 // ============================================================================
 // Re-exports for convenience
 // ============================================================================

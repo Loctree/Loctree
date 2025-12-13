@@ -13,7 +13,7 @@ use crate::types::ColorMode;
 const SUBCOMMANDS: &[&str] = &[
     "auto", "agent", "scan", "tree", "slice", "find", "dead", "unused", "cycles", "commands",
     "events", "info", "lint", "report", "help", "query", "diff", "memex", "crowd", "twins",
-    "routes", "dist", "coverage", "sniff",
+    "routes", "dist", "coverage", "sniff", "impact",
 ];
 
 /// Check if an argument looks like a new-style subcommand.
@@ -238,6 +238,7 @@ pub fn parse_command(args: &[String]) -> Result<Option<ParsedCommand>, String> {
         Some("report") => parse_report_command(&remaining_args)?,
         Some("help") => parse_help_command(&remaining_args)?,
         Some("query") => parse_query_command(&remaining_args)?,
+        Some("impact") => parse_impact_command(&remaining_args)?,
         Some("diff") => parse_diff_command(&remaining_args)?,
         Some("memex") => parse_memex_command(&remaining_args)?,
         Some("crowd") => parse_crowd_command(&remaining_args)?,
@@ -382,6 +383,7 @@ DESCRIPTION:
 OPTIONS:
     --full-scan       Force full rescan, ignore cached data
     --scan-all        Include hidden and ignored files
+    --watch           Watch for changes and re-scan automatically
     --help, -h        Show this help message
 
 ARGUMENTS:
@@ -391,7 +393,8 @@ EXAMPLES:
     loct scan                    # Scan current directory
     loct scan --full-scan        # Force complete rescan
     loct scan src/ lib/          # Scan specific directories
-    loct scan --scan-all         # Include all files (even hidden)"
+    loct scan --scan-all         # Include all files (even hidden)
+    loct scan --watch            # Watch mode with live refresh"
             .to_string());
     }
 
@@ -407,6 +410,10 @@ EXAMPLES:
             }
             "--scan-all" => {
                 opts.scan_all = true;
+                i += 1;
+            }
+            "--watch" => {
+                opts.watch = true;
                 i += 1;
             }
             _ if !arg.starts_with('-') => {
@@ -552,35 +559,54 @@ EXAMPLES:
 fn parse_slice_command(args: &[String]) -> Result<Command, String> {
     // Check for help flag first
     if args.iter().any(|a| a == "--help" || a == "-h") {
-        return Err("loct slice - Extract holographic context for a file
+        return Err("loct slice - Extract file + dependencies for AI context
 
 USAGE:
-    loct slice [OPTIONS] <TARGET_PATH>
+    loct slice <TARGET_PATH> [OPTIONS]
 
 DESCRIPTION:
-    Extracts a 'holographic slice' - the minimal context needed to
-    understand a specific file. Shows its dependencies (imports) and
-    optionally its consumers (what imports it).
+    Extracts a 'holographic slice' - the target file plus all its dependencies
+    (what it imports). This creates a minimal, focused context perfect for AI assistants.
 
-    This is useful for:
-    - Understanding a file's context before editing
-    - Feeding relevant code to AI assistants
-    - Analyzing impact of changes to a file
+    The slice includes:
+    - Core: The target file itself
+    - Dependencies: All files it imports (direct and transitive)
+    - Consumers (optional): Files that import the target (--consumers flag)
+
+    Perfect for:
+    - Feeding relevant code context to AI agents
+    - Understanding what a file depends on before editing
+    - Analyzing potential impact of changes
+
+    NOT impact analysis - this shows what the file USES, not what USES it.
+    For reverse dependencies, use --consumers or 'loct query who-imports <file>'.
 
 OPTIONS:
-    --consumers, -c      Include files that import the target (reverse deps)
+    --consumers, -c      Include reverse dependencies (files that import this file)
     --depth <N>          Maximum dependency depth to traverse (default: unlimited)
     --root <PATH>        Project root for resolving relative imports
     --help, -h           Show this help message
 
 ARGUMENTS:
-    <TARGET_PATH>        Path to the file to analyze (required)
+    <TARGET_PATH>        Path to the file to extract context for (required)
 
 EXAMPLES:
-    loct slice src/main.rs                  # Show dependencies of main.rs
-    loct slice src/utils.ts --consumers     # Show deps and consumers
-    loct slice lib/api.ts --depth 2         # Limit to 2 levels deep
-    loct slice src/app.tsx --root ./        # Specify project root"
+    loct slice src/main.rs                   # File + its dependencies
+    loct slice src/utils.ts --consumers      # Include files that import utils.ts
+    loct slice lib/api.ts --depth 2          # Limit to 2 dependency levels
+    loct slice src/app.tsx --json            # JSON output for AI tools
+    loct slice src/component.tsx --consumers --json > context.json
+
+OUTPUT FORMAT:
+    Shows 3 layers:
+    1. Core:       The target file (1 file)
+    2. Deps:       Dependencies (what it imports)
+    3. Consumers:  Reverse deps (what imports it) - only with --consumers
+
+RELATED COMMANDS:
+    loct query who-imports <file>   Find all files that import a specific file
+    loct find --impact <file>       Find symbols affected by changes (removed in v0.6)
+    loct auto --for-agent-feed      Full codebase context for AI agents"
             .to_string());
     }
 
@@ -637,28 +663,31 @@ EXAMPLES:
 fn parse_find_command(args: &[String]) -> Result<Command, String> {
     // Check for help flag first
     if args.iter().any(|a| a == "--help" || a == "-h") {
-        return Err("loct find - Search symbols/files with regex filters
+        return Err("loct find - Semantic search for symbols by name pattern
 
 USAGE:
     loct find [QUERY] [OPTIONS]
 
 DESCRIPTION:
-    Powerful search across the codebase with multiple filter modes.
-    Supports regex patterns for symbols and file names, plus special
-    modes for impact analysis and similarity detection.
+    Semantic search for symbols (functions, classes, types) matching a name pattern.
+    Uses regex patterns to match symbol names in your codebase.
 
-    Search modes:
-    - Symbol search: Find functions, classes, types by name pattern
-    - File search: Find files by path pattern
-    - Impact analysis: Find all symbols affected by a file change
-    - Similarity: Find symbols with similar names
+    NOT impact analysis - for dependency impact, see your editor's LSP or loctree graph.
+    NOT dead code detection - for that, use 'loct dead' or 'loct twins'.
+
+    This command searches the symbol index built during 'loct scan' and finds
+    definitions/exports matching your query pattern.
+
+SEARCH MODES:
+    Symbol search (default)   Find symbols by name pattern (regex supported)
+    File search               Find files by path pattern (--file flag)
+    Similarity search         Find similar symbol names (--similar flag)
 
 OPTIONS:
     --symbol <PATTERN>, -s <PATTERN>    Search for symbols matching regex
     --pattern <PATTERN>                 Alias for --symbol (regex)
     --file <PATTERN>, -f <PATTERN>      Search for files matching regex
-    --impact <FILE>                     Show symbols affected by file changes
-    --similar <SYMBOL>                  Find symbols with similar names
+    --similar <SYMBOL>                  Find symbols with similar names (fuzzy)
     --dead                              Only show dead/unused symbols
     --exported                          Only show exported symbols
     --lang <LANG>                       Filter by language (ts, rs, js, py, etc.)
@@ -671,12 +700,18 @@ ARGUMENTS:
 EXAMPLES:
     loct find Patient                   # Find symbols containing \"Patient\"
     loct find --symbol \".*Config$\"      # Regex: symbols ending with Config
+    loct find --symbol \"use.*Hook\"      # Find hook functions (useAuth, useState, etc.)
     loct find --file \"utils\"            # Files containing \"utils\" in path
-    loct find --symbol Patient --lang ts # TypeScript Patient symbols
+    loct find --symbol Patient --lang ts # TypeScript Patient symbols only
     loct find --dead --exported         # Dead exported symbols
-    loct find --impact src/api.ts       # What's affected by api.ts changes
-    loct find --similar handleClick     # Find similarly named handlers
-    loct find --limit 50                # Limit to 50 results"
+    loct find --similar handleClick     # Find similarly named handlers (fuzzy match)
+    loct find --limit 50                # Limit to 50 results
+
+RELATED COMMANDS:
+    loct dead              Detect unused exports / dead code
+    loct twins             Find duplicate exports and dead parrots (0 imports)
+    loct slice <file>      Extract file dependencies (what it imports)
+    loct query who-imports Show what imports a specific file"
             .to_string());
     }
 
@@ -873,21 +908,27 @@ RUST CRATE-INTERNAL IMPORTS:
 fn parse_cycles_command(args: &[String]) -> Result<Command, String> {
     // Check for help flag first
     if args.iter().any(|a| a == "--help" || a == "-h") {
-        return Err("loct cycles - Detect circular imports
+        return Err("loct cycles - Detect circular import chains
 
 USAGE:
     loct cycles [OPTIONS] [PATHS...]
 
 DESCRIPTION:
-    Detects circular import dependencies in your codebase.
-    Circular imports can cause:
-    - Runtime initialization errors
-    - Undefined behavior in module loading
-    - Confusing dependency graphs
-    - Build/bundling issues
+    Detects circular dependencies in your import graph.
 
-    This command analyzes the import graph and reports all cycles,
-    grouped by severity and size.
+    A circular import occurs when file A imports B, B imports C, and C imports A,
+    creating a cycle: A → B → C → A
+
+    Circular imports cause:
+    - Runtime initialization errors (module not fully loaded)
+    - Undefined behavior in module loading order
+    - Complex, hard-to-understand dependency graphs
+    - Build and bundling failures
+    - Flaky test behavior due to import order sensitivity
+
+    This command analyzes the import graph and reports all detected cycles,
+    showing the complete import chain for each cycle. Results are grouped by
+    severity (cycle length) and impact.
 
 OPTIONS:
     --path <PATTERN>     Filter to files matching path pattern
@@ -897,10 +938,28 @@ ARGUMENTS:
     [PATHS...]           Root directories to analyze (default: current directory)
 
 EXAMPLES:
-    loct cycles                       # Detect all cycles in current dir
+    loct cycles                       # Detect all cycles in current directory
     loct cycles src/                  # Only analyze src/ directory
-    loct cycles --path components/    # Cycles involving components/
-    loct cycles --json                # JSON output for CI/CD"
+    loct cycles --path components/    # Only show cycles involving components/
+    loct cycles --json                # JSON output for CI/CD integration
+
+OUTPUT FORMAT:
+    Each cycle is shown as an import chain:
+      src/A.ts → src/B.ts → src/C.ts → src/A.ts
+
+    Smaller cycles (2-3 files) are often easier to fix.
+    Larger cycles (5+ files) indicate architectural issues.
+
+FIXING CYCLES:
+    1. Extract shared code into a separate file
+    2. Use dependency injection instead of direct imports
+    3. Consolidate related modules
+    4. Move type definitions to a shared types file
+
+RELATED COMMANDS:
+    loct slice <file>          See what a file depends on
+    loct query who-imports     Find files that import a specific file
+    loct lint --fail           Run as CI check (exit code 1 if cycles found)"
             .to_string());
     }
 
@@ -1409,29 +1468,48 @@ fn parse_help_command(args: &[String]) -> Result<Command, String> {
 fn parse_query_command(args: &[String]) -> Result<Command, String> {
     // Check for help flag first
     if args.iter().any(|a| a == "--help" || a == "-h") {
-        return Err("loct query - Query snapshot data
+        return Err("loct query - Graph queries (who-imports, who-exports, etc.)
 
 USAGE:
     loct query <KIND> <TARGET>
 
 DESCRIPTION:
-    Query the import graph and symbol index for specific information:
+    Query the import graph and symbol index for specific relationships.
 
-    who-imports <FILE>      Find all files that import the specified file
-    where-symbol <SYMBOL>   Find where a symbol is defined/exported
-    component-of <FILE>     Show which components/modules contain this file
-
-    Results include import paths, symbol locations, and dependency chains.
+    These are targeted queries against the dependency graph built by 'loct scan'.
+    Perfect for answering specific questions about code relationships.
 
 QUERY KINDS:
-    who-imports       List all importers of a file
-    where-symbol      Locate symbol definitions and exports
-    component-of      Show containing components/modules
+    who-imports <FILE>        Find all files that import the specified file
+                              (reverse dependencies / consumers)
+
+    where-symbol <SYMBOL>     Find where a symbol is defined/exported
+                              (symbol location lookup)
+
+    component-of <FILE>       Show which components/modules contain this file
+                              (ownership/hierarchy)
+
+ARGUMENTS:
+    <KIND>      Query type (who-imports, where-symbol, component-of)
+    <TARGET>    Target file path or symbol name
 
 EXAMPLES:
-    loct query who-imports src/utils.ts        # Who imports utils.ts?
+    loct query who-imports src/utils.ts        # What files import utils.ts?
     loct query where-symbol PatientRecord      # Where is PatientRecord defined?
-    loct query component-of src/ui/Button.tsx  # What component owns Button?"
+    loct query component-of src/ui/Button.tsx  # What owns Button.tsx?
+    loct query who-imports lib/api.ts --json   # JSON output for automation
+
+OUTPUT:
+    Results show:
+    - File paths (absolute or relative)
+    - Import chains (how files are connected)
+    - Symbol locations (file + line number)
+    - Dependency depth (how many hops)
+
+RELATED COMMANDS:
+    loct slice <file>           Show what a file depends on (forward deps)
+    loct find --symbol <name>   Search for symbols by pattern
+    loct dead                   Find symbols with 0 imports"
             .to_string());
     }
 
@@ -1460,37 +1538,137 @@ EXAMPLES:
     Ok(Command::Query(QueryOptions { kind, target }))
 }
 
+fn parse_impact_command(args: &[String]) -> Result<Command, String> {
+    // Check for help flag first
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        return Err("loct impact - Analyze impact of modifying/removing a file
+
+USAGE:
+    loct impact <FILE> [OPTIONS]
+
+DESCRIPTION:
+    Shows \"what breaks if you modify or remove this file\" by traversing
+    the reverse dependency graph. Finds all direct and transitive consumers.
+
+OPTIONS:
+    --depth <N>          Limit traversal depth (default: unlimited)
+    --root <PATH>        Project root (default: current directory)
+    --help, -h           Show this help message
+
+ARGUMENTS:
+    <FILE>               Path to the file to analyze (required)
+
+EXAMPLES:
+    loct impact src/utils.ts                # Full impact analysis
+    loct impact src/api.ts --depth 2        # Limit to 2 levels deep
+    loct impact src/core.ts --root ./       # Specify project root"
+            .to_string());
+    }
+
+    let mut opts = ImpactCommandOptions::default();
+    let mut i = 0;
+
+    while i < args.len() {
+        let arg = &args[i];
+        match arg.as_str() {
+            "--depth" | "--max-depth" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--depth requires a value".to_string())?;
+                opts.depth = Some(value.parse().map_err(|_| "--depth requires a number")?);
+                i += 2;
+            }
+            "--root" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--root requires a path".to_string())?;
+                opts.root = Some(PathBuf::from(value));
+                i += 2;
+            }
+            _ if !arg.starts_with('-') => {
+                if opts.target.is_empty() {
+                    opts.target = arg.clone();
+                } else {
+                    return Err(format!(
+                        "Unexpected argument '{}'. impact takes one target path.",
+                        arg
+                    ));
+                }
+                i += 1;
+            }
+            _ => {
+                return Err(format!("Unknown option '{}' for 'impact' command.", arg));
+            }
+        }
+    }
+
+    if opts.target.is_empty() {
+        return Err(
+            "'impact' command requires a target file path. Usage: loct impact <path>".to_string(),
+        );
+    }
+
+    Ok(Command::Impact(opts))
+}
+
 fn parse_diff_command(args: &[String]) -> Result<Command, String> {
     // Check for help flag first
     if args.iter().any(|a| a == "--help" || a == "-h") {
-        return Err("loct diff - Compare snapshots and show semantic delta
+        return Err("loct diff - Compare snapshots between branches/commits
 
 USAGE:
     loct diff --since <SNAPSHOT> [--to <SNAPSHOT>] [OPTIONS]
     loct diff <SNAPSHOT1> [SNAPSHOT2]
 
 DESCRIPTION:
-    Compares two code snapshots and shows semantic changes:
-    - New/removed files
-    - Import graph changes
-    - New dead code introduced
-    - Symbol additions/removals
-    - Architecture drift
+    Compares two code snapshots and shows semantic differences.
 
-    Snapshots can be Git refs (main, HEAD~1), tags, or snapshot IDs.
+    Unlike git diff (line changes), this shows structural/architectural changes:
+    - New/removed files
+    - Import graph changes (new dependencies, removed imports)
+    - New dead code introduced (regressions)
+    - Symbol additions/removals
+    - Circular dependency changes (new cycles, fixed cycles)
+    - Architecture drift (changed import patterns)
+
+    Snapshots can be:
+    - Git refs: main, develop, HEAD~1
+    - Tags: v1.0.0, v2.0.0
+    - Commit SHAs: abc123
+    - Snapshot IDs from .loctree/ directory
 
 OPTIONS:
-    --since <SNAPSHOT>   Base snapshot to compare from (required)
-    --to <SNAPSHOT>      Target snapshot to compare to (default: current working tree)
-    --jsonl              Output in JSONL format (one change per line)
-    --problems-only      Show only regressions (new dead code, new cycles)
-    --help, -h           Show this help message
+    --since <SNAPSHOT>    Base snapshot to compare from (required)
+    --to <SNAPSHOT>       Target snapshot to compare to (default: current working tree)
+    --auto-scan-base      Automatically create git worktree and scan target branch
+                          (zero-friction: no need to manually scan branches)
+    --jsonl               Output in JSONL format (one change per line)
+    --problems-only       Show only regressions (new dead code, new cycles)
+    --help, -h            Show this help message
+
+ARGUMENTS:
+    <SNAPSHOT1>           Base snapshot (alternative to --since)
+    [SNAPSHOT2]           Target snapshot (alternative to --to)
 
 EXAMPLES:
-    loct diff --since main              # Compare main branch to working tree
-    loct diff --since HEAD~1            # Compare to previous commit
-    loct diff --since v1.0.0 --to v2.0.0   # Compare two tags
-    loct diff main --problems-only      # Only show regressions since main"
+    loct diff --since main                    # Compare main to working tree
+    loct diff --since HEAD~1                  # Compare to previous commit
+    loct diff --since main --auto-scan-base   # Auto-scan main branch
+    loct diff --since v1.0.0 --to v2.0.0      # Compare two tags
+    loct diff main --problems-only            # Only show regressions
+    loct diff --since main --jsonl            # JSONL output for CI
+
+OUTPUT:
+    Shows semantic changes in categories:
+    - Files Added/Removed
+    - Symbols Added/Removed
+    - New Dead Code (regressions to fix)
+    - New Cycles (import loops introduced)
+    - Import Graph Changes
+
+RELATED COMMANDS:
+    loct scan                Run scan to create snapshot
+    loct auto --full-scan    Force full rescan before comparison"
             .to_string());
     }
 
@@ -1513,6 +1691,10 @@ EXAMPLES:
                     .ok_or_else(|| "--to requires a snapshot ID or path".to_string())?;
                 opts.to = Some(value.clone());
                 i += 2;
+            }
+            "--auto-scan-base" => {
+                opts.auto_scan_base = true;
+                i += 1;
             }
             "--jsonl" => {
                 opts.jsonl = true;
@@ -1726,32 +1908,53 @@ fn parse_twins_command(args: &[String]) -> Result<Command, String> {
     // Check for help flag first
     if args.iter().any(|a| a == "--help" || a == "-h") {
         return Err(
-            "loct twins - Detect semantic duplicates (dead parrots, exact twins, barrel chaos)
+            "loct twins - Find dead parrots (0 imports) and duplicate exports
 
 USAGE:
-    loct twins [OPTIONS]
+    loct twins [OPTIONS] [PATH]
 
 DESCRIPTION:
-    Identifies three types of semantic issues:
+    Detects semantic issues in your export/import graph:
 
-    Dead Parrots:   Exports with 0 imports (Monty Python reference)
-                    - Code that looks alive but is actually unused
+    Dead Parrots:   Exports with 0 imports anywhere in the codebase
+                    - Named after Monty Python's \"dead parrot\" sketch
+                    - Code that appears to exist but is never actually used
+                    - High confidence candidates for removal
 
-    Exact Twins:    Same symbol exported from multiple files
-                    - Duplicate exports causing confusion
+    Exact Twins:    Same symbol name exported from multiple files
+                    - Can cause import confusion (which one to use?)
+                    - May indicate duplicated logic or missing consolidation
 
-    Barrel Chaos:   Missing index.ts, deep re-export chains, inconsistent import paths
-                    - Barrel file issues and re-export problems
+    Barrel Chaos:   Re-export anti-patterns
+                    - Missing index.ts barrel files where expected
+                    - Deep re-export chains (A re-exports B re-exports C)
+                    - Inconsistent import paths (some use barrel, some bypass)
+
+    This is a code smell detector - findings are hints, not verdicts.
+    Review each result in context before making changes.
 
 OPTIONS:
     --path <DIR>       Root directory to analyze (default: current directory)
     --dead-only        Show only dead parrots (exports with 0 imports)
     --help, -h         Show this help message
 
+ARGUMENTS:
+    [PATH]             Root directory to analyze (alternative to --path)
+
 EXAMPLES:
-    loct twins                  # Full semantic analysis (all three types)
-    loct twins --dead-only      # Only dead parrots (0 imports)
-    loct twins --path src/      # Analyze specific directory"
+    loct twins                  # Full analysis (dead parrots + twins + barrel chaos)
+    loct twins --dead-only      # Only show exports with 0 imports
+    loct twins src/             # Analyze specific directory
+    loct twins --json           # Machine-readable output for automation
+
+OUTPUT:
+    Shows each category separately with file locations and symbol names.
+    Dead parrots are sorted by file to help with cleanup.
+
+RELATED COMMANDS:
+    loct dead              More detailed dead code analysis with confidence levels
+    loct sniff             Aggregate code smell analysis (twins + dead + crowds)
+    loct find --dead       Search for specific dead symbols"
                 .to_string(),
         );
     }
