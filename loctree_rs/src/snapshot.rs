@@ -626,10 +626,11 @@ impl Snapshot {
         println!("Status: OK");
         println!();
         println!("Next steps:");
-        println!("  loct dead                    # Find unused exports");
-        println!("  loct -A --report report.html # Full analysis with duplicates");
-        println!("  loct commands                # Show Tauri FE↔BE command bridges");
-        println!("  loct slice <file> --json     # Extract context for AI agent");
+        println!("  loct --for-ai                # Project overview for AI agents");
+        println!("  loct slice <file> --json     # Extract context with dependencies");
+        println!("  loct twins                   # Dead parrots + duplicates + barrel chaos");
+        println!("  loct '.files | length'       # jq-style queries on snapshot");
+        println!("  loct query who-imports <f>   # Quick graph queries");
     }
 }
 
