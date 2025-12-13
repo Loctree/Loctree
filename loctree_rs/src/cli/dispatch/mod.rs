@@ -9,7 +9,6 @@ mod handlers;
 use std::path::PathBuf;
 
 use crate::args::ParsedArgs;
-use crate::progress::Spinner;
 use crate::types::{DEFAULT_LOC_THRESHOLD, Mode, OutputMode};
 
 use super::command::*;

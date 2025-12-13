@@ -10,12 +10,10 @@
 //! - Dead exports detection (`--dead`)
 
 use std::collections::{HashMap, HashSet};
-use std::fs;
 
-use globset::GlobSet;
 use serde::Serialize;
 
-use crate::types::{ExportSymbol, FileAnalysis, ReexportKind};
+use crate::types::{FileAnalysis, ReexportKind};
 
 use super::root_scan::normalize_module_id;
 
