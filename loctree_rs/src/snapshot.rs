@@ -456,7 +456,9 @@ impl Snapshot {
 
     /// Save snapshot to disk
     pub fn save(&self, root: &Path) -> io::Result<()> {
-        // If a snapshot already exists for the same branch/commit, skip rewriting.
+        // If a snapshot already exists for the same branch/commit AND worktree is clean,
+        // skip rewriting (no changes since last commit = same code).
+        // But if worktree is dirty, ALWAYS save fresh snapshot (user is actively working).
         if let (Some(commit), Some(branch), Ok(existing)) = (
             self.metadata.git_commit.as_ref(),
             self.metadata.git_branch.as_ref(),
@@ -465,20 +467,16 @@ impl Snapshot {
             && existing.metadata.git_branch.as_ref() == Some(branch)
         {
             let dirty = is_git_dirty(root).unwrap_or(false);
-            if dirty {
-                crate::progress::warning(&format!(
-                    "Snapshot {}@{} exists; worktree dirty → commit to refresh",
-                    branch,
-                    &commit[..7.min(commit.len())]
-                ));
-            } else {
+            if !dirty {
+                // Clean worktree + same commit = skip (nothing changed)
                 crate::progress::info(&format!(
                     "Snapshot {}@{} up-to-date, skipping",
                     branch,
                     &commit[..7.min(commit.len())]
                 ));
+                return Ok(());
             }
-            return Ok(());
+            // Dirty worktree = continue and save fresh snapshot
         }
 
         let snapshot_path = Self::snapshot_path(root);
@@ -776,6 +774,9 @@ pub fn run_init_with_options(
         start_time.elapsed().as_secs_f64()
     ));
 
+    // Second spinner for building snapshot (can take a while for large codebases)
+    let build_spinner = crate::progress::Spinner::new("Building snapshot...");
+
     // Build the snapshot from scan results
     let mut snapshot = Snapshot::new(root_list.iter().map(|p| p.display().to_string()).collect());
 
@@ -982,6 +983,9 @@ pub fn run_init_with_options(
     let duration_ms = start_time.elapsed().as_millis() as u64;
     snapshot.finalize_metadata(duration_ms);
 
+    // Finish build spinner
+    build_spinner.finish_clear();
+
     // Save snapshot
     snapshot.save(&snapshot_root)?;
 
@@ -992,8 +996,10 @@ pub fn run_init_with_options(
 
     // Auto mode: emit full artifact set into ./.loctree to avoid extra commands
     if parsed.auto_outputs {
+        let artifacts_spinner = crate::progress::Spinner::new("Generating artifacts...");
         match write_auto_artifacts(&snapshot_root, &scan_results, &parsed) {
             Ok(paths) => {
+                artifacts_spinner.finish_clear();
                 if !paths.is_empty() {
                     println!("Artifacts saved under ./.loctree:");
                     for p in paths {
@@ -1002,6 +1008,7 @@ pub fn run_init_with_options(
                 }
             }
             Err(err) => {
+                artifacts_spinner.finish_error("Failed to generate artifacts");
                 eprintln!("[loctree][warn] failed to write auto artifacts: {}", err);
             }
         }
