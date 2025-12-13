@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
-## [Unreleased]
+## [0.6.15] - 2025-12-13
 
 ### Added
 - **jq-style query mode** — Query snapshot data directly with jq syntax
@@ -16,6 +16,31 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
   - Auto-discovers latest snapshot from `.loctree/*/snapshot.json`
   - Explicit snapshot: `loct '.files' --snapshot path/to/snapshot.json`
   - Usage: `loct '<filter>' [flags]` — filter must come before flags
+
+- **Progress spinners** — Visual feedback during `loct auto`:
+  - "Building snapshot..." spinner after scanning completes
+  - "Generating artifacts..." spinner before writing reports
+  - Eliminates "dead time" between scan and output
+
+- **`find_latest_snapshot_in(root)` API** — Thread-safe snapshot discovery
+  - Allows passing explicit root directory instead of relying on `cwd`
+  - Fixes flaky tests in parallel execution environments
+
+### Changed
+- **Dirty worktree now allows fresh scans** — Previously, dirty worktree would skip scanning even when files changed. Now only clean worktree + same commit skips (actual no-change scenario). Users can scan during refactoring without committing first.
+
+- **Updated "Next steps" output** — Now shows modern commands:
+  - `loct --for-ai` (project overview for AI agents)
+  - `loct slice <file> --json` (context extraction)
+  - `loct twins` (dead parrots + duplicates)
+  - `loct '.files | length'` (jq queries)
+  - `loct query who-imports <f>` (quick graph queries)
+
+### Fixed
+- **Thread-safe snapshot tests** — Removed `set_current_dir` calls that caused race conditions in parallel test execution
+
+### Technical
+- Added version requirement (`0.6.15`) to `loctree_server` dependency for crates.io publishing
 
 ## [0.6.9] - 2025-12-11
 

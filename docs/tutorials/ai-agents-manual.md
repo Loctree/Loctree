@@ -287,6 +287,49 @@ loct diff --since <snapshot_id>     # Compare current vs old snapshot
 loct diff --since main              # Compare against main branch snapshot
 ```
 
+### jq-style queries
+
+Query snapshot data directly using jq syntax (powered by jaq, a Rust-native jq implementation).
+
+```bash
+loct '<filter>'                     # Query current snapshot
+loct '<filter>' --snapshot <path>   # Query specific snapshot
+```
+
+**Flags:**
+- `-r` — Raw output (no JSON quotes)
+- `-c` — Compact output (single line)
+- `-e` — Exit code based on empty result
+- `--arg NAME VALUE` — Pass string variable
+- `--argjson NAME JSON` — Pass JSON variable
+
+**Examples:**
+```bash
+# Metadata
+loct '.metadata'
+
+# Count files
+loct '.files | length'
+
+# Find large files (>500 LOC)
+loct '.files[] | select(.loc > 500)' -c
+
+# Filter edges by pattern
+loct '.edges[] | select(.from | contains("api"))'
+
+# List Tauri commands
+loct '.command_bridges | map(.name)'
+
+# Find top export duplicates
+loct '.export_index | to_entries | map(select(.value | length > 1)) | sort_by(.value | length) | reverse | .[0:5]'
+```
+
+**Use cases:**
+- Quick codebase statistics
+- Custom filtering and aggregation
+- Integration with shell pipelines
+- Extracting specific data for analysis
+
 **Output includes:**
 - Files added, removed, modified
 - New/resolved circular imports
