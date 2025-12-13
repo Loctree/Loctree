@@ -496,20 +496,16 @@ impl HolographicSlice {
     }
 }
 
-/// Prompt user to create snapshot if it doesn't exist (TTY only)
-fn prompt_create_snapshot(root: &Path, parsed: &ParsedArgs) -> io::Result<bool> {
+/// Auto-create snapshot if it doesn't exist, or prompt in interactive mode
+fn ensure_snapshot(root: &Path, parsed: &ParsedArgs) -> io::Result<bool> {
     let snapshot_path = root.join(".loctree").join("snapshot.json");
 
     if !std::io::stdin().is_terminal() {
-        // Non-interactive: print clear error and exit (avoid ugly Debug output)
+        // Non-interactive: auto-create snapshot silently
+        eprintln!("[loct] No snapshot found, creating one...");
+        crate::snapshot::run_init(&[root.to_path_buf()], parsed)?;
         eprintln!();
-        eprintln!("❌ No snapshot found at {}", snapshot_path.display());
-        eprintln!();
-        eprintln!("   The `slice` command requires a snapshot. Create one with:");
-        eprintln!();
-        eprintln!("     cd {} && loctree", root.display());
-        eprintln!();
-        std::process::exit(1);
+        return Ok(true);
     }
 
     eprintln!("No snapshot found at {}", snapshot_path.display());
@@ -550,7 +546,7 @@ pub fn run_slice(
 
     // Check if snapshot exists, prompt to create if not
     if !Snapshot::exists(&effective_root) {
-        if prompt_create_snapshot(&effective_root, parsed)? {
+        if ensure_snapshot(&effective_root, parsed)? {
             // Snapshot was created, continue
         } else {
             return Err(io::Error::new(
