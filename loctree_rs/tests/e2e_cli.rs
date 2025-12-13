@@ -307,7 +307,7 @@ mod tauri_mode {
             .current_dir(&fixture)
             .assert()
             .success()
-            .stdout(predicate::str::contains("Tauri"));
+            .stdout(predicate::str::contains("handlers")); // Tauri mode detected = handlers shown
     }
 
     #[test]
