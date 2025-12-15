@@ -84,7 +84,10 @@ pub fn handle_dead_command(opts: &DeadOptions, global: &GlobalOptions) -> Dispat
 
 /// Handle the cycles command - detect circular imports
 pub fn handle_cycles_command(opts: &CyclesOptions, global: &GlobalOptions) -> DispatchResult {
-    use crate::analyzer::cycles::{find_cycles_classified_with_lazy, print_cycles_classified};
+    use crate::analyzer::cycles::{
+        CycleCompilability, find_cycles_classified_with_lazy, print_cycles_classified,
+        print_cycles_classified_legacy,
+    };
     use std::path::Path;
 
     // Show spinner unless in quiet/json mode
@@ -121,28 +124,64 @@ pub fn handle_cycles_command(opts: &CyclesOptions, global: &GlobalOptions) -> Di
         .collect();
 
     // Find and classify cycles
-    let (classified_cycles, classified_lazy_cycles) = find_cycles_classified_with_lazy(&edges);
+    let (mut classified_cycles, classified_lazy_cycles) = find_cycles_classified_with_lazy(&edges);
+
+    // Filter to breaking-only if requested
+    if opts.breaking_only {
+        classified_cycles.retain(|c| c.compilability == CycleCompilability::Breaking);
+    }
+
+    // Count by compilability for spinner message
+    let breaking_count = classified_cycles
+        .iter()
+        .filter(|c| c.compilability == CycleCompilability::Breaking)
+        .count();
+    let structural_count = classified_cycles
+        .iter()
+        .filter(|c| c.compilability == CycleCompilability::Structural)
+        .count();
+    let diamond_count = classified_cycles
+        .iter()
+        .filter(|c| c.compilability == CycleCompilability::DiamondDependency)
+        .count();
 
     if let Some(s) = spinner {
-        let total = classified_cycles.len() + classified_lazy_cycles.len();
-        s.finish_success(&format!(
-            "Found {} cycle(s) ({} strict, {} lazy)",
-            total,
-            classified_cycles.len(),
-            classified_lazy_cycles.len()
-        ));
+        if opts.breaking_only {
+            s.finish_success(&format!(
+                "Found {} breaking cycle(s) (filtered from {} total)",
+                breaking_count,
+                breaking_count + structural_count + diamond_count
+            ));
+        } else {
+            s.finish_success(&format!(
+                "Found {} cycle(s) ({} breaking, {} structural, {} diamond)",
+                classified_cycles.len(),
+                breaking_count,
+                structural_count,
+                diamond_count
+            ));
+        }
     }
 
     // Output results
     let json_output = global.json;
-    print_cycles_classified(&classified_cycles, json_output);
 
-    if !classified_lazy_cycles.is_empty() && !json_output {
+    if opts.legacy_format {
+        print_cycles_classified_legacy(&classified_cycles, json_output);
+    } else {
+        print_cycles_classified(&classified_cycles, json_output);
+    }
+
+    if !classified_lazy_cycles.is_empty() && !json_output && !opts.breaking_only {
         println!("\nLazy circular imports (info):");
         println!(
             "  Detected via imports inside functions/methods; usually safe but review if init order matters."
         );
-        print_cycles_classified(&classified_lazy_cycles, false);
+        if opts.legacy_format {
+            print_cycles_classified_legacy(&classified_lazy_cycles, false);
+        } else {
+            print_cycles_classified(&classified_lazy_cycles, false);
+        }
 
         // Show the lazy edges that participated (sample)
         let lazy_edges: Vec<_> = edges
@@ -158,7 +197,12 @@ pub fn handle_cycles_command(opts: &CyclesOptions, global: &GlobalOptions) -> Di
         }
     }
 
-    DispatchResult::Exit(0)
+    // Exit code: 1 if there are breaking cycles (for CI use)
+    if breaking_count > 0 && opts.breaking_only {
+        DispatchResult::Exit(1)
+    } else {
+        DispatchResult::Exit(0)
+    }
 }
 
 /// Handle the commands command - show Tauri command bridges

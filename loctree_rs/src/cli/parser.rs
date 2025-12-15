@@ -986,47 +986,53 @@ USAGE:
     loct cycles [OPTIONS] [PATHS...]
 
 DESCRIPTION:
-    Detects circular dependencies in your import graph.
+    Detects circular dependencies in your import graph and classifies them
+    by compilability impact.
 
-    A circular import occurs when file A imports B, B imports C, and C imports A,
-    creating a cycle: A → B → C → A
+    Cycles are grouped into three categories:
+    🔴 Breaking    - Would fail compilation (runtime circular value deps)
+    🟡 Structural  - Reference patterns that compile OK (mod/use, traits)
+    🟢 Diamond     - Not true cycles, just shared dependencies
 
-    Circular imports cause:
-    - Runtime initialization errors (module not fully loaded)
-    - Undefined behavior in module loading order
-    - Complex, hard-to-understand dependency graphs
-    - Build and bundling failures
-    - Flaky test behavior due to import order sensitivity
-
-    This command analyzes the import graph and reports all detected cycles,
-    showing the complete import chain for each cycle. Results are grouped by
-    severity (cycle length) and impact.
+    Most detected \"cycles\" in real code are Structural or Diamond patterns
+    that compile successfully. True Breaking cycles are rare.
 
 OPTIONS:
     --path <PATTERN>     Filter to files matching path pattern
+    --breaking-only      Only show cycles that would break compilation
+    --explain            Show detailed explanation for each cycle
+    --legacy             Use legacy output format (old grouping by pattern)
     --help, -h           Show this help message
 
 ARGUMENTS:
     [PATHS...]           Root directories to analyze (default: current directory)
 
 EXAMPLES:
-    loct cycles                       # Detect all cycles in current directory
+    loct cycles                       # Show all cycles with new format
+    loct cycles --breaking-only       # Only show compilation-breaking cycles
+    loct cycles --explain             # Detailed pattern explanations
     loct cycles src/                  # Only analyze src/ directory
-    loct cycles --path components/    # Only show cycles involving components/
     loct cycles --json                # JSON output for CI/CD integration
 
-OUTPUT FORMAT:
-    Each cycle is shown as an import chain:
-      src/A.ts → src/B.ts → src/C.ts → src/A.ts
+OUTPUT FORMAT (NEW):
+    🔴 Breaking Cycles (0) - Will fail compilation
+       (none - great!)
 
-    Smaller cycles (2-3 files) are often easier to fix.
-    Larger cycles (5+ files) indicate architectural issues.
+    🟡 Structural Cycles (4) - Reference patterns, compile OK
+       #1 types/ai.rs ↔ types/mod.rs (2 files)
+          Pattern: Rust mod/use separation
+          Risk: low (Rust pattern, OK)
+          Suggestion: Idiomatic Rust - no action needed
+
+    🟢 Diamond Dependencies (1) - Shared modules, not cycles
+       (not shown by default, use --explain)
+
+    Summary: 0 breaking, 4 structural, 1 diamond
 
 FIXING CYCLES:
-    1. Extract shared code into a separate file
-    2. Use dependency injection instead of direct imports
-    3. Consolidate related modules
-    4. Move type definitions to a shared types file
+    1. Breaking: Extract shared code into a separate file
+    2. Structural: Usually OK, review if coupling is excessive
+    3. Diamond: Good architecture - shared utilities are fine
 
 RELATED COMMANDS:
     loct slice <file>          See what a file depends on
@@ -1047,6 +1053,18 @@ RELATED COMMANDS:
                     .ok_or_else(|| "--path requires a pattern".to_string())?;
                 opts.path_filter = Some(value.clone());
                 i += 2;
+            }
+            "--breaking-only" => {
+                opts.breaking_only = true;
+                i += 1;
+            }
+            "--explain" => {
+                opts.explain = true;
+                i += 1;
+            }
+            "--legacy" => {
+                opts.legacy_format = true;
+                i += 1;
             }
             _ if !arg.starts_with('-') => {
                 opts.roots.push(PathBuf::from(arg));

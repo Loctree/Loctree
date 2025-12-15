@@ -404,6 +404,15 @@ pub struct CyclesOptions {
 
     /// Filter by file path pattern (regex)
     pub path_filter: Option<String>,
+
+    /// Only show cycles that would break compilation
+    pub breaking_only: bool,
+
+    /// Show detailed explanation for each cycle
+    pub explain: bool,
+
+    /// Use legacy output format (for backwards compatibility)
+    pub legacy_format: bool,
 }
 
 /// Options for the `commands` command (Tauri command bridges).
