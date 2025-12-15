@@ -44,6 +44,9 @@ loct twins
 # Detect dead exports
 loct dead --confidence high
 
+# Quick health check (cycles + dead + twins summary)
+loct health
+
 # Verify tree-shaking in production bundles
 loct dist dist/bundle.js.map src/
 

@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
+## [0.6.22] - 2025-12-15
+
+### Added
+- **`loct health` command** — Quick health check summary in one command
+  - Combines cycles + dead exports + twins analysis into a single summary
+  - Shows: cycle count (hard/structural), dead exports (high/low confidence), twins count
+  - Supports `--json` for CI integration
+  - Usage: `loct health`, `loct health --json`, `loct health src/`
+  - Designed for quick sanity checks before commits or in CI pipelines
+
+### Technical
+- Added `Health` command variant and `HealthOptions` struct
+- Implemented `handle_health_command` in analysis handlers
+
 ## [0.6.15] - 2025-12-13
 
 ### Added

@@ -1,6 +1,6 @@
 {
   "name": "loctree",
-  "version": "0.6.20",
+  "version": "0.6.22",
   "tagline": "Scan once, slice many.",
   "description": "AI-oriented codebase analyzer. Your GPS for navigating codebases - use BEFORE reading files manually.",
 
@@ -102,6 +102,13 @@
       "desc": "Find unused exports (pytest Test* ignored)",
       "when": "Cleanup phase"
     },
+    "health": {
+      "cmd": "loct health",
+      "desc": "Quick health check: cycles + dead + twins summary",
+      "when": "Quick sanity check before commits or in CI",
+      "flags": ["--json", "--include-tests"],
+      "example_output": "Cycles: 3 total (2 hard, 1 structural)\nDead: 6 high confidence, 24 low\nTwins: 2 duplicate symbol groups"
+    },
     "diff": {
       "cmd": "loct diff --since <ref>",
       "desc": "Compare snapshots (e.g., --since main, --since HEAD~5)",
@@ -185,6 +192,10 @@
     "pr_review": {
       "steps": ["diff", "circular", "twins"],
       "desc": "1. See what changed, 2. Check for new cycles, 3. Check for new dead code"
+    },
+    "quick_sanity_check": {
+      "steps": ["health"],
+      "desc": "Quick summary before commit - cycles + dead + twins in one command"
     }
   },
 

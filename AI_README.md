@@ -1,8 +1,8 @@
-# loct — AI Agent Quick Reference (v0.6.15)
+# loct — AI Agent Quick Reference (v0.6.22)
 
 Static analysis for AI agents: scan once, slice many. Default `loct` writes `.loctree/<branch@sha>/snapshot.json`; use `loct report --serve` (or `loct lint --sarif`) when you need full artifacts (`analysis.json`, `report.html`, `report.sarif`, etc.).
 
-**v0.6.15 highlights**: jq-style query mode (`loct '.metadata'`), bundle distribution analysis (`loct dist`), Dart/Flutter support.
+**v0.6.22 highlights**: `loct health` (quick cycles+dead+twins summary), jq-style query mode, bundle distribution analysis (`loct dist`).
 
 > **Full documentation:** [AI Agent's Manual](docs/tutorials/ai-agents-manual.md)
 
@@ -43,6 +43,7 @@ loct events --json        # Emit/listen, ghost/orphan/races
 # 7) Hygiene
 loct dead --confidence high  # unused exports (alias-aware)
 loct cycles                  # circular imports
+loct health                  # quick summary: cycles + dead + twins
 
 # 8) Twins analysis (semantic duplicates)
 loct twins                   # dead parrots + exact twins + barrel chaos
@@ -109,6 +110,7 @@ loct --version   # expect 0.6.15+
 - **Impact**: `loct impact <file>`
 - **Dead code**: `loct dead --confidence high`
 - **Circular imports**: `loct cycles`
+- **Quick health check**: `loct health` (cycles + dead + twins summary)
 - **Twins analysis**: `loct twins` (dead parrots, exact twins, barrel chaos)
 - **Suppress false positives**: `loct suppress twins <sym>`, `loct suppress --list`
 - **Functional crowds**: `loct crowd` (find similar files clustering around same functionality)
@@ -125,6 +127,7 @@ loct --version   # expect 0.6.15+
 - Quick queries: `loct query who-imports <file>`, `loct query where-symbol <sym>`, `loct query component-of <file>`
 - **jq queries**: `loct '.metadata'`, `loct '.files | length'`, `loct '.edges[]' -c`
 - Twins analysis: `loct twins` (dead parrots + exact twins + barrel chaos)
+- **Health check**: `loct health` (cycles + dead + twins summary in one)
 - Suppress false positives: `loct suppress twins <sym>` (stored in `.loctree/suppressions.toml`)
 - Bundle dist: `loct dist dist/bundle.js.map src/` (symbol-level dead export detection)
 - Analysis shortcuts: `loct -A --dead`, `loct -A --circular`, `loct -A --report report.html`

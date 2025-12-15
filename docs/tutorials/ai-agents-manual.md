@@ -202,6 +202,29 @@ Circular import detected:
   src/a.ts → src/b.ts → src/c.ts → src/a.ts
 ```
 
+### `loct health`
+
+Quick health check summary — combines cycles + dead exports + twins in one command.
+
+```bash
+loct health              # Quick summary
+loct health --json       # JSON output for CI
+loct health src/         # Analyze specific directory
+```
+
+**Output example:**
+```
+Health Check Summary
+
+Cycles:      3 total (2 hard, 1 structural)
+Dead:        6 high confidence, 24 low
+Twins:       2 duplicate symbol groups
+
+Run `loct cycles`, `loct dead`, `loct twins` for details.
+```
+
+Use this for quick sanity checks before commits or in CI pipelines.
+
 ### `loct twins`
 
 Semantic duplicate analysis — finds dead parrots, exact twins, and barrel chaos.

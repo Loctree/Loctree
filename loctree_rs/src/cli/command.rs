@@ -235,6 +235,14 @@ pub enum Command {
     /// - Orphan files (files with 0 importers)
     /// - Shadow exports (symbols exported by multiple files where some have 0 imports)
     Zombie(ZombieOptions),
+
+    /// Quick health check summary (cycles + dead + twins).
+    ///
+    /// One-shot command to get a summary of all structural issues:
+    /// - Circular imports (hard cycles count)
+    /// - Dead exports (high confidence count)
+    /// - Twins (duplicate exports count)
+    Health(HealthOptions),
 }
 
 impl Default for Command {
@@ -819,6 +827,17 @@ pub struct ZombieOptions {
     pub include_tests: bool,
 }
 
+/// Options for the `health` command.
+/// Quick health check summary (cycles + dead + twins).
+#[derive(Debug, Clone, Default)]
+pub struct HealthOptions {
+    /// Root directories to analyze
+    pub roots: Vec<PathBuf>,
+
+    /// Include test files in analysis (default: false)
+    pub include_tests: bool,
+}
+
 /// Options for the `help` command.
 #[derive(Debug, Clone, Default)]
 pub struct HelpOptions {
@@ -959,6 +978,7 @@ impl Command {
             Command::Hotspots(_) => "hotspots",
             Command::Layoutmap(_) => "layoutmap",
             Command::Zombie(_) => "zombie",
+            Command::Health(_) => "health",
         }
     }
 
@@ -996,6 +1016,7 @@ impl Command {
             Command::Hotspots(_) => "Show import frequency heatmap (core vs peripheral)",
             Command::Layoutmap(_) => "Analyze CSS layout (z-index, position, grid/flex)",
             Command::Zombie(_) => "Find zombie code (dead exports + orphan files + shadows)",
+            Command::Health(_) => "Quick health check (cycles + dead + twins summary)",
         }
     }
 
@@ -1057,6 +1078,10 @@ impl Command {
                 "zombie",
                 "Find zombie code (dead exports + orphan files + shadows)",
             ),
+            (
+                "health",
+                "Quick health check (cycles + dead + twins summary)",
+            ),
         ];
 
         let mut help = String::new();
@@ -1116,6 +1141,7 @@ impl Command {
             "hotspots" => Some(HOTSPOTS_HELP),
             "layoutmap" => Some(LAYOUTMAP_HELP),
             "zombie" => Some(ZOMBIE_HELP),
+            "health" => Some(HEALTH_HELP),
             _ => None,
         }
     }
@@ -2117,6 +2143,49 @@ RELATED COMMANDS:
     loct twins              Dead parrots and semantic duplicates
     loct hotspots --leaves  Find leaf nodes (0 importers)
     loct sniff              Code smell analysis";
+
+const HEALTH_HELP: &str = "loct health - Quick health check summary
+
+USAGE:
+    loct health [OPTIONS] [PATHS...]
+
+DESCRIPTION:
+    One-shot summary of all structural issues in your codebase:
+    - Cycles: Circular import count (hard vs structural)
+    - Dead: Unused exports (high confidence count)
+    - Twins: Duplicate symbol names across files
+
+    Use this as a quick sanity check before commits or in CI.
+    Run individual commands for detailed analysis.
+
+OPTIONS:
+    --include-tests    Include test files in analysis (default: false)
+    --json             Output as JSON for programmatic use
+    --help, -h         Show this help message
+
+ARGUMENTS:
+    [PATHS...]         Root directories to scan (default: current directory)
+
+EXAMPLES:
+    loct health                    # Quick health summary
+    loct health --include-tests    # Include test files
+    loct health src/               # Analyze specific directory
+    loct health --json             # Machine-readable output
+
+OUTPUT FORMAT:
+    Health Check Summary
+
+    Cycles:      3 total (2 hard, 1 structural)
+    Dead:        6 high confidence, 24 low
+    Twins:       2 duplicate symbol groups
+
+    Run `loct cycles`, `loct dead`, `loct twins` for details.
+
+RELATED COMMANDS:
+    loct cycles    Detailed circular import analysis
+    loct dead      Detailed dead export analysis
+    loct twins     Duplicate export analysis
+    loct zombie    Combined dead/orphan/shadow analysis";
 
 // ============================================================================
 // Tests

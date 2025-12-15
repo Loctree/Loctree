@@ -3,8 +3,8 @@
 //! Handles: dead, cycles, commands, events, routes, zombie
 
 use super::super::super::command::{
-    CommandsOptions, CyclesOptions, DeadOptions, EventsOptions, FocusOptions, HotspotsOptions,
-    LayoutmapOptions, RoutesOptions, ZombieOptions,
+    CommandsOptions, CyclesOptions, DeadOptions, EventsOptions, FocusOptions, HealthOptions,
+    HotspotsOptions, LayoutmapOptions, RoutesOptions, ZombieOptions,
 };
 use super::super::{DispatchResult, GlobalOptions, load_or_create_snapshot};
 use crate::progress::Spinner;
@@ -1352,4 +1352,141 @@ fn is_test_file_path(path: &str) -> bool {
         || path.ends_with("_test.py")
         || path.starts_with("test_")
         || path.contains("/test_")
+}
+
+/// Handle the health command - quick summary of cycles + dead + twins
+pub fn handle_health_command(opts: &HealthOptions, global: &GlobalOptions) -> DispatchResult {
+    use crate::analyzer::cycles::{CycleCompilability, find_cycles_classified_with_lazy};
+    use crate::analyzer::dead_parrots::{DeadFilterConfig, find_dead_exports};
+    use crate::analyzer::twins::detect_exact_twins;
+    use std::path::Path;
+
+    // Show spinner unless in quiet/json mode
+    let spinner = if !global.quiet && !global.json {
+        Some(Spinner::new("Running health check..."))
+    } else {
+        None
+    };
+
+    // Load snapshot (auto-scan if missing)
+    let root = opts
+        .roots
+        .first()
+        .map(|p| p.as_path())
+        .unwrap_or(Path::new("."));
+
+    let snapshot = match load_or_create_snapshot(root, global) {
+        Ok(s) => s,
+        Err(e) => {
+            if let Some(s) = spinner {
+                s.finish_error(&format!("Failed to load snapshot: {}", e));
+            } else {
+                eprintln!("[loct][error] {}", e);
+            }
+            return DispatchResult::Exit(1);
+        }
+    };
+
+    // 1. Cycles analysis
+    let edges: Vec<(String, String, String)> = snapshot
+        .edges
+        .iter()
+        .map(|e| (e.from.clone(), e.to.clone(), e.label.clone()))
+        .collect();
+
+    let (classified_cycles, _) = find_cycles_classified_with_lazy(&edges);
+
+    let hard_cycles = classified_cycles
+        .iter()
+        .filter(|c| c.compilability == CycleCompilability::Breaking)
+        .count();
+    let structural_cycles = classified_cycles
+        .iter()
+        .filter(|c| c.compilability == CycleCompilability::Structural)
+        .count();
+    let total_cycles = classified_cycles.len();
+
+    // 2. Dead exports analysis
+    let dead_exports = find_dead_exports(
+        &snapshot.files,
+        false,
+        None,
+        DeadFilterConfig {
+            include_tests: opts.include_tests,
+            include_helpers: false,
+            library_mode: global.library_mode,
+            example_globs: Vec::new(),
+            python_library_mode: global.python_library,
+        },
+    );
+
+    // Count by confidence
+    let high_confidence = dead_exports
+        .iter()
+        .filter(|d| d.confidence == "high")
+        .count();
+    let low_confidence = dead_exports.len() - high_confidence;
+
+    // 3. Twins analysis
+    let twins = detect_exact_twins(&snapshot.files, opts.include_tests);
+    let twin_count = twins.len();
+
+    if let Some(s) = spinner {
+        s.finish_success("Health check complete");
+    }
+
+    // Output results
+    if global.json {
+        let json = serde_json::json!({
+            "cycles": {
+                "total": total_cycles,
+                "hard": hard_cycles,
+                "structural": structural_cycles
+            },
+            "dead_exports": {
+                "total": dead_exports.len(),
+                "high_confidence": high_confidence,
+                "low_confidence": low_confidence
+            },
+            "twins": {
+                "total": twin_count
+            }
+        });
+        println!("{}", serde_json::to_string_pretty(&json).unwrap());
+    } else {
+        println!("\nHealth Check Summary\n");
+
+        // Cycles
+        if total_cycles == 0 {
+            println!("Cycles:      OK (none detected)");
+        } else {
+            println!(
+                "Cycles:      {} total ({} hard, {} structural)",
+                total_cycles, hard_cycles, structural_cycles
+            );
+        }
+
+        // Dead exports
+        if dead_exports.is_empty() {
+            println!("Dead:        OK (none detected)");
+        } else {
+            println!(
+                "Dead:        {} high confidence, {} low",
+                high_confidence, low_confidence
+            );
+        }
+
+        // Twins
+        if twin_count == 0 {
+            println!("Twins:       OK (none detected)");
+        } else {
+            println!("Twins:       {} duplicate symbol groups", twin_count);
+        }
+
+        println!();
+        println!("Run `loct cycles`, `loct dead`, `loct twins` for details.");
+        println!();
+    }
+
+    DispatchResult::Exit(0)
 }
