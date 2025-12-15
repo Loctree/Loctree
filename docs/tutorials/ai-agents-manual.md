@@ -202,6 +202,29 @@ Circular import detected:
   src/a.ts → src/b.ts → src/c.ts → src/a.ts
 ```
 
+### `loct health`
+
+Quick health check summary — combines cycles + dead exports + twins in one command.
+
+```bash
+loct health              # Quick summary
+loct health --json       # JSON output for CI
+loct health src/         # Analyze specific directory
+```
+
+**Output example:**
+```
+Health Check Summary
+
+Cycles:      3 total (2 hard, 1 structural)
+Dead:        6 high confidence, 24 low
+Twins:       2 duplicate symbol groups
+
+Run `loct cycles`, `loct dead`, `loct twins` for details.
+```
+
+Use this for quick sanity checks before commits or in CI pipelines.
+
 ### `loct twins`
 
 Semantic duplicate analysis — finds dead parrots, exact twins, and barrel chaos.
@@ -287,6 +310,49 @@ loct diff --since <snapshot_id>     # Compare current vs old snapshot
 loct diff --since main              # Compare against main branch snapshot
 ```
 
+### jq-style queries
+
+Query snapshot data directly using jq syntax (powered by jaq, a Rust-native jq implementation).
+
+```bash
+loct '<filter>'                     # Query current snapshot
+loct '<filter>' --snapshot <path>   # Query specific snapshot
+```
+
+**Flags:**
+- `-r` — Raw output (no JSON quotes)
+- `-c` — Compact output (single line)
+- `-e` — Exit code based on empty result
+- `--arg NAME VALUE` — Pass string variable
+- `--argjson NAME JSON` — Pass JSON variable
+
+**Examples:**
+```bash
+# Metadata
+loct '.metadata'
+
+# Count files
+loct '.files | length'
+
+# Find large files (>500 LOC)
+loct '.files[] | select(.loc > 500)' -c
+
+# Filter edges by pattern
+loct '.edges[] | select(.from | contains("api"))'
+
+# List Tauri commands
+loct '.command_bridges | map(.name)'
+
+# Find top export duplicates
+loct '.export_index | to_entries | map(select(.value | length > 1)) | sort_by(.value | length) | reverse | .[0:5]'
+```
+
+**Use cases:**
+- Quick codebase statistics
+- Custom filtering and aggregation
+- Integration with shell pipelines
+- Extracting specific data for analysis
+
 **Output includes:**
 - Files added, removed, modified
 - New/resolved circular imports
@@ -342,6 +408,69 @@ loct query where-symbol useAuth
 # Is this file isolated or connected?
 loct query component-of src/orphan.ts
 ```
+
+### jq-style Queries (v0.6.15+)
+
+Query snapshot data directly using jq syntax. Uses jaq (Rust-native jq implementation) for zero external dependencies.
+
+```bash
+loct '<filter>' [options]
+```
+
+**Basic Usage:**
+```bash
+loct '.metadata'                    # Extract snapshot metadata
+loct '.files | length'              # Count files in codebase
+loct '.edges | length'              # Count import edges
+loct '.command_bridges | length'    # Count Tauri commands
+```
+
+**Filtering:**
+```bash
+# Find all edges from api/ directory
+loct '.edges[] | select(.from | contains("api"))'
+
+# Find large files (>500 LOC)
+loct '.files[] | select(.loc > 500)'
+
+# Get all file paths
+loct '.files[].path' -r
+
+# List Tauri command names
+loct '.command_bridges | map(.name)'
+```
+
+**Options:**
+| Flag | Description |
+|------|-------------|
+| `-r`, `--raw` | Raw output (no JSON quotes for strings) |
+| `-c`, `--compact` | Compact output (one line per result) |
+| `-e`, `--exit-status` | Exit 1 if result is false/null |
+| `--arg <name> <val>` | Bind string variable |
+| `--argjson <name> <json>` | Bind JSON variable |
+| `--snapshot <path>` | Use specific snapshot file |
+
+**Variable Binding:**
+```bash
+# Find edges from specific file
+loct '.edges[] | select(.from == $file)' --arg file 'src/api.ts'
+
+# Files with LOC above threshold
+loct '.files[] | select(.loc > $min)' --argjson min 300
+```
+
+**Important:** Filter must come before flags:
+```bash
+# ✅ Correct
+loct '.edges[]' --arg file 'foo.ts'
+
+# ❌ Won't work
+loct --arg file 'foo.ts' '.edges[]'
+```
+
+**Snapshot Discovery:**
+- Auto-discovers newest `.loctree/*/snapshot.json` by modification time
+- Use `--snapshot path/to/snapshot.json` to specify explicitly
 
 ---
 
@@ -628,6 +757,7 @@ loct cycles --json | jq '.[] | select(.files | length > 2)'
 | FE↔BE gaps | `loct commands --missing` |
 | Who imports file | `loct query who-imports <file>` |
 | Where is symbol | `loct query where-symbol <name>` |
+| jq query | `loct '.files \| length'`, `loct '.metadata'` |
 | Delta since snapshot | `loct diff --since <id>` |
 | CI lint | `loct lint --fail --sarif` |
 | Git blame | `loct git blame <file>` |

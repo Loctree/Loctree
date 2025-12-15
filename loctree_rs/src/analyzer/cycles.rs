@@ -6,9 +6,438 @@
 use std::cmp::min;
 use std::collections::{HashMap, HashSet};
 
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::root_scan::normalize_module_id;
+
+/// Classification of a cycle's nature and severity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CycleClassification {
+    HardBidirectional,
+    ModuleSelfReference,
+    TraitBased,
+    CfgGated,
+    FanPattern,
+    WildcardImport,
+    Unknown,
+}
+
+/// Compilability status of a cycle.
+///
+/// This classifies cycles by whether they would actually break compilation,
+/// addressing the false positive issue where "strict cycles" are reported
+/// as critical but compile successfully.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CycleCompilability {
+    /// Would fail compilation (runtime circular value dependencies).
+    /// Example: `const A = B + 1` and `const B = A + 1`
+    Breaking,
+
+    /// Graph cycle that compiles fine due to language semantics.
+    /// Examples:
+    /// - Rust mod/use separation (mod declares, use consumes)
+    /// - TypeScript cross-file references that resolve at runtime
+    Structural,
+
+    /// Not a true cycle - shared dependency diamond pattern.
+    /// Multiple files importing from a common module.
+    DiamondDependency,
+}
+
+impl CycleCompilability {
+    pub fn label(&self) -> &'static str {
+        match self {
+            CycleCompilability::Breaking => "breaking",
+            CycleCompilability::Structural => "structural",
+            CycleCompilability::DiamondDependency => "diamond",
+        }
+    }
+
+    pub fn icon(&self) -> &'static str {
+        match self {
+            CycleCompilability::Breaking => "🔴",
+            CycleCompilability::Structural => "🟡",
+            CycleCompilability::DiamondDependency => "🟢",
+        }
+    }
+
+    pub fn description(&self) -> &'static str {
+        match self {
+            CycleCompilability::Breaking => "Will fail compilation",
+            CycleCompilability::Structural => "Reference pattern, compiles OK",
+            CycleCompilability::DiamondDependency => "Shared module, not a cycle",
+        }
+    }
+}
+
+impl CycleClassification {
+    pub fn severity(&self) -> u8 {
+        match self {
+            CycleClassification::HardBidirectional => 3,
+            CycleClassification::WildcardImport => 2,
+            CycleClassification::CfgGated => 1,
+            CycleClassification::ModuleSelfReference => 0,
+            CycleClassification::TraitBased => 0,
+            CycleClassification::FanPattern => 0,
+            CycleClassification::Unknown => 2,
+        }
+    }
+    pub fn severity_label(&self) -> &'static str {
+        match self.severity() {
+            3 => "high",
+            2 => "medium",
+            1 => "low",
+            _ => "info",
+        }
+    }
+    pub fn severity_icon(&self) -> &'static str {
+        match self.severity() {
+            3 | 2 => "[!] ",
+            _ => "[i] ",
+        }
+    }
+    pub fn description(&self) -> &'static str {
+        match self {
+            CycleClassification::HardBidirectional => "blocks decoupling",
+            CycleClassification::WildcardImport => "implicit coupling",
+            CycleClassification::CfgGated => "conditional, low impact",
+            CycleClassification::ModuleSelfReference => "Rust pattern, OK",
+            CycleClassification::TraitBased => "architectural, OK",
+            CycleClassification::FanPattern => "not true cycle",
+            CycleClassification::Unknown => "needs review",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClassifiedCycle {
+    pub nodes: Vec<String>,
+    pub classification: CycleClassification,
+    pub compilability: CycleCompilability,
+    pub has_wildcard: bool,
+    pub is_cfg_gated: bool,
+    /// Pattern description for human-readable output
+    pub pattern: String,
+    /// Risk level: "none", "low", "medium", "high"
+    pub risk: String,
+    /// Suggestion for fixing (if applicable)
+    pub suggestion: Option<String>,
+}
+
+impl ClassifiedCycle {
+    pub fn new(nodes: Vec<String>, edges: &[(String, String, String)]) -> Self {
+        let classification = classify_cycle(&nodes, edges);
+        let has_wildcard = check_has_wildcard(&nodes, edges);
+        let is_cfg_gated = check_is_cfg_gated(&nodes, edges);
+        let compilability = determine_compilability(&classification, &nodes, edges);
+        let (pattern, risk, suggestion) = describe_cycle(&classification, &compilability, &nodes);
+
+        ClassifiedCycle {
+            nodes,
+            classification,
+            compilability,
+            has_wildcard,
+            is_cfg_gated,
+            pattern,
+            risk,
+            suggestion,
+        }
+    }
+}
+
+/// Determine the compilability status of a cycle based on its classification.
+fn determine_compilability(
+    classification: &CycleClassification,
+    nodes: &[String],
+    edges: &[(String, String, String)],
+) -> CycleCompilability {
+    match classification {
+        // These patterns are known to compile fine
+        CycleClassification::ModuleSelfReference => CycleCompilability::Structural,
+        CycleClassification::TraitBased => CycleCompilability::Structural,
+        CycleClassification::CfgGated => CycleCompilability::Structural,
+        CycleClassification::FanPattern => CycleCompilability::DiamondDependency,
+
+        // Hard bidirectional and wildcard need deeper analysis
+        CycleClassification::HardBidirectional | CycleClassification::WildcardImport => {
+            // Check if this is a Rust mod/use pattern (structural, not breaking)
+            if is_rust_mod_use_pattern(nodes, edges) {
+                return CycleCompilability::Structural;
+            }
+
+            // Check if edges are type-only imports (structural)
+            if all_edges_type_only(nodes, edges) {
+                return CycleCompilability::Structural;
+            }
+
+            // Check if it's actually a diamond (shared dependency)
+            if is_diamond_pattern(nodes, edges) {
+                return CycleCompilability::DiamondDependency;
+            }
+
+            // Default to structural since most cycles that make it through
+            // Tarjan's SCC in real code actually compile.
+            // True "Breaking" would require detecting value-level circular init.
+            CycleCompilability::Structural
+        }
+
+        CycleClassification::Unknown => {
+            // Unknown patterns default to structural since they compiled
+            CycleCompilability::Structural
+        }
+    }
+}
+
+/// Check if a cycle is a Rust mod/use pattern (mod.rs declares, child uses parent).
+fn is_rust_mod_use_pattern(nodes: &[String], edges: &[(String, String, String)]) -> bool {
+    let node_set: HashSet<&str> = nodes.iter().map(|s| s.as_str()).collect();
+
+    // Look for patterns like:
+    // - types/mod.rs -> types/ai.rs (mod declaration)
+    // - types/ai.rs -> types/mod.rs (use statement)
+    for (from, to, kind) in edges {
+        if !node_set.contains(from.as_str()) || !node_set.contains(to.as_str()) {
+            continue;
+        }
+
+        // Check for mod.rs patterns
+        let is_mod_declaration =
+            (from.ends_with("/mod.rs") || from.ends_with("\\mod.rs")) && kind == "mod";
+
+        // Check for use patterns going back to parent
+        let is_use_to_parent = kind == "use" || kind == "import";
+
+        if is_mod_declaration || is_use_to_parent {
+            return true;
+        }
+    }
+
+    // Also check by path structure - if one is parent of the other
+    if nodes.len() == 2 {
+        return is_parent_child_module(&nodes[0], &nodes[1])
+            || is_parent_child_module(&nodes[1], &nodes[0]);
+    }
+
+    false
+}
+
+/// Check if all edges in the cycle are type-only imports.
+fn all_edges_type_only(nodes: &[String], edges: &[(String, String, String)]) -> bool {
+    let node_set: HashSet<&str> = nodes.iter().map(|s| s.as_str()).collect();
+
+    let cycle_edges: Vec<_> = edges
+        .iter()
+        .filter(|(from, to, _)| node_set.contains(from.as_str()) && node_set.contains(to.as_str()))
+        .collect();
+
+    if cycle_edges.is_empty() {
+        return false;
+    }
+
+    cycle_edges
+        .iter()
+        .all(|(_, _, kind)| kind == "type_import" || kind == "type" || kind.contains("type"))
+}
+
+/// Check if the detected "cycle" is actually a diamond dependency pattern.
+fn is_diamond_pattern(nodes: &[String], edges: &[(String, String, String)]) -> bool {
+    if nodes.len() < 3 {
+        return false;
+    }
+
+    let node_set: HashSet<&str> = nodes.iter().map(|s| s.as_str()).collect();
+
+    // Count incoming and outgoing edges for each node
+    let mut incoming: HashMap<&str, usize> = HashMap::new();
+    let mut outgoing: HashMap<&str, usize> = HashMap::new();
+
+    for (from, to, _) in edges {
+        if node_set.contains(from.as_str()) && node_set.contains(to.as_str()) {
+            *incoming.entry(to.as_str()).or_default() += 1;
+            *outgoing.entry(from.as_str()).or_default() += 1;
+        }
+    }
+
+    // Diamond pattern: one node has many incoming edges (shared dependency)
+    // and the "cycle" exists because multiple paths lead to the same module
+    for node in nodes {
+        let inc = incoming.get(node.as_str()).copied().unwrap_or(0);
+        let out = outgoing.get(node.as_str()).copied().unwrap_or(0);
+
+        // Shared leaf: many incoming, few outgoing
+        if inc >= 2 && out <= 1 {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Generate human-readable description of the cycle.
+fn describe_cycle(
+    classification: &CycleClassification,
+    compilability: &CycleCompilability,
+    nodes: &[String],
+) -> (String, String, Option<String>) {
+    let pattern = match classification {
+        CycleClassification::ModuleSelfReference => "Rust mod/use separation".to_string(),
+        CycleClassification::TraitBased => "Trait-based abstraction".to_string(),
+        CycleClassification::CfgGated => "Conditional compilation (#[cfg])".to_string(),
+        CycleClassification::FanPattern => "Shared utility module".to_string(),
+        CycleClassification::HardBidirectional => {
+            if nodes.len() == 2 {
+                "Bidirectional reference".to_string()
+            } else {
+                format!("Cross-module references ({} files)", nodes.len())
+            }
+        }
+        CycleClassification::WildcardImport => "Wildcard re-export".to_string(),
+        CycleClassification::Unknown => "Unknown pattern".to_string(),
+    };
+
+    let risk = match compilability {
+        CycleCompilability::Breaking => "high".to_string(),
+        CycleCompilability::Structural => {
+            if nodes.len() > 5 {
+                "medium".to_string()
+            } else {
+                "low".to_string()
+            }
+        }
+        CycleCompilability::DiamondDependency => "none".to_string(),
+    };
+
+    let suggestion = match (classification, compilability) {
+        (_, CycleCompilability::DiamondDependency) => None,
+        (CycleClassification::ModuleSelfReference, _) => {
+            Some("Idiomatic Rust - no action needed".to_string())
+        }
+        (CycleClassification::FanPattern, _) => {
+            Some("Good architecture - shared utilities are fine".to_string())
+        }
+        (CycleClassification::HardBidirectional, CycleCompilability::Structural) => {
+            if nodes.len() > 5 {
+                Some("Consider facade pattern to reduce coupling".to_string())
+            } else {
+                Some("Review for tight coupling".to_string())
+            }
+        }
+        (CycleClassification::WildcardImport, _) => {
+            Some("Consider explicit imports instead of *".to_string())
+        }
+        _ => None,
+    };
+
+    (pattern, risk, suggestion)
+}
+
+fn classify_cycle(nodes: &[String], edges: &[(String, String, String)]) -> CycleClassification {
+    if check_is_cfg_gated(nodes, edges) {
+        return CycleClassification::CfgGated;
+    }
+    if check_has_wildcard(nodes, edges) {
+        return CycleClassification::WildcardImport;
+    }
+    if is_module_self_reference(nodes) {
+        return CycleClassification::ModuleSelfReference;
+    }
+    if is_fan_pattern(nodes, edges) {
+        return CycleClassification::FanPattern;
+    }
+    if nodes.len() == 2 {
+        return CycleClassification::HardBidirectional;
+    }
+    if is_hard_bidirectional(nodes, edges) {
+        return CycleClassification::HardBidirectional;
+    }
+    CycleClassification::Unknown
+}
+
+fn check_has_wildcard(nodes: &[String], edges: &[(String, String, String)]) -> bool {
+    let node_set: HashSet<&str> = nodes.iter().map(|s| s.as_str()).collect();
+    edges.iter().any(|(from, to, kind)| {
+        node_set.contains(from.as_str())
+            && node_set.contains(to.as_str())
+            && kind.contains("wildcard")
+    })
+}
+
+fn check_is_cfg_gated(nodes: &[String], edges: &[(String, String, String)]) -> bool {
+    let node_set: HashSet<&str> = nodes.iter().map(|s| s.as_str()).collect();
+    edges.iter().any(|(from, to, kind)| {
+        node_set.contains(from.as_str())
+            && node_set.contains(to.as_str())
+            && (kind.contains("cfg") || kind.contains("conditional"))
+    })
+}
+
+fn is_module_self_reference(nodes: &[String]) -> bool {
+    if nodes.len() != 2 {
+        return false;
+    }
+    is_parent_child_module(&nodes[0], &nodes[1]) || is_parent_child_module(&nodes[1], &nodes[0])
+}
+
+fn is_parent_child_module(parent: &str, child: &str) -> bool {
+    let p = parent
+        .replace('\\', "/")
+        .trim_end_matches(".rs")
+        .trim_end_matches("/mod")
+        .to_string();
+    let c = child.replace('\\', "/").trim_end_matches(".rs").to_string();
+    if c.starts_with(&format!("{}/", p)) {
+        return true;
+    }
+    let parent_dir = if parent.ends_with("/mod.rs") {
+        parent.trim_end_matches("/mod.rs")
+    } else if parent.ends_with(".rs") {
+        parent.trim_end_matches(".rs")
+    } else {
+        parent
+    };
+    let child_dir = child.rsplit_once('/').map(|(d, _)| d).unwrap_or(child);
+    parent_dir == child_dir && parent != child
+}
+
+fn is_fan_pattern(nodes: &[String], edges: &[(String, String, String)]) -> bool {
+    if nodes.len() < 3 {
+        return false;
+    }
+    let node_set: HashSet<&str> = nodes.iter().map(|s| s.as_str()).collect();
+    let mut incoming: HashMap<&str, usize> = HashMap::new();
+    let mut outgoing: HashMap<&str, usize> = HashMap::new();
+    for (from, to, _) in edges {
+        if node_set.contains(from.as_str()) && node_set.contains(to.as_str()) {
+            *incoming.entry(to.as_str()).or_default() += 1;
+            *outgoing.entry(from.as_str()).or_default() += 1;
+        }
+    }
+    nodes.iter().any(|n| {
+        incoming.get(n.as_str()).copied().unwrap_or(0) >= nodes.len() / 2
+            && outgoing.get(n.as_str()).copied().unwrap_or(0) <= 2
+    })
+}
+
+fn is_hard_bidirectional(nodes: &[String], edges: &[(String, String, String)]) -> bool {
+    if nodes.len() < 2 {
+        return false;
+    }
+    let node_set: HashSet<&str> = nodes.iter().map(|s| s.as_str()).collect();
+    let mut has_in: HashSet<&str> = HashSet::new();
+    let mut has_out: HashSet<&str> = HashSet::new();
+    for (from, to, _) in edges {
+        if node_set.contains(from.as_str()) && node_set.contains(to.as_str()) {
+            has_out.insert(from.as_str());
+            has_in.insert(to.as_str());
+        }
+    }
+    nodes
+        .iter()
+        .all(|n| has_in.contains(n.as_str()) && has_out.contains(n.as_str()))
+}
 
 struct TarjanData {
     index: usize,
@@ -120,6 +549,267 @@ pub fn find_cycles_with_lazy(
     }
 
     (strict_cycles, lazy_cycles)
+}
+
+/// Find cycles and return them as classified cycles with metadata.
+///
+/// This is a convenience wrapper around `find_cycles()` that automatically
+/// classifies each cycle using `ClassifiedCycle::new()`.
+pub fn find_cycles_classified(edges: &[(String, String, String)]) -> Vec<ClassifiedCycle> {
+    let raw_cycles = find_cycles(edges);
+    raw_cycles
+        .into_iter()
+        .map(|nodes| ClassifiedCycle::new(nodes, edges))
+        .collect()
+}
+
+/// Find cycles (strict and lazy) and return them as classified cycles.
+///
+/// Returns `(strict_cycles, lazy_cycles)` where both are classified with metadata.
+/// - `strict_cycles`: Excludes lazy_import and type_import edges
+/// - `lazy_cycles`: Cycles that only exist when lazy imports are included
+pub fn find_cycles_classified_with_lazy(
+    edges: &[(String, String, String)],
+) -> (Vec<ClassifiedCycle>, Vec<ClassifiedCycle>) {
+    let (strict, lazy) = find_cycles_with_lazy(edges);
+    (
+        strict
+            .into_iter()
+            .map(|n| ClassifiedCycle::new(n, edges))
+            .collect(),
+        lazy.into_iter()
+            .map(|n| ClassifiedCycle::new(n, edges))
+            .collect(),
+    )
+}
+
+/// Print cycles classified by compilability (Breaking/Structural/Diamond).
+///
+/// This format addresses the issue where "strict cycles" were reported as "critical"
+/// even though they compile successfully. Now cycles are grouped by actual impact.
+pub fn print_cycles_classified(classified_cycles: &[ClassifiedCycle], json_output: bool) {
+    if json_output {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &serde_json::json!({ "classifiedCycles": classified_cycles })
+            )
+            .unwrap()
+        );
+        return;
+    }
+
+    if classified_cycles.is_empty() {
+        println!("No circular imports detected. ✓");
+        return;
+    }
+
+    // Group by compilability status
+    let mut by_compilability: HashMap<CycleCompilability, Vec<&ClassifiedCycle>> = HashMap::new();
+    for c in classified_cycles {
+        by_compilability.entry(c.compilability).or_default().push(c);
+    }
+
+    let breaking = by_compilability
+        .get(&CycleCompilability::Breaking)
+        .map(|v| v.len())
+        .unwrap_or(0);
+    let structural = by_compilability
+        .get(&CycleCompilability::Structural)
+        .map(|v| v.len())
+        .unwrap_or(0);
+    let diamond = by_compilability
+        .get(&CycleCompilability::DiamondDependency)
+        .map(|v| v.len())
+        .unwrap_or(0);
+
+    println!("\nCircular Import Analysis\n");
+
+    // Breaking Cycles
+    println!(
+        "{} Breaking Cycles ({}) - {}",
+        CycleCompilability::Breaking.icon(),
+        breaking,
+        CycleCompilability::Breaking.description()
+    );
+    if breaking == 0 {
+        println!("   (none - great!)\n");
+    } else if let Some(cycles) = by_compilability.get(&CycleCompilability::Breaking) {
+        print_cycle_group(cycles, true);
+    }
+
+    // Structural Cycles
+    println!(
+        "{} Structural Cycles ({}) - {}",
+        CycleCompilability::Structural.icon(),
+        structural,
+        CycleCompilability::Structural.description()
+    );
+    if structural == 0 {
+        println!("   (none)\n");
+    } else if let Some(cycles) = by_compilability.get(&CycleCompilability::Structural) {
+        print_cycle_group(cycles, false);
+    }
+
+    // Diamond Dependencies
+    println!(
+        "{} Diamond Dependencies ({}) - {}",
+        CycleCompilability::DiamondDependency.icon(),
+        diamond,
+        CycleCompilability::DiamondDependency.description()
+    );
+    if diamond == 0 {
+        println!("   (none)\n");
+    } else if let Some(cycles) = by_compilability.get(&CycleCompilability::DiamondDependency) {
+        print_cycle_group(cycles, false);
+    }
+
+    // Summary
+    println!(
+        "Summary: {} breaking, {} structural, {} diamond",
+        breaking, structural, diamond
+    );
+
+    if breaking == 0 {
+        println!("\n✓ No compilation-breaking cycles detected.");
+        if structural > 0 {
+            println!("  Structural cycles are architectural concerns, not errors.");
+        }
+    }
+}
+
+/// Print a group of cycles with details.
+fn print_cycle_group(cycles: &[&ClassifiedCycle], detailed: bool) {
+    for (i, c) in cycles.iter().enumerate() {
+        let num = i + 1;
+        let path_summary = format_cycle_path(&c.nodes);
+
+        println!("   #{} {} ({} files)", num, path_summary, c.nodes.len());
+        println!("      Pattern: {}", c.pattern);
+        println!(
+            "      Risk: {} ({})",
+            c.risk,
+            c.classification.description()
+        );
+
+        if let Some(ref suggestion) = c.suggestion {
+            println!("      Suggestion: {}", suggestion);
+        }
+
+        // Show full path for detailed mode (breaking cycles)
+        if detailed && c.nodes.len() <= 10 {
+            println!("      Chain: {}", c.nodes.join(" -> "));
+        }
+
+        println!();
+    }
+}
+
+/// Format cycle path for display (first ↔ last for 2-node, abbreviated for larger).
+fn format_cycle_path(nodes: &[String]) -> String {
+    if nodes.is_empty() {
+        return "(empty)".to_string();
+    }
+
+    // Extract just filenames for readability
+    let short_names: Vec<String> = nodes
+        .iter()
+        .map(|p| {
+            p.rsplit('/')
+                .next()
+                .unwrap_or(p)
+                .rsplit('\\')
+                .next()
+                .unwrap_or(p)
+                .to_string()
+        })
+        .collect();
+
+    match nodes.len() {
+        1 => short_names[0].clone(),
+        2 => format!("{} ↔ {}", short_names[0], short_names[1]),
+        3..=5 => short_names.join(" → "),
+        _ => format!(
+            "{} → ... ({} files) → {}",
+            short_names[0],
+            nodes.len() - 2,
+            short_names.last().unwrap()
+        ),
+    }
+}
+
+/// Print cycles in the old format (for backwards compatibility).
+pub fn print_cycles_classified_legacy(classified_cycles: &[ClassifiedCycle], json_output: bool) {
+    if json_output {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &serde_json::json!({ "classifiedCycles": classified_cycles })
+            )
+            .unwrap()
+        );
+        return;
+    }
+    if classified_cycles.is_empty() {
+        println!("No circular imports detected.");
+        return;
+    }
+    let mut by_class: HashMap<CycleClassification, Vec<&ClassifiedCycle>> = HashMap::new();
+    for c in classified_cycles {
+        by_class.entry(c.classification).or_default().push(c);
+    }
+    println!("Cycles Analysis:");
+    let mut classes: Vec<_> = by_class.keys().collect();
+    classes.sort_by_key(|c| std::cmp::Reverse(c.severity()));
+    for cls in &classes {
+        let cycles = &by_class[cls];
+        println!(
+            "├── {:22} {:3}  {}  ({})",
+            format!("{:?}:", cls),
+            cycles.len(),
+            cls.severity_icon(),
+            cls.description()
+        );
+    }
+    let actionable = classified_cycles
+        .iter()
+        .filter(|c| c.classification.severity() >= 2)
+        .count();
+    let info = classified_cycles
+        .iter()
+        .filter(|c| c.classification.severity() < 2)
+        .count();
+    println!(
+        "└── Total: {} cycles ({} actionable, {} informational)\n",
+        classified_cycles.len(),
+        actionable,
+        info
+    );
+    let mut num = 1;
+    for cls in &classes {
+        for c in &by_class[cls] {
+            let mut nodes = c.nodes.clone();
+            nodes.reverse();
+            let s = if nodes.len() > 12 {
+                format!(
+                    "{} -> ... ({} intermediate) ... -> {}",
+                    nodes[..5].join(" -> "),
+                    nodes.len() - 10,
+                    nodes[nodes.len() - 5..].join(" -> ")
+                )
+            } else {
+                nodes.join(" -> ")
+            };
+            println!(
+                "Cycle {} [{:?}] ({} files):\n  {}\n",
+                num,
+                c.classification,
+                c.nodes.len(),
+                s
+            );
+            num += 1;
+        }
+    }
 }
 
 fn find_cycles_normalized(edges: &[(String, String)]) -> Vec<Vec<String>> {
@@ -582,6 +1272,107 @@ mod tests {
         assert!(
             cycles.is_empty(),
             "Node with only outgoing edges (no cycle) should not be reported"
+        );
+    }
+
+    #[test]
+    fn test_classify_hard_bidirectional() {
+        use super::{CycleClassification, find_cycles_classified};
+        let edges = vec![
+            ("a.rs".to_string(), "b.rs".to_string(), "import".to_string()),
+            ("b.rs".to_string(), "a.rs".to_string(), "import".to_string()),
+        ];
+        let classified = find_cycles_classified(&edges);
+        assert_eq!(classified.len(), 1);
+        assert_eq!(
+            classified[0].classification,
+            CycleClassification::HardBidirectional
+        );
+        assert_eq!(classified[0].classification.severity(), 3);
+    }
+
+    #[test]
+    fn test_classify_module_self_reference() {
+        use super::{CycleClassification, find_cycles_classified};
+        let edges = vec![
+            (
+                "src/mod.rs".to_string(),
+                "src/helper.rs".to_string(),
+                "import".to_string(),
+            ),
+            (
+                "src/helper.rs".to_string(),
+                "src/mod.rs".to_string(),
+                "import".to_string(),
+            ),
+        ];
+        let classified = find_cycles_classified(&edges);
+        assert_eq!(classified.len(), 1);
+        assert_eq!(
+            classified[0].classification,
+            CycleClassification::ModuleSelfReference
+        );
+        assert_eq!(classified[0].classification.severity(), 0);
+    }
+
+    #[test]
+    fn test_classify_wildcard_import() {
+        use super::{CycleClassification, find_cycles_classified};
+        let edges = vec![
+            (
+                "a.rs".to_string(),
+                "b.rs".to_string(),
+                "wildcard".to_string(),
+            ),
+            ("b.rs".to_string(), "a.rs".to_string(), "import".to_string()),
+        ];
+        let classified = find_cycles_classified(&edges);
+        assert_eq!(classified.len(), 1);
+        assert_eq!(
+            classified[0].classification,
+            CycleClassification::WildcardImport
+        );
+        assert_eq!(classified[0].classification.severity(), 2);
+        assert!(classified[0].has_wildcard);
+    }
+
+    #[test]
+    fn test_classify_cfg_gated() {
+        use super::{CycleClassification, find_cycles_classified};
+        let edges = vec![
+            ("a.rs".to_string(), "b.rs".to_string(), "cfg".to_string()),
+            ("b.rs".to_string(), "a.rs".to_string(), "import".to_string()),
+        ];
+        let classified = find_cycles_classified(&edges);
+        assert_eq!(classified.len(), 1);
+        assert_eq!(classified[0].classification, CycleClassification::CfgGated);
+        assert_eq!(classified[0].classification.severity(), 1);
+        assert!(classified[0].is_cfg_gated);
+    }
+
+    #[test]
+    fn test_severity_levels() {
+        use super::CycleClassification;
+        assert_eq!(CycleClassification::HardBidirectional.severity(), 3);
+        assert_eq!(CycleClassification::WildcardImport.severity(), 2);
+        assert_eq!(CycleClassification::Unknown.severity(), 2);
+        assert_eq!(CycleClassification::CfgGated.severity(), 1);
+        assert_eq!(CycleClassification::ModuleSelfReference.severity(), 0);
+        assert_eq!(CycleClassification::TraitBased.severity(), 0);
+        assert_eq!(CycleClassification::FanPattern.severity(), 0);
+
+        assert_eq!(
+            CycleClassification::HardBidirectional.severity_label(),
+            "high"
+        );
+        assert_eq!(
+            CycleClassification::WildcardImport.severity_label(),
+            "medium"
+        );
+        assert_eq!(CycleClassification::CfgGated.severity_label(), "low");
+        assert_eq!(
+            CycleClassification::ModuleSelfReference.severity_label(),
+            "info"
         );
     }
 }

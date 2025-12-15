@@ -266,7 +266,7 @@ pub fn compute_command_gaps_with_confidence(
                 let confidence = if string_literal_matches.is_empty() {
                     Confidence::High
                 } else {
-                    Confidence::Low
+                    Confidence::Smell // String literals suggest possible dynamic usage
                 };
 
                 Some(CommandGap {
@@ -429,7 +429,7 @@ mod tests {
 
     /// Tests confidence scoring for unused handlers.
     /// HIGH confidence = no string literal matches found.
-    /// LOW confidence = string literal matches found (may be dynamic usage).
+    /// SMELL confidence = string literal matches found (may be dynamic usage).
     #[test]
     fn confidence_scoring_for_unused_handlers() {
         use super::Confidence;
@@ -470,8 +470,8 @@ mod tests {
         assert_eq!(truly_unused.confidence, Some(Confidence::High));
         assert!(truly_unused.string_literal_matches.is_empty());
 
-        // get_pin_status should have LOW confidence (string literal match found)
-        assert_eq!(pin_status.confidence, Some(Confidence::Low));
+        // get_pin_status should have SMELL confidence (string literal match found)
+        assert_eq!(pin_status.confidence, Some(Confidence::Smell));
         assert!(!pin_status.string_literal_matches.is_empty());
     }
 

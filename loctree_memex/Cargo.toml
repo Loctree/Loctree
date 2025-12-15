@@ -1,6 +1,6 @@
 [package]
 name = "loctree_memex"
-version = "0.1.4"
+version = "0.1.10"
 edition = "2024"
 authors = ["Loctree <loct@loctree.io>"]
 description = "AI Memory integration for Loctree using rmcp_memex"
@@ -8,7 +8,7 @@ license = "MIT"
 
 [dependencies]
 # The core RAG/memory MCP server (now part of loctree monorepo)
-rmcp-memex = { path = "../rmcp_memex" }
+rmcp-memex = { version = "0.1.9", path = "../rmcp_memex" }
 
 # Serialization & CLI
 serde = { version = "1.0", features = ["derive"] }

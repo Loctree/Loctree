@@ -1,103 +1,230 @@
 {
   "name": "loctree",
-  "version": "0.6.12",
+  "version": "0.6.22",
   "tagline": "Scan once, slice many.",
-  "description": "AI-oriented codebase analyzer. Use BEFORE reading files manually.",
-  "install": "cargo install loctree",
+  "description": "AI-oriented codebase analyzer. Your GPS for navigating codebases - use BEFORE reading files manually.",
+
+  "install": {
+    "check": "which loct || loct --version",
+    "macos": "brew install loctree/loctree/loctree",
+    "linux": "cargo install loctree",
+    "windows": "cargo install loctree",
+    "fallback": "cargo install loctree",
+    "requires": "Rust toolchain (rustup.rs) if using cargo install",
+    "verify": "loct --version",
+    "note": "If loct CLI unavailable, check for .loctree/agent.json - pre-generated snapshot with same data"
+  },
+
+  "start_here": {
+    "cmd": "loct --for-ai",
+    "why": "Always run this FIRST. Returns JSON with health score, monoliths, hub files, quick wins - everything you need to plan your work.",
+    "example_output": {
+      "health_score": 100,
+      "files_analyzed": 1221,
+      "total_loc": 246248,
+      "dead_exports": 0,
+      "circular_imports": 0,
+      "quick_wins": ["opaque_passthrough types to fix"],
+      "hub_files": ["most imported files in codebase"],
+      "largest_files": ["monoliths to decompose"]
+    }
+  },
+
   "commands": {
     "scan": {
       "cmd": "loct",
-      "desc": "Scan project, save snapshot + reports to .loctree/"
+      "desc": "Scan project, save snapshot + reports to .loctree/",
+      "when": "After major changes or if snapshot is stale"
     },
     "ai_overview": {
       "cmd": "loct --for-ai",
-      "desc": "Project overview optimized for AI (JSON)"
+      "desc": "Project overview optimized for AI (JSON)",
+      "when": "FIRST command in any session"
     },
     "slice": {
       "cmd": "loct slice <file> --consumers --json",
-      "desc": "Extract file context with dependencies for AI"
-    },
-    "query_who_imports": {
-      "cmd": "loct query who-imports <file>",
-      "desc": "Files that import target (fast, no full scan)"
-    },
-    "query_where_symbol": {
-      "cmd": "loct query where-symbol <name>",
-      "desc": "Find symbol definitions across codebase"
-    },
-    "query_component": {
-      "cmd": "loct query component-of <file>",
-      "desc": "Graph component containing file"
-    },
-    "diff": {
-      "cmd": "loct diff --since <ref>",
-      "desc": "Compare snapshots (e.g., --since main, --since HEAD~5)"
-    },
-    "check_similar": {
-      "cmd": "loct find --similar <Name>",
-      "desc": "Find similar existing components before creating new"
-    },
-    "circular": {
-      "cmd": "loct cycles",
-      "desc": "Detect circular import cycles"
-    },
-    "dead_code": {
-      "cmd": "loct dead --confidence high",
-      "desc": "Find unused exports (pytest Test* ignored)"
-    },
-    "impact": {
-      "cmd": "loct find --impact <file>",
-      "desc": "What breaks if file is removed"
-    },
-    "trace": {
-      "cmd": "loct trace <handler>",
-      "desc": "Investigate Tauri handler FE<>BE usage"
-    },
-    "commands_missing": {
-      "cmd": "loct commands --missing",
-      "desc": "FE calls without BE handlers"
-    },
-    "commands_unused": {
-      "cmd": "loct commands --unused",
-      "desc": "BE handlers without FE calls"
-    },
-    "lint_ci": {
-      "cmd": "loct lint --fail --sarif",
-      "desc": "CI guardrails with SARIF output"
-    },
-    "crowd_auto": {
-      "cmd": "loct crowd",
-      "desc": "Auto-detect crowds (clusters of similar files)"
-    },
-    "crowd_pattern": {
-      "cmd": "loct crowd <pattern>",
-      "desc": "Detect crowd around a pattern (e.g., \"message\")"
+      "desc": "Extract file context with dependencies",
+      "when": "Before modifying any file - see who imports it",
+      "example_output": "imports: [...], importers: [...], loc: 2611"
     },
     "twins": {
       "cmd": "loct twins",
-      "desc": "Dead parrots + exact twins + barrel chaos"
+      "desc": "Dead parrots + exact twins + barrel chaos",
+      "when": "Before cleanup or when health score is low",
+      "example_output": "62 dead parrots, 109 re-export chains, 5 barrel chaos files"
     },
-    "twins_dead_only": {
-      "cmd": "loct twins --dead-only",
-      "desc": "Only exports with 0 imports (dead parrots)"
+    "crowd_pattern": {
+      "cmd": "loct crowd <pattern>",
+      "desc": "Find cluster of related files around a pattern",
+      "when": "Before refactoring a feature area",
+      "example_output": "63 files, score 10/10 (HIGH attention), path: src/features/ai-suite"
+    },
+    "crowd_auto": {
+      "cmd": "loct crowd",
+      "desc": "Auto-detect all crowds in codebase",
+      "when": "Understanding overall codebase structure"
+    },
+    "query_who_imports": {
+      "cmd": "loct query who-imports <file>",
+      "desc": "Files that import target (fast, no full scan)",
+      "when": "Before changing exports or deleting file"
+    },
+    "query_where_symbol": {
+      "cmd": "loct query where-symbol <name>",
+      "desc": "Find symbol definitions across codebase",
+      "when": "Before creating new component/type/function"
+    },
+    "query_component": {
+      "cmd": "loct query component-of <file>",
+      "desc": "Graph component containing file",
+      "when": "Understanding file's place in architecture"
+    },
+    "check_similar": {
+      "cmd": "loct find --similar <Name>",
+      "desc": "Find similar existing components",
+      "when": "BEFORE creating anything new - avoid duplication"
+    },
+    "impact": {
+      "cmd": "loct impact <file>",
+      "desc": "Show what breaks if you modify/remove a file",
+      "when": "Before deleting, renaming, or major refactor",
+      "flags": ["--json", "--depth N"],
+      "example": "loct impact src/utils/auth.ts",
+      "example_output": "5 direct consumers, 23 transitive consumers, max depth: 4"
+    },
+    "circular": {
+      "cmd": "loct cycles",
+      "desc": "Detect circular import cycles",
+      "when": "After refactor or when builds fail mysteriously"
+    },
+    "dead_code": {
+      "cmd": "loct dead --confidence high",
+      "desc": "Find unused exports (pytest Test* ignored)",
+      "when": "Cleanup phase"
+    },
+    "health": {
+      "cmd": "loct health",
+      "desc": "Quick health check: cycles + dead + twins summary",
+      "when": "Quick sanity check before commits or in CI",
+      "flags": ["--json", "--include-tests"],
+      "example_output": "Cycles: 3 total (2 hard, 1 structural)\nDead: 6 high confidence, 24 low\nTwins: 2 duplicate symbol groups"
+    },
+    "diff": {
+      "cmd": "loct diff --since <ref>",
+      "desc": "Compare snapshots (e.g., --since main, --since HEAD~5)",
+      "when": "Before PR review or after branch merge",
+      "flags": ["--auto-scan-base", "--json"],
+      "new": "--auto-scan-base: zero-friction branch comparison (auto-scans base ref if needed)",
+      "example": "loct diff --auto-scan-base --since main"
+    },
+    "watch": {
+      "cmd": "loct --watch",
+      "desc": "Live refresh during development - auto re-scan on file changes",
+      "when": "Active development session with frequent changes",
+      "example": "loct --watch",
+      "note": "Watches for file changes and automatically re-runs scan"
+    },
+    "trace": {
+      "cmd": "loct trace <handler>",
+      "desc": "Investigate Tauri/IPC handler FE<>BE usage",
+      "when": "Debugging frontend-backend communication"
+    },
+    "commands_missing": {
+      "cmd": "loct commands --missing",
+      "desc": "Frontend calls without backend handlers",
+      "when": "After adding invoke() calls"
+    },
+    "commands_unused": {
+      "cmd": "loct commands --unused",
+      "desc": "Backend handlers without frontend calls",
+      "when": "Cleanup dead backend code"
+    },
+    "lint_ci": {
+      "cmd": "loct lint --fail --sarif",
+      "desc": "CI guardrails with SARIF output",
+      "when": "CI pipeline integration"
+    },
+    "jq_large_files": {
+      "cmd": "loct '.files[] | select(.loc > 500)' -c",
+      "desc": "Find files with >500 LOC (monolith candidates)",
+      "when": "Identifying decomposition targets"
+    },
+    "jq_metadata": {
+      "cmd": "loct '.metadata'",
+      "desc": "Extract snapshot metadata",
+      "when": "Checking snapshot freshness"
     }
   },
+
   "workflows": {
-    "before_new_component": ["check_similar", "query_where_symbol", "twins"],
-    "before_refactor": ["slice", "impact", "circular", "query_who_imports"],
-    "debugging_tauri": ["trace", "commands_missing", "commands_unused"],
-    "compare_branches": ["diff"],
-    "find_crowds": ["crowd_auto", "crowd_pattern"],
-    "cleanup_dead_code": ["twins", "dead_code"]
+    "new_session": {
+      "steps": ["ai_overview"],
+      "desc": "Start every session here - get the lay of the land"
+    },
+    "before_creating_anything": {
+      "steps": ["check_similar", "query_where_symbol", "twins"],
+      "desc": "1. Check if similar exists, 2. Find where symbols are defined, 3. Check for dead code patterns"
+    },
+    "before_removing_file": {
+      "steps": ["impact", "query_who_imports", "slice"],
+      "desc": "1. Use 'loct impact' to see what breaks, 2. Check all importers, 3. Get full context"
+    },
+    "before_refactor": {
+      "steps": ["slice", "query_who_imports", "impact", "circular"],
+      "desc": "1. Get file context, 2. See importers, 3. Check impact, 4. Verify no cycles"
+    },
+    "iterative_development": {
+      "steps": ["watch"],
+      "desc": "Use 'loct --watch' for live refresh during active development - no manual re-scans needed"
+    },
+    "decompose_monolith": {
+      "steps": ["slice", "crowd_pattern", "twins", "query_who_imports"],
+      "desc": "1. Understand monolith structure, 2. Find related files, 3. Check for dead exports, 4. Plan safe extraction"
+    },
+    "debugging_tauri": {
+      "steps": ["trace", "commands_missing", "commands_unused"],
+      "desc": "1. Trace specific handler, 2. Find missing handlers, 3. Find unused handlers"
+    },
+    "cleanup_dead_code": {
+      "steps": ["twins", "dead_code", "impact"],
+      "desc": "1. Find dead parrots and barrel chaos, 2. Find unused exports, 3. Verify safe to delete"
+    },
+    "pr_review": {
+      "steps": ["diff", "circular", "twins"],
+      "desc": "1. See what changed, 2. Check for new cycles, 3. Check for new dead code"
+    },
+    "quick_sanity_check": {
+      "steps": ["health"],
+      "desc": "Quick summary before commit - cycles + dead + twins in one command"
+    }
   },
+
+  "avoid": {
+    "dont_grep_imports": "Use `loct query who-imports` instead of grep/rg for import tracing",
+    "dont_guess_structure": "Use `loct --for-ai` instead of exploring with ls/find",
+    "dont_create_duplicates": "Use `loct find --similar` before creating new components",
+    "dont_delete_blindly": "Use `loct impact <file>` before removing files - see full impact tree",
+    "dont_ignore_twins": "Dead parrots accumulate fast - run `loct twins` regularly",
+    "dont_manual_rescan": "Use `loct --watch` instead of manually re-running scans during development"
+  },
+
+  "fallback": {
+    "when": "loct CLI not installed or not working",
+    "use": ".loctree/agent.json",
+    "desc": "Pre-generated snapshot file with same data as `loct --for-ai`. Check if exists in project root."
+  },
+
   "ide_integration": {
     "url_scheme": "loctree://open?f=<file>&l=<line>",
-    "sarif_output": "loct lint --sarif > results.sarif"
+    "sarif_output": "loct lint --sarif > results.sarif",
+    "vscode": "Install SARIF Viewer extension for inline warnings"
   },
+
   "links": {
     "docs": "https://docs.rs/loctree",
     "github": "https://github.com/Loctree/Loctree",
     "crates": "https://crates.io/crates/loctree",
+    "homebrew": "https://github.com/Loctree/homebrew-loctree",
     "blog": "https://loctree.io/#blog"
   }
 }

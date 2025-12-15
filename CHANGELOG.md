@@ -4,7 +4,73 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
-## [Unreleased]
+## [0.6.23] - 2025-12-15
+
+### Added
+- **`loct audit` command** — Full codebase audit with actionable findings in one command
+  - Combines ALL structural analyses: cycles + dead + twins + orphans + shadows + crowds
+  - Perfect for getting a complete picture of codebase health on day one
+  - Shows summary with counts and top findings for each category
+  - Supports `--json` for CI integration and `--include-tests` for test files
+  - Usage: `loct audit`, `loct audit --json`, `loct audit src/`
+  - Designed for agents and developers who want actionable feedback immediately
+
+### Technical
+- Added `Audit` command variant and `AuditOptions` struct
+- Implemented `handle_audit_command` in analysis handlers
+- Aggregates: cycles, dead exports, twins, orphan files, shadow exports, crowds
+
+## [0.6.22] - 2025-12-15
+
+### Added
+- **`loct health` command** — Quick health check summary in one command
+  - Combines cycles + dead exports + twins analysis into a single summary
+  - Shows: cycle count (hard/structural), dead exports (high/low confidence), twins count
+  - Supports `--json` for CI integration
+  - Usage: `loct health`, `loct health --json`, `loct health src/`
+  - Designed for quick sanity checks before commits or in CI pipelines
+
+### Technical
+- Added `Health` command variant and `HealthOptions` struct
+- Implemented `handle_health_command` in analysis handlers
+
+## [0.6.15] - 2025-12-13
+
+### Added
+- **jq-style query mode** — Query snapshot data directly with jq syntax
+  - `loct '.metadata'` — Extract metadata from snapshot
+  - `loct '.files | length'` — Count files in codebase
+  - `loct '.edges[] | select(.from | contains("api"))'` — Filter edges
+  - Uses jaq (Rust-native jq implementation) for zero external dependencies
+  - Flags: `-r` (raw), `-c` (compact), `-e` (exit status), `--arg`, `--argjson`
+  - Auto-discovers latest snapshot from `.loctree/*/snapshot.json`
+  - Explicit snapshot: `loct '.files' --snapshot path/to/snapshot.json`
+  - Usage: `loct '<filter>' [flags]` — filter must come before flags
+
+- **Progress spinners** — Visual feedback during `loct auto`:
+  - "Building snapshot..." spinner after scanning completes
+  - "Generating artifacts..." spinner before writing reports
+  - Eliminates "dead time" between scan and output
+
+- **`find_latest_snapshot_in(root)` API** — Thread-safe snapshot discovery
+  - Allows passing explicit root directory instead of relying on `cwd`
+  - Fixes flaky tests in parallel execution environments
+
+### Changed
+- **Dirty worktree now allows fresh scans** — Previously, dirty worktree would skip scanning even when files changed. Now only clean worktree + same commit skips (actual no-change scenario). Users can scan during refactoring without committing first.
+
+- **Updated "Next steps" output** — Now shows modern commands:
+  - `loct --for-ai` (project overview for AI agents)
+  - `loct slice <file> --json` (context extraction)
+  - `loct twins` (dead parrots + duplicates)
+  - `loct '.files | length'` (jq queries)
+  - `loct query who-imports <f>` (quick graph queries)
+
+### Fixed
+- **Thread-safe snapshot tests** — Removed `set_current_dir` calls that caused race conditions in parallel test execution
+
+### Technical
+- Added version requirement (`0.6.15`) to `loctree_server` dependency for crates.io publishing
 
 ## [0.6.9] - 2025-12-11
 

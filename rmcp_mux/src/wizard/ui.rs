@@ -118,7 +118,7 @@ pub fn draw_service_list(f: &mut Frame, app: &AppState, area: Rect) {
         .map(|(i, svc)| {
             // Selection checkbox
             let checkbox = if svc.selected {
-                Span::styled("[✓] ", Style::default().fg(Color::Green))
+                Span::styled("[x] ", Style::default().fg(Color::Green))
             } else {
                 Span::styled("[ ] ", Style::default().fg(Color::DarkGray))
             };
@@ -277,7 +277,7 @@ pub fn draw_client_list(f: &mut Frame, app: &AppState, area: Rect) {
         .map(|(i, client)| {
             // Selection checkbox
             let checkbox = if client.selected {
-                Span::styled("[✓] ", Style::default().fg(Color::Green))
+                Span::styled("[x] ", Style::default().fg(Color::Green))
             } else {
                 Span::styled("[ ] ", Style::default().fg(Color::DarkGray))
             };
@@ -507,7 +507,7 @@ pub fn draw_summary(f: &mut Frame, app: &AppState, area: Rect) {
     ];
 
     for name in &selected_servers {
-        lines.push(Line::from(format!("  ✓ {}", name)));
+        lines.push(Line::from(format!("  [x] {}", name)));
     }
 
     lines.push(Line::from(""));
@@ -517,7 +517,7 @@ pub fn draw_summary(f: &mut Frame, app: &AppState, area: Rect) {
     )));
 
     for name in &selected_clients {
-        lines.push(Line::from(format!("  ✓ {}", name)));
+        lines.push(Line::from(format!("  [x] {}", name)));
     }
 
     let summary = Paragraph::new(lines)
@@ -658,7 +658,7 @@ pub fn draw_health_check_info(f: &mut Frame, app: &AppState, area: Rect) {
     ];
 
     for name in &selected_servers {
-        lines.push(Line::from(format!("  ✓ {}", name)));
+        lines.push(Line::from(format!("  [x] {}", name)));
     }
 
     lines.push(Line::from(""));
@@ -668,7 +668,7 @@ pub fn draw_health_check_info(f: &mut Frame, app: &AppState, area: Rect) {
     )));
 
     for name in &selected_clients {
-        lines.push(Line::from(format!("  ✓ {}", name)));
+        lines.push(Line::from(format!("  [x] {}", name)));
     }
 
     let info = Paragraph::new(lines)

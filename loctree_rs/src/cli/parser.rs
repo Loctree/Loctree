@@ -11,9 +11,39 @@ use crate::types::ColorMode;
 
 /// Known subcommand names for the new CLI interface.
 const SUBCOMMANDS: &[&str] = &[
-    "auto", "agent", "scan", "tree", "slice", "find", "dead", "unused", "cycles", "commands",
-    "events", "info", "lint", "report", "help", "query", "diff", "memex", "crowd", "twins",
-    "routes", "dist", "coverage",
+    "auto",
+    "agent",
+    "scan",
+    "tree",
+    "slice",
+    "find",
+    "dead",
+    "unused",
+    "cycles",
+    "commands",
+    "events",
+    "info",
+    "lint",
+    "report",
+    "help",
+    "query",
+    "diff",
+    "memex",
+    "crowd",
+    "tagmap",
+    "twins",
+    "suppress",
+    "routes",
+    "dist",
+    "coverage",
+    "sniff",
+    "impact",
+    "focus",
+    "hotspots",
+    "layoutmap",
+    "zombie",
+    "health",
+    "audit",
 ];
 
 /// Check if an argument looks like a new-style subcommand.
@@ -21,23 +51,68 @@ pub fn is_subcommand(arg: &str) -> bool {
     SUBCOMMANDS.contains(&arg)
 }
 
+/// Check if argument looks like a jq filter expression
+fn is_jq_filter(arg: &str) -> bool {
+    let trimmed = arg.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    // Starts with . [ or { = jq filter
+    if trimmed.starts_with('.') || trimmed.starts_with('[') || trimmed.starts_with('{') {
+        // But not path-like ./foo or .\foo
+        if trimmed.starts_with("./") || trimmed.starts_with(".\\") {
+            return false;
+        }
+        // If it's a dotfile that exists on disk, treat as path
+        if trimmed.starts_with('.')
+            && !trimmed.contains('[')
+            && !trimmed.contains('|')
+            && std::path::Path::new(trimmed).exists()
+        {
+            return false;
+        }
+        return true;
+    }
+    false
+}
+
 /// Check if the argument list appears to use new-style subcommands.
 ///
 /// Returns true if the first non-flag argument is a known subcommand,
 /// or if only global flags like --help/--version are present.
 pub fn uses_new_syntax(args: &[String]) -> bool {
-    for arg in args {
+    let mut i = 0;
+    while i < args.len() {
+        let arg = &args[i];
+
         // Skip global flags that can appear before subcommand
         if arg == "--json"
             || arg == "--quiet"
             || arg == "--verbose"
-            || arg.starts_with("--color")
             || arg == "--library-mode"
+            || arg == "--python-library"
+            || arg == "--for-ai"
+            || arg == "--watch"
             || arg == "-v"
             || arg == "-q"
         {
+            i += 1;
             continue;
         }
+
+        // Handle flags with optional/required values
+        if arg.starts_with("--color") || arg.starts_with("--py-root") {
+            // --color=auto or --py-root=Lib (value in same arg)
+            if arg.contains('=') {
+                i += 1;
+            } else {
+                // --color auto or --py-root Lib (value in next arg)
+                i += 2;
+            }
+            continue;
+        }
+
         // These are always valid in new syntax (not legacy-specific)
         if arg == "--help"
             || arg == "-h"
@@ -52,8 +127,8 @@ pub fn uses_new_syntax(args: &[String]) -> bool {
         if arg.starts_with('-') {
             return false;
         }
-        // First positional argument - check if it's a subcommand
-        return is_subcommand(arg);
+        // First positional argument - check if it's a subcommand or jq filter
+        return is_subcommand(arg) || is_jq_filter(arg);
     }
     // No arguments = default to auto (new syntax)
     true
@@ -76,6 +151,14 @@ pub fn parse_command(args: &[String]) -> Result<Option<ParsedCommand>, String> {
     let mut global = GlobalOptions::default();
     let mut remaining_args: Vec<String> = Vec::new();
     let mut subcommand: Option<String> = None;
+    let mut for_ai_alias = false;
+    let mut watch_alias = false;
+
+    // Check for jq-style query before extracting global options
+    // This allows: loct '.metadata' to work without conflicts
+    if !args.is_empty() && is_jq_filter(&args[0]) {
+        return parse_jq_query_command(args, &global).map(Some);
+    }
 
     // First pass: extract global options and find subcommand
     let mut i = 0;
@@ -115,6 +198,18 @@ pub fn parse_command(args: &[String]) -> Result<Option<ParsedCommand>, String> {
             }
             "--python-library" => {
                 global.python_library = true;
+                i += 1;
+            }
+            "--py-root" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--py-root requires a path".to_string())?;
+                global.py_roots.push(PathBuf::from(value));
+                i += 2;
+            }
+            _ if arg.starts_with("--py-root=") => {
+                let value = arg.trim_start_matches("--py-root=");
+                global.py_roots.push(PathBuf::from(value));
                 i += 1;
             }
             "--help" | "-h" => {
@@ -166,6 +261,10 @@ pub fn parse_command(args: &[String]) -> Result<Option<ParsedCommand>, String> {
         }
     }
 
+    if subcommand.is_none() && watch_alias {
+        subcommand = Some("scan".to_string());
+    }
+
     // Parse the specific command
     if let Some(sub) = subcommand.as_deref()
         && remaining_args.iter().any(|a| a == "--help" || a == "-h")
@@ -179,7 +278,7 @@ pub fn parse_command(args: &[String]) -> Result<Option<ParsedCommand>, String> {
         )));
     }
 
-    let command = match subcommand.as_deref() {
+    let mut command = match subcommand.as_deref() {
         None | Some("auto") => parse_auto_command(&remaining_args)?,
         Some("agent") => {
             let cmd = parse_auto_command(&remaining_args)?;
@@ -206,12 +305,22 @@ pub fn parse_command(args: &[String]) -> Result<Option<ParsedCommand>, String> {
         Some("report") => parse_report_command(&remaining_args)?,
         Some("help") => parse_help_command(&remaining_args)?,
         Some("query") => parse_query_command(&remaining_args)?,
+        Some("impact") => parse_impact_command(&remaining_args)?,
         Some("diff") => parse_diff_command(&remaining_args)?,
         Some("memex") => parse_memex_command(&remaining_args)?,
         Some("crowd") => parse_crowd_command(&remaining_args)?,
+        Some("tagmap") => parse_tagmap_command(&remaining_args)?,
         Some("twins") => parse_twins_command(&remaining_args)?,
+        Some("suppress") => parse_suppress_command(&remaining_args)?,
+        Some("sniff") => parse_sniff_command(&remaining_args)?,
         Some("dist") => parse_dist_command(&remaining_args)?,
         Some("coverage") => parse_coverage_command(&remaining_args)?,
+        Some("focus") => parse_focus_command(&remaining_args)?,
+        Some("hotspots") => parse_hotspots_command(&remaining_args)?,
+        Some("layoutmap") => parse_layoutmap_command(&remaining_args)?,
+        Some("zombie") => parse_zombie_command(&remaining_args)?,
+        Some("health") => parse_health_command(&remaining_args)?,
+        Some("audit") => parse_audit_command(&remaining_args)?,
         Some(unknown) => {
             return Err(format!(
                 "Unknown command '{}'. Run 'loct --help' for available commands.",
@@ -349,6 +458,7 @@ DESCRIPTION:
 OPTIONS:
     --full-scan       Force full rescan, ignore cached data
     --scan-all        Include hidden and ignored files
+    --watch           Watch for changes and re-scan automatically
     --help, -h        Show this help message
 
 ARGUMENTS:
@@ -358,7 +468,8 @@ EXAMPLES:
     loct scan                    # Scan current directory
     loct scan --full-scan        # Force complete rescan
     loct scan src/ lib/          # Scan specific directories
-    loct scan --scan-all         # Include all files (even hidden)"
+    loct scan --scan-all         # Include all files (even hidden)
+    loct scan --watch            # Watch mode with live refresh"
             .to_string());
     }
 
@@ -374,6 +485,10 @@ EXAMPLES:
             }
             "--scan-all" => {
                 opts.scan_all = true;
+                i += 1;
+            }
+            "--watch" => {
+                opts.watch = true;
                 i += 1;
             }
             _ if !arg.starts_with('-') => {
@@ -519,35 +634,55 @@ EXAMPLES:
 fn parse_slice_command(args: &[String]) -> Result<Command, String> {
     // Check for help flag first
     if args.iter().any(|a| a == "--help" || a == "-h") {
-        return Err("loct slice - Extract holographic context for a file
+        return Err("loct slice - Extract file + dependencies for AI context
 
 USAGE:
-    loct slice [OPTIONS] <TARGET_PATH>
+    loct slice <TARGET_PATH> [OPTIONS]
 
 DESCRIPTION:
-    Extracts a 'holographic slice' - the minimal context needed to
-    understand a specific file. Shows its dependencies (imports) and
-    optionally its consumers (what imports it).
+    Extracts a 'holographic slice' - the target file plus all its dependencies
+    (what it imports). This creates a minimal, focused context perfect for AI assistants.
 
-    This is useful for:
-    - Understanding a file's context before editing
-    - Feeding relevant code to AI assistants
-    - Analyzing impact of changes to a file
+    The slice includes:
+    - Core: The target file itself
+    - Dependencies: All files it imports (direct and transitive)
+    - Consumers (optional): Files that import the target (--consumers flag)
+
+    Perfect for:
+    - Feeding relevant code context to AI agents
+    - Understanding what a file depends on before editing
+    - Analyzing potential impact of changes
+
+    NOT impact analysis - this shows what the file USES, not what USES it.
+    For reverse dependencies, use --consumers or 'loct query who-imports <file>'.
 
 OPTIONS:
-    --consumers, -c      Include files that import the target (reverse deps)
+    --consumers, -c      Include reverse dependencies (files that import this file)
     --depth <N>          Maximum dependency depth to traverse (default: unlimited)
     --root <PATH>        Project root for resolving relative imports
+    --rescan             Force snapshot update before slicing (includes new/uncommitted files)
     --help, -h           Show this help message
 
 ARGUMENTS:
-    <TARGET_PATH>        Path to the file to analyze (required)
+    <TARGET_PATH>        Path to the file to extract context for (required)
 
 EXAMPLES:
-    loct slice src/main.rs                  # Show dependencies of main.rs
-    loct slice src/utils.ts --consumers     # Show deps and consumers
-    loct slice lib/api.ts --depth 2         # Limit to 2 levels deep
-    loct slice src/app.tsx --root ./        # Specify project root"
+    loct slice src/main.rs                   # File + its dependencies
+    loct slice src/utils.ts --consumers      # Include files that import utils.ts
+    loct slice lib/api.ts --depth 2          # Limit to 2 dependency levels
+    loct slice src/app.tsx --json            # JSON output for AI tools
+    loct slice src/component.tsx --consumers --json > context.json
+
+OUTPUT FORMAT:
+    Shows 3 layers:
+    1. Core:       The target file (1 file)
+    2. Deps:       Dependencies (what it imports)
+    3. Consumers:  Reverse deps (what imports it) - only with --consumers
+
+RELATED COMMANDS:
+    loct query who-imports <file>   Find all files that import a specific file
+    loct find --impact <file>       Find symbols affected by changes (removed in v0.6)
+    loct auto --for-agent-feed      Full codebase context for AI agents"
             .to_string());
     }
 
@@ -574,6 +709,10 @@ EXAMPLES:
                     .ok_or_else(|| "--root requires a path".to_string())?;
                 opts.root = Some(PathBuf::from(value));
                 i += 2;
+            }
+            "--rescan" => {
+                opts.rescan = true;
+                i += 1;
             }
             _ if !arg.starts_with('-') => {
                 if opts.target.is_empty() {
@@ -604,28 +743,31 @@ EXAMPLES:
 fn parse_find_command(args: &[String]) -> Result<Command, String> {
     // Check for help flag first
     if args.iter().any(|a| a == "--help" || a == "-h") {
-        return Err("loct find - Search symbols/files with regex filters
+        return Err("loct find - Semantic search for symbols by name pattern
 
 USAGE:
     loct find [QUERY] [OPTIONS]
 
 DESCRIPTION:
-    Powerful search across the codebase with multiple filter modes.
-    Supports regex patterns for symbols and file names, plus special
-    modes for impact analysis and similarity detection.
+    Semantic search for symbols (functions, classes, types) matching a name pattern.
+    Uses regex patterns to match symbol names in your codebase.
 
-    Search modes:
-    - Symbol search: Find functions, classes, types by name pattern
-    - File search: Find files by path pattern
-    - Impact analysis: Find all symbols affected by a file change
-    - Similarity: Find symbols with similar names
+    NOT impact analysis - for dependency impact, see your editor's LSP or loctree graph.
+    NOT dead code detection - for that, use 'loct dead' or 'loct twins'.
+
+    This command searches the symbol index built during 'loct scan' and finds
+    definitions/exports matching your query pattern.
+
+SEARCH MODES:
+    Symbol search (default)   Find symbols by name pattern (regex supported)
+    File search               Find files by path pattern (--file flag)
+    Similarity search         Find similar symbol names (--similar flag)
 
 OPTIONS:
     --symbol <PATTERN>, -s <PATTERN>    Search for symbols matching regex
     --pattern <PATTERN>                 Alias for --symbol (regex)
     --file <PATTERN>, -f <PATTERN>      Search for files matching regex
-    --impact <FILE>                     Show symbols affected by file changes
-    --similar <SYMBOL>                  Find symbols with similar names
+    --similar <SYMBOL>                  Find symbols with similar names (fuzzy)
     --dead                              Only show dead/unused symbols
     --exported                          Only show exported symbols
     --lang <LANG>                       Filter by language (ts, rs, js, py, etc.)
@@ -638,12 +780,18 @@ ARGUMENTS:
 EXAMPLES:
     loct find Patient                   # Find symbols containing \"Patient\"
     loct find --symbol \".*Config$\"      # Regex: symbols ending with Config
+    loct find --symbol \"use.*Hook\"      # Find hook functions (useAuth, useState, etc.)
     loct find --file \"utils\"            # Files containing \"utils\" in path
-    loct find --symbol Patient --lang ts # TypeScript Patient symbols
+    loct find --symbol Patient --lang ts # TypeScript Patient symbols only
     loct find --dead --exported         # Dead exported symbols
-    loct find --impact src/api.ts       # What's affected by api.ts changes
-    loct find --similar handleClick     # Find similarly named handlers
-    loct find --limit 50                # Limit to 50 results"
+    loct find --similar handleClick     # Find similarly named handlers (fuzzy match)
+    loct find --limit 50                # Limit to 50 results
+
+RELATED COMMANDS:
+    loct dead              Detect unused exports / dead code
+    loct twins             Find duplicate exports and dead parrots (0 imports)
+    loct slice <file>      Extract file dependencies (what it imports)
+    loct query who-imports Show what imports a specific file"
             .to_string());
     }
 
@@ -820,6 +968,10 @@ RUST CRATE-INTERNAL IMPORTS:
                 opts.with_helpers = true;
                 i += 1;
             }
+            "--with-shadows" => {
+                opts.with_shadows = true;
+                i += 1;
+            }
             _ if !arg.starts_with('-') => {
                 opts.roots.push(PathBuf::from(arg));
                 i += 1;
@@ -840,34 +992,64 @@ RUST CRATE-INTERNAL IMPORTS:
 fn parse_cycles_command(args: &[String]) -> Result<Command, String> {
     // Check for help flag first
     if args.iter().any(|a| a == "--help" || a == "-h") {
-        return Err("loct cycles - Detect circular imports
+        return Err("loct cycles - Detect circular import chains
 
 USAGE:
     loct cycles [OPTIONS] [PATHS...]
 
 DESCRIPTION:
-    Detects circular import dependencies in your codebase.
-    Circular imports can cause:
-    - Runtime initialization errors
-    - Undefined behavior in module loading
-    - Confusing dependency graphs
-    - Build/bundling issues
+    Detects circular dependencies in your import graph and classifies them
+    by compilability impact.
 
-    This command analyzes the import graph and reports all cycles,
-    grouped by severity and size.
+    Cycles are grouped into three categories:
+    🔴 Breaking    - Would fail compilation (runtime circular value deps)
+    🟡 Structural  - Reference patterns that compile OK (mod/use, traits)
+    🟢 Diamond     - Not true cycles, just shared dependencies
+
+    Most detected \"cycles\" in real code are Structural or Diamond patterns
+    that compile successfully. True Breaking cycles are rare.
 
 OPTIONS:
     --path <PATTERN>     Filter to files matching path pattern
+    --breaking-only      Only show cycles that would break compilation
+    --explain            Show detailed explanation for each cycle
+    --legacy             Use legacy output format (old grouping by pattern)
     --help, -h           Show this help message
 
 ARGUMENTS:
     [PATHS...]           Root directories to analyze (default: current directory)
 
 EXAMPLES:
-    loct cycles                       # Detect all cycles in current dir
+    loct cycles                       # Show all cycles with new format
+    loct cycles --breaking-only       # Only show compilation-breaking cycles
+    loct cycles --explain             # Detailed pattern explanations
     loct cycles src/                  # Only analyze src/ directory
-    loct cycles --path components/    # Cycles involving components/
-    loct cycles --json                # JSON output for CI/CD"
+    loct cycles --json                # JSON output for CI/CD integration
+
+OUTPUT FORMAT (NEW):
+    🔴 Breaking Cycles (0) - Will fail compilation
+       (none - great!)
+
+    🟡 Structural Cycles (4) - Reference patterns, compile OK
+       #1 types/ai.rs ↔ types/mod.rs (2 files)
+          Pattern: Rust mod/use separation
+          Risk: low (Rust pattern, OK)
+          Suggestion: Idiomatic Rust - no action needed
+
+    🟢 Diamond Dependencies (1) - Shared modules, not cycles
+       (not shown by default, use --explain)
+
+    Summary: 0 breaking, 4 structural, 1 diamond
+
+FIXING CYCLES:
+    1. Breaking: Extract shared code into a separate file
+    2. Structural: Usually OK, review if coupling is excessive
+    3. Diamond: Good architecture - shared utilities are fine
+
+RELATED COMMANDS:
+    loct slice <file>          See what a file depends on
+    loct query who-imports     Find files that import a specific file
+    loct lint --fail           Run as CI check (exit code 1 if cycles found)"
             .to_string());
     }
 
@@ -883,6 +1065,18 @@ EXAMPLES:
                     .ok_or_else(|| "--path requires a pattern".to_string())?;
                 opts.path_filter = Some(value.clone());
                 i += 2;
+            }
+            "--breaking-only" => {
+                opts.breaking_only = true;
+                i += 1;
+            }
+            "--explain" => {
+                opts.explain = true;
+                i += 1;
+            }
+            "--legacy" => {
+                opts.legacy_format = true;
+                i += 1;
             }
             _ if !arg.starts_with('-') => {
                 opts.roots.push(PathBuf::from(arg));
@@ -1011,8 +1205,8 @@ DESCRIPTION:
     Helps maintain event contract integrity in Tauri applications.
 
 OPTIONS:
-    --ghost      Show only ghost events (emitted but never listened)
-    --orphan     Show only orphan listeners (listening but never emitted)
+    --ghost(s)   Show only ghost events (emitted but never listened)
+    --orphan(s)  Show only orphan listeners (listening but never emitted)
     --races      Show only potential race conditions (multiple emitters)
     --no-duplicates      Hide duplicate export sections in CLI output
     --no-dynamic-imports Hide dynamic import sections in CLI output
@@ -1032,11 +1226,11 @@ EXAMPLES:
     while i < args.len() {
         let arg = &args[i];
         match arg.as_str() {
-            "--ghost" => {
+            "--ghost" | "--ghosts" => {
                 opts.ghost = true;
                 i += 1;
             }
-            "--orphan" => {
+            "--orphan" | "--orphans" => {
                 opts.orphan = true;
                 i += 1;
             }
@@ -1050,6 +1244,10 @@ EXAMPLES:
             }
             "--no-dynamic-imports" => {
                 opts.suppress_dynamic = true;
+                i += 1;
+            }
+            "--fe-sync" => {
+                opts.fe_sync = true;
                 i += 1;
             }
             _ if !arg.starts_with('-') => {
@@ -1376,29 +1574,48 @@ fn parse_help_command(args: &[String]) -> Result<Command, String> {
 fn parse_query_command(args: &[String]) -> Result<Command, String> {
     // Check for help flag first
     if args.iter().any(|a| a == "--help" || a == "-h") {
-        return Err("loct query - Query snapshot data
+        return Err("loct query - Graph queries (who-imports, who-exports, etc.)
 
 USAGE:
     loct query <KIND> <TARGET>
 
 DESCRIPTION:
-    Query the import graph and symbol index for specific information:
+    Query the import graph and symbol index for specific relationships.
 
-    who-imports <FILE>      Find all files that import the specified file
-    where-symbol <SYMBOL>   Find where a symbol is defined/exported
-    component-of <FILE>     Show which components/modules contain this file
-
-    Results include import paths, symbol locations, and dependency chains.
+    These are targeted queries against the dependency graph built by 'loct scan'.
+    Perfect for answering specific questions about code relationships.
 
 QUERY KINDS:
-    who-imports       List all importers of a file
-    where-symbol      Locate symbol definitions and exports
-    component-of      Show containing components/modules
+    who-imports <FILE>        Find all files that import the specified file
+                              (reverse dependencies / consumers)
+
+    where-symbol <SYMBOL>     Find where a symbol is defined/exported
+                              (symbol location lookup)
+
+    component-of <FILE>       Show which components/modules contain this file
+                              (ownership/hierarchy)
+
+ARGUMENTS:
+    <KIND>      Query type (who-imports, where-symbol, component-of)
+    <TARGET>    Target file path or symbol name
 
 EXAMPLES:
-    loct query who-imports src/utils.ts        # Who imports utils.ts?
+    loct query who-imports src/utils.ts        # What files import utils.ts?
     loct query where-symbol PatientRecord      # Where is PatientRecord defined?
-    loct query component-of src/ui/Button.tsx  # What component owns Button?"
+    loct query component-of src/ui/Button.tsx  # What owns Button.tsx?
+    loct query who-imports lib/api.ts --json   # JSON output for automation
+
+OUTPUT:
+    Results show:
+    - File paths (absolute or relative)
+    - Import chains (how files are connected)
+    - Symbol locations (file + line number)
+    - Dependency depth (how many hops)
+
+RELATED COMMANDS:
+    loct slice <file>           Show what a file depends on (forward deps)
+    loct find --symbol <name>   Search for symbols by pattern
+    loct dead                   Find symbols with 0 imports"
             .to_string());
     }
 
@@ -1427,37 +1644,137 @@ EXAMPLES:
     Ok(Command::Query(QueryOptions { kind, target }))
 }
 
+fn parse_impact_command(args: &[String]) -> Result<Command, String> {
+    // Check for help flag first
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        return Err("loct impact - Analyze impact of modifying/removing a file
+
+USAGE:
+    loct impact <FILE> [OPTIONS]
+
+DESCRIPTION:
+    Shows \"what breaks if you modify or remove this file\" by traversing
+    the reverse dependency graph. Finds all direct and transitive consumers.
+
+OPTIONS:
+    --depth <N>          Limit traversal depth (default: unlimited)
+    --root <PATH>        Project root (default: current directory)
+    --help, -h           Show this help message
+
+ARGUMENTS:
+    <FILE>               Path to the file to analyze (required)
+
+EXAMPLES:
+    loct impact src/utils.ts                # Full impact analysis
+    loct impact src/api.ts --depth 2        # Limit to 2 levels deep
+    loct impact src/core.ts --root ./       # Specify project root"
+            .to_string());
+    }
+
+    let mut opts = ImpactCommandOptions::default();
+    let mut i = 0;
+
+    while i < args.len() {
+        let arg = &args[i];
+        match arg.as_str() {
+            "--depth" | "--max-depth" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--depth requires a value".to_string())?;
+                opts.depth = Some(value.parse().map_err(|_| "--depth requires a number")?);
+                i += 2;
+            }
+            "--root" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--root requires a path".to_string())?;
+                opts.root = Some(PathBuf::from(value));
+                i += 2;
+            }
+            _ if !arg.starts_with('-') => {
+                if opts.target.is_empty() {
+                    opts.target = arg.clone();
+                } else {
+                    return Err(format!(
+                        "Unexpected argument '{}'. impact takes one target path.",
+                        arg
+                    ));
+                }
+                i += 1;
+            }
+            _ => {
+                return Err(format!("Unknown option '{}' for 'impact' command.", arg));
+            }
+        }
+    }
+
+    if opts.target.is_empty() {
+        return Err(
+            "'impact' command requires a target file path. Usage: loct impact <path>".to_string(),
+        );
+    }
+
+    Ok(Command::Impact(opts))
+}
+
 fn parse_diff_command(args: &[String]) -> Result<Command, String> {
     // Check for help flag first
     if args.iter().any(|a| a == "--help" || a == "-h") {
-        return Err("loct diff - Compare snapshots and show semantic delta
+        return Err("loct diff - Compare snapshots between branches/commits
 
 USAGE:
     loct diff --since <SNAPSHOT> [--to <SNAPSHOT>] [OPTIONS]
     loct diff <SNAPSHOT1> [SNAPSHOT2]
 
 DESCRIPTION:
-    Compares two code snapshots and shows semantic changes:
-    - New/removed files
-    - Import graph changes
-    - New dead code introduced
-    - Symbol additions/removals
-    - Architecture drift
+    Compares two code snapshots and shows semantic differences.
 
-    Snapshots can be Git refs (main, HEAD~1), tags, or snapshot IDs.
+    Unlike git diff (line changes), this shows structural/architectural changes:
+    - New/removed files
+    - Import graph changes (new dependencies, removed imports)
+    - New dead code introduced (regressions)
+    - Symbol additions/removals
+    - Circular dependency changes (new cycles, fixed cycles)
+    - Architecture drift (changed import patterns)
+
+    Snapshots can be:
+    - Git refs: main, develop, HEAD~1
+    - Tags: v1.0.0, v2.0.0
+    - Commit SHAs: abc123
+    - Snapshot IDs from .loctree/ directory
 
 OPTIONS:
-    --since <SNAPSHOT>   Base snapshot to compare from (required)
-    --to <SNAPSHOT>      Target snapshot to compare to (default: current working tree)
-    --jsonl              Output in JSONL format (one change per line)
-    --problems-only      Show only regressions (new dead code, new cycles)
-    --help, -h           Show this help message
+    --since <SNAPSHOT>    Base snapshot to compare from (required)
+    --to <SNAPSHOT>       Target snapshot to compare to (default: current working tree)
+    --auto-scan-base      Automatically create git worktree and scan target branch
+                          (zero-friction: no need to manually scan branches)
+    --jsonl               Output in JSONL format (one change per line)
+    --problems-only       Show only regressions (new dead code, new cycles)
+    --help, -h            Show this help message
+
+ARGUMENTS:
+    <SNAPSHOT1>           Base snapshot (alternative to --since)
+    [SNAPSHOT2]           Target snapshot (alternative to --to)
 
 EXAMPLES:
-    loct diff --since main              # Compare main branch to working tree
-    loct diff --since HEAD~1            # Compare to previous commit
-    loct diff --since v1.0.0 --to v2.0.0   # Compare two tags
-    loct diff main --problems-only      # Only show regressions since main"
+    loct diff --since main                    # Compare main to working tree
+    loct diff --since HEAD~1                  # Compare to previous commit
+    loct diff --since main --auto-scan-base   # Auto-scan main branch
+    loct diff --since v1.0.0 --to v2.0.0      # Compare two tags
+    loct diff main --problems-only            # Only show regressions
+    loct diff --since main --jsonl            # JSONL output for CI
+
+OUTPUT:
+    Shows semantic changes in categories:
+    - Files Added/Removed
+    - Symbols Added/Removed
+    - New Dead Code (regressions to fix)
+    - New Cycles (import loops introduced)
+    - Import Graph Changes
+
+RELATED COMMANDS:
+    loct scan                Run scan to create snapshot
+    loct auto --full-scan    Force full rescan before comparison"
             .to_string());
     }
 
@@ -1480,6 +1797,10 @@ EXAMPLES:
                     .ok_or_else(|| "--to requires a snapshot ID or path".to_string())?;
                 opts.to = Some(value.clone());
                 i += 2;
+            }
+            "--auto-scan-base" => {
+                opts.auto_scan_base = true;
+                i += 1;
             }
             "--jsonl" => {
                 opts.jsonl = true;
@@ -1689,36 +2010,112 @@ EXAMPLES:
     Ok(Command::Crowd(opts))
 }
 
+fn parse_tagmap_command(args: &[String]) -> Result<Command, String> {
+    if args.is_empty() {
+        return Err("tagmap requires a keyword. Usage: loct tagmap <keyword>".to_string());
+    }
+
+    // Check for help flag first
+    if args.iter().any(|a| a == "--help" || a == "-h")
+        && let Some(help) = Command::format_command_help("tagmap")
+    {
+        println!("{}", help);
+        std::process::exit(0);
+    }
+
+    let mut opts = TagmapOptions::default();
+
+    // First positional argument is the keyword
+    if !args[0].starts_with('-') {
+        opts.keyword = args[0].clone();
+    } else {
+        return Err("tagmap requires a keyword as first argument".to_string());
+    }
+
+    let mut i = 1;
+    while i < args.len() {
+        let arg = &args[i];
+        match arg.as_str() {
+            "--include-tests" => {
+                opts.include_tests = true;
+                i += 1;
+            }
+            "--limit" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--limit requires a number".to_string())?;
+                opts.limit = Some(value.parse().map_err(|_| "--limit requires a number")?);
+                i += 2;
+            }
+            _ if !arg.starts_with('-') => {
+                opts.roots.push(PathBuf::from(arg));
+                i += 1;
+            }
+            _ => {
+                return Err(format!("Unknown option '{}' for 'tagmap' command.", arg));
+            }
+        }
+    }
+
+    if opts.roots.is_empty() {
+        opts.roots.push(PathBuf::from("."));
+    }
+
+    Ok(Command::Tagmap(opts))
+}
+
 fn parse_twins_command(args: &[String]) -> Result<Command, String> {
     // Check for help flag first
     if args.iter().any(|a| a == "--help" || a == "-h") {
         return Err(
-            "loct twins - Detect semantic duplicates (dead parrots, exact twins, barrel chaos)
+            "loct twins - Find dead parrots (0 imports) and duplicate exports
 
 USAGE:
-    loct twins [OPTIONS]
+    loct twins [OPTIONS] [PATH]
 
 DESCRIPTION:
-    Identifies three types of semantic issues:
+    Detects semantic issues in your export/import graph:
 
-    Dead Parrots:   Exports with 0 imports (Monty Python reference)
-                    - Code that looks alive but is actually unused
+    Dead Parrots:   Exports with 0 imports anywhere in the codebase
+                    - Named after Monty Python's \"dead parrot\" sketch
+                    - Code that appears to exist but is never actually used
+                    - High confidence candidates for removal
 
-    Exact Twins:    Same symbol exported from multiple files
-                    - Duplicate exports causing confusion
+    Exact Twins:    Same symbol name exported from multiple files
+                    - Can cause import confusion (which one to use?)
+                    - May indicate duplicated logic or missing consolidation
 
-    Barrel Chaos:   Missing index.ts, deep re-export chains, inconsistent import paths
-                    - Barrel file issues and re-export problems
+    Barrel Chaos:   Re-export anti-patterns
+                    - Missing index.ts barrel files where expected
+                    - Deep re-export chains (A re-exports B re-exports C)
+                    - Inconsistent import paths (some use barrel, some bypass)
+
+    This is a code smell detector - findings are hints, not verdicts.
+    Review each result in context before making changes.
 
 OPTIONS:
     --path <DIR>       Root directory to analyze (default: current directory)
     --dead-only        Show only dead parrots (exports with 0 imports)
+    --include-tests    Include test files in analysis (excluded by default)
     --help, -h         Show this help message
 
+ARGUMENTS:
+    [PATH]             Root directory to analyze (alternative to --path)
+
 EXAMPLES:
-    loct twins                  # Full semantic analysis (all three types)
-    loct twins --dead-only      # Only dead parrots (0 imports)
-    loct twins --path src/      # Analyze specific directory"
+    loct twins                  # Full analysis (dead parrots + twins + barrel chaos)
+    loct twins --dead-only      # Only show exports with 0 imports
+    loct twins src/             # Analyze specific directory
+    loct twins --json           # Machine-readable output for automation
+
+OUTPUT:
+    Shows each category separately with file locations and symbol names.
+    Dead parrots are sorted by file to help with cleanup.
+
+RELATED COMMANDS:
+    loct dead              More detailed dead code analysis with confidence levels
+    loct sniff             Aggregate code smell analysis (twins + dead + crowds)
+    loct find --dead       Search for specific dead symbols"
                 .to_string(),
         );
     }
@@ -1740,6 +2137,14 @@ EXAMPLES:
                 opts.dead_only = true;
                 i += 1;
             }
+            "--include-suppressed" => {
+                opts.include_suppressed = true;
+                i += 1;
+            }
+            "--include-tests" => {
+                opts.include_tests = true;
+                i += 1;
+            }
             _ => {
                 // Treat as path if no flag prefix
                 if !arg.starts_with('-') {
@@ -1753,6 +2158,194 @@ EXAMPLES:
     }
 
     Ok(Command::Twins(opts))
+}
+
+fn parse_suppress_command(args: &[String]) -> Result<Command, String> {
+    use super::command::SuppressOptions;
+
+    // Check for help flag first
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        return Err("loct suppress - Manage false positive suppressions
+
+USAGE:
+    loct suppress <type> <symbol> [OPTIONS]
+    loct suppress --list
+    loct suppress --clear
+
+TYPES:
+    twins         Exact twin (same symbol in multiple files)
+    dead_parrot   Dead parrot (export with 0 imports)
+    dead_export   Dead export (unused export)
+    circular      Circular import
+
+OPTIONS:
+    --file <path>       Suppress only for this specific file
+    --reason <text>     Reason for suppression (for documentation)
+    --remove            Remove a suppression instead of adding
+    --list              List all current suppressions
+    --clear             Clear all suppressions
+
+EXAMPLES:
+    loct suppress twins Message --reason \"FE/BE mirror OK\"
+    loct suppress dead_parrot unusedFunc --file src/utils.ts
+    loct suppress --list
+    loct suppress twins Message --remove"
+            .to_string());
+    }
+
+    let mut opts = SuppressOptions::default();
+    let mut i = 0;
+    let mut positional_count = 0;
+
+    while i < args.len() {
+        let arg = &args[i];
+        match arg.as_str() {
+            "--list" => {
+                opts.list = true;
+                i += 1;
+            }
+            "--clear" => {
+                opts.clear = true;
+                i += 1;
+            }
+            "--remove" => {
+                opts.remove = true;
+                i += 1;
+            }
+            "--file" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--file requires a path".to_string())?;
+                opts.file = Some(value.clone());
+                i += 2;
+            }
+            "--reason" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--reason requires a value".to_string())?;
+                opts.reason = Some(value.clone());
+                i += 2;
+            }
+            "--path" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--path requires a directory".to_string())?;
+                opts.path = Some(PathBuf::from(value));
+                i += 2;
+            }
+            _ => {
+                if arg.starts_with('-') {
+                    return Err(format!("Unknown option '{}' for 'suppress' command.", arg));
+                }
+                // Positional: first is type, second is symbol
+                match positional_count {
+                    0 => opts.suppression_type = Some(arg.clone()),
+                    1 => opts.symbol = Some(arg.clone()),
+                    _ => return Err(format!("Unexpected argument '{}'.", arg)),
+                }
+                positional_count += 1;
+                i += 1;
+            }
+        }
+    }
+
+    Ok(Command::Suppress(opts))
+}
+
+fn parse_sniff_command(args: &[String]) -> Result<Command, String> {
+    // Check for help flag first
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        return Err("loct sniff - Sniff for code smells (aggregate analysis)
+
+USAGE:
+    loct sniff [OPTIONS]
+
+DESCRIPTION:
+    Aggregates all smell-level findings worth checking:
+
+    Twins:        Same symbol name in multiple files
+                  - Can cause import confusion
+
+    Dead Parrots: Exports with 0 imports
+                  - Potentially unused code
+
+    Crowds:       Files with similar dependency patterns
+                  - Possible duplication or fragmentation
+
+    Output is friendly and non-judgmental. These are hints, not verdicts.
+
+OPTIONS:
+    --path <DIR>           Root directory to analyze (default: current directory)
+    --dead-only            Show only dead parrots (skip twins and crowds)
+    --twins-only           Show only twins (skip dead parrots and crowds)
+    --crowds-only          Show only crowds (skip twins and dead parrots)
+    --include-tests        Include test files in analysis (default: false)
+    --min-crowd-size <N>   Minimum crowd size to report (default: 2)
+    --help, -h             Show this help message
+
+EXAMPLES:
+    loct sniff                    # Full code smell analysis
+    loct sniff --dead-only        # Only dead parrots
+    loct sniff --twins-only       # Only duplicate names
+    loct sniff --crowds-only      # Only similar file clusters
+    loct sniff --include-tests    # Include test files
+    loct sniff --json             # Machine-readable output"
+            .to_string());
+    }
+
+    let mut opts = SniffOptions::default();
+    let mut i = 0;
+
+    while i < args.len() {
+        let arg = &args[i];
+        match arg.as_str() {
+            "--path" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--path requires a directory".to_string())?;
+                opts.path = Some(PathBuf::from(value));
+                i += 2;
+            }
+            "--dead-only" => {
+                opts.dead_only = true;
+                i += 1;
+            }
+            "--twins-only" => {
+                opts.twins_only = true;
+                i += 1;
+            }
+            "--crowds-only" => {
+                opts.crowds_only = true;
+                i += 1;
+            }
+            "--include-tests" => {
+                opts.include_tests = true;
+                i += 1;
+            }
+            "--min-crowd-size" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--min-crowd-size requires a number".to_string())?;
+                opts.min_crowd_size = Some(
+                    value
+                        .parse::<usize>()
+                        .map_err(|_| format!("Invalid number for --min-crowd-size: {}", value))?,
+                );
+                i += 2;
+            }
+            _ => {
+                // Treat as path if no flag prefix
+                if !arg.starts_with('-') {
+                    opts.path = Some(PathBuf::from(arg));
+                    i += 1;
+                } else {
+                    return Err(format!("Unknown option '{}' for 'sniff' command.", arg));
+                }
+            }
+        }
+    }
+
+    Ok(Command::Sniff(opts))
 }
 
 fn parse_dist_command(args: &[String]) -> Result<Command, String> {
@@ -1906,6 +2499,393 @@ EXAMPLES:
     }
 
     Ok(Command::Coverage(opts))
+}
+
+/// Parse `loct focus <dir> [options]` command.
+fn parse_focus_command(args: &[String]) -> Result<Command, String> {
+    if args.is_empty() {
+        return Err("focus requires a target directory. Usage: loct focus <dir>".to_string());
+    }
+
+    // Check for --help first
+    if args.iter().any(|a| a == "--help" || a == "-h")
+        && let Some(help) = Command::format_command_help("focus")
+    {
+        println!("{}", help);
+        std::process::exit(0);
+    }
+
+    let mut opts = FocusOptions::default();
+
+    // First positional argument is the target directory
+    if !args[0].starts_with('-') {
+        opts.target = args[0].clone();
+    } else {
+        return Err("focus requires a target directory as first argument".to_string());
+    }
+
+    let mut i = 1;
+
+    while i < args.len() {
+        let arg = &args[i];
+        match arg.as_str() {
+            "--consumers" | "-c" => {
+                opts.consumers = true;
+                i += 1;
+            }
+            "--depth" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--depth requires a value".to_string())?;
+                opts.depth =
+                    Some(value.parse::<usize>().map_err(|_| {
+                        format!("Invalid depth value '{}', expected a number", value)
+                    })?);
+                i += 2;
+            }
+            "--root" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--root requires a path".to_string())?;
+                opts.root = Some(PathBuf::from(value));
+                i += 2;
+            }
+            _ => {
+                return Err(format!("Unknown option '{}' for 'focus' command.", arg));
+            }
+        }
+    }
+
+    Ok(Command::Focus(opts))
+}
+
+/// Parse `loct hotspots [options]` command.
+fn parse_hotspots_command(args: &[String]) -> Result<Command, String> {
+    // Check for --help first
+    if args.iter().any(|a| a == "--help" || a == "-h")
+        && let Some(help) = Command::format_command_help("hotspots")
+    {
+        println!("{}", help);
+        std::process::exit(0);
+    }
+
+    let mut opts = HotspotsOptions::default();
+    let mut i = 0;
+
+    while i < args.len() {
+        let arg = &args[i];
+        match arg.as_str() {
+            "--min" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--min requires a value".to_string())?;
+                opts.min_imports =
+                    Some(value.parse::<usize>().map_err(|_| {
+                        format!("Invalid min value '{}', expected a number", value)
+                    })?);
+                i += 2;
+            }
+            "--limit" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--limit requires a value".to_string())?;
+                opts.limit =
+                    Some(value.parse::<usize>().map_err(|_| {
+                        format!("Invalid limit value '{}', expected a number", value)
+                    })?);
+                i += 2;
+            }
+            "--leaves" => {
+                opts.leaves_only = true;
+                i += 1;
+            }
+            "--coupling" => {
+                opts.coupling = true;
+                i += 1;
+            }
+            "--root" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--root requires a path".to_string())?;
+                opts.root = Some(PathBuf::from(value));
+                i += 2;
+            }
+            _ => {
+                return Err(format!("Unknown option '{}' for 'hotspots' command.", arg));
+            }
+        }
+    }
+
+    Ok(Command::Hotspots(opts))
+}
+
+fn parse_layoutmap_command(args: &[String]) -> Result<Command, String> {
+    // Check for --help first
+    if args.iter().any(|a| a == "--help" || a == "-h")
+        && let Some(help) = Command::format_command_help("layoutmap")
+    {
+        println!("{}", help);
+        std::process::exit(0);
+    }
+
+    let mut opts = LayoutmapOptions::default();
+    let mut i = 0;
+
+    while i < args.len() {
+        let arg = &args[i];
+        match arg.as_str() {
+            "--zindex" | "--z-index" | "--zindex-only" => {
+                opts.zindex_only = true;
+                i += 1;
+            }
+            "--sticky" | "--sticky-only" => {
+                opts.sticky_only = true;
+                i += 1;
+            }
+            "--grid" | "--grid-only" => {
+                opts.grid_only = true;
+                i += 1;
+            }
+            "--min-zindex" | "--min-z" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--min-zindex requires a value".to_string())?;
+                opts.min_zindex = Some(value.parse::<i32>().map_err(|_| {
+                    format!("Invalid z-index value '{}', expected a number", value)
+                })?);
+                i += 2;
+            }
+            "--root" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--root requires a path".to_string())?;
+                opts.root = Some(PathBuf::from(value));
+                i += 2;
+            }
+            "--exclude" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--exclude requires a glob pattern".to_string())?;
+                opts.exclude.push(value.clone());
+                i += 2;
+            }
+            _ => {
+                return Err(format!("Unknown option '{}' for 'layoutmap' command.", arg));
+            }
+        }
+    }
+
+    Ok(Command::Layoutmap(opts))
+}
+
+fn parse_zombie_command(args: &[String]) -> Result<Command, String> {
+    // Check for --help first
+    if args.iter().any(|a| a == "--help" || a == "-h")
+        && let Some(help) = Command::format_command_help("zombie")
+    {
+        println!("{}", help);
+        std::process::exit(0);
+    }
+
+    let mut opts = ZombieOptions::default();
+    let mut i = 0;
+
+    while i < args.len() {
+        let arg = &args[i];
+        match arg.as_str() {
+            "--include-tests" => {
+                opts.include_tests = true;
+                i += 1;
+            }
+            _ => {
+                // Treat as root path
+                if arg.starts_with("--") {
+                    return Err(format!("Unknown option '{}' for 'zombie' command.", arg));
+                }
+                opts.roots.push(PathBuf::from(arg));
+                i += 1;
+            }
+        }
+    }
+
+    Ok(Command::Zombie(opts))
+}
+
+fn parse_health_command(args: &[String]) -> Result<Command, String> {
+    // Check for --help first
+    if args.iter().any(|a| a == "--help" || a == "-h")
+        && let Some(help) = Command::format_command_help("health")
+    {
+        println!("{}", help);
+        std::process::exit(0);
+    }
+
+    let mut opts = HealthOptions::default();
+    let mut i = 0;
+
+    while i < args.len() {
+        let arg = &args[i];
+        match arg.as_str() {
+            "--include-tests" => {
+                opts.include_tests = true;
+                i += 1;
+            }
+            _ => {
+                // Treat as root path
+                if arg.starts_with("--") {
+                    return Err(format!("Unknown option '{}' for 'health' command.", arg));
+                }
+                opts.roots.push(PathBuf::from(arg));
+                i += 1;
+            }
+        }
+    }
+
+    Ok(Command::Health(opts))
+}
+
+fn parse_audit_command(args: &[String]) -> Result<Command, String> {
+    // Check for --help first
+    if args.iter().any(|a| a == "--help" || a == "-h")
+        && let Some(help) = Command::format_command_help("audit")
+    {
+        println!("{}", help);
+        std::process::exit(0);
+    }
+
+    let mut opts = AuditOptions::default();
+    let mut i = 0;
+
+    while i < args.len() {
+        let arg = &args[i];
+        match arg.as_str() {
+            "--include-tests" => {
+                opts.include_tests = true;
+                i += 1;
+            }
+            _ => {
+                // Treat as root path
+                if arg.starts_with("--") {
+                    return Err(format!("Unknown option '{}' for 'audit' command.", arg));
+                }
+                opts.roots.push(PathBuf::from(arg));
+                i += 1;
+            }
+        }
+    }
+
+    Ok(Command::Audit(opts))
+}
+
+fn parse_jq_query_command(
+    args: &[String],
+    global: &GlobalOptions,
+) -> Result<ParsedCommand, String> {
+    if args.is_empty() {
+        return Err("jq query requires a filter expression".to_string());
+    }
+
+    let mut opts = JqQueryOptions::default();
+
+    // First arg should be the filter
+    let mut i = if is_jq_filter(&args[0]) {
+        opts.filter = args[0].clone();
+        1
+    } else {
+        return Err(format!("Expected jq filter expression, got: '{}'", args[0]));
+    };
+
+    // Parse remaining jq-specific flags
+    while i < args.len() {
+        let arg = &args[i];
+        match arg.as_str() {
+            "-r" | "--raw-output" => {
+                opts.raw_output = true;
+                i += 1;
+            }
+            "-c" | "--compact-output" => {
+                opts.compact_output = true;
+                i += 1;
+            }
+            "-e" | "--exit-status" => {
+                opts.exit_status = true;
+                i += 1;
+            }
+            "--arg" => {
+                let name = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--arg requires a name and value".to_string())?;
+                let value = args
+                    .get(i + 2)
+                    .ok_or_else(|| "--arg requires a name and value".to_string())?;
+                opts.string_args.push((name.clone(), value.clone()));
+                i += 3;
+            }
+            "--argjson" => {
+                let name = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--argjson requires a name and JSON value".to_string())?;
+                let json_value = args
+                    .get(i + 2)
+                    .ok_or_else(|| "--argjson requires a name and JSON value".to_string())?;
+                opts.json_args.push((name.clone(), json_value.clone()));
+                i += 3;
+            }
+            "--snapshot" => {
+                let path = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--snapshot requires a path".to_string())?;
+                opts.snapshot_path = Some(PathBuf::from(path));
+                i += 2;
+            }
+            "--help" | "-h" => {
+                return Err("loct jq - Query snapshot with jq-style filters
+
+USAGE:
+    loct '<filter>' [OPTIONS]
+
+DESCRIPTION:
+    Execute jq-style filter expressions on the latest snapshot JSON.
+    Automatically finds the most recent snapshot in .loctree/ directory.
+
+    The filter syntax follows jq conventions:
+    - .metadata          Extract metadata field
+    - .files[]           Iterate over files array
+    - .files[0]          Get first file
+    - .[\"key\"]           Access key with special characters
+
+OPTIONS:
+    -r, --raw-output         Output raw strings, not JSON
+    -c, --compact-output     Compact JSON output (no pretty-printing)
+    -e, --exit-status        Set exit code based on output (0 if truthy)
+    --arg <name> <value>     Pass string variable to filter
+    --argjson <name> <json>  Pass JSON variable to filter
+    --snapshot <path>        Use specific snapshot file instead of latest
+    --help, -h               Show this help message
+
+EXAMPLES:
+    loct '.metadata'                    # Extract metadata
+    loct '.files | length'              # Count files
+    loct '.files[] | .path'             # List all file paths
+    loct '.metadata.total_loc' -r       # Raw number output
+    loct '.files[] | select(.lang == \"ts\")' -c  # Find TypeScript files
+    loct --snapshot .loctree/snap-abc123.json '.metadata'  # Query specific snapshot
+
+GLOBAL OPTIONS:
+    --json           Output as JSON (default for jq mode)
+    --quiet          Suppress warnings
+    --verbose        Show debug info
+
+NOTE: This command requires jaq library (built with --features jq)"
+                    .to_string());
+            }
+            _ => {
+                return Err(format!("Unknown option '{}' for jq query mode", arg));
+            }
+        }
+    }
+
+    Ok(ParsedCommand::new(Command::JqQuery(opts), global.clone()))
 }
 
 // ============================================================================
@@ -2065,6 +3045,87 @@ mod tests {
             assert!(opts.pattern.is_none());
         } else {
             panic!("Expected Crowd command");
+        }
+    }
+
+    #[test]
+    fn test_is_jq_filter() {
+        // Valid jq filters
+        assert!(is_jq_filter(".metadata"));
+        assert!(is_jq_filter(".files[]"));
+        assert!(is_jq_filter(".files[0]"));
+        assert!(is_jq_filter("[.files]"));
+        assert!(is_jq_filter("{foo: .bar}"));
+        assert!(is_jq_filter(".foo | .bar"));
+
+        // Not jq filters
+        assert!(!is_jq_filter("./foo"));
+        assert!(!is_jq_filter(".\\foo"));
+        assert!(!is_jq_filter("scan"));
+        assert!(!is_jq_filter("--help"));
+        assert!(!is_jq_filter(""));
+    }
+
+    #[test]
+    fn test_parse_jq_query_basic() {
+        let args = vec![".metadata".into()];
+        let result = parse_command(&args).unwrap().unwrap();
+        assert_eq!(result.command.name(), "jq");
+        if let Command::JqQuery(opts) = result.command {
+            assert_eq!(opts.filter, ".metadata");
+            assert!(!opts.raw_output);
+            assert!(!opts.compact_output);
+        } else {
+            panic!("Expected JqQuery command");
+        }
+    }
+
+    #[test]
+    fn test_parse_jq_query_with_flags() {
+        let args = vec![".files[]".into(), "-r".into(), "-c".into()];
+        let result = parse_command(&args).unwrap().unwrap();
+        if let Command::JqQuery(opts) = result.command {
+            assert_eq!(opts.filter, ".files[]");
+            assert!(opts.raw_output);
+            assert!(opts.compact_output);
+        } else {
+            panic!("Expected JqQuery command");
+        }
+    }
+
+    #[test]
+    fn test_parse_jq_query_with_arg() {
+        let args = vec![
+            ".metadata".into(),
+            "--arg".into(),
+            "name".into(),
+            "value".into(),
+        ];
+        let result = parse_command(&args).unwrap().unwrap();
+        if let Command::JqQuery(opts) = result.command {
+            assert_eq!(opts.string_args.len(), 1);
+            assert_eq!(opts.string_args[0].0, "name");
+            assert_eq!(opts.string_args[0].1, "value");
+        } else {
+            panic!("Expected JqQuery command");
+        }
+    }
+
+    #[test]
+    fn test_parse_jq_query_with_snapshot() {
+        let args = vec![
+            ".metadata".into(),
+            "--snapshot".into(),
+            ".loctree/snap.json".into(),
+        ];
+        let result = parse_command(&args).unwrap().unwrap();
+        if let Command::JqQuery(opts) = result.command {
+            assert_eq!(
+                opts.snapshot_path,
+                Some(PathBuf::from(".loctree/snap.json"))
+            );
+        } else {
+            panic!("Expected JqQuery command");
         }
     }
 }

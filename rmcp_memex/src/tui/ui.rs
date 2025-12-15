@@ -215,7 +215,7 @@ fn render_host_selection(frame: &mut Frame, area: Rect, app: &App) {
             let is_focused = i == app.focus;
             let is_selected = app.selected_hosts.contains(&i);
 
-            let checkbox = if is_selected { "[✓]" } else { "[ ]" };
+            let checkbox = if is_selected { "[x]" } else { "[ ]" };
             let status = host.status_icon();
 
             let style = if is_focused {
@@ -315,7 +315,7 @@ fn render_health_check(frame: &mut Frame, area: Rect, app: &App) {
     if let Some(status) = &app.health_status {
         lines.push(Line::from(Span::styled(
             format!("Binary: {}", status),
-            if status.starts_with('✓') {
+            if status.starts_with("[OK]") {
                 Style::default().fg(Color::Green)
             } else {
                 Style::default().fg(Color::Red)

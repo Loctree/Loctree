@@ -238,7 +238,7 @@ impl LoctreeServer {
     /// Get a holographic slice for a file (core + deps + consumers).
     #[tool(
         name = "get_slice",
-        description = "Extract holographic context for a file. Returns the file, its dependencies, and files that import it."
+        description = "USE THIS FIRST when investigating a file. Returns the file + all its imports + all files that depend on it. Saves you 10+ grep calls and prevents missing hidden dependencies. One call = complete understanding of a file's role in the codebase."
     )]
     async fn get_slice(&self, Parameters(params): Parameters<GetSliceParams>) -> String {
         if let Err(e) = self.maybe_reload().await {
@@ -319,7 +319,7 @@ impl LoctreeServer {
     /// Search for symbols matching a pattern.
     #[tool(
         name = "find_symbol",
-        description = "Search for symbols (functions, classes, exports) matching a pattern. Supports regex."
+        description = "Find where a function/class/type is defined AND used. Better than grep: understands code structure, shows export locations with line numbers, filters by kind (function/class/const). Use when you need to find something by name."
     )]
     async fn find_symbol(&self, Parameters(params): Parameters<FindSymbolParams>) -> String {
         if let Err(e) = self.maybe_reload().await {
@@ -386,7 +386,7 @@ impl LoctreeServer {
     /// Find unused exports (dead code).
     #[tool(
         name = "check_dead",
-        description = "Detect dead code - exported symbols that are never imported anywhere."
+        description = "Find dead code before you accidentally modify it. Returns exports that NO file imports - safe to delete. Prevents wasting time fixing code that's not even used. Run before any refactoring."
     )]
     async fn check_dead(&self, Parameters(params): Parameters<CheckDeadParams>) -> String {
         if let Err(e) = self.maybe_reload().await {
@@ -428,7 +428,7 @@ impl LoctreeServer {
     /// Detect circular imports.
     #[tool(
         name = "check_cycles",
-        description = "Find circular import chains in the codebase."
+        description = "Detect circular imports that cause runtime bugs and bundle bloat. Shows exact file chains forming the cycle. Critical check before adding new imports - your change might create a cycle."
     )]
     async fn check_cycles(&self) -> String {
         if let Err(e) = self.maybe_reload().await {
@@ -458,7 +458,7 @@ impl LoctreeServer {
     /// Find files that import a given file.
     #[tool(
         name = "who_imports",
-        description = "Find all files that import a given file (reverse dependency lookup)."
+        description = "See what breaks if you change a file. Returns all files that depend on it. Essential before modifying any shared utility or type - know your blast radius."
     )]
     async fn who_imports(&self, Parameters(params): Parameters<WhoImportsParams>) -> String {
         if let Err(e) = self.maybe_reload().await {
@@ -489,7 +489,7 @@ impl LoctreeServer {
     /// Get project overview and health metrics.
     #[tool(
         name = "project_info",
-        description = "Get project overview: file count, total LOC, dead code count, cycle count."
+        description = "Quick health check of the codebase. Shows: file count, LOC, dead code count, circular imports. Use at session start to understand project size and existing technical debt."
     )]
     async fn project_info(&self) -> String {
         if let Err(e) = self.maybe_reload().await {
@@ -530,7 +530,7 @@ impl LoctreeServer {
     /// Detect twins (dead parrots and exact duplicates).
     #[tool(
         name = "check_twins",
-        description = "Find dead parrots (exports with 0 imports) and exact twins (same symbol exported from multiple files)."
+        description = "Find duplicate code and naming conflicts. Detects: same function name in multiple files (confusing imports), exports nobody uses (dead parrots). Helps clean up copy-paste debt."
     )]
     async fn check_twins(&self) -> String {
         if let Err(e) = self.maybe_reload().await {
@@ -538,7 +538,8 @@ impl LoctreeServer {
         }
 
         let snapshot = self.snapshot.read().await;
-        let registry = build_symbol_registry(&snapshot.files);
+        // include_tests=false for server API (production-focused)
+        let registry = build_symbol_registry(&snapshot.files, false);
 
         // Dead parrots: symbols with 0 imports
         let dead_parrots: Vec<_> = registry
@@ -555,7 +556,7 @@ impl LoctreeServer {
             .collect();
 
         // Exact twins: same name exported from different files
-        let exact_twins = detect_exact_twins(&snapshot.files);
+        let exact_twins = detect_exact_twins(&snapshot.files, false);
         let twins_json: Vec<_> = exact_twins
             .iter()
             .map(|t| {
@@ -591,7 +592,7 @@ impl LoctreeServer {
     /// Detect functional crowds (clusters of files with similar purpose).
     #[tool(
         name = "check_crowds",
-        description = "Find crowds - groups of files that cluster around similar functionality, potentially indicating duplication."
+        description = "Find files that probably do the same thing. Groups files by shared dependencies - if 5 files all import the same utils, they might be duplicates or candidates for consolidation."
     )]
     async fn check_crowds(&self) -> String {
         if let Err(e) = self.maybe_reload().await {
@@ -654,9 +655,12 @@ impl ServerHandler for LoctreeServer {
                 website_url: Some("https://github.com/Loctree/Loctree".to_string()),
             },
             instructions: Some(
-                "Loctree MCP server for AI-oriented codebase analysis. \
-                 Provides instant holographic slices, symbol search, dead code detection, \
-                 and circular import detection."
+                "USE LOCTREE BEFORE GREP. This server gives you instant codebase understanding: \
+                 get_slice shows a file + all its dependencies + all files that use it (one call = full context). \
+                 find_symbol locates any function/class with line numbers. \
+                 check_dead finds code safe to delete. \
+                 who_imports shows what breaks if you change something. \
+                 Start with project_info to see codebase health, then use get_slice on files you're investigating."
                     .into(),
             ),
         }

@@ -1,8 +1,8 @@
-# loct — AI Agent Quick Reference (v0.6.7)
+# loct — AI Agent Quick Reference (v0.6.22)
 
 Static analysis for AI agents: scan once, slice many. Default `loct` writes `.loctree/<branch@sha>/snapshot.json`; use `loct report --serve` (or `loct lint --sarif`) when you need full artifacts (`analysis.json`, `report.html`, `report.sarif`, etc.).
 
-**v0.6.7 highlights**: Bundle distribution analysis (`loct dist`) with symbol-level source map decoding, Dart/Flutter support, improved dead code detection.
+**v0.6.22 highlights**: `loct health` (quick cycles+dead+twins summary), jq-style query mode, bundle distribution analysis (`loct dist`).
 
 > **Full documentation:** [AI Agent's Manual](docs/tutorials/ai-agents-manual.md)
 
@@ -12,44 +12,71 @@ Static analysis for AI agents: scan once, slice many. Default `loct` writes `.lo
 # 1) Scan from repo root (auto-detects stack, writes snapshot + reports)
 loct
 
-# 2) Extract context for a task (3 layers: core, deps, consumers)
+# 2) Extract context for a single file (3 layers: core, deps, consumers)
 loct slice src/components/ChatPanel.tsx --consumers --json | claude
+
+# 2b) Extract context for a directory (like slice for folders)
+loct focus src/features/patients/ --consumers --json  # understand feature module
 
 # 3) Find before you create (fuzzy + defs/uses in one)
 loct find ChatPanel                  # avoid duplicates
 loct find useAuth                    # definitions & uses
 loct find src/utils/api.ts           # quick impact-ish lookup
 
-# 4) Quick queries (new!)
+# 4) Quick queries
 loct query who-imports src/utils.ts    # what files import this
 loct query where-symbol useAuth        # find symbol definitions
 loct query component-of src/api.ts     # graph component
 
-# 5) Tauri FE↔BE coverage
+# 5) jq-style queries (NEW! v0.6.15)
+loct '.metadata'                       # extract snapshot metadata
+loct '.files | length'                 # count files
+loct '.edges[] | select(.from | contains("api"))'  # filter edges
+loct '.command_bridges | map(.name)'   # list all command names
+loct '.files[] | select(.loc > 500)' -c  # large files, compact
+
+# 6) Tauri FE↔BE coverage
 loct commands --missing   # FE calls without BE handlers
 loct commands --unused    # Handlers without FE calls
 loct events --json        # Emit/listen, ghost/orphan/races
 
-# 6) Hygiene
+# 7) Hygiene
 loct dead --confidence high  # unused exports (alias-aware)
 loct cycles                  # circular imports
+loct health                  # quick summary: cycles + dead + twins
 
-# 7) Twins analysis (semantic duplicates)
+# 8) Twins analysis (semantic duplicates)
 loct twins                   # dead parrots + exact twins + barrel chaos
 loct twins --dead-only       # only exports with 0 imports
+loct twins --include-suppressed  # show suppressed findings too
 
-# 8) Crowd detection (functional duplicates)
+# 9) False positive suppression (v0.6.16+)
+loct suppress twins Message          # suppress twin everywhere
+loct suppress twins Message --file src/types.ts  # only in file
+loct suppress dead_parrot unusedFunc --reason "dynamic import"
+loct suppress --list                 # view suppressions
+loct suppress --clear                # reset all
+
+# 10) Crowd detection (functional duplicates)
 loct crowd                   # auto-detect all crowds
 loct crowd message           # files clustering around "message"
-loct crowd --json            # JSON for AI agents
+loct crowd --json            # JSON for AI agents (includes context_type)
+# context_type: rail|panel|modal|form|list|state|api|util|other
 
-# 9) Delta / diff
+# 11) Import hotspots (core vs peripheral)
+loct hotspots                # top 50 most-imported files
+loct hotspots --leaves       # find leaf nodes (entry points / dead)
+loct hotspots --coupling     # show in-degree AND out-degree
+loct hotspots --min 5        # only files with 5+ importers
+loct hotspots --json         # JSON for AI agents
+
+# 12) Delta / diff
 loct diff --since main       # compare against another snapshot
 
-# 10) Bundle analysis (verify tree-shaking)
+# 13) Bundle analysis (verify tree-shaking)
 loct dist dist/bundle.js.map src/  # compare source vs bundle
 
-# 11) CI / policy
+# 14) CI / policy
 loct lint --fail --sarif > results.sarif
 ```
 
@@ -57,7 +84,7 @@ loct lint --fail --sarif > results.sarif
 
 ```bash
 cargo install loctree
-loct --version   # expect 0.6.7+
+loct --version   # expect 0.6.15+
 ```
 
 ## Auto-Detect Stack
@@ -74,14 +101,20 @@ loct --version   # expect 0.6.7+
 
 ## What to Run (by goal)
 
-- **Context for AI**: `loct slice <file> --consumers --json` (deps always included)
+- **Context for a file**: `loct slice <file> --consumers --json` (deps always included)
+- **Slice new/uncommitted file**: `loct slice <file> --rescan` (forces snapshot update first)
+- **Context for a directory**: `loct focus <dir> --consumers --json` (like slice for folders)
 - **Find duplicates/usage**: `loct find <pattern>` (fuzzy + defs/uses)
 - **Quick queries**: `loct query who-imports <file>`, `loct query where-symbol <sym>`
+- **jq-style queries**: `loct '.files | length'`, `loct '.edges[] | select(...)'`
 - **Impact**: `loct impact <file>`
 - **Dead code**: `loct dead --confidence high`
 - **Circular imports**: `loct cycles`
+- **Quick health check**: `loct health` (cycles + dead + twins summary)
 - **Twins analysis**: `loct twins` (dead parrots, exact twins, barrel chaos)
+- **Suppress false positives**: `loct suppress twins <sym>`, `loct suppress --list`
 - **Functional crowds**: `loct crowd` (find similar files clustering around same functionality)
+- **Import hotspots**: `loct hotspots` (core vs peripheral files by import frequency)
 - **Bundle analysis**: `loct dist <sourcemap> <srcdir>` (verify tree-shaking, symbol-level)
 - **Tauri FE↔BE**: `loct commands --missing`, `loct commands --unused`, `loct events --json`
 - **Delta between scans**: `loct diff --since <snapshot_id>`
@@ -92,7 +125,10 @@ loct --version   # expect 0.6.7+
 - Scan & cache: `loct` (writes `.loctree/<branch@sha>/snapshot.json`)
 - Slice for AI: `loct slice <file> [--consumers --json]`
 - Quick queries: `loct query who-imports <file>`, `loct query where-symbol <sym>`, `loct query component-of <file>`
+- **jq queries**: `loct '.metadata'`, `loct '.files | length'`, `loct '.edges[]' -c`
 - Twins analysis: `loct twins` (dead parrots + exact twins + barrel chaos)
+- **Health check**: `loct health` (cycles + dead + twins summary in one)
+- Suppress false positives: `loct suppress twins <sym>` (stored in `.loctree/suppressions.toml`)
 - Bundle dist: `loct dist dist/bundle.js.map src/` (symbol-level dead export detection)
 - Analysis shortcuts: `loct -A --dead`, `loct -A --circular`, `loct -A --report report.html`
 - Diff snapshots: `loct diff --since <main|HEAD~N|snapshot_id>`
@@ -106,6 +142,7 @@ loct --version   # expect 0.6.7+
 - SARIF file integrates with GitHub/GitLab code scanning and IDEs.
 - SARIF includes `loctree://open?f=<file>&l=<line>` URLs for IDE integration.
 - Respect `.gitignore` by default; add `--scan-all` to include node_modules/target/.venv.
+- Python projects: use `--py-root <path>` for non-standard package roots (e.g., `--py-root packages/mylib`).
 - Events: set `LOCT_EVENT_ALIASES="rust://foo=tauri://foo,legacy_evt=new_evt"` to bridge cross-language names; self-emits with matching literals in the same file are treated as resolved to reduce orphan noise.
 
 ## Rust-Specific Features (v0.5.17+)

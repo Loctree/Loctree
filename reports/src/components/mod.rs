@@ -52,7 +52,7 @@ mod duplicates;
 mod dynamic_imports;
 mod for_ai;
 mod graph;
-mod icons;
+pub mod icons;
 mod insights;
 mod quick_commands;
 mod section;

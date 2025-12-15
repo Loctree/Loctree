@@ -713,10 +713,11 @@ pub fn process_root_context(
     // Run twins analysis (dead parrots, exact twins, barrel chaos)
     let twins_data = if !parsed.skip_dead_symbols {
         // Find dead parrots (0 imports)
-        let twins_result = find_dead_parrots(&analyses, true);
+        // Note: include_tests=false for production reports
+        let twins_result = find_dead_parrots(&analyses, true, false);
 
         // Detect exact twins (same symbol exported from multiple files)
-        let exact_twins = detect_exact_twins(&analyses);
+        let exact_twins = detect_exact_twins(&analyses, false);
 
         // Analyze barrel chaos (missing barrels, deep chains, inconsistent paths)
         // Build snapshot from analyses for barrel analysis
@@ -1242,9 +1243,9 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
                     .filter(|g| g.confidence == Some(Confidence::High))
                     .map(|g| g.name.clone())
                     .collect();
-                let low_conf: Vec<_> = unused_handlers
+                let smell_conf: Vec<_> = unused_handlers
                     .iter()
-                    .filter(|g| g.confidence == Some(Confidence::Low))
+                    .filter(|g| g.confidence == Some(Confidence::Smell))
                     .collect();
 
                 if !high_conf.is_empty() {
@@ -1253,9 +1254,9 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
                         high_conf.join(", ")
                     );
                 }
-                if !low_conf.is_empty() {
-                    println!("  Unused handlers (LOW confidence - possible dynamic usage):");
-                    for g in &low_conf {
+                if !smell_conf.is_empty() {
+                    println!("  Unused handlers (SMELL confidence - possible dynamic usage):");
+                    for g in &smell_conf {
                         let matches_note = if !g.string_literal_matches.is_empty() {
                             format!(
                                 " ({} string literal matches)",

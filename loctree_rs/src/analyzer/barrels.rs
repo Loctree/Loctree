@@ -12,7 +12,7 @@ use std::path::Path;
 use crate::snapshot::Snapshot;
 
 /// Complete barrel chaos analysis results
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct BarrelAnalysis {
     /// Directories missing barrel files
     pub missing_barrels: Vec<MissingBarrel>,
@@ -390,12 +390,12 @@ pub fn format_barrel_analysis(analysis: &BarrelAnalysis) -> String {
         let mut displayed = 0;
 
         for chain_data in &analysis.deep_chains {
-            let chain_key = chain_data.chain.join(" → ");
+            let chain_key = chain_data.chain.join(" -> ");
 
             if seen_chains.insert(chain_key.clone()) && displayed < 5 {
-                let warning = if chain_data.depth > 2 { " ⚠️" } else { "" };
+                let warning = if chain_data.depth > 2 { " [!]" } else { "" };
                 output.push_str(&format!(
-                    "   ├─ {}: {} (depth: {}){}\n",
+                    "   |- {}: {} (depth: {}){}\n",
                     chain_data.symbol, chain_key, chain_data.depth, warning
                 ));
                 displayed += 1;
@@ -441,7 +441,7 @@ pub fn format_barrel_analysis(analysis: &BarrelAnalysis) -> String {
         && analysis.deep_chains.is_empty()
         && analysis.inconsistent_paths.is_empty()
     {
-        output.push_str("   ✓ No barrel chaos detected\n");
+        output.push_str("   [OK] No barrel chaos detected\n");
     }
 
     output

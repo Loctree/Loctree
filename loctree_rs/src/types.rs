@@ -328,8 +328,9 @@ pub struct ReexportEntry {
 pub enum ReexportKind {
     /// `export * from './module'`
     Star,
-    /// `export { a, b } from './module'`
-    Named(Vec<String>),
+    /// `export { a, b as c } from './module'`
+    /// Each tuple is (original_name, exported_name) - same if no alias
+    Named(Vec<(String, String)>),
 }
 
 /// An exported symbol from a module.
@@ -412,6 +413,9 @@ pub struct EventRef {
     pub awaited: bool,
     /// Payload type/shape if detected.
     pub payload: Option<String>,
+    /// True if this event uses a dynamic pattern (format!/template literal).
+    #[serde(default)]
+    pub is_dynamic: bool,
 }
 
 /// Python concurrency race indicator

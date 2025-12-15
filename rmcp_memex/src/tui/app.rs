@@ -180,13 +180,13 @@ impl App {
             Ok(output) => {
                 if output.status.success() {
                     let version = String::from_utf8_lossy(&output.stdout);
-                    self.health_status = Some(format!("✓ Binary OK: {}", version.trim()));
+                    self.health_status = Some(format!("[OK] Binary OK: {}", version.trim()));
                 } else {
-                    self.health_status = Some("✗ Binary found but failed to run".to_string());
+                    self.health_status = Some("[ERR] Binary found but failed to run".to_string());
                 }
             }
             Err(e) => {
-                self.health_status = Some(format!("✗ Binary not found: {}", e));
+                self.health_status = Some(format!("[ERR] Binary not found: {}", e));
             }
         }
 
@@ -195,10 +195,10 @@ impl App {
         let db_path = PathBuf::from(&expanded_path);
         if db_path.exists() {
             self.messages
-                .push(format!("✓ DB path exists: {}", expanded_path));
+                .push(format!("[OK] DB path exists: {}", expanded_path));
         } else {
             self.messages
-                .push(format!("○ DB path will be created: {}", expanded_path));
+                .push(format!("[-] DB path will be created: {}", expanded_path));
         }
     }
 
@@ -224,7 +224,7 @@ impl App {
                         ));
                     } else {
                         self.messages
-                            .push(format!("✓ Backup created: {}", backup_path));
+                            .push(format!("[OK] Backup created: {}", backup_path));
                     }
                 }
 

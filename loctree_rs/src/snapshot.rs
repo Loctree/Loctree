@@ -142,6 +142,12 @@ pub struct EventBridge {
     pub emits: Vec<(String, usize, String)>,
     /// Listen locations (file, line)
     pub listens: Vec<(String, usize)>,
+    /// True if this is a FE↔FE sync pattern (emit and listen both in frontend)
+    #[serde(default)]
+    pub is_fe_sync: bool,
+    /// True if emit and listen are in the same file (strongest FE↔FE indicator)
+    #[serde(default)]
+    pub same_file_sync: bool,
 }
 
 /// Export index entry (used by VS2 slice module)
@@ -364,9 +370,107 @@ impl Snapshot {
         }
     }
 
+    /// Find the most recent snapshot in .loctree/*/snapshot.json
+    ///
+    /// This function is useful for query mode where we want to automatically
+    /// discover the latest snapshot without requiring explicit path specification.
+    ///
+    /// # Arguments
+    /// * `explicit_path` - If provided, use this path directly instead of searching
+    ///
+    /// # Returns
+    /// * `Ok(PathBuf)` - Path to the snapshot file
+    /// * `Err(String)` - Helpful error message if no snapshot found
+    ///
+    /// # Example
+    /// ```ignore
+    /// // Auto-discover latest snapshot
+    /// let path = Snapshot::find_latest_snapshot(None)?;
+    ///
+    /// // Use explicit path
+    /// let path = Snapshot::find_latest_snapshot(Some(Path::new(".loctree/main@abc123/snapshot.json")))?;
+    /// ```
+    pub fn find_latest_snapshot(explicit_path: Option<&Path>) -> Result<PathBuf, String> {
+        // If explicit path provided, validate and return it
+        if let Some(path) = explicit_path {
+            if path.exists() {
+                return Ok(path.to_path_buf());
+            } else {
+                return Err(format!(
+                    "Snapshot not found at '{}'. Run `loct scan` first.",
+                    path.display()
+                ));
+            }
+        }
+
+        // Search for .loctree directory starting from current directory
+        let cwd = std::env::current_dir()
+            .map_err(|e| format!("Failed to get current directory: {}", e))?;
+
+        Self::find_latest_snapshot_in(&cwd)
+    }
+
+    /// Find latest snapshot starting from a given root directory.
+    /// This is the core implementation used by `find_latest_snapshot` and tests.
+    pub fn find_latest_snapshot_in(root: &Path) -> Result<PathBuf, String> {
+        let loctree_root = match Self::find_loctree_root(root) {
+            Some(root) => root,
+            None => {
+                return Err(
+                    "No .loctree directory found. Run `loct scan` first to create a snapshot."
+                        .to_string(),
+                );
+            }
+        };
+
+        let loctree_dir = loctree_root.join(SNAPSHOT_DIR);
+
+        // Collect all snapshot.json files in .loctree/*/snapshot.json
+        let mut snapshots: Vec<(PathBuf, std::time::SystemTime)> = Vec::new();
+
+        // Check for legacy snapshot at .loctree/snapshot.json
+        let legacy_path = loctree_dir.join(SNAPSHOT_FILE);
+        if legacy_path.exists()
+            && let Ok(meta) = fs::metadata(&legacy_path)
+            && let Ok(mtime) = meta.modified()
+        {
+            snapshots.push((legacy_path, mtime));
+        }
+
+        // Check for branch@sha subdirectories: .loctree/*/snapshot.json
+        if let Ok(entries) = fs::read_dir(&loctree_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    let snapshot_path = path.join(SNAPSHOT_FILE);
+                    if snapshot_path.exists()
+                        && let Ok(meta) = fs::metadata(&snapshot_path)
+                        && let Ok(mtime) = meta.modified()
+                    {
+                        snapshots.push((snapshot_path, mtime));
+                    }
+                }
+            }
+        }
+
+        if snapshots.is_empty() {
+            return Err(format!(
+                "No snapshots found in '{}'. Run `loct scan` first.",
+                loctree_dir.display()
+            ));
+        }
+
+        // Sort by mtime (newest first) and return the most recent
+        snapshots.sort_by(|a, b| b.1.cmp(&a.1));
+
+        Ok(snapshots.into_iter().next().unwrap().0)
+    }
+
     /// Save snapshot to disk
     pub fn save(&self, root: &Path) -> io::Result<()> {
-        // If a snapshot already exists for the same branch/commit, skip rewriting.
+        // If a snapshot already exists for the same branch/commit AND worktree is clean,
+        // skip rewriting (no changes since last commit = same code).
+        // But if worktree is dirty, ALWAYS save fresh snapshot (user is actively working).
         if let (Some(commit), Some(branch), Ok(existing)) = (
             self.metadata.git_commit.as_ref(),
             self.metadata.git_branch.as_ref(),
@@ -375,20 +479,16 @@ impl Snapshot {
             && existing.metadata.git_branch.as_ref() == Some(branch)
         {
             let dirty = is_git_dirty(root).unwrap_or(false);
-            if dirty {
-                crate::progress::warning(&format!(
-                    "Snapshot {}@{} exists; worktree dirty → commit to refresh",
-                    branch,
-                    &commit[..7.min(commit.len())]
-                ));
-            } else {
+            if !dirty {
+                // Clean worktree + same commit = skip (nothing changed)
                 crate::progress::info(&format!(
                     "Snapshot {}@{} up-to-date, skipping",
                     branch,
                     &commit[..7.min(commit.len())]
                 ));
+                return Ok(());
             }
-            return Ok(());
+            // Dirty worktree = continue and save fresh snapshot
         }
 
         let snapshot_path = Self::snapshot_path(root);
@@ -538,10 +638,11 @@ impl Snapshot {
         println!("Status: OK");
         println!();
         println!("Next steps:");
-        println!("  loct dead                    # Find unused exports");
-        println!("  loct -A --report report.html # Full analysis with duplicates");
-        println!("  loct commands                # Show Tauri FE↔BE command bridges");
-        println!("  loct slice <file> --json     # Extract context for AI agent");
+        println!("  loct --for-ai                # Project overview for AI agents");
+        println!("  loct slice <file> --json     # Extract context with dependencies");
+        println!("  loct twins                   # Dead parrots + duplicates + barrel chaos");
+        println!("  loct '.files | length'       # jq-style queries on snapshot");
+        println!("  loct query who-imports <f>   # Quick graph queries");
     }
 }
 
@@ -685,6 +786,9 @@ pub fn run_init_with_options(
         crate::progress::format_count(file_count, "file", "files"),
         start_time.elapsed().as_secs_f64()
     ));
+
+    // Second spinner for building snapshot (can take a while for large codebases)
+    let build_spinner = crate::progress::Spinner::new("Building snapshot...");
 
     // Build the snapshot from scan results
     let mut snapshot = Snapshot::new(root_list.iter().map(|p| p.display().to_string()).collect());
@@ -857,17 +961,54 @@ pub fn run_init_with_options(
     all_events.extend(event_emits_map.keys().cloned());
     all_events.extend(event_listens_map.keys().cloned());
 
+    // Helper to check if a file is frontend code (TypeScript/JavaScript)
+    let is_frontend_file = |path: &str| {
+        snapshot
+            .files
+            .iter()
+            .find(|f| f.path == path)
+            .map(|f| f.language == "typescript" || f.language == "javascript")
+            .unwrap_or(false)
+    };
+
     for event_name in all_events {
+        let emits = event_emits_map
+            .get(&event_name)
+            .cloned()
+            .unwrap_or_default();
+        let listens = event_listens_map
+            .get(&event_name)
+            .cloned()
+            .unwrap_or_default();
+
+        // Detect FE↔FE sync pattern:
+        // 1. Has both emits and listens
+        // 2. All emits are from frontend files
+        // 3. All listens are from frontend files
+        // 4. No Rust involvement (Rust files would have "rust" language)
+        let has_emit = !emits.is_empty();
+        let has_listen = !listens.is_empty();
+        let all_emits_fe = emits.iter().all(|(path, _, _)| is_frontend_file(path));
+        let all_listens_fe = listens.iter().all(|(path, _)| is_frontend_file(path));
+        let is_fe_sync = has_emit && has_listen && all_emits_fe && all_listens_fe;
+
+        // Check if emit and listen are in the same file (strongest indicator)
+        let same_file_sync = if is_fe_sync {
+            let emit_files: HashSet<&str> =
+                emits.iter().map(|(path, _, _)| path.as_str()).collect();
+            let listen_files: HashSet<&str> =
+                listens.iter().map(|(path, _)| path.as_str()).collect();
+            !emit_files.is_disjoint(&listen_files)
+        } else {
+            false
+        };
+
         snapshot.event_bridges.push(EventBridge {
             name: event_name.clone(),
-            emits: event_emits_map
-                .get(&event_name)
-                .cloned()
-                .unwrap_or_default(),
-            listens: event_listens_map
-                .get(&event_name)
-                .cloned()
-                .unwrap_or_default(),
+            emits,
+            listens,
+            is_fe_sync,
+            same_file_sync,
         });
     }
 
@@ -892,6 +1033,9 @@ pub fn run_init_with_options(
     let duration_ms = start_time.elapsed().as_millis() as u64;
     snapshot.finalize_metadata(duration_ms);
 
+    // Finish build spinner
+    build_spinner.finish_clear();
+
     // Save snapshot
     snapshot.save(&snapshot_root)?;
 
@@ -902,8 +1046,10 @@ pub fn run_init_with_options(
 
     // Auto mode: emit full artifact set into ./.loctree to avoid extra commands
     if parsed.auto_outputs {
+        let artifacts_spinner = crate::progress::Spinner::new("Generating artifacts...");
         match write_auto_artifacts(&snapshot_root, &scan_results, &parsed) {
             Ok(paths) => {
+                artifacts_spinner.finish_clear();
                 if !paths.is_empty() {
                     println!("Artifacts saved under ./.loctree:");
                     for p in paths {
@@ -912,6 +1058,7 @@ pub fn run_init_with_options(
                 }
             }
             Err(err) => {
+                artifacts_spinner.finish_error("Failed to generate artifacts");
                 eprintln!("[loctree][warn] failed to write auto artifacts: {}", err);
             }
         }
@@ -1181,6 +1328,24 @@ pub(crate) fn write_auto_artifacts(
         },
     );
 
+    // Build minimal snapshot for SARIF enrichment (blast radius, consumer count)
+    let minimal_snapshot = Snapshot {
+        metadata: SnapshotMetadata::default(),
+        files: vec![],
+        edges: all_graph_edges
+            .iter()
+            .map(|(from, to, label)| GraphEdge {
+                from: from.clone(),
+                to: to.clone(),
+                label: label.clone(),
+            })
+            .collect(),
+        export_index: Default::default(),
+        command_bridges: vec![],
+        event_bridges: vec![],
+        barrels: vec![],
+    };
+
     let sarif_content = generate_sarif_string(SarifInputs {
         duplicate_exports: &all_ranked_dups,
         missing_handlers: &global_missing_handlers,
@@ -1188,6 +1353,7 @@ pub(crate) fn write_auto_artifacts(
         dead_exports: &dead_exports,
         circular_imports: &cycles,
         pipeline_summary: &pipeline_summary,
+        snapshot: Some(&minimal_snapshot),
     })
     .map_err(|err| io::Error::other(format!("Failed to serialize SARIF: {err}")))?;
     write_atomic(&sarif_path, sarif_content)?;
@@ -1234,6 +1400,9 @@ pub(crate) fn write_auto_artifacts(
                 "locations": gap.locations.iter().map(|(path, line)| {
                     json!({ "path": path, "line": line })
                 }).collect::<Vec<_>>(),
+                "why": format!("Frontend calls invoke('{}') but no #[tauri::command] handler found", gap.name),
+                "impact": "Runtime error: 'command {} not found' when invoked from frontend",
+                "suggestedFix": "Create handler with #[tauri::command] and register in invoke_handler![]",
             })
         }).collect::<Vec<_>>(),
         "unusedHandlers": global_unused_handlers.iter().map(|gap| {
@@ -1244,6 +1413,9 @@ pub(crate) fn write_auto_artifacts(
                     json!({ "path": path, "line": line })
                 }).collect::<Vec<_>>(),
                 "confidence": gap.confidence.as_ref().map(|c| format!("{:?}", c)),
+                "why": format!("Handler '{}' is registered but no invoke() calls found in frontend", gap.name),
+                "impact": "Dead code - handler exists but is never called",
+                "suggestedFix": "If intentionally unused (e.g., for tests), ignore. Otherwise, remove handler.",
             })
         }).collect::<Vec<_>>(),
         "unregisteredHandlers": global_unregistered_handlers.iter().map(|gap| {
@@ -1253,6 +1425,9 @@ pub(crate) fn write_auto_artifacts(
                 "locations": gap.locations.iter().map(|(path, line)| {
                     json!({ "path": path, "line": line })
                 }).collect::<Vec<_>>(),
+                "why": format!("#[tauri::command] fn {}() found but NOT in invoke_handler![] macro", gap.name),
+                "impact": "Command exists but is unreachable from frontend - invoke() calls will fail",
+                "suggestedFix": "Add to invoke_handler![] in main.rs or lib.rs, or remove if unused",
             })
         }).collect::<Vec<_>>(),
         "summary": {
@@ -1468,6 +1643,8 @@ mod tests {
             name: "user_updated".to_string(),
             emits: vec![("events.ts".to_string(), 10, "emit".to_string())],
             listens: vec![("listener.ts".to_string(), 20)],
+            is_fe_sync: false,
+            same_file_sync: false,
         });
 
         snapshot.save(tmp.path()).expect("save");
@@ -1566,5 +1743,122 @@ mod tests {
             loaded.export_index.get("Button").unwrap(),
             &vec!["src/Button.tsx".to_string()]
         );
+    }
+
+    #[test]
+    fn test_find_latest_snapshot_explicit_path_exists() {
+        let tmp = TempDir::new().expect("create temp dir");
+        let snapshot_path = tmp.path().join(SNAPSHOT_DIR).join(SNAPSHOT_FILE);
+
+        // Create snapshot directory and file
+        std::fs::create_dir_all(snapshot_path.parent().unwrap()).expect("create dir");
+        let snapshot = Snapshot::new(vec!["src".to_string()]);
+        let json = serde_json::to_string_pretty(&snapshot).unwrap();
+        std::fs::write(&snapshot_path, json).expect("write snapshot");
+
+        // Should return the explicit path
+        let result = Snapshot::find_latest_snapshot(Some(&snapshot_path));
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), snapshot_path);
+    }
+
+    #[test]
+    fn test_find_latest_snapshot_explicit_path_not_exists() {
+        let result =
+            Snapshot::find_latest_snapshot(Some(Path::new("/nonexistent/path/snapshot.json")));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("Snapshot not found"));
+        assert!(err.contains("Run `loct scan` first"));
+    }
+
+    #[test]
+    fn test_find_latest_snapshot_picks_newest_by_mtime() {
+        let tmp = TempDir::new().expect("create temp dir");
+        let loctree_dir = tmp.path().join(SNAPSHOT_DIR);
+
+        // Create two branch@sha subdirectories with snapshots
+        let old_dir = loctree_dir.join("main@old123");
+        let new_dir = loctree_dir.join("main@new456");
+        std::fs::create_dir_all(&old_dir).expect("create old dir");
+        std::fs::create_dir_all(&new_dir).expect("create new dir");
+
+        let old_snapshot_path = old_dir.join(SNAPSHOT_FILE);
+        let new_snapshot_path = new_dir.join(SNAPSHOT_FILE);
+
+        // Write old snapshot first
+        let snapshot = Snapshot::new(vec!["src".to_string()]);
+        let json = serde_json::to_string_pretty(&snapshot).unwrap();
+        std::fs::write(&old_snapshot_path, &json).expect("write old snapshot");
+
+        // Wait a tiny bit to ensure mtime difference
+        std::thread::sleep(std::time::Duration::from_millis(10));
+
+        // Write new snapshot
+        std::fs::write(&new_snapshot_path, &json).expect("write new snapshot");
+
+        // Use find_latest_snapshot_in to avoid changing global cwd (thread-safe)
+        let result = Snapshot::find_latest_snapshot_in(tmp.path());
+
+        assert!(result.is_ok());
+        let found_path = result.unwrap();
+        // Should find the newer snapshot
+        assert!(
+            found_path.to_string_lossy().contains("new456"),
+            "Expected newest snapshot, got: {}",
+            found_path.display()
+        );
+    }
+
+    #[test]
+    fn test_find_latest_snapshot_no_loctree_dir() {
+        let tmp = TempDir::new().expect("create temp dir");
+        // No .loctree directory
+
+        // Use find_latest_snapshot_in to avoid changing global cwd (thread-safe)
+        let result = Snapshot::find_latest_snapshot_in(tmp.path());
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("No .loctree directory found"));
+        assert!(err.contains("Run `loct scan` first"));
+    }
+
+    #[test]
+    fn test_find_latest_snapshot_empty_loctree_dir() {
+        let tmp = TempDir::new().expect("create temp dir");
+        // Create empty .loctree directory (no snapshots)
+        std::fs::create_dir(tmp.path().join(SNAPSHOT_DIR)).expect("create .loctree");
+
+        // Use find_latest_snapshot_in to avoid changing global cwd (thread-safe)
+        let result = Snapshot::find_latest_snapshot_in(tmp.path());
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("No snapshots found"));
+        assert!(err.contains("Run `loct scan` first"));
+    }
+
+    #[test]
+    fn test_find_latest_snapshot_legacy_path() {
+        let tmp = TempDir::new().expect("create temp dir");
+        let loctree_dir = tmp.path().join(SNAPSHOT_DIR);
+
+        // Create legacy snapshot at .loctree/snapshot.json (not in subdirectory)
+        std::fs::create_dir_all(&loctree_dir).expect("create .loctree dir");
+        let legacy_path = loctree_dir.join(SNAPSHOT_FILE);
+
+        let snapshot = Snapshot::new(vec!["src".to_string()]);
+        let json = serde_json::to_string_pretty(&snapshot).unwrap();
+        std::fs::write(&legacy_path, json).expect("write legacy snapshot");
+
+        // Use find_latest_snapshot_in to avoid changing global cwd (thread-safe)
+        let result = Snapshot::find_latest_snapshot_in(tmp.path());
+
+        assert!(result.is_ok());
+        // Compare canonicalized paths to handle /private/var vs /var on macOS
+        let found = result.unwrap().canonicalize().unwrap_or_default();
+        let expected = legacy_path.canonicalize().unwrap_or_default();
+        assert_eq!(found, expected);
     }
 }

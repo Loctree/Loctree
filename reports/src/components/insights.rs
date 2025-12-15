@@ -1,6 +1,6 @@
 //! AI insights panel component
 
-use crate::components::{Icon, ICON_ROBOT, ICON_SQUARES_FOUR, ICON_WARNING_CIRCLE};
+use crate::components::icons::{Icon, ICON_ROBOT, ICON_SQUARES_FOUR, ICON_WARNING_CIRCLE};
 use crate::types::AiInsight;
 use leptos::prelude::*;
 

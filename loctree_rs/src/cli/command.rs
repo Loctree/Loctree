@@ -44,6 +44,9 @@ pub struct GlobalOptions {
 
     /// Python library mode (treat __all__ exports as public API, skip dunder methods)
     pub python_library: bool,
+
+    /// Additional Python package roots for import resolution
+    pub py_roots: Vec<PathBuf>,
 }
 
 // ============================================================================
@@ -154,11 +157,23 @@ pub enum Command {
     /// suggesting potential consolidation or refactoring opportunities.
     Crowd(CrowdOptions),
 
+    /// Unified search around a keyword - files, crowds, and dead exports.
+    ///
+    /// Aggregates files matching the keyword, crowd analysis, and dead code
+    /// into a single comprehensive view.
+    Tagmap(TagmapOptions),
+
     /// Show symbol registry and dead parrots (semantic duplicate detection).
     ///
     /// Builds a registry of all exported symbols and their import counts.
     /// Dead parrots are symbols with 0 imports - candidates for removal.
     Twins(TwinsOptions),
+
+    /// Manage false positive suppressions.
+    ///
+    /// Mark findings as "reviewed and OK" so they don't appear in subsequent runs.
+    /// Suppressions are stored in `.loctree/suppressions.toml`.
+    Suppress(SuppressOptions),
 
     /// Analyze bundle distribution using source maps.
     ///
@@ -171,6 +186,76 @@ pub enum Command {
     /// Cross-references production usage (FE invoke/emit) with test imports
     /// to find handlers and events without test coverage.
     Coverage(CoverageOptions),
+
+    /// Sniff for code smells (twins + dead parrots + crowds).
+    ///
+    /// Aggregates all smell-level findings worth checking:
+    /// - Twins: same symbol name in multiple files
+    /// - Dead parrots: exports with 0 imports
+    /// - Crowds: files with similar dependency patterns
+    ///
+    /// Output is friendly and non-judgmental - these are hints, not verdicts.
+    Sniff(SniffOptions),
+
+    /// Query snapshot with jq-style filters (loct '.metadata').
+    ///
+    /// Runs jq-style filter expressions on the latest snapshot JSON.
+    /// Supports standard jq flags: -r (raw), -c (compact), -e (exit status),
+    /// --arg (string vars), --argjson (JSON vars), --snapshot (explicit path).
+    JqQuery(JqQueryOptions),
+
+    /// Analyze impact of modifying/removing a file.
+    ///
+    /// Shows which files would break if you modify or remove the target file.
+    /// Traverses the reverse dependency graph to find direct and transitive consumers.
+    Impact(ImpactCommandOptions),
+
+    /// Focus on a directory - extract holographic context for all files in a directory.
+    ///
+    /// Like `slice` but for directories. Shows core files, internal edges,
+    /// external dependencies, and consumers of the directory as a unit.
+    Focus(FocusOptions),
+
+    /// Show import frequency heatmap - which files are core vs peripheral.
+    ///
+    /// Ranks files by how often they are imported (in-degree) to identify
+    /// hub modules (core infrastructure) vs leaf modules (feature endpoints).
+    Hotspots(HotspotsOptions),
+
+    /// Analyze CSS layout properties (z-index, position, display).
+    ///
+    /// Extracts layout structure from CSS/SCSS files to help understand
+    /// UI layering, sticky/fixed elements, and grid/flex usage.
+    Layoutmap(LayoutmapOptions),
+
+    /// Find zombie code (dead exports + orphan files + shadow exports).
+    ///
+    /// Combines three sources of dead code into one actionable report:
+    /// - Dead exports (from dead code analysis)
+    /// - Orphan files (files with 0 importers)
+    /// - Shadow exports (symbols exported by multiple files where some have 0 imports)
+    Zombie(ZombieOptions),
+
+    /// Quick health check summary (cycles + dead + twins).
+    ///
+    /// One-shot command to get a summary of all structural issues:
+    /// - Circular imports (hard cycles count)
+    /// - Dead exports (high confidence count)
+    /// - Twins (duplicate exports count)
+    Health(HealthOptions),
+
+    /// Full audit - comprehensive analysis with actionable findings.
+    ///
+    /// Combines all structural analyses into one report:
+    /// - Cycles (circular imports)
+    /// - Dead exports (unused code)
+    /// - Twins (duplicate symbols)
+    /// - Orphan files (0 importers)
+    /// - Shadow exports (consolidation candidates)
+    /// - Crowds (similar file clusters)
+    ///
+    /// Perfect for getting a complete picture of codebase health.
+    Audit(AuditOptions),
 }
 
 impl Default for Command {
@@ -219,6 +304,9 @@ pub struct ScanOptions {
 
     /// Include normally-ignored directories
     pub scan_all: bool,
+
+    /// Watch for file changes and re-scan automatically
+    pub watch: bool,
 }
 
 /// Options for the `tree` command.
@@ -263,6 +351,9 @@ pub struct SliceOptions {
 
     /// Maximum depth for dependency traversal
     pub depth: Option<usize>,
+
+    /// Force rescan before slicing (includes uncommitted files)
+    pub rescan: bool,
 }
 
 /// Options for the `find` command.
@@ -321,6 +412,9 @@ pub struct DeadOptions {
 
     /// Include helper/scripts/docs files (default: false)
     pub with_helpers: bool,
+
+    /// Detect shadow exports (same symbol exported by multiple files, only one used)
+    pub with_shadows: bool,
 }
 
 /// Options for the `cycles` command.
@@ -331,6 +425,25 @@ pub struct CyclesOptions {
 
     /// Filter by file path pattern (regex)
     pub path_filter: Option<String>,
+
+    /// Only show cycles that would break compilation
+    pub breaking_only: bool,
+
+    /// Show detailed explanation for each cycle
+    pub explain: bool,
+
+    /// Use legacy output format (for backwards compatibility)
+    pub legacy_format: bool,
+}
+
+/// Options for the `trace` command (Tauri/IPC handler tracing).
+#[derive(Debug, Clone, Default)]
+pub struct TraceOptions {
+    /// Handler name to trace
+    pub handler: String,
+
+    /// Root directories to analyze
+    pub roots: Vec<PathBuf>,
 }
 
 /// Options for the `commands` command (Tauri command bridges).
@@ -401,6 +514,9 @@ pub struct EventsOptions {
 
     /// Show potential race conditions
     pub races: bool,
+
+    /// Show only FE↔FE sync events (window sync pattern)
+    pub fe_sync: bool,
 
     /// Suppress duplicate sections (noise reduction)
     pub suppress_duplicates: bool,
@@ -477,6 +593,9 @@ pub struct DiffOptions {
 
     /// Show only new problems (added dead exports, new cycles, new missing handlers)
     pub problems_only: bool,
+
+    /// Automatically scan target branch using git worktree (zero-friction diff)
+    pub auto_scan_base: bool,
 }
 
 /// Options for the `memex` command.
@@ -531,6 +650,23 @@ pub struct CrowdOptions {
     pub include_tests: bool,
 }
 
+/// Options for the `tagmap` command.
+/// Unified search aggregating files, crowds, and dead code around a keyword.
+#[derive(Debug, Clone, Default)]
+pub struct TagmapOptions {
+    /// Keyword to search for (in paths and names)
+    pub keyword: String,
+
+    /// Root directories to analyze
+    pub roots: Vec<PathBuf>,
+
+    /// Include test files in analysis (default: false)
+    pub include_tests: bool,
+
+    /// Maximum results to show per section
+    pub limit: Option<usize>,
+}
+
 /// Options for the `twins` command.
 /// Shows symbol registry and dead parrots (0 import count).
 #[derive(Debug, Clone, Default)]
@@ -540,6 +676,41 @@ pub struct TwinsOptions {
 
     /// Show only dead parrots (symbols with 0 imports)
     pub dead_only: bool,
+
+    /// Include suppressed findings in output
+    pub include_suppressed: bool,
+
+    /// Include test files in analysis (default: false)
+    pub include_tests: bool,
+}
+
+/// Options for the `suppress` command.
+/// Manage false positive suppressions.
+#[derive(Debug, Clone, Default)]
+pub struct SuppressOptions {
+    /// Root directory (defaults to current directory)
+    pub path: Option<PathBuf>,
+
+    /// Type of finding to suppress: twins, dead_parrot, dead_export, circular
+    pub suppression_type: Option<String>,
+
+    /// Symbol name to suppress
+    pub symbol: Option<String>,
+
+    /// Optional: specific file path
+    pub file: Option<String>,
+
+    /// Reason for suppression
+    pub reason: Option<String>,
+
+    /// List all current suppressions
+    pub list: bool,
+
+    /// Clear all suppressions
+    pub clear: bool,
+
+    /// Remove a specific suppression
+    pub remove: bool,
 }
 
 /// Options for the `dist` command.
@@ -551,6 +722,154 @@ pub struct DistOptions {
 
     /// Source directory to scan for exports
     pub src: Option<PathBuf>,
+}
+
+/// Options for the `sniff` command.
+/// Aggregates code smell findings (twins, dead parrots, crowds).
+#[derive(Debug, Clone, Default)]
+pub struct SniffOptions {
+    /// Root directory to analyze (defaults to current directory)
+    pub path: Option<PathBuf>,
+
+    /// Show only dead parrots (skip twins and crowds)
+    pub dead_only: bool,
+
+    /// Show only twins (skip dead parrots and crowds)
+    pub twins_only: bool,
+
+    /// Show only crowds (skip twins and dead parrots)
+    pub crowds_only: bool,
+
+    /// Include test files in analysis (default: false)
+    pub include_tests: bool,
+
+    /// Minimum crowd size to report (default: 2)
+    pub min_crowd_size: Option<usize>,
+}
+
+/// Options for jq-style query mode (loct '.filter')
+#[derive(Debug, Clone, Default)]
+pub struct JqQueryOptions {
+    /// The jq filter expression
+    pub filter: String,
+    /// Raw string output (-r)
+    pub raw_output: bool,
+    /// Compact JSON output (-c)
+    pub compact_output: bool,
+    /// Exit status mode (-e)
+    pub exit_status: bool,
+    /// String variable bindings: (name, value)
+    pub string_args: Vec<(String, String)>,
+    /// JSON variable bindings: (name, json_string)
+    pub json_args: Vec<(String, String)>,
+    /// Explicit snapshot path
+    pub snapshot_path: Option<std::path::PathBuf>,
+}
+
+/// Options for the `impact` command.
+#[derive(Debug, Clone, Default)]
+pub struct ImpactCommandOptions {
+    /// Target file path to analyze
+    pub target: String,
+
+    /// Maximum traversal depth (None = unlimited)
+    pub depth: Option<usize>,
+
+    /// Root directory (defaults to current directory)
+    pub root: Option<PathBuf>,
+}
+
+/// Options for the `focus` command.
+/// Focus on a directory - like slice but for directories.
+#[derive(Debug, Clone, Default)]
+pub struct FocusOptions {
+    /// Target directory path
+    pub target: String,
+
+    /// Root directory (defaults to current directory)
+    pub root: Option<PathBuf>,
+
+    /// Include consumer files (files outside the directory that import it)
+    pub consumers: bool,
+
+    /// Maximum depth for external dependency traversal
+    pub depth: Option<usize>,
+}
+
+/// Options for the `hotspots` command.
+/// Shows import frequency heatmap - which files are core vs peripheral.
+#[derive(Debug, Clone, Default)]
+pub struct HotspotsOptions {
+    /// Root directory (defaults to current directory)
+    pub root: Option<PathBuf>,
+
+    /// Minimum import count to show (default: 1)
+    pub min_imports: Option<usize>,
+
+    /// Maximum files to show (default: 50)
+    pub limit: Option<usize>,
+
+    /// Show only files with zero importers (leaf nodes)
+    pub leaves_only: bool,
+
+    /// Show coupling score (out-degree / files that import many others)
+    pub coupling: bool,
+}
+
+/// Options for the `layoutmap` command.
+/// Analyze CSS layout properties (z-index, position, display).
+#[derive(Debug, Clone, Default)]
+pub struct LayoutmapOptions {
+    /// Root directory (defaults to current directory)
+    pub root: Option<PathBuf>,
+
+    /// Show only z-index values
+    pub zindex_only: bool,
+
+    /// Show only sticky/fixed position elements
+    pub sticky_only: bool,
+
+    /// Show only grid/flex layouts
+    pub grid_only: bool,
+
+    /// Minimum z-index threshold to report (default: 1)
+    pub min_zindex: Option<i32>,
+
+    /// Glob patterns to exclude (e.g., "**/prototype/**", "**/.obsidian/**")
+    pub exclude: Vec<String>,
+}
+
+/// Options for the `zombie` command.
+/// Find all zombie code (dead exports + orphan files + shadows).
+#[derive(Debug, Clone, Default)]
+pub struct ZombieOptions {
+    /// Root directories to analyze
+    pub roots: Vec<PathBuf>,
+
+    /// Include test files in zombie detection (default: false)
+    pub include_tests: bool,
+}
+
+/// Options for the `health` command.
+/// Quick health check summary (cycles + dead + twins).
+#[derive(Debug, Clone, Default)]
+pub struct HealthOptions {
+    /// Root directories to analyze
+    pub roots: Vec<PathBuf>,
+
+    /// Include test files in analysis (default: false)
+    pub include_tests: bool,
+}
+
+/// Options for the `audit` command.
+/// Full audit combining all structural analyses into one actionable report.
+#[derive(Debug, Clone, Default)]
+pub struct AuditOptions {
+    /// Root directories to analyze
+    pub roots: Vec<PathBuf>,
+
+    /// Include test files in analysis (default: false)
+    pub include_tests: bool,
 }
 
 /// Options for the `help` command.
@@ -681,9 +1000,20 @@ impl Command {
             Command::Diff(_) => "diff",
             Command::Memex(_) => "memex",
             Command::Crowd(_) => "crowd",
+            Command::Tagmap(_) => "tagmap",
             Command::Twins(_) => "twins",
+            Command::Suppress(_) => "suppress",
             Command::Dist(_) => "dist",
             Command::Coverage(_) => "coverage",
+            Command::Sniff(_) => "sniff",
+            Command::JqQuery(_) => "jq",
+            Command::Impact(_) => "impact",
+            Command::Focus(_) => "focus",
+            Command::Hotspots(_) => "hotspots",
+            Command::Layoutmap(_) => "layoutmap",
+            Command::Zombie(_) => "zombie",
+            Command::Health(_) => "health",
+            Command::Audit(_) => "audit",
         }
     }
 
@@ -691,7 +1021,7 @@ impl Command {
     pub fn description(&self) -> &'static str {
         match self {
             Command::Auto(_) => "Full auto-scan with stack detection (default)",
-            Command::Scan(_) => "Build/update snapshot for current HEAD",
+            Command::Scan(_) => "Build/update snapshot for current HEAD (supports --watch)",
             Command::Tree(_) => "Display LOC tree / structural overview",
             Command::Slice(_) => "Extract holographic context for a file",
             Command::Find(_) => "Search symbols/files with regex filters",
@@ -708,67 +1038,130 @@ impl Command {
             Command::Diff(_) => "Compare snapshots and show semantic delta",
             Command::Memex(_) => "Index analysis into AI memory (vector DB)",
             Command::Crowd(_) => "Detect functional crowds (similar files clustering)",
+            Command::Tagmap(_) => "Unified search: files + crowd + dead around a keyword",
             Command::Twins(_) => "Show symbol registry and dead parrots (0 imports)",
+            Command::Suppress(_) => "Manage false positive suppressions",
             Command::Routes(_) => "List backend/web routes (FastAPI/Flask)",
             Command::Dist(_) => "Analyze bundle distribution using source maps",
             Command::Coverage(_) => "Analyze test coverage gaps (structural coverage)",
+            Command::Sniff(_) => "Sniff for code smells (twins + dead parrots + crowds)",
+            Command::JqQuery(_) => "Query snapshot with jq-style filters (loct '.filter')",
+            Command::Impact(_) => "Analyze impact of modifying/removing a file",
+            Command::Focus(_) => "Extract holographic context for a directory",
+            Command::Hotspots(_) => "Show import frequency heatmap (core vs peripheral)",
+            Command::Layoutmap(_) => "Analyze CSS layout (z-index, position, grid/flex)",
+            Command::Zombie(_) => "Find zombie code (dead exports + orphan files + shadows)",
+            Command::Health(_) => "Quick health check (cycles + dead + twins summary)",
+            Command::Audit(_) => "Full audit (cycles + dead + twins + zombie + crowds)",
         }
     }
 
     /// Generate the main help text listing all commands.
+    /// Generate the main help text listing the core commands.
     pub fn format_help() -> String {
-        let commands = [
-            ("auto", "Full auto-scan with stack detection (default)"),
-            ("agent", "Agent bundle JSON (alias for auto --agent-json)"),
-            ("scan", "Build/update snapshot for current HEAD"),
-            ("tree", "Display LOC tree / structural overview"),
-            ("slice <path>", "Extract holographic context for a file"),
-            ("find", "Search symbols/files with regex filters"),
-            ("dead", "Detect unused exports / dead code"),
-            ("cycles", "Detect circular imports"),
-            ("commands", "Show Tauri command bridges (FE ↔ BE)"),
-            ("routes", "List backend/web routes (FastAPI/Flask)"),
-            ("events", "Show event flow and issues"),
-            ("info", "Show snapshot metadata and project info"),
-            ("lint", "Structural lint/policy checks"),
-            ("report", "Generate HTML/JSON reports"),
+        let core_commands = [
+            ("auto", "Scan & update snapshot (default)"),
+            ("--for-ai", "AI overview bundle (alias: auto --agent-json)"),
+            ("scan --watch", "Watch filesystem and rescan on change"),
+            ("slice <path>", "File hologram: deps + consumers"),
+            ("find", "Search/similar/dead filters over symbols & files"),
             (
-                "query <kind> <target>",
-                "Query snapshot (who-imports, where-symbol, component-of)",
+                "query <kind>",
+                "Fast snapshot lookups (who-imports | where-symbol | component-of)",
             ),
-            ("memex", "Index analysis into AI memory (vector DB)"),
+            ("impact <file>", "Reverse deps for safe delete/rename"),
+            ("dead | cycles", "Dead exports and circular imports"),
+            ("twins | crowd", "Duplicate exports and functional clusters"),
+            ("health | audit", "Quick or full structural report"),
+            ("diff --since <ref>", "Snapshot diff (with auto-scan base)"),
             (
-                "crowd [pattern]",
-                "Detect functional crowds around a pattern",
+                "commands | trace",
+                "Tauri bridges coverage and handler trace",
             ),
-            ("twins", "Dead parrots, exact twins, barrel chaos analysis"),
-            (
-                "dist <map> <src>",
-                "Analyze bundle distribution using source maps",
-            ),
-            ("coverage", "Analyze test coverage gaps (structural)"),
         ];
 
         let mut help = String::new();
-        help.push_str("loctree - AI-oriented Project Analyzer\n\n");
-        help.push_str("USAGE:\n");
-        help.push_str("    loct [COMMAND] [OPTIONS]\n");
-        help.push_str("    loct                      # Auto-scan (default)\n");
-        help.push_str("    loct <command> --help     # Command-specific help\n\n");
-        help.push_str("COMMANDS:\n");
+        help.push_str(
+            "loctree - AI-oriented Project Analyzer
 
-        for (name, desc) in commands {
-            help.push_str(&format!("    {:<18} {}\n", name, desc));
+",
+        );
+        help.push_str(
+            "USAGE:
+",
+        );
+        help.push_str(
+            "    loct [COMMAND] [OPTIONS]
+",
+        );
+        help.push_str(
+            "    loct                      # Auto-scan (default)
+",
+        );
+        help.push_str(
+            "    loct <command> --help     # Command-specific help
+
+",
+        );
+        help.push_str(
+            "CORE COMMANDS (focus on first run):
+",
+        );
+
+        for (name, desc) in core_commands {
+            help.push_str(&format!(
+                "    {:<18} {}
+",
+                name, desc
+            ));
         }
 
-        help.push_str("\nGLOBAL OPTIONS:\n");
-        help.push_str("    --json           Output as JSON (stdout only)\n");
-        help.push_str("    --quiet          Suppress non-essential output\n");
-        help.push_str("    --verbose        Show detailed progress\n");
-        help.push_str("    --color <mode>   Color mode: auto|always|never\n");
-        help.push_str("    --help           Show this help\n");
-        help.push_str("    --version        Show version\n");
-        help.push_str("\nFor deprecated flags, run: loct --help-legacy\n");
+        help.push_str(            "
+ADVANCED: lint, report, tagmap, suppress, layoutmap, hotspots, zombie, memex, focus, coverage, dist, info, routes, events, jq.
+",
+        );
+        help.push_str(
+            "More: loct --help-legacy for legacy flags, loct --help-full for full reference.
+
+",
+        );
+        help.push_str(
+            "GLOBAL OPTIONS:
+",
+        );
+        help.push_str(
+            "    --json           Output as JSON (stdout only)
+",
+        );
+        help.push_str(
+            "    --quiet          Suppress non-essential output
+",
+        );
+        help.push_str(
+            "    --verbose        Show detailed progress
+",
+        );
+        help.push_str(
+            "    --color <mode>   Color mode: auto|always|never
+",
+        );
+        help.push_str(
+            "    --py-root <path> Additional Python package root for imports
+",
+        );
+        help.push_str(
+            "    --help           Show this help
+",
+        );
+        help.push_str(
+            "    --version        Show version
+",
+        );
+        help.push_str(
+            "
+For deprecated flags, run: loct --help-legacy
+",
+        );
 
         help
     }
@@ -784,19 +1177,30 @@ impl Command {
             "find" => Some(FIND_HELP),
             "dead" | "unused" => Some(DEAD_HELP),
             "cycles" => Some(CYCLES_HELP),
+            "trace" => Some(TRACE_HELP),
             "commands" => Some(COMMANDS_HELP),
             "events" => Some(EVENTS_HELP),
             "info" => Some(INFO_HELP),
             "lint" => Some(LINT_HELP),
             "report" => Some(REPORT_HELP),
             "query" => Some(QUERY_HELP),
+            "impact" => Some(IMPACT_HELP),
             "diff" => Some(DIFF_HELP),
             "memex" => Some(MEMEX_HELP),
             "crowd" => Some(CROWD_HELP),
+            "tagmap" => Some(TAGMAP_HELP),
             "twins" => Some(TWINS_HELP),
             "routes" => Some(ROUTES_HELP),
             "dist" => Some(DIST_HELP),
             "coverage" => Some(COVERAGE_HELP),
+            "sniff" => Some(SNIFF_HELP),
+            "suppress" => Some(SUPPRESS_HELP),
+            "focus" => Some(FOCUS_HELP),
+            "hotspots" => Some(HOTSPOTS_HELP),
+            "layoutmap" => Some(LAYOUTMAP_HELP),
+            "zombie" => Some(ZOMBIE_HELP),
+            "health" => Some(HEALTH_HELP),
+            "audit" => Some(AUDIT_HELP),
             _ => None,
         }
     }
@@ -896,6 +1300,7 @@ DESCRIPTION:
 OPTIONS:
     --full-scan       Force full rescan, ignore cached data
     --scan-all        Include hidden and ignored files
+    --watch           Watch for changes and re-scan automatically
     --help, -h        Show this help message
 
 ARGUMENTS:
@@ -905,7 +1310,8 @@ EXAMPLES:
     loct scan                    # Scan current directory
     loct scan --full-scan        # Force complete rescan
     loct scan src/ lib/          # Scan specific directories
-    loct scan --scan-all         # Include all files (even hidden)";
+    loct scan --scan-all         # Include all files (even hidden)
+    loct scan --watch            # Watch mode with live refresh";
 
 const TREE_HELP: &str = "loct tree - Display LOC tree / structural overview
 
@@ -937,52 +1343,70 @@ EXAMPLES:
     loct tree --loc 100             # LOC threshold
     loct tree src/ --show-hidden    # Include dotfiles";
 
-const SLICE_HELP: &str = "loct slice - Extract holographic context for a file
+const SLICE_HELP: &str = "loct slice - Extract file + dependencies for AI context
 
 USAGE:
-    loct slice <FILE> [OPTIONS]
+    loct slice <TARGET_PATH> [OPTIONS]
 
 DESCRIPTION:
-    Builds a context slice for a specific file/component:
-    - Shows dependencies and consumers
-    - Includes symbol exports/imports
-    - Designed for AI agents and code review
+    Extracts a 'holographic slice' - the target file plus all its dependencies.
+    Perfect for feeding focused context to AI assistants.
+
+    Shows what the file USES, not what USES it.
+    For reverse dependencies, use --consumers or 'loct query who-imports'.
 
 OPTIONS:
-    --consumers        Include files that import the target
-    --root <PATH>      Project root (default: current directory)
+    --consumers, -c    Include reverse dependencies (files that import this)
+    --depth <N>        Maximum dependency depth to traverse
+    --root <PATH>      Project root for resolving imports
+    --rescan           Force snapshot update (includes new/uncommitted files)
     --help, -h         Show this help message
 
 EXAMPLES:
-    loct slice src/foo.ts
-    loct slice src/foo.ts --consumers
-    loct slice src/foo.ts --root ./packages/app";
+    loct slice src/main.rs              # File + its dependencies
+    loct slice src/utils.ts --consumers # Include reverse deps
+    loct slice lib/api.ts --depth 2     # Limit to 2 levels
+    loct slice src/app.tsx --json       # JSON output for AI tools
+    loct slice src/new-file.ts --rescan # Slice a newly created file
 
-const FIND_HELP: &str = "loct find - Search symbols/files with regex filters
+RELATED COMMANDS:
+    loct query who-imports <file>    Find all importers
+    loct auto --for-agent-feed       Full codebase context
+    loct focus <dir>                 Slice for a directory";
+
+const FIND_HELP: &str = "loct find - Semantic search for symbols by name pattern
 
 USAGE:
-    loct find [OPTIONS] <QUERY>
+    loct find [QUERY] [OPTIONS]
 
 DESCRIPTION:
-    Semantic search across the snapshot:
-    - Symbols, files, impacts, similar components
-    - Supports dead-only/exported-only filters
+    Semantic search for symbols (functions, classes, types) matching a name pattern.
+    Uses regex patterns to match symbol names in your codebase.
+
+    NOT impact analysis - for dependency impact, use your editor's LSP or 'loct impact'.
+    NOT dead code detection - use 'loct dead' or 'loct twins' for that.
 
 OPTIONS:
-    --symbol <NAME>     Exact symbol search
-    --impact <FILE>     Show files impacted by FILE
-    --similar <NAME>    Find similar components/symbols
-    --dead-only         Filter to dead symbols
-    --exported-only     Filter to exported symbols
-    --lang <LANG>       Restrict to language (ts, rs, py, etc.)
-    --limit <N>         Result limit
-    --help, -h          Show this help message
+    --symbol <PATTERN>   Search for symbols matching regex
+    --file <PATTERN>     Search for files matching regex
+    --similar <SYMBOL>   Find symbols with similar names (fuzzy)
+    --dead               Only show dead/unused symbols
+    --exported           Only show exported symbols
+    --lang <LANG>        Filter by language (ts, rs, js, py, etc.)
+    --limit <N>          Maximum results to show
+    --help, -h           Show this help message
 
 EXAMPLES:
-    loct find useAuth
-    loct find --symbol MyType
-    loct find --impact src/foo.ts
-    loct find --similar Button";
+    loct find Patient              # Find symbols containing \"Patient\"
+    loct find --symbol \".*Config$\" # Regex: symbols ending with Config
+    loct find --file \"utils\"       # Files containing \"utils\" in path
+    loct find --dead --exported    # Dead exported symbols
+
+RELATED COMMANDS:
+    loct dead              Find unused exports / dead code
+    loct twins             Find duplicate exports and dead parrots
+    loct slice <file>      Extract file dependencies
+    loct query who-imports Show what imports a file";
 
 const DEAD_HELP: &str = "loct dead - Detect unused exports / dead code
 
@@ -999,49 +1423,94 @@ OPTIONS:
     --full, --all        Show all results (ignore --top limit)
     --with-tests         Include test files
     --with-helpers       Include helper files
+    --with-shadows       Detect shadow exports (same symbol, multiple files)
     --help, -h           Show this help message
 
 EXAMPLES:
     loct dead
     loct dead --confidence high
-    loct dead --with-tests";
+    loct dead --with-tests
+    loct dead --with-shadows";
 
-const CYCLES_HELP: &str = "loct cycles - Detect circular imports
+const CYCLES_HELP: &str = "loct cycles - Detect circular import chains
 
 USAGE:
-    loct cycles [PATHS...]
+    loct cycles [OPTIONS] [PATHS...]
 
 DESCRIPTION:
-    Finds import cycles using the dependency graph. Supports Rust/TS/Py.
+    Detects circular dependencies in your import graph.
+    Example: A → B → C → A
+
+    Circular imports cause:
+    - Runtime initialization errors
+    - Build/bundling failures
+    - Flaky test behavior
+
+OPTIONS:
+    --path <PATTERN>     Filter to files matching pattern
+    --help, -h           Show this help message
+
+EXAMPLES:
+    loct cycles                # Detect all cycles
+    loct cycles src/           # Only analyze src/
+    loct cycles --json         # JSON output for CI
+
+RELATED COMMANDS:
+    loct slice <file>       See what a file depends on
+    loct query who-imports  Find reverse dependencies
+    loct lint --fail        Run as CI check";
+
+const TRACE_HELP: &str = "loct trace - Trace a Tauri/IPC handler end-to-end
+
+USAGE:
+    loct trace <handler> [ROOTS...]
+
+DESCRIPTION:
+    Investigates why a handler is missing/unused:
+    - Backend definition (file, line, exposed name)
+    - Frontend invoke() calls and plain mentions
+    - Registration status in generate_handler![]
+    - Verdict + suggestion to fix
 
 OPTIONS:
     --help, -h           Show this help message
 
-EXAMPLES:
-    loct cycles
-    loct cycles src/";
+ARGUMENTS:
+    <handler>            Handler name to trace (exposed or internal)
+    [ROOTS...]           Root directories to scan (default: current directory)
 
-const COMMANDS_HELP: &str = "loct commands - Show Tauri command bridges (FE ↔ BE)
+EXAMPLES:
+    loct trace toggle_assistant
+    loct trace standard_command apps/desktop";
+
+const COMMANDS_HELP: &str = "loct commands - Tauri FE↔BE handler coverage analysis
 
 USAGE:
     loct commands [OPTIONS] [PATHS...]
 
 DESCRIPTION:
-    Lists Tauri command handlers, missing/unused ones, and FE callsites.
+    Analyzes Tauri command bridge contracts between frontend and backend.
+
+    Detects:
+    - Missing handlers: FE calls invoke('cmd') but no BE #[tauri::command]
+    - Unused handlers: BE has #[tauri::command] but FE never calls it
+    - Matched handlers: Both FE and BE exist (healthy)
 
 OPTIONS:
-    --name <FILTER>      Regex filter on command name
+    --name <PATTERN>     Filter to commands matching pattern
     --missing-only       Show only missing handlers
     --unused-only        Show only unused handlers
-    --limit <N>          Maximum results to show (default: unlimited)
-    --no-duplicates      Hide duplicate sections in CLI output
-    --no-dynamic-imports Hide dynamic import sections in CLI output
+    --limit <N>          Maximum results to show
     --help, -h           Show this help message
 
 EXAMPLES:
-    loct commands
-    loct commands --missing-only
-    loct commands --limit 10 --json";
+    loct commands                    # Full coverage report
+    loct commands --missing-only     # Only missing handlers
+    loct commands --json --missing   # JSON for CI
+
+RELATED COMMANDS:
+    loct events        Analyze Tauri event flow
+    loct lint --tauri  Full Tauri contract validation";
 
 const EVENTS_HELP: &str = "loct events - Show event flow and issues
 
@@ -1132,38 +1601,108 @@ EXAMPLES:
     loct report --output report.html
     loct report --serve --port 4173";
 
-const QUERY_HELP: &str = "loct query - Query snapshot data
+const QUERY_HELP: &str = "loct query - Graph queries (who-imports, who-exports, etc.)
 
 USAGE:
     loct query <KIND> <TARGET>
 
-KIND:
-    who-imports <FILE>      Find all files that import FILE
+DESCRIPTION:
+    Query the import graph and symbol index for specific relationships.
+    Targeted queries against the dependency graph built by 'loct scan'.
+
+QUERY KINDS:
+    who-imports <FILE>      Find all files that import the file (reverse deps)
     where-symbol <SYMBOL>   Find where a symbol is defined/exported
-    component-of <FILE>     Show which component contains FILE
+    component-of <FILE>     Show which component/module contains the file
 
 OPTIONS:
-    --help, -h          Show this help message
+    --help, -h              Show this help message
 
 EXAMPLES:
-    loct query who-imports src/foo.ts
-    loct query where-symbol MyType
-    loct query component-of src/foo.ts";
+    loct query who-imports src/utils.ts       # What imports utils.ts?
+    loct query where-symbol PatientRecord     # Where is it defined?
+    loct query component-of src/ui/Button.tsx # What owns Button?
 
-const DIFF_HELP: &str = "loct diff - Compare snapshots and show semantic delta
+RELATED COMMANDS:
+    loct slice <file>           Show what a file depends on
+    loct find --symbol <name>   Search for symbols by pattern
+    loct dead                   Find symbols with 0 imports";
+
+const IMPACT_HELP: &str = "loct impact - Analyze impact of modifying/removing a file
 
 USAGE:
-    loct diff <FROM> [TO]
+    loct impact <FILE> [OPTIONS]
 
 DESCRIPTION:
-    Compares two snapshots (paths or refs) and reports semantic differences.
+    Shows \"what breaks if you modify or remove this file\" by traversing
+    the reverse dependency graph. Finds all direct and transitive consumers.
+
+    This is different from 'query who-imports':
+    - who-imports: Finds direct importers only
+    - impact: Finds ALL affected files (direct + transitive)
+
+    Useful for:
+    - Understanding change impact before refactoring
+    - Identifying critical files (high fan-out)
+    - Safe deletion analysis
 
 OPTIONS:
-    --help, -h          Show this help message
+    --depth <N>          Limit traversal depth (default: unlimited)
+    --root <PATH>        Project root (default: current directory)
+    --json               Output as JSON for agent consumption
+    --help, -h           Show this help message
+
+ARGUMENTS:
+    <FILE>               Path to the file to analyze (required)
 
 EXAMPLES:
-    loct diff HEAD~1
-    loct diff .loctree/snapA.json .loctree/snapB.json";
+    loct impact src/utils.ts                # Full impact analysis
+    loct impact src/api.ts --depth 2        # Limit to 2 levels deep
+    loct impact lib/helpers.ts --json       # JSON output
+    loct impact src/core.ts --root ./       # Specify project root
+
+OUTPUT FORMAT:
+    Direct consumers (5 files):
+      src/app.ts (import)
+      src/lib.ts (import)
+      ...
+
+    Transitive impact (23 files total):
+      [depth 2] src/page.tsx (import)
+      ...
+
+    ⚠ Removing this file would break 28 files (max depth: 3)";
+
+const DIFF_HELP: &str = "loct diff - Compare snapshots between branches/commits
+
+USAGE:
+    loct diff --since <SNAPSHOT> [--to <SNAPSHOT>] [OPTIONS]
+
+DESCRIPTION:
+    Compares two code snapshots and shows semantic differences.
+
+    Unlike git diff (line changes), this shows structural changes:
+    - New/removed files and symbols
+    - Import graph changes
+    - New dead code introduced (regressions)
+    - New circular dependencies
+
+OPTIONS:
+    --since <SNAPSHOT>   Base snapshot to compare from (required)
+    --to <SNAPSHOT>      Target snapshot (default: current working tree)
+    --auto-scan-base     Auto-create git worktree and scan target branch
+    --problems-only      Show only regressions (new dead code, new cycles)
+    --help, -h           Show this help message
+
+EXAMPLES:
+    loct diff --since main                    # Compare main to working tree
+    loct diff --since HEAD~1                  # Compare to previous commit
+    loct diff --since main --auto-scan-base   # Auto-scan main branch
+    loct diff --since v1.0.0 --to v2.0.0      # Compare two tags
+
+RELATED COMMANDS:
+    loct scan             Run scan to create snapshot
+    loct auto --full-scan Force full rescan";
 
 const MEMEX_HELP: &str = "loct memex - Index analysis into AI memory (vector DB)
 
@@ -1191,17 +1730,103 @@ EXAMPLES:
     loct crowd cache
     loct crowd session";
 
-const TWINS_HELP: &str =
-    "loct twins - Detect semantic duplicates (dead parrots, exact twins, barrel chaos)
+const TAGMAP_HELP: &str = "loct tagmap - Unified search around a keyword
 
 USAGE:
-    loct twins [OPTIONS]
+    loct tagmap <KEYWORD> [OPTIONS]
 
 DESCRIPTION:
-    Shows dead parrots (0 imports), twins, and barrel/export issues.
+    Aggregates three analyses into one view:
+    1. FILES:  All files with keyword in path or name
+    2. CROWD:  Functional clustering around the keyword
+    3. DEAD:   Dead exports related to the keyword
+
+    Perfect for understanding everything about a domain/feature at once.
 
 OPTIONS:
-    --help, -h          Show this help message";
+    --include-tests    Include test files in analysis
+    --limit <N>        Maximum results per section (default: 20)
+    --json             Output as JSON for AI tools
+    --help, -h         Show this help message
+
+ARGUMENTS:
+    <KEYWORD>          Keyword to search for (required)
+
+EXAMPLES:
+    loct tagmap patient           # Everything about 'patient' feature
+    loct tagmap auth              # Auth-related files, crowds, dead code
+    loct tagmap message --json    # JSON output for AI processing
+    loct tagmap api --limit 10    # Limit results
+
+OUTPUT FORMAT:
+    === TAGMAP: 'patient' ===
+
+    FILES MATCHING KEYWORD (12):
+      src/features/patients/PatientsList.tsx
+      src/hooks/usePatient.ts
+      ...
+
+    CROWD ANALYSIS (8 files):
+      Score: 7.2/10
+      Members: PatientsList, PatientDetail, PatientForm...
+      Issues: Consider consolidating similar files
+
+    DEAD EXPORTS (3):
+      oldPatientHandler in src/api/patients.ts
+      PatientV1 in src/types/patient.ts
+      ...
+
+RELATED COMMANDS:
+    loct crowd <pattern>    Detailed crowd analysis
+    loct dead               All dead exports
+    loct find <query>       Symbol/file search
+    loct focus <dir>        Directory-level context";
+
+const TWINS_HELP: &str = "loct twins - Find dead parrots (0 imports) and duplicate exports
+
+USAGE:
+    loct twins [OPTIONS] [PATH]
+
+DESCRIPTION:
+    Detects semantic issues in your export/import graph:
+
+    Dead Parrots:   Exports with 0 imports anywhere in the codebase
+                    (Monty Python reference - code that looks alive but isn't used)
+
+    Exact Twins:    Same symbol name exported from multiple files
+                    (can cause import confusion)
+
+    Barrel Chaos:   Re-export anti-patterns
+                    (missing index.ts, deep re-export chains)
+
+    This is a code smell detector - findings are hints, not verdicts.
+
+OPTIONS:
+    --path <DIR>           Root directory to analyze
+    --dead-only            Show only dead parrots (0 imports)
+    --include-tests        Include test files (excluded by default)
+    --include-suppressed   Show suppressed findings too
+    --help, -h             Show this help message
+
+EXAMPLES:
+    loct twins                    # Full analysis
+    loct twins --dead-only        # Only exports with 0 imports
+    loct twins src/               # Analyze specific directory
+    loct twins --include-tests    # Include test files
+    loct twins --include-suppressed  # Include suppressed items
+
+SUPPRESSION:
+    Mark findings as false positives (they won't show in subsequent runs):
+    loct suppress twins <symbol>              # Suppress a twin
+    loct suppress twins <symbol> --file <f>   # Suppress only in specific file
+    loct suppress --list                      # Show all suppressions
+    loct suppress --clear                     # Clear all suppressions
+
+RELATED COMMANDS:
+    loct dead              Detailed dead code analysis
+    loct sniff             Aggregate code smell analysis
+    loct suppress          Manage false positive suppressions
+    loct find --dead       Search for specific dead symbols";
 
 const DIST_HELP: &str = "loct dist - Analyze bundle distribution using source maps
 
@@ -1282,6 +1907,438 @@ OUTPUT:
     - LOW: Tests that import unused code
 
     Each gap shows the source location and usage context.";
+
+const SNIFF_HELP: &str = "loct sniff - Sniff for code smells (aggregate analysis)
+
+USAGE:
+    loct sniff [OPTIONS]
+
+DESCRIPTION:
+    Aggregates all smell-level findings worth checking:
+
+    Twins:        Same symbol name in multiple files
+                  - Can cause import confusion
+
+    Dead Parrots: Exports with 0 imports
+                  - Potentially unused code
+
+    Crowds:       Files with similar dependency patterns
+                  - Possible duplication or fragmentation
+
+    Output is friendly and non-judgmental. These are hints, not verdicts.
+
+OPTIONS:
+    --path <DIR>           Root directory to analyze (default: current directory)
+    --dead-only            Show only dead parrots (skip twins and crowds)
+    --twins-only           Show only twins (skip dead parrots and crowds)
+    --crowds-only          Show only crowds (skip twins and dead parrots)
+    --include-tests        Include test files in analysis (default: false)
+    --min-crowd-size <N>   Minimum crowd size to report (default: 2)
+    --json                 Output as JSON for programmatic use
+    --help, -h             Show this help message
+
+EXAMPLES:
+    loct sniff                    # Full code smell analysis
+    loct sniff --dead-only        # Only dead parrots
+    loct sniff --twins-only       # Only duplicate names
+    loct sniff --crowds-only      # Only similar file clusters
+    loct sniff --include-tests    # Include test files
+    loct sniff --json             # Machine-readable output
+
+OUTPUT:
+    Aggregates three types of code smells:
+    - TWINS: Same symbol exported from multiple files
+    - DEAD PARROTS: Exports with 0 imports
+    - CROWDS: Files clustering around similar functionality
+
+    Each section provides actionable suggestions for consolidation or cleanup.";
+
+const SUPPRESS_HELP: &str = "loct suppress - Mark findings as false positives
+
+USAGE:
+    loct suppress <type> <symbol> [OPTIONS]
+    loct suppress --list
+    loct suppress --clear
+
+DESCRIPTION:
+    Manages false positive suppressions so reviewed findings don't appear
+    in subsequent runs. Suppressions are stored in .loctree/suppressions.toml.
+
+    Use this when you've reviewed a finding and determined it's intentional:
+    - FE/BE type mirrors (same type defined in TypeScript and Rust)
+    - Intentional re-exports for public APIs
+    - Entry points that appear 'dead' but are used externally
+
+TYPES:
+    twins          Exact twin (same symbol in multiple files)
+    dead_parrot    Dead parrot (export with 0 imports)
+    dead_export    Dead export (unused export)
+    circular       Circular import
+
+OPTIONS:
+    --file <PATH>      Only suppress in specific file (default: all files)
+    --reason <TEXT>    Document why this is a false positive
+    --list             Show all current suppressions
+    --clear            Remove all suppressions
+    --help, -h         Show this help message
+
+EXAMPLES:
+    loct suppress twins Message              # Suppress 'Message' twin everywhere
+    loct suppress twins Message --file src/types.ts  # Only in specific file
+    loct suppress dead_parrot unusedHelper --reason 'Used via dynamic import'
+    loct suppress --list                     # View all suppressions
+    loct suppress --clear                    # Reset suppressions
+
+STORAGE:
+    Suppressions are stored in .loctree/suppressions.toml
+    Commit this file to share suppressions with your team.
+
+RELATED COMMANDS:
+    loct twins         Find twins and dead parrots (--include-suppressed to show all)
+    loct dead          Find unused exports
+    loct sniff         Aggregate smell analysis";
+
+const FOCUS_HELP: &str = "loct focus - Extract holographic context for a directory
+
+USAGE:
+    loct focus <DIRECTORY> [OPTIONS]
+
+DESCRIPTION:
+    Like 'slice' but for directories. Extracts a holographic view of a directory:
+
+    Core:       All files within the target directory
+    Internal:   Import edges between files inside the directory
+    Deps:       External files imported by core (outside the directory)
+    Consumers:  Files outside the directory that import core files
+
+    Perfect for understanding feature modules like 'src/features/patients/'.
+
+OPTIONS:
+    --consumers, -c    Include files that import from this directory
+    --depth <N>        Maximum depth for external dependency traversal
+    --root <PATH>      Project root (default: current directory)
+    --json             Output as JSON for agent consumption
+    --help, -h         Show this help message
+
+ARGUMENTS:
+    <DIRECTORY>        Path to the directory to analyze (required)
+
+EXAMPLES:
+    loct focus src/features/patients/           # Focus on patients feature
+    loct focus src/components/ --consumers      # Include external consumers
+    loct focus lib/utils/ --depth 1             # Limit external dep depth
+    loct focus src/api/ --json                  # JSON output for AI tools
+
+OUTPUT FORMAT:
+    Focus: src/features/patients/
+
+    Core (12 files, 2,340 LOC):
+      src/features/patients/index.ts
+      src/features/patients/PatientsList.tsx
+      ...
+
+    Internal edges: 18 imports within directory
+
+    External Deps (8 files, 890 LOC):
+      [d1] src/components/Button.tsx
+      ...
+
+    Consumers (3 files, 450 LOC):
+      src/App.tsx
+      ...
+
+    Total: 23 files, 3,680 LOC
+
+RELATED COMMANDS:
+    loct slice <file>       Extract context for a single file
+    loct impact <file>      Show what breaks if you change a file
+    loct crowd <pattern>    Find files clustering around a pattern";
+
+const HOTSPOTS_HELP: &str = "loct hotspots - Import frequency heatmap (core vs peripheral)
+
+USAGE:
+    loct hotspots [OPTIONS]
+
+DESCRIPTION:
+    Ranks files by how often they are imported (in-degree) to identify:
+
+    CORE:       Files imported by 10+ others (critical infrastructure)
+    SHARED:     Files imported by 3-9 others (shared utilities)
+    PERIPHERAL: Files imported by 1-2 others (feature-specific)
+    LEAF:       Files with 0 importers (entry points or dead code)
+
+    This helps AI agents understand which files are risky to modify
+    (high in-degree = many dependents) vs safe to refactor (low in-degree).
+
+OPTIONS:
+    --min <N>              Minimum import count to show (default: 1)
+    --limit <N>            Maximum files to show (default: 50)
+    --leaves               Show only leaf nodes (0 importers)
+    --coupling             Include out-degree (files that import many others)
+    --root <PATH>          Project root (default: current directory)
+    --json                 Output as JSON for agent consumption
+    --help, -h             Show this help message
+
+EXAMPLES:
+    loct hotspots                    # Show top 50 most-imported files
+    loct hotspots --limit 20         # Top 20 only
+    loct hotspots --leaves           # Find leaf nodes (entry points / dead)
+    loct hotspots --coupling         # Show both in-degree and out-degree
+    loct hotspots --min 5            # Only files with 5+ importers
+    loct hotspots --json             # JSON output for AI tools
+
+OUTPUT FORMAT:
+    Import Hotspots (42 files analyzed)
+
+    CORE (10+ importers):
+      [32] src/utils/helpers.ts           # hub module
+      [18] src/components/Button.tsx
+
+    SHARED (3-9 importers):
+      [7]  src/hooks/useAuth.ts
+      [5]  src/api/client.ts
+
+    PERIPHERAL (1-2 importers):
+      [2]  src/features/login/form.tsx
+      [1]  src/features/login/types.ts
+
+    LEAF (0 importers):
+      src/pages/index.tsx               # entry point
+      src/features/old/legacy.ts        # possibly dead
+
+    With --coupling:
+      [in:32 out:3]  src/utils/helpers.ts    # hub, low coupling
+      [in:2  out:15] src/features/main.tsx   # feature root, high coupling
+
+RELATED COMMANDS:
+    loct dead               Find unused exports
+    loct impact <file>      Show what breaks if you modify a file
+    loct focus <dir>        Extract context for a directory";
+
+const LAYOUTMAP_HELP: &str = "loct layoutmap - Analyze CSS layout properties
+
+USAGE:
+    loct layoutmap [OPTIONS]
+
+DESCRIPTION:
+    Extracts and analyzes layout-related CSS properties from your codebase:
+
+    Z-INDEX:    Shows all z-index values across CSS/SCSS files, sorted by value.
+                Helps identify layering conflicts and understand UI stacking.
+
+    POSITION:   Lists sticky/fixed positioned elements.
+                Useful for understanding what elements persist during scroll.
+
+    DISPLAY:    Identifies grid/flex layouts and their locations.
+                Maps out the layout architecture of your components.
+
+OPTIONS:
+    --zindex-only          Show only z-index values
+    --sticky-only          Show only sticky/fixed position elements
+    --grid-only            Show only grid/flex layouts
+    --min-zindex <N>       Filter z-index values >= N (default: show all)
+    --exclude <PATTERN>    Exclude paths matching glob (can be repeated)
+    --root <PATH>          Project root (default: current directory)
+    --json                 Output as JSON for agent consumption
+    --help, -h             Show this help message
+
+EXAMPLES:
+    loct layoutmap                  # Full CSS layout analysis
+    loct layoutmap --zindex-only    # Only z-index hierarchy
+    loct layoutmap --sticky-only    # Only sticky/fixed elements
+    loct layoutmap --min-zindex 100 # High z-index values (likely overlays)
+    loct layoutmap --exclude .obsidian --exclude prototype  # Skip dirs
+    loct layoutmap --json           # JSON output for AI tools
+
+OUTPUT FORMAT:
+    Z-INDEX HIERARCHY:
+      [9999] src/components/Modal.css:15       .modal-overlay
+      [1000] src/components/Toast.css:8        .toast-container
+      [ 100] src/components/Dropdown.css:23    .dropdown-menu
+      [  10] src/components/Header.css:5       .header
+
+    STICKY/FIXED ELEMENTS:
+      [fixed]  src/components/Header.css:12    .header
+      [sticky] src/components/Sidebar.css:5    .sidebar-nav
+
+    GRID/FLEX LAYOUTS:
+      [grid]   src/layouts/Dashboard.css:8     .dashboard-grid
+      [flex]   src/components/Card.css:3       .card-content
+
+RELATED COMMANDS:
+    loct crowd              Find functionally similar components
+    loct find <pattern>     Search for CSS selectors or properties";
+
+const ZOMBIE_HELP: &str = "loct zombie - Find all zombie code (combined analysis)
+
+USAGE:
+    loct zombie [OPTIONS] [PATHS...]
+
+DESCRIPTION:
+    Combines three sources of dead code into one actionable report:
+
+    DEAD EXPORTS:     Unused exports detected by dead code analysis
+                      (symbols with 0 imports)
+
+    ORPHAN FILES:     Files with 0 importers (not imported by any other file)
+                      Entry points are OK, but others might be dead
+
+    SHADOW EXPORTS:   Same symbol exported by multiple files where some
+                      have 0 imports (likely consolidation candidates)
+
+    This is a comprehensive zombie hunter - finds all forms of potentially
+    dead code in a single scan.
+
+OPTIONS:
+    --include-tests    Include test files in analysis (default: false)
+    --json             Output as JSON for programmatic use
+    --help, -h         Show this help message
+
+ARGUMENTS:
+    [PATHS...]         Root directories to scan (default: current directory)
+
+EXAMPLES:
+    loct zombie                    # Find all zombie code
+    loct zombie --include-tests    # Include test files
+    loct zombie src/               # Analyze specific directory
+    loct zombie --json             # Machine-readable output
+
+OUTPUT FORMAT:
+    🧟 Zombie Code Report
+
+    Dead Exports (3):
+      src/utils/old.ts:15 - unusedFunction
+      src/hooks/legacy.ts:8 - useLegacyHook
+      ...
+
+    Orphan Files (0 importers, 2):
+      src/features/patients/PatientsList.tsx (504 LOC)
+      src/components/deprecated/OldButton.tsx (89 LOC)
+
+    Shadow Exports (1):
+      conversationHostStore exported by 2 files, 1 dead
+
+    Total: 6 zombie items, ~950 LOC to review
+
+RELATED COMMANDS:
+    loct dead               Detailed dead export analysis
+    loct twins              Dead parrots and semantic duplicates
+    loct hotspots --leaves  Find leaf nodes (0 importers)
+    loct sniff              Code smell analysis";
+
+const HEALTH_HELP: &str = "loct health - Quick health check summary
+
+USAGE:
+    loct health [OPTIONS] [PATHS...]
+
+DESCRIPTION:
+    One-shot summary of all structural issues in your codebase:
+    - Cycles: Circular import count (hard vs structural)
+    - Dead: Unused exports (high confidence count)
+    - Twins: Duplicate symbol names across files
+
+    Use this as a quick sanity check before commits or in CI.
+    Run individual commands for detailed analysis.
+
+OPTIONS:
+    --include-tests    Include test files in analysis (default: false)
+    --json             Output as JSON for programmatic use
+    --help, -h         Show this help message
+
+ARGUMENTS:
+    [PATHS...]         Root directories to scan (default: current directory)
+
+EXAMPLES:
+    loct health                    # Quick health summary
+    loct health --include-tests    # Include test files
+    loct health src/               # Analyze specific directory
+    loct health --json             # Machine-readable output
+
+OUTPUT FORMAT:
+    Health Check Summary
+
+    Cycles:      3 total (2 hard, 1 structural)
+    Dead:        6 high confidence, 24 low
+    Twins:       2 duplicate symbol groups
+
+    Run `loct cycles`, `loct dead`, `loct twins` for details.
+
+RELATED COMMANDS:
+    loct cycles    Detailed circular import analysis
+    loct dead      Detailed dead export analysis
+    loct twins     Duplicate export analysis
+    loct zombie    Combined dead/orphan/shadow analysis";
+
+const AUDIT_HELP: &str = "loct audit - Full codebase audit with actionable findings
+
+USAGE:
+    loct audit [OPTIONS] [PATHS...]
+
+DESCRIPTION:
+    Comprehensive analysis combining all structural checks into one report.
+    Perfect for getting a complete picture of codebase health on day one.
+
+    Includes:
+    - Cycles: Circular imports (hard + structural)
+    - Dead exports: Unused code with 0 imports
+    - Twins: Same symbol exported from multiple files
+    - Orphan files: Files with 0 importers (not entry points)
+    - Shadow exports: Consolidation candidates
+    - Crowds: Files with similar dependency patterns
+
+    Each finding includes actionable suggestions for cleanup.
+
+OPTIONS:
+    --include-tests    Include test files in analysis (default: false)
+    --json             Output as JSON for programmatic use
+    --help, -h         Show this help message
+
+ARGUMENTS:
+    [PATHS...]         Root directories to scan (default: current directory)
+
+EXAMPLES:
+    loct audit                     # Full audit of current directory
+    loct audit --include-tests     # Include test files
+    loct audit src/                # Audit specific directory
+    loct audit --json              # Machine-readable output for CI
+
+OUTPUT FORMAT:
+    🔍 Full Codebase Audit
+
+    CYCLES (3 total)
+      2 hard cycles (breaking)
+      1 structural cycle
+
+    DEAD EXPORTS (12 total)
+      6 high confidence
+      6 low confidence
+
+    TWINS (2 groups)
+      useAuth exported from 2 files
+      formatDate exported from 3 files
+
+    ORPHAN FILES (4 files, 1,200 LOC)
+      src/legacy/old-utils.ts (450 LOC)
+      src/deprecated/helper.ts (320 LOC)
+      ...
+
+    SHADOW EXPORTS (1)
+      store exported by 2 files, 1 dead
+
+    CROWDS (2 clusters)
+      API handlers: 5 similar files
+      Form components: 3 similar files
+
+    ─────────────────────────────────
+    Total: 22 findings to review
+    Run individual commands for details.
+
+RELATED COMMANDS:
+    loct health    Quick summary (cycles + dead + twins only)
+    loct zombie    Dead exports + orphans + shadows
+    loct sniff     Code smells (twins + dead + crowds)
+    loct cycles    Detailed cycle analysis
+    loct dead      Detailed dead export analysis";
 
 // ============================================================================
 // Tests

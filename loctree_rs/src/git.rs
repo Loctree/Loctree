@@ -325,6 +325,57 @@ impl GitRepo {
 
         Ok(files)
     }
+
+    /// Create a temporary worktree for a specific branch/commit
+    /// Returns the path to the worktree directory
+    pub fn create_worktree(&self, reference: &str, worktree_path: &Path) -> Result<(), GitError> {
+        use std::process::Command;
+
+        // Resolve the reference to ensure it exists
+        self.resolve_ref(reference)?;
+
+        // Use git worktree add command (libgit2 doesn't support worktrees well)
+        let output = Command::new("git")
+            .arg("worktree")
+            .arg("add")
+            .arg(worktree_path)
+            .arg(reference)
+            .current_dir(&self.path)
+            .output()?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(GitError::OperationFailed(format!(
+                "Failed to create worktree: {}",
+                stderr
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Remove a worktree
+    pub fn remove_worktree(&self, worktree_path: &Path) -> Result<(), GitError> {
+        use std::process::Command;
+
+        let output = Command::new("git")
+            .arg("worktree")
+            .arg("remove")
+            .arg(worktree_path)
+            .arg("--force")
+            .current_dir(&self.path)
+            .output()?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(GitError::OperationFailed(format!(
+                "Failed to remove worktree: {}",
+                stderr
+            )));
+        }
+
+        Ok(())
+    }
 }
 
 /// Status of a changed file
@@ -986,6 +1037,78 @@ mod tests {
         assert_eq!(ChangeStatus::Modified, ChangeStatus::Modified);
         assert_eq!(ChangeStatus::Renamed, ChangeStatus::Renamed);
         assert_eq!(ChangeStatus::Copied, ChangeStatus::Copied);
+    }
+
+    #[test]
+    fn test_create_and_remove_worktree() {
+        let (temp_dir, repo) = create_test_repo();
+        let path = temp_dir.path();
+
+        // Create initial commit (we're on a default branch)
+        let current_branch = Command::new("git")
+            .args(["rev-parse", "--abbrev-ref", "HEAD"])
+            .current_dir(path)
+            .output()
+            .unwrap();
+        let current_branch = String::from_utf8_lossy(&current_branch.stdout)
+            .trim()
+            .to_string();
+
+        // Create a new branch from current
+        Command::new("git")
+            .args(["branch", "test-branch"])
+            .current_dir(path)
+            .output()
+            .unwrap();
+
+        // Add a commit on the new branch
+        Command::new("git")
+            .args(["checkout", "test-branch"])
+            .current_dir(path)
+            .output()
+            .unwrap();
+
+        std::fs::write(path.join("branch.ts"), "export const test = 1;").unwrap();
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(path)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "Add branch file"])
+            .current_dir(path)
+            .output()
+            .unwrap();
+
+        // Go back to original branch
+        Command::new("git")
+            .args(["checkout", &current_branch])
+            .current_dir(path)
+            .output()
+            .unwrap();
+
+        // Create worktree
+        let worktree_path = temp_dir.path().join("test-worktree");
+        let result = repo.create_worktree("test-branch", &worktree_path);
+        assert!(result.is_ok(), "Failed to create worktree: {:?}", result);
+
+        // Verify worktree exists and has the branch file
+        assert!(worktree_path.exists());
+        assert!(worktree_path.join("branch.ts").exists());
+
+        // Remove worktree
+        let result = repo.remove_worktree(&worktree_path);
+        assert!(result.is_ok(), "Failed to remove worktree: {:?}", result);
+    }
+
+    #[test]
+    fn test_create_worktree_nonexistent_branch() {
+        let (temp_dir, repo) = create_test_repo();
+        let worktree_path = temp_dir.path().join("test-worktree");
+
+        // Try to create worktree for non-existent branch
+        let result = repo.create_worktree("nonexistent-branch", &worktree_path);
+        assert!(result.is_err());
     }
 
     fn create_rust_test_repo() -> (TempDir, GitRepo) {

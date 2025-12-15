@@ -12,6 +12,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::report::{Confidence, DupSeverity, RankedDup, ReportSection};
 use super::root_scan::normalize_module_id;
+use super::twins::{TwinCategory, categorize_twin};
 use crate::types::{FileAnalysis, SignatureUse, SignatureUseKind};
 
 /// Top-level AI summary - the entry point for agents
@@ -47,6 +48,12 @@ pub struct ForAiSummary {
     pub unused_high_confidence: usize,
     pub cascade_imports: usize,
     pub dynamic_imports: usize,
+    /// Dead parrots from twins analysis (exports with 0 imports)
+    pub twins_dead_parrots: usize,
+    /// Same-language exact twins (likely real duplicates needing consolidation)
+    pub twins_same_language: usize,
+    /// Cross-language twins (FE/BE pairs, usually intentional)
+    pub twins_cross_language: usize,
     /// Priority message for the AI
     pub priority: String,
     /// Health score 0-100
@@ -232,7 +239,23 @@ fn compute_summary(sections: &[ReportSection], analyses: &[FileAnalysis]) -> For
     let dynamic_imports: usize = sections.iter().map(|s| s.dynamic.len()).sum();
     let circular_imports: usize = sections.iter().map(|s| s.circular_imports.len()).sum();
 
-    // Generate priority message
+    // Collect twins data from sections
+    let twins_dead_parrots: usize = sections
+        .iter()
+        .filter_map(|s| s.twins_data.as_ref())
+        .map(|t| t.dead_parrots.len())
+        .sum();
+
+    let (twins_same_language, twins_cross_language): (usize, usize) = sections
+        .iter()
+        .filter_map(|s| s.twins_data.as_ref())
+        .flat_map(|t| &t.exact_twins)
+        .fold((0, 0), |(same, cross), twin| match categorize_twin(twin) {
+            TwinCategory::SameLanguage(_) => (same + 1, cross),
+            TwinCategory::CrossLanguage => (same, cross + 1),
+        });
+
+    // Generate priority message (now includes twins!)
     let priority = if missing_handlers > 0 {
         format!(
             "CRITICAL: Fix {} missing handlers first (runtime errors at invoke). Then {} unused handlers (tech debt).",
@@ -247,6 +270,16 @@ fn compute_summary(sections: &[ReportSection], analyses: &[FileAnalysis]) -> For
         format!(
             "CLEANUP: {} unused handlers (high confidence) can be safely removed. {} dead exports, {} duplicate exports.",
             unused_high_confidence, dead_exports, duplicate_exports
+        )
+    } else if twins_same_language > 0 {
+        format!(
+            "TECH DEBT: {} same-language twins (consolidate duplicates). {} dead parrots (0 imports). {} cross-lang pairs (likely OK).",
+            twins_same_language, twins_dead_parrots, twins_cross_language
+        )
+    } else if twins_dead_parrots > 0 {
+        format!(
+            "TECH DEBT: {} dead parrots (exports with 0 imports). Consider removing unused code.",
+            twins_dead_parrots
         )
     } else if dead_exports > 0 {
         format!(
@@ -274,12 +307,16 @@ fn compute_summary(sections: &[ReportSection], analyses: &[FileAnalysis]) -> For
     // - Dead exports: 2 points each (unused exports)
     // - Duplicate exports: 1 point per 5 (naming confusion)
     // - Circular imports: 3 points each (architectural smell)
+    // - Dead parrots (twins): 1 point each (unused but less severe than dead_exports)
+    // - Same-language twins: 2 points each (real duplicates needing consolidation)
     let issue_penalty = missing_handlers * 20
         + unregistered_handlers * 15
         + unused_high_confidence * 5
         + dead_exports * 2
         + (duplicate_exports / 5).min(20)
-        + circular_imports * 3;
+        + circular_imports * 3
+        + twins_dead_parrots
+        + twins_same_language * 2;
     let health_score = 100u8.saturating_sub(issue_penalty.min(100) as u8);
 
     ForAiSummary {
@@ -294,6 +331,9 @@ fn compute_summary(sections: &[ReportSection], analyses: &[FileAnalysis]) -> For
         unused_high_confidence,
         cascade_imports,
         dynamic_imports,
+        twins_dead_parrots,
+        twins_same_language,
+        twins_cross_language,
         priority,
         health_score,
     }
@@ -850,8 +890,8 @@ fn build_used_exports(analyses: &[FileAnalysis]) -> HashSet<(String, String)> {
                     used_exports.insert((target_norm, "*".to_string()));
                 }
                 crate::types::ReexportKind::Named(names) => {
-                    for name in names {
-                        used_exports.insert((target_norm.clone(), name.clone()));
+                    for (original, _exported) in names {
+                        used_exports.insert((target_norm.clone(), original.clone()));
                     }
                 }
             }
@@ -875,8 +915,8 @@ fn build_reexport_map(analyses: &[FileAnalysis]) -> HashMap<String, HashSet<Stri
                     entry.insert("*".to_string());
                 }
                 crate::types::ReexportKind::Named(names) => {
-                    for name in names {
-                        entry.insert(name.clone());
+                    for (original, _exported) in names {
+                        entry.insert(original.clone());
                     }
                 }
             }
@@ -1561,5 +1601,140 @@ mod tests {
             wins.iter().any(|w| w.kind == "opaque_passthrough"),
             "Opaque passthrough quick win should be emitted"
         );
+    }
+
+    #[test]
+    fn test_compute_summary_with_twins_same_language() {
+        use crate::analyzer::report::TwinsData;
+        use crate::analyzer::twins::{ExactTwin, SymbolEntry, TwinLocation};
+
+        let mut section = mock_section("src", 10);
+        section.twins_data = Some(TwinsData {
+            dead_parrots: vec![SymbolEntry {
+                name: "unusedUtil".to_string(),
+                kind: "function".to_string(),
+                file_path: "src/utils.ts".to_string(),
+                line: 10,
+                import_count: 0,
+            }],
+            exact_twins: vec![ExactTwin {
+                name: "UserType".to_string(),
+                locations: vec![
+                    TwinLocation {
+                        file_path: "src/types/user.ts".to_string(),
+                        line: 5,
+                        kind: "type".to_string(),
+                        import_count: 10,
+                        is_canonical: true,
+                        signature_fingerprint: None,
+                    },
+                    TwinLocation {
+                        file_path: "src/models/user.ts".to_string(),
+                        line: 8,
+                        kind: "type".to_string(),
+                        import_count: 2,
+                        is_canonical: false,
+                        signature_fingerprint: None,
+                    },
+                ],
+                signature_similarity: None,
+            }],
+            barrel_chaos: Default::default(),
+        });
+
+        let sections = vec![section];
+        let analyses: Vec<FileAnalysis> = vec![];
+
+        let summary = compute_summary(&sections, &analyses);
+
+        // Check twins are counted
+        assert_eq!(summary.twins_dead_parrots, 1);
+        assert_eq!(summary.twins_same_language, 1);
+        assert_eq!(summary.twins_cross_language, 0);
+
+        // Health score should be reduced
+        // Penalty: 1 dead_parrot * 1 + 1 same_lang * 2 = 3
+        assert_eq!(summary.health_score, 97);
+
+        // Priority should mention twins
+        assert!(summary.priority.contains("same-language twins"));
+    }
+
+    #[test]
+    fn test_compute_summary_with_twins_cross_language() {
+        use crate::analyzer::report::TwinsData;
+        use crate::analyzer::twins::{ExactTwin, TwinLocation};
+
+        let mut section = mock_section("src", 10);
+        section.twins_data = Some(TwinsData {
+            dead_parrots: vec![],
+            exact_twins: vec![ExactTwin {
+                name: "Message".to_string(),
+                locations: vec![
+                    TwinLocation {
+                        file_path: "src/types/message.ts".to_string(),
+                        line: 5,
+                        kind: "interface".to_string(),
+                        import_count: 10,
+                        is_canonical: true,
+                        signature_fingerprint: None,
+                    },
+                    TwinLocation {
+                        file_path: "src-tauri/src/types.rs".to_string(),
+                        line: 20,
+                        kind: "struct".to_string(),
+                        import_count: 5,
+                        is_canonical: false,
+                        signature_fingerprint: None,
+                    },
+                ],
+                signature_similarity: None,
+            }],
+            barrel_chaos: Default::default(),
+        });
+
+        let sections = vec![section];
+        let analyses: Vec<FileAnalysis> = vec![];
+
+        let summary = compute_summary(&sections, &analyses);
+
+        // Cross-language twins should NOT add to penalty
+        assert_eq!(summary.twins_same_language, 0);
+        assert_eq!(summary.twins_cross_language, 1);
+
+        // Health score should be 100 (cross-lang twins don't penalize)
+        assert_eq!(summary.health_score, 100);
+        assert!(summary.priority.contains("HEALTHY"));
+    }
+
+    #[test]
+    fn test_compute_summary_twins_dead_parrots_penalty() {
+        use crate::analyzer::report::TwinsData;
+        use crate::analyzer::twins::SymbolEntry;
+
+        let mut section = mock_section("src", 10);
+        section.twins_data = Some(TwinsData {
+            dead_parrots: (0..10)
+                .map(|i| SymbolEntry {
+                    name: format!("unused{}", i),
+                    kind: "function".to_string(),
+                    file_path: format!("src/util{}.ts", i),
+                    line: i,
+                    import_count: 0,
+                })
+                .collect(),
+            exact_twins: vec![],
+            barrel_chaos: Default::default(),
+        });
+
+        let sections = vec![section];
+        let analyses: Vec<FileAnalysis> = vec![];
+
+        let summary = compute_summary(&sections, &analyses);
+
+        // 10 dead parrots * 1 point each = 10 penalty
+        assert_eq!(summary.twins_dead_parrots, 10);
+        assert_eq!(summary.health_score, 90);
+        assert!(summary.priority.contains("dead parrots"));
     }
 }

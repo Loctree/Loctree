@@ -228,6 +228,7 @@ fn main() -> std::io::Result<()> {
             &mut parsed.ignore_patterns,
             &mut parsed.tauri_preset,
             &mut library_mode,
+            &mut parsed.py_roots,
             parsed.verbose,
         );
         parsed.library_mode = library_mode; // Apply auto-detected library mode

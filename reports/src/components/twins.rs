@@ -5,7 +5,7 @@
 //! 2. Exact Twins - symbols with identical names in different files
 //! 3. Barrel Chaos - missing/deep/inconsistent barrel files
 
-use crate::components::{Icon, ICON_COPY, ICON_FOLDER_OPEN, ICON_GHOST, ICON_TWINS};
+use crate::components::icons::{Icon, ICON_COPY, ICON_FOLDER_OPEN, ICON_GHOST, ICON_TWINS};
 use crate::types::{BarrelChaos, DeadParrot, ExactTwin, TwinsData};
 use leptos::prelude::*;
 

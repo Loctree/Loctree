@@ -55,7 +55,7 @@
 //!
 //! See the [README](https://github.com/Loctree/Loctree) for full documentation.
 
-#![doc(html_root_url = "https://docs.rs/loctree/0.6.12")]
+#![doc(html_root_url = "https://docs.rs/loctree/0.6.20")]
 #![doc(
     html_favicon_url = "https://raw.githubusercontent.com/Loctree/Loctree/main/assets/loctree-badge.svg"
 )]
@@ -117,6 +117,12 @@ pub mod args;
 /// Loads `.loctree/config.toml` for project-specific settings like custom Tauri command macros.
 pub mod config;
 
+/// Suppression system for false positives.
+///
+/// Allows marking findings as "reviewed and OK" so they don't appear in subsequent runs.
+/// Stored in `.loctree/suppressions.toml`.
+pub mod suppressions;
+
 /// Auto-detection of project stacks.
 ///
 /// Detects Rust, TypeScript, Python, Tauri, Vite, and more based on marker files.
@@ -169,6 +175,17 @@ pub mod similarity;
 /// slicer::run_slice(root, "src/App.tsx", true, true, &parsed).unwrap();
 /// ```
 pub mod slicer;
+
+/// Directory-level holographic focus.
+///
+/// Like slicer but for directories instead of single files.
+pub mod focuser;
+
+/// CSS Layout Analysis.
+///
+/// Scans CSS/SCSS files for layout-related properties:
+/// z-index, position: sticky/fixed, display: grid/flex.
+pub mod layoutmap;
 
 /// Incremental snapshot persistence.
 ///
@@ -269,6 +286,22 @@ pub mod memex;
 ///
 /// Provides Black-style visual feedback for CLI operations.
 pub mod progress;
+
+/// jaq query execution for filtering snapshot data.
+///
+/// Provides jq-compatible filtering using the jaq library.
+pub mod jaq_query;
+
+/// Impact analysis module for understanding file dependencies.
+///
+/// Analyzes "what breaks if you modify/remove this file" by traversing
+/// the reverse dependency graph to find all direct and transitive consumers.
+pub mod impact;
+
+/// Watch mode for live snapshot refresh during iterative development.
+///
+/// Provides file system watching with debouncing and incremental re-scanning.
+pub mod watch;
 
 // ============================================================================
 // Re-exports for convenience
