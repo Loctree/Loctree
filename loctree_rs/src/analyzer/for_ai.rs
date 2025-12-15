@@ -28,6 +28,8 @@ pub struct ForAiReport {
     pub sections: Vec<ForAiSectionRef>,
     /// Immediate actionable items
     pub quick_wins: Vec<QuickWin>,
+    /// Top actionable tasks with explicit verification commands
+    pub priority_tasks: Vec<PriorityTask>,
     /// Files with most connections (good context anchors)
     pub hub_files: Vec<HubFile>,
     /// Agent-ready bundle with condensed lists (handlers, dupes, dead, dynamic, cycles)
@@ -93,6 +95,20 @@ pub struct QuickWin {
     /// IDE integration URL (loctree://open?f={file}&l={line})
     #[serde(skip_serializing_if = "Option::is_none")]
     pub open_url: Option<String>,
+}
+
+/// High-priority task for a first-shot plan (action + verify)
+#[derive(Serialize, Clone)]
+pub struct PriorityTask {
+    pub priority: u8,
+    pub kind: String,
+    pub target: String,
+    pub location: String,
+    pub why: String,
+    /// Risk severity of leaving it unfixed: high|medium|low
+    pub risk: String,
+    pub fix_hint: String,
+    pub verify_cmd: String,
 }
 
 /// High-connectivity file that makes good context anchor
@@ -203,6 +219,7 @@ pub fn generate_for_ai_report(
     let summary = compute_summary(sections, analyses);
     let section_refs = build_section_refs(sections);
     let quick_wins = extract_quick_wins(sections, analyses);
+    let priority_tasks = build_priority_tasks(&quick_wins);
     let hub_files = find_hub_files(analyses);
     let bundle = build_agent_bundle(sections, analyses);
 
@@ -212,9 +229,51 @@ pub fn generate_for_ai_report(
         summary,
         sections: section_refs,
         quick_wins,
+        priority_tasks,
         hub_files,
         bundle,
     }
+}
+
+fn build_priority_tasks(quick_wins: &[QuickWin]) -> Vec<PriorityTask> {
+    quick_wins
+        .iter()
+        .take(10)
+        .map(|w| {
+            let risk = match w.kind.as_str() {
+                "missing_handler" | "unregistered_handler" => "high",
+                "circular_import" | "opaque_passthrough" => "medium",
+                "unused_handler" | "dead_export" => "low",
+                _ => "medium",
+            }
+            .to_string();
+
+            let verify_cmd = match w.kind.as_str() {
+                "missing_handler" | "unregistered_handler" | "unused_handler" => {
+                    format!("loct trace {}", w.target)
+                }
+                "dead_export" | "opaque_passthrough" => {
+                    format!("loct query where-symbol {}", w.target)
+                }
+                "circular_import" => "loct cycles --explain".to_string(),
+                _ => w
+                    .trace_cmd
+                    .clone()
+                    .unwrap_or_else(|| "loct health".to_string()),
+            };
+
+            PriorityTask {
+                priority: w.priority,
+                kind: w.kind.clone(),
+                target: w.target.clone(),
+                location: w.location.clone(),
+                why: w.why.clone(),
+                risk,
+                fix_hint: w.fix_hint.clone(),
+                verify_cmd,
+            }
+        })
+        .collect()
 }
 
 fn compute_summary(sections: &[ReportSection], analyses: &[FileAnalysis]) -> ForAiSummary {
@@ -716,7 +775,7 @@ fn extract_quick_wins(sections: &[ReportSection], analyses: &[FileAnalysis]) -> 
                 ),
                 fix_hint: refactor_hint,
                 complexity: "easy".to_string(),
-                trace_cmd: Some(format!("loct trace {}", dup.name)),
+                trace_cmd: Some(format!("loct query where-symbol {}", dup.name)),
                 open_url,
             });
             priority += 1;
@@ -837,7 +896,7 @@ fn extract_quick_wins(sections: &[ReportSection], analyses: &[FileAnalysis]) -> 
             ),
             fix_hint,
             complexity: "medium".to_string(),
-            trace_cmd: Some(format!("loct trace {}", opaque.symbol)),
+            trace_cmd: Some(format!("loct query where-symbol {}", opaque.symbol)),
             open_url: Some(open_url),
         });
         priority += 1;

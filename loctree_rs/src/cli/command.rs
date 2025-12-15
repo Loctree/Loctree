@@ -97,6 +97,12 @@ pub enum Command {
     /// Replacement for legacy `-A --circular`.
     Cycles(CyclesOptions),
 
+    /// Trace a Tauri/IPC handler end-to-end (FE invokes ↔ BE handlers).
+    ///
+    /// Explains why a handler is unused or missing by inspecting frontend invokes,
+    /// registered backend handlers, and mentions across the codebase.
+    Trace(TraceOptions),
+
     /// Show Tauri command bridges (FE ↔ BE mappings).
     ///
     /// Lists all Tauri commands with their frontend invocations
@@ -988,6 +994,7 @@ impl Command {
             Command::Find(_) => "find",
             Command::Dead(_) => "dead",
             Command::Cycles(_) => "cycles",
+            Command::Trace(_) => "trace",
             Command::Commands(_) => "commands",
             Command::Routes(_) => "routes",
             Command::Events(_) => "events",
@@ -1027,6 +1034,7 @@ impl Command {
             Command::Find(_) => "Search symbols/files with regex filters",
             Command::Dead(_) => "Detect unused exports / dead code",
             Command::Cycles(_) => "Detect circular imports",
+            Command::Trace(_) => "Trace Tauri/IPC handler end-to-end",
             Command::Commands(_) => "Show Tauri command bridges (FE ↔ BE)",
             Command::Events(_) => "Show event flow and issues",
             Command::Info(_) => "Show snapshot metadata and project info",
@@ -1178,6 +1186,7 @@ For deprecated flags, run: loct --help-legacy
             "dead" | "unused" => Some(DEAD_HELP),
             "cycles" => Some(CYCLES_HELP),
             "trace" => Some(TRACE_HELP),
+            "jq" => Some(JQ_HELP),
             "commands" => Some(COMMANDS_HELP),
             "events" => Some(EVENTS_HELP),
             "info" => Some(INFO_HELP),
@@ -1482,6 +1491,41 @@ ARGUMENTS:
 EXAMPLES:
     loct trace toggle_assistant
     loct trace standard_command apps/desktop";
+
+const JQ_HELP: &str = "loct jq - Query snapshot with jq-style filters
+
+USAGE:
+    loct '<filter>' [OPTIONS]
+
+DESCRIPTION:
+    Execute jq-style filter expressions on the latest snapshot JSON.
+    Automatically finds the most recent snapshot in .loctree/ directory.
+
+    The filter syntax follows jq conventions:
+    - .metadata          Extract metadata field
+    - .files[]           Iterate over files array
+    - .files[0]          Get first file
+    - .[\"key\"]         Access key with special characters
+
+OPTIONS:
+    -r, --raw-output         Output raw strings, not JSON
+    -c, --compact-output     Compact JSON output (no pretty-printing)
+    -e, --exit-status        Set exit code based on output (0 if truthy)
+    --arg <name> <value>     Pass string variable to filter
+    --argjson <name> <json>  Pass JSON variable to filter
+    --snapshot <path>        Use specific snapshot file instead of latest
+    --help, -h               Show this help message
+
+EXAMPLES:
+    loct '.metadata'                         # Extract metadata
+    loct '.files | length'                   # Count files
+    loct '.files[] | .path'                  # List file paths
+    loct '.metadata.total_loc' -r            # Raw number output
+    loct '.files[] | select(.lang == \"ts\")' -c
+    loct '.files[] | select(.loc > 500)' -c
+
+NOTE:
+    This command requires jaq dependencies (enabled by default in the CLI build).";
 
 const COMMANDS_HELP: &str = "loct commands - Tauri FE↔BE handler coverage analysis
 

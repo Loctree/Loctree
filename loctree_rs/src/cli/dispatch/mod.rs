@@ -160,6 +160,17 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
             parsed.use_gitignore = true;
         }
 
+        Command::Trace(opts) => {
+            parsed.mode = Mode::Trace;
+            parsed.trace_handler = Some(opts.handler.clone());
+            parsed.root_list = if opts.roots.is_empty() {
+                vec![PathBuf::from(".")]
+            } else {
+                opts.roots.clone()
+            };
+            parsed.use_gitignore = true;
+        }
+
         Command::Commands(opts) => {
             // Commands shows Tauri command bridges
             parsed.mode = Mode::AnalyzeImports;

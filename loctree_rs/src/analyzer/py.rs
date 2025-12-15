@@ -730,6 +730,7 @@ pub(crate) fn analyze_py_file(
     analysis.is_test = is_python_test_file(path, content);
     analysis.is_typed_package = check_typed_package(path, root);
     analysis.is_namespace_package = check_namespace_package(path, root);
+    let is_package_init = path.file_name().and_then(|n| n.to_str()) == Some("__init__.py");
 
     for (idx, line) in content.lines().enumerate() {
         let line_num = idx + 1;
@@ -857,6 +858,43 @@ pub(crate) fn analyze_py_file(
                     }
                 }
                 analysis.imports.push(entry);
+
+                // Python package API re-export pattern:
+                // __init__.py often re-exports names via `from .mod import Foo as Bar`.
+                // Treat these as re-exports (not fresh definitions) to reduce duplicate/dead noise.
+                if is_package_init && indent == 0 && names_clean != "*" {
+                    let mut name_pairs: Vec<(String, String)> = Vec::new();
+                    for sym in names_clean.split(',') {
+                        let sym = sym.trim();
+                        if sym.is_empty() {
+                            continue;
+                        }
+                        let (original, exported) = if let Some((lhs, rhs)) = sym.split_once(" as ")
+                        {
+                            (lhs.trim(), rhs.trim())
+                        } else {
+                            (sym, sym)
+                        };
+                        if exported.is_empty() || exported.starts_with('_') {
+                            continue;
+                        }
+                        name_pairs.push((original.to_string(), exported.to_string()));
+                        analysis.exports.push(ExportSymbol::new(
+                            exported.to_string(),
+                            "reexport",
+                            "named",
+                            Some(line_num),
+                        ));
+                    }
+
+                    if !name_pairs.is_empty() {
+                        analysis.reexports.push(ReexportEntry {
+                            source: module.to_string(),
+                            kind: ReexportKind::Named(name_pairs),
+                            resolved: resolved.clone(),
+                        });
+                    }
+                }
             }
             if names_clean == "*" {
                 let (resolved, _) =
@@ -1673,6 +1711,53 @@ import sys
         let exported: HashSet<_> = analysis.exports.iter().map(|e| e.name.clone()).collect();
         assert!(exported.contains("Foo"));
         assert!(exported.contains("Bar"));
+    }
+
+    #[test]
+    fn treats_init_named_from_import_as_reexport() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("pkg")).expect("mkdir pkg");
+        std::fs::write(
+            root.join("pkg/foo.py"),
+            "class Foo: pass\nclass Baz: pass\n",
+        )
+        .expect("write foo.py");
+
+        let content = "from .foo import Foo as Bar, Baz";
+        let path = root.join("pkg/__init__.py");
+        let analysis = analyze_py_file(
+            content,
+            &path,
+            root,
+            Some(&py_exts()),
+            "pkg/__init__.py".to_string(),
+            &[root.to_path_buf()],
+            python_stdlib_set(),
+        );
+
+        let reexport = analysis
+            .reexports
+            .iter()
+            .find(|r| r.source == ".foo")
+            .expect("expected .foo reexport");
+
+        match &reexport.kind {
+            ReexportKind::Named(names) => {
+                assert!(names.contains(&(String::from("Foo"), String::from("Bar"))));
+                assert!(names.contains(&(String::from("Baz"), String::from("Baz"))));
+            }
+            other => panic!("expected named reexport, got {:?}", other),
+        }
+
+        let exported: HashSet<_> = analysis
+            .exports
+            .iter()
+            .filter(|e| e.kind == "reexport")
+            .map(|e| e.name.as_str())
+            .collect();
+        assert!(exported.contains("Bar"));
+        assert!(exported.contains("Baz"));
     }
 
     #[test]

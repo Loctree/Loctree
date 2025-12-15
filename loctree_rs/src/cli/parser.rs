@@ -20,6 +20,7 @@ const SUBCOMMANDS: &[&str] = &[
     "dead",
     "unused",
     "cycles",
+    "trace",
     "commands",
     "events",
     "info",
@@ -153,6 +154,7 @@ pub fn parse_command(args: &[String]) -> Result<Option<ParsedCommand>, String> {
     let mut subcommand: Option<String> = None;
     let mut for_ai_alias = false;
     let mut watch_alias = false;
+    let mut help_requested = false;
 
     // Check for jq-style query before extracting global options
     // This allows: loct '.metadata' to work without conflicts
@@ -192,6 +194,15 @@ pub fn parse_command(args: &[String]) -> Result<Option<ParsedCommand>, String> {
                 global.color = parse_color_mode(value)?;
                 i += 1;
             }
+            "--for-ai" => {
+                for_ai_alias = true;
+                i += 1;
+            }
+            "--watch" => {
+                watch_alias = true;
+                remaining_args.push(arg.clone());
+                i += 1;
+            }
             "--library-mode" => {
                 global.library_mode = true;
                 i += 1;
@@ -213,14 +224,7 @@ pub fn parse_command(args: &[String]) -> Result<Option<ParsedCommand>, String> {
                 i += 1;
             }
             "--help" | "-h" => {
-                // Help is special - if no subcommand yet, show main help
-                if subcommand.is_none() {
-                    return Ok(Some(ParsedCommand::new(
-                        Command::Help(HelpOptions::default()),
-                        global,
-                    )));
-                }
-                remaining_args.push(arg.clone());
+                help_requested = true;
                 i += 1;
             }
             "--help-legacy" => {
@@ -265,13 +269,10 @@ pub fn parse_command(args: &[String]) -> Result<Option<ParsedCommand>, String> {
         subcommand = Some("scan".to_string());
     }
 
-    // Parse the specific command
-    if let Some(sub) = subcommand.as_deref()
-        && remaining_args.iter().any(|a| a == "--help" || a == "-h")
-    {
+    if help_requested {
         return Ok(Some(ParsedCommand::new(
             Command::Help(HelpOptions {
-                command: Some(sub.to_string()),
+                command: subcommand.clone(),
                 ..Default::default()
             }),
             global,
@@ -297,6 +298,7 @@ pub fn parse_command(args: &[String]) -> Result<Option<ParsedCommand>, String> {
         Some("find") => parse_find_command(&remaining_args)?,
         Some("dead") | Some("unused") => parse_dead_command(&remaining_args)?,
         Some("cycles") => parse_cycles_command(&remaining_args)?,
+        Some("trace") => parse_trace_command(&remaining_args)?,
         Some("commands") => parse_commands_command(&remaining_args)?,
         Some("events") => parse_events_command(&remaining_args)?,
         Some("routes") => parse_routes_command(&remaining_args)?,
@@ -328,6 +330,21 @@ pub fn parse_command(args: &[String]) -> Result<Option<ParsedCommand>, String> {
             ));
         }
     };
+
+    if for_ai_alias {
+        match command {
+            Command::Auto(ref mut opts) => {
+                opts.for_agent_feed = true;
+                opts.agent_json = true;
+                opts.full_scan = true;
+            }
+            _ => {
+                return Err(
+                    "--for-ai is only supported with the default scan (no subcommand)".to_string(),
+                );
+            }
+        }
+    }
 
     Ok(Some(ParsedCommand::new(command, global)))
 }
@@ -1093,6 +1110,42 @@ RELATED COMMANDS:
     }
 
     Ok(Command::Cycles(opts))
+}
+
+fn parse_trace_command(args: &[String]) -> Result<Command, String> {
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        if let Some(help) = Command::format_command_help("trace") {
+            return Err(help.to_string());
+        }
+    }
+
+    if args.is_empty() {
+        return Err(
+            "loct trace requires a handler name, e.g.: loct trace toggle_assistant".to_string(),
+        );
+    }
+
+    let mut opts = TraceOptions::default();
+    let mut i = 0;
+
+    while i < args.len() {
+        let arg = &args[i];
+        if arg.starts_with('-') {
+            return Err(format!("Unknown option '{}' for 'trace' command.", arg));
+        }
+        if opts.handler.is_empty() {
+            opts.handler = arg.clone();
+        } else {
+            opts.roots.push(PathBuf::from(arg));
+        }
+        i += 1;
+    }
+
+    if opts.roots.is_empty() {
+        opts.roots.push(PathBuf::from("."));
+    }
+
+    Ok(Command::Trace(opts))
 }
 
 fn parse_commands_command(args: &[String]) -> Result<Command, String> {
@@ -2839,45 +2892,13 @@ fn parse_jq_query_command(
                 i += 2;
             }
             "--help" | "-h" => {
-                return Err("loct jq - Query snapshot with jq-style filters
-
-USAGE:
-    loct '<filter>' [OPTIONS]
-
-DESCRIPTION:
-    Execute jq-style filter expressions on the latest snapshot JSON.
-    Automatically finds the most recent snapshot in .loctree/ directory.
-
-    The filter syntax follows jq conventions:
-    - .metadata          Extract metadata field
-    - .files[]           Iterate over files array
-    - .files[0]          Get first file
-    - .[\"key\"]           Access key with special characters
-
-OPTIONS:
-    -r, --raw-output         Output raw strings, not JSON
-    -c, --compact-output     Compact JSON output (no pretty-printing)
-    -e, --exit-status        Set exit code based on output (0 if truthy)
-    --arg <name> <value>     Pass string variable to filter
-    --argjson <name> <json>  Pass JSON variable to filter
-    --snapshot <path>        Use specific snapshot file instead of latest
-    --help, -h               Show this help message
-
-EXAMPLES:
-    loct '.metadata'                    # Extract metadata
-    loct '.files | length'              # Count files
-    loct '.files[] | .path'             # List all file paths
-    loct '.metadata.total_loc' -r       # Raw number output
-    loct '.files[] | select(.lang == \"ts\")' -c  # Find TypeScript files
-    loct --snapshot .loctree/snap-abc123.json '.metadata'  # Query specific snapshot
-
-GLOBAL OPTIONS:
-    --json           Output as JSON (default for jq mode)
-    --quiet          Suppress warnings
-    --verbose        Show debug info
-
-NOTE: This command requires jaq library (built with --features jq)"
-                    .to_string());
+                return Ok(ParsedCommand::new(
+                    Command::Help(HelpOptions {
+                        command: Some("jq".to_string()),
+                        ..Default::default()
+                    }),
+                    global.clone(),
+                ));
             }
             _ => {
                 return Err(format!("Unknown option '{}' for jq query mode", arg));
@@ -2903,6 +2924,7 @@ mod tests {
         assert!(is_subcommand("tree"));
         assert!(is_subcommand("slice"));
         assert!(is_subcommand("dead"));
+        assert!(is_subcommand("trace"));
         assert!(!is_subcommand("--tree"));
         assert!(!is_subcommand("-A"));
         assert!(!is_subcommand("unknown"));
@@ -2915,6 +2937,8 @@ mod tests {
         assert!(uses_new_syntax(&["scan".into()]));
         assert!(uses_new_syntax(&["tree".into()]));
         assert!(uses_new_syntax(&["--json".into(), "scan".into()]));
+        assert!(uses_new_syntax(&["--watch".into()]));
+        assert!(uses_new_syntax(&["--for-ai".into()]));
 
         // Legacy syntax
         assert!(!uses_new_syntax(&["--tree".into()]));
