@@ -1113,10 +1113,10 @@ RELATED COMMANDS:
 }
 
 fn parse_trace_command(args: &[String]) -> Result<Command, String> {
-    if args.iter().any(|a| a == "--help" || a == "-h") {
-        if let Some(help) = Command::format_command_help("trace") {
-            return Err(help.to_string());
-        }
+    if args.iter().any(|a| a == "--help" || a == "-h")
+        && let Some(help) = Command::format_command_help("trace")
+    {
+        return Err(help.to_string());
     }
 
     if args.is_empty() {
