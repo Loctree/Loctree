@@ -43,6 +43,7 @@ const SUBCOMMANDS: &[&str] = &[
     "layoutmap",
     "zombie",
     "health",
+    "audit",
 ];
 
 /// Check if an argument looks like a new-style subcommand.
@@ -311,6 +312,7 @@ pub fn parse_command(args: &[String]) -> Result<Option<ParsedCommand>, String> {
         Some("layoutmap") => parse_layoutmap_command(&remaining_args)?,
         Some("zombie") => parse_zombie_command(&remaining_args)?,
         Some("health") => parse_health_command(&remaining_args)?,
+        Some("audit") => parse_audit_command(&remaining_args)?,
         Some(unknown) => {
             return Err(format!(
                 "Unknown command '{}'. Run 'loct --help' for available commands.",
@@ -2732,6 +2734,39 @@ fn parse_health_command(args: &[String]) -> Result<Command, String> {
     }
 
     Ok(Command::Health(opts))
+}
+
+fn parse_audit_command(args: &[String]) -> Result<Command, String> {
+    // Check for --help first
+    if args.iter().any(|a| a == "--help" || a == "-h")
+        && let Some(help) = Command::format_command_help("audit")
+    {
+        println!("{}", help);
+        std::process::exit(0);
+    }
+
+    let mut opts = AuditOptions::default();
+    let mut i = 0;
+
+    while i < args.len() {
+        let arg = &args[i];
+        match arg.as_str() {
+            "--include-tests" => {
+                opts.include_tests = true;
+                i += 1;
+            }
+            _ => {
+                // Treat as root path
+                if arg.starts_with("--") {
+                    return Err(format!("Unknown option '{}' for 'audit' command.", arg));
+                }
+                opts.roots.push(PathBuf::from(arg));
+                i += 1;
+            }
+        }
+    }
+
+    Ok(Command::Audit(opts))
 }
 
 fn parse_jq_query_command(

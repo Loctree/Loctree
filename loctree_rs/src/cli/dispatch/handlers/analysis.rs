@@ -3,8 +3,8 @@
 //! Handles: dead, cycles, commands, events, routes, zombie
 
 use super::super::super::command::{
-    CommandsOptions, CyclesOptions, DeadOptions, EventsOptions, FocusOptions, HealthOptions,
-    HotspotsOptions, LayoutmapOptions, RoutesOptions, ZombieOptions,
+    AuditOptions, CommandsOptions, CyclesOptions, DeadOptions, EventsOptions, FocusOptions,
+    HealthOptions, HotspotsOptions, LayoutmapOptions, RoutesOptions, ZombieOptions,
 };
 use super::super::{DispatchResult, GlobalOptions, load_or_create_snapshot};
 use crate::progress::Spinner;
@@ -1485,6 +1485,314 @@ pub fn handle_health_command(opts: &HealthOptions, global: &GlobalOptions) -> Di
 
         println!();
         println!("Run `loct cycles`, `loct dead`, `loct twins` for details.");
+        println!();
+    }
+
+    DispatchResult::Exit(0)
+}
+
+/// Handle the audit command - full codebase audit with actionable findings
+pub fn handle_audit_command(opts: &AuditOptions, global: &GlobalOptions) -> DispatchResult {
+    use crate::analyzer::crowd::detect_all_crowds;
+    use crate::analyzer::cycles::{CycleCompilability, find_cycles_classified_with_lazy};
+    use crate::analyzer::dead_parrots::{DeadFilterConfig, find_dead_exports};
+    use crate::analyzer::twins::{build_symbol_registry, detect_exact_twins};
+    use std::collections::HashMap;
+    use std::path::Path;
+
+    // Show spinner unless in quiet/json mode
+    let spinner = if !global.quiet && !global.json {
+        Some(Spinner::new("Running full audit..."))
+    } else {
+        None
+    };
+
+    // Load snapshot (auto-scan if missing)
+    let root = opts
+        .roots
+        .first()
+        .map(|p| p.as_path())
+        .unwrap_or(Path::new("."));
+
+    let snapshot = match load_or_create_snapshot(root, global) {
+        Ok(s) => s,
+        Err(e) => {
+            if let Some(s) = spinner {
+                s.finish_error(&format!("Failed to load snapshot: {}", e));
+            } else {
+                eprintln!("[loct][error] {}", e);
+            }
+            return DispatchResult::Exit(1);
+        }
+    };
+
+    // 1. Cycles analysis
+    let edges: Vec<(String, String, String)> = snapshot
+        .edges
+        .iter()
+        .map(|e| (e.from.clone(), e.to.clone(), e.label.clone()))
+        .collect();
+
+    let (classified_cycles, _) = find_cycles_classified_with_lazy(&edges);
+
+    let hard_cycles = classified_cycles
+        .iter()
+        .filter(|c| c.compilability == CycleCompilability::Breaking)
+        .count();
+    let structural_cycles = classified_cycles
+        .iter()
+        .filter(|c| c.compilability == CycleCompilability::Structural)
+        .count();
+    let total_cycles = classified_cycles.len();
+
+    // 2. Dead exports analysis
+    let dead_exports = find_dead_exports(
+        &snapshot.files,
+        false,
+        None,
+        DeadFilterConfig {
+            include_tests: opts.include_tests,
+            include_helpers: false,
+            library_mode: global.library_mode,
+            example_globs: Vec::new(),
+            python_library_mode: global.python_library,
+        },
+    );
+
+    let high_confidence = dead_exports
+        .iter()
+        .filter(|d| d.confidence == "high")
+        .count();
+    let low_confidence = dead_exports.len() - high_confidence;
+
+    // 3. Twins analysis
+    let twins = detect_exact_twins(&snapshot.files, opts.include_tests);
+    let twin_count = twins.len();
+
+    // 4. Orphan files (files with 0 importers)
+    let mut in_degree: HashMap<String, usize> = HashMap::new();
+
+    for file in &snapshot.files {
+        in_degree.insert(file.path.clone(), 0);
+    }
+
+    for edge in &snapshot.edges {
+        *in_degree.entry(edge.to.clone()).or_insert(0) += 1;
+    }
+
+    let mut orphan_files: Vec<(String, usize)> = in_degree
+        .iter()
+        .filter(|(path, count)| {
+            if **count > 0 {
+                return false;
+            }
+            if is_entry_point(path.as_str()) {
+                return false;
+            }
+            if !opts.include_tests && is_test_file_path(path.as_str()) {
+                return false;
+            }
+            true
+        })
+        .map(|(path, _)| {
+            let loc = snapshot
+                .files
+                .iter()
+                .find(|f| &f.path == path)
+                .map(|f| f.loc)
+                .unwrap_or(0);
+            (path.clone(), loc)
+        })
+        .collect();
+
+    orphan_files.sort_by(|a, b| b.1.cmp(&a.1));
+    let orphan_loc: usize = orphan_files.iter().map(|(_, loc)| loc).sum();
+
+    // 5. Shadow exports
+    let registry = build_symbol_registry(&snapshot.files, opts.include_tests);
+    let mut shadow_exports: Vec<(String, usize, usize)> = Vec::new();
+
+    for twin in &twins {
+        let mut total_locations = 0;
+        let mut dead_count = 0;
+
+        for loc in &twin.locations {
+            total_locations += 1;
+            let key = (loc.file_path.clone(), twin.name.clone());
+            if let Some(entry) = registry.get(&key)
+                && entry.import_count == 0
+            {
+                dead_count += 1;
+            }
+        }
+
+        if dead_count > 0 && dead_count < total_locations {
+            shadow_exports.push((twin.name.clone(), total_locations, dead_count));
+        }
+    }
+
+    // 6. Crowds analysis
+    let crowds = detect_all_crowds(&snapshot.files);
+
+    if let Some(s) = spinner {
+        s.finish_success("Audit complete");
+    }
+
+    // Calculate total findings
+    let total_findings = total_cycles
+        + dead_exports.len()
+        + twin_count
+        + orphan_files.len()
+        + shadow_exports.len()
+        + crowds.len();
+
+    // Output results
+    if global.json {
+        let json = serde_json::json!({
+            "cycles": {
+                "total": total_cycles,
+                "hard": hard_cycles,
+                "structural": structural_cycles
+            },
+            "dead_exports": {
+                "total": dead_exports.len(),
+                "high_confidence": high_confidence,
+                "low_confidence": low_confidence
+            },
+            "twins": {
+                "total": twin_count,
+                "groups": twins.iter().take(10).map(|t| {
+                    serde_json::json!({
+                        "name": t.name,
+                        "locations": t.locations.len()
+                    })
+                }).collect::<Vec<_>>()
+            },
+            "orphan_files": {
+                "total": orphan_files.len(),
+                "total_loc": orphan_loc,
+                "files": orphan_files.iter().take(10).map(|(path, loc)| {
+                    serde_json::json!({
+                        "path": path,
+                        "loc": loc
+                    })
+                }).collect::<Vec<_>>()
+            },
+            "shadow_exports": {
+                "total": shadow_exports.len(),
+                "items": shadow_exports.iter().take(10).map(|(name, total, dead)| {
+                    serde_json::json!({
+                        "name": name,
+                        "total_locations": total,
+                        "dead_locations": dead
+                    })
+                }).collect::<Vec<_>>()
+            },
+            "crowds": {
+                "total": crowds.len(),
+                "clusters": crowds.iter().take(5).map(|c| {
+                    serde_json::json!({
+                        "pattern": c.pattern,
+                        "files": c.members.len()
+                    })
+                }).collect::<Vec<_>>()
+            },
+            "summary": {
+                "total_findings": total_findings
+            }
+        });
+        println!("{}", serde_json::to_string_pretty(&json).unwrap());
+    } else {
+        println!("\n🔍 Full Codebase Audit\n");
+
+        // Cycles
+        println!("CYCLES ({} total)", total_cycles);
+        if total_cycles == 0 {
+            println!("  ✓ No circular imports detected");
+        } else {
+            println!("  {} hard cycles (breaking)", hard_cycles);
+            println!("  {} structural cycles", structural_cycles);
+        }
+        println!();
+
+        // Dead exports
+        println!("DEAD EXPORTS ({} total)", dead_exports.len());
+        if dead_exports.is_empty() {
+            println!("  ✓ No unused exports detected");
+        } else {
+            println!("  {} high confidence", high_confidence);
+            println!("  {} low confidence", low_confidence);
+        }
+        println!();
+
+        // Twins
+        println!("TWINS ({} groups)", twin_count);
+        if twin_count == 0 {
+            println!("  ✓ No duplicate symbols detected");
+        } else {
+            for twin in twins.iter().take(3) {
+                println!(
+                    "  {} exported from {} files",
+                    twin.name,
+                    twin.locations.len()
+                );
+            }
+            if twin_count > 3 {
+                println!("  ... and {} more", twin_count - 3);
+            }
+        }
+        println!();
+
+        // Orphan files
+        println!(
+            "ORPHAN FILES ({} files, {} LOC)",
+            orphan_files.len(),
+            orphan_loc
+        );
+        if orphan_files.is_empty() {
+            println!("  ✓ No orphan files detected");
+        } else {
+            for (path, loc) in orphan_files.iter().take(3) {
+                println!("  {} ({} LOC)", path, loc);
+            }
+            if orphan_files.len() > 3 {
+                println!("  ... and {} more", orphan_files.len() - 3);
+            }
+        }
+        println!();
+
+        // Shadow exports
+        println!("SHADOW EXPORTS ({} total)", shadow_exports.len());
+        if shadow_exports.is_empty() {
+            println!("  ✓ No shadow exports detected");
+        } else {
+            for (name, total, dead) in shadow_exports.iter().take(3) {
+                println!("  {} exported by {} files, {} dead", name, total, dead);
+            }
+            if shadow_exports.len() > 3 {
+                println!("  ... and {} more", shadow_exports.len() - 3);
+            }
+        }
+        println!();
+
+        // Crowds
+        println!("CROWDS ({} clusters)", crowds.len());
+        if crowds.is_empty() {
+            println!("  ✓ No similar file clusters detected");
+        } else {
+            for crowd in crowds.iter().take(3) {
+                println!("  {}: {} similar files", crowd.pattern, crowd.members.len());
+            }
+            if crowds.len() > 3 {
+                println!("  ... and {} more", crowds.len() - 3);
+            }
+        }
+        println!();
+
+        // Summary
+        println!("─────────────────────────────────");
+        println!("Total: {} findings to review", total_findings);
+        println!("Run individual commands for details.");
         println!();
     }
 

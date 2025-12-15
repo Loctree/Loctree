@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
+## [0.6.23] - 2025-12-15
+
+### Added
+- **`loct audit` command** — Full codebase audit with actionable findings in one command
+  - Combines ALL structural analyses: cycles + dead + twins + orphans + shadows + crowds
+  - Perfect for getting a complete picture of codebase health on day one
+  - Shows summary with counts and top findings for each category
+  - Supports `--json` for CI integration and `--include-tests` for test files
+  - Usage: `loct audit`, `loct audit --json`, `loct audit src/`
+  - Designed for agents and developers who want actionable feedback immediately
+
+### Technical
+- Added `Audit` command variant and `AuditOptions` struct
+- Implemented `handle_audit_command` in analysis handlers
+- Aggregates: cycles, dead exports, twins, orphan files, shadow exports, crowds
+
 ## [0.6.22] - 2025-12-15
 
 ### Added

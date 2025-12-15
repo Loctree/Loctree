@@ -243,6 +243,19 @@ pub enum Command {
     /// - Dead exports (high confidence count)
     /// - Twins (duplicate exports count)
     Health(HealthOptions),
+
+    /// Full audit - comprehensive analysis with actionable findings.
+    ///
+    /// Combines all structural analyses into one report:
+    /// - Cycles (circular imports)
+    /// - Dead exports (unused code)
+    /// - Twins (duplicate symbols)
+    /// - Orphan files (0 importers)
+    /// - Shadow exports (consolidation candidates)
+    /// - Crowds (similar file clusters)
+    ///
+    /// Perfect for getting a complete picture of codebase health.
+    Audit(AuditOptions),
 }
 
 impl Default for Command {
@@ -838,6 +851,17 @@ pub struct HealthOptions {
     pub include_tests: bool,
 }
 
+/// Options for the `audit` command.
+/// Full audit combining all structural analyses into one actionable report.
+#[derive(Debug, Clone, Default)]
+pub struct AuditOptions {
+    /// Root directories to analyze
+    pub roots: Vec<PathBuf>,
+
+    /// Include test files in analysis (default: false)
+    pub include_tests: bool,
+}
+
 /// Options for the `help` command.
 #[derive(Debug, Clone, Default)]
 pub struct HelpOptions {
@@ -979,6 +1003,7 @@ impl Command {
             Command::Layoutmap(_) => "layoutmap",
             Command::Zombie(_) => "zombie",
             Command::Health(_) => "health",
+            Command::Audit(_) => "audit",
         }
     }
 
@@ -1017,6 +1042,7 @@ impl Command {
             Command::Layoutmap(_) => "Analyze CSS layout (z-index, position, grid/flex)",
             Command::Zombie(_) => "Find zombie code (dead exports + orphan files + shadows)",
             Command::Health(_) => "Quick health check (cycles + dead + twins summary)",
+            Command::Audit(_) => "Full audit (cycles + dead + twins + zombie + crowds)",
         }
     }
 
@@ -1082,6 +1108,10 @@ impl Command {
                 "health",
                 "Quick health check (cycles + dead + twins summary)",
             ),
+            (
+                "audit",
+                "Full audit (cycles + dead + twins + zombie + crowds)",
+            ),
         ];
 
         let mut help = String::new();
@@ -1142,6 +1172,7 @@ impl Command {
             "layoutmap" => Some(LAYOUTMAP_HELP),
             "zombie" => Some(ZOMBIE_HELP),
             "health" => Some(HEALTH_HELP),
+            "audit" => Some(AUDIT_HELP),
             _ => None,
         }
     }
@@ -2186,6 +2217,77 @@ RELATED COMMANDS:
     loct dead      Detailed dead export analysis
     loct twins     Duplicate export analysis
     loct zombie    Combined dead/orphan/shadow analysis";
+
+const AUDIT_HELP: &str = "loct audit - Full codebase audit with actionable findings
+
+USAGE:
+    loct audit [OPTIONS] [PATHS...]
+
+DESCRIPTION:
+    Comprehensive analysis combining all structural checks into one report.
+    Perfect for getting a complete picture of codebase health on day one.
+
+    Includes:
+    - Cycles: Circular imports (hard + structural)
+    - Dead exports: Unused code with 0 imports
+    - Twins: Same symbol exported from multiple files
+    - Orphan files: Files with 0 importers (not entry points)
+    - Shadow exports: Consolidation candidates
+    - Crowds: Files with similar dependency patterns
+
+    Each finding includes actionable suggestions for cleanup.
+
+OPTIONS:
+    --include-tests    Include test files in analysis (default: false)
+    --json             Output as JSON for programmatic use
+    --help, -h         Show this help message
+
+ARGUMENTS:
+    [PATHS...]         Root directories to scan (default: current directory)
+
+EXAMPLES:
+    loct audit                     # Full audit of current directory
+    loct audit --include-tests     # Include test files
+    loct audit src/                # Audit specific directory
+    loct audit --json              # Machine-readable output for CI
+
+OUTPUT FORMAT:
+    🔍 Full Codebase Audit
+
+    CYCLES (3 total)
+      2 hard cycles (breaking)
+      1 structural cycle
+
+    DEAD EXPORTS (12 total)
+      6 high confidence
+      6 low confidence
+
+    TWINS (2 groups)
+      useAuth exported from 2 files
+      formatDate exported from 3 files
+
+    ORPHAN FILES (4 files, 1,200 LOC)
+      src/legacy/old-utils.ts (450 LOC)
+      src/deprecated/helper.ts (320 LOC)
+      ...
+
+    SHADOW EXPORTS (1)
+      store exported by 2 files, 1 dead
+
+    CROWDS (2 clusters)
+      API handlers: 5 similar files
+      Form components: 3 similar files
+
+    ─────────────────────────────────
+    Total: 22 findings to review
+    Run individual commands for details.
+
+RELATED COMMANDS:
+    loct health    Quick summary (cycles + dead + twins only)
+    loct zombie    Dead exports + orphans + shadows
+    loct sniff     Code smells (twins + dead + crowds)
+    loct cycles    Detailed cycle analysis
+    loct dead      Detailed dead export analysis";
 
 // ============================================================================
 // Tests

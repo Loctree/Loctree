@@ -335,6 +335,11 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
             // Health is handled specially in dispatch_command
             // as it doesn't go through ParsedArgs
         }
+
+        Command::Audit(_) => {
+            // Audit is handled specially in dispatch_command
+            // as it doesn't go through ParsedArgs
+        }
     }
 
     parsed
@@ -460,6 +465,9 @@ pub fn dispatch_command(parsed_cmd: &ParsedCommand) -> DispatchResult {
         }
         Command::Health(opts) => {
             return handlers::analysis::handle_health_command(opts, &parsed_cmd.global);
+        }
+        Command::Audit(opts) => {
+            return handlers::analysis::handle_audit_command(opts, &parsed_cmd.global);
         }
         Command::Scan(opts) if opts.watch => {
             return handlers::watch::handle_scan_watch_command(opts, &parsed_cmd.global);
