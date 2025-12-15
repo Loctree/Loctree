@@ -55,3 +55,7 @@ reports/report.html
 /bin/*.zip
 # Keep placeholder scripts but ignore actual binaries that overwrite them
 # (they have no extension on Unix, .exe on Windows)
+
+# macOS
+**/.DS_Store
+reports/report.html

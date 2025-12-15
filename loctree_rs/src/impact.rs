@@ -189,7 +189,7 @@ pub fn format_impact_text(result: &ImpactResult) -> String {
     output.push_str(&format!("Impact analysis for: {}\n\n", result.target));
 
     if result.total_affected == 0 {
-        output.push_str("✓ No files depend on this file. Safe to remove.\n");
+        output.push_str("[OK] No files depend on this file. Safe to remove.\n");
         return output;
     }
 
@@ -235,7 +235,7 @@ pub fn format_impact_text(result: &ImpactResult) -> String {
     }
 
     output.push_str(&format!(
-        "⚠ Removing this file would affect {} files (max depth: {})\n",
+        "[!] Removing this file would affect {} files (max depth: {})\n",
         result.total_affected, result.max_depth
     ));
 

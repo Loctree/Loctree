@@ -5,7 +5,7 @@ use serde_json::json;
 use crate::types::OutputMode;
 
 use super::{
-    DeadExport,
+    DeadExport, ShadowExport,
     search::{ImpactResult, SimilarityCandidate, SymbolSearchResult},
 };
 
@@ -143,17 +143,17 @@ pub fn print_dead_exports(
                 None => item.file.clone(),
             };
 
-            // Map confidence string to emoji
-            let emoji = match item.confidence.as_str() {
-                "certain" => "🔴",
-                "high" | "very-high" => "🟡",
-                "medium" | "smell" => "🟢",
-                _ => "⚪",
+            // Map confidence string to indicator
+            let indicator = match item.confidence.as_str() {
+                "certain" => "[!!]",
+                "high" | "very-high" => "[!]",
+                "medium" | "smell" => "[?]",
+                _ => "[-]",
             };
 
             println!(
                 "  {} {} - {} in {}",
-                emoji,
+                indicator,
                 item.confidence.to_uppercase(),
                 item.symbol,
                 location
@@ -162,6 +162,88 @@ pub fn print_dead_exports(
         }
         if count > limit {
             println!("  ... and {} more", count - limit);
+        }
+    }
+}
+
+/// Print shadow exports - same symbol exported by multiple files, but only one is actually used
+pub fn print_shadow_exports(shadows: &[ShadowExport], output: OutputMode) {
+    if matches!(output, OutputMode::Json) {
+        let json_items: Vec<_> = shadows
+            .iter()
+            .map(|s| {
+                json!({
+                    "symbol": s.symbol,
+                    "used_file": s.used_file,
+                    "used_line": s.used_line,
+                    "dead_files": s.dead_files.iter().map(|f| {
+                        json!({
+                            "file": f.file,
+                            "line": f.line,
+                            "loc": f.loc
+                        })
+                    }).collect::<Vec<_>>(),
+                    "total_dead_loc": s.total_dead_loc
+                })
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json_items)
+                .expect("Failed to serialize shadow exports to JSON")
+        );
+    } else if matches!(output, OutputMode::Jsonl) {
+        for shadow in shadows {
+            let json_line = json!({
+                "symbol": shadow.symbol,
+                "used_file": shadow.used_file,
+                "used_line": shadow.used_line,
+                "dead_files": shadow.dead_files.iter().map(|f| {
+                    json!({
+                        "file": f.file,
+                        "line": f.line,
+                        "loc": f.loc
+                    })
+                }).collect::<Vec<_>>(),
+                "total_dead_loc": shadow.total_dead_loc
+            });
+            println!(
+                "{}",
+                serde_json::to_string(&json_line)
+                    .expect("Failed to serialize shadow export to JSON")
+            );
+        }
+    } else {
+        let count = shadows.len();
+        println!("\nShadow Exports ({} found):", count);
+        println!("Same symbol exported by multiple files, but only one is actually used.\n");
+
+        for shadow in shadows {
+            println!("  [SHADOW] {}", shadow.symbol);
+
+            // Show the USED file
+            let used_location = if let Some(line) = shadow.used_line {
+                format!("{}:{}", shadow.used_file, line)
+            } else {
+                shadow.used_file.clone()
+            };
+            println!("    ✓ USED: {}", used_location);
+
+            // Show the DEAD files
+            for dead_file in &shadow.dead_files {
+                let dead_location = if let Some(line) = dead_file.line {
+                    format!("{}:{}", dead_file.file, line)
+                } else {
+                    dead_file.file.clone()
+                };
+                println!("    ✗ DEAD: {} ({} LOC)", dead_location, dead_file.loc);
+            }
+
+            if shadow.total_dead_loc > 0 {
+                println!("    → Total dead code: {} LOC\n", shadow.total_dead_loc);
+            } else {
+                println!();
+            }
         }
     }
 }

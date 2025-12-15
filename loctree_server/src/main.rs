@@ -538,7 +538,8 @@ impl LoctreeServer {
         }
 
         let snapshot = self.snapshot.read().await;
-        let registry = build_symbol_registry(&snapshot.files);
+        // include_tests=false for server API (production-focused)
+        let registry = build_symbol_registry(&snapshot.files, false);
 
         // Dead parrots: symbols with 0 imports
         let dead_parrots: Vec<_> = registry
@@ -555,7 +556,7 @@ impl LoctreeServer {
             .collect();
 
         // Exact twins: same name exported from different files
-        let exact_twins = detect_exact_twins(&snapshot.files);
+        let exact_twins = detect_exact_twins(&snapshot.files, false);
         let twins_json: Vec<_> = exact_twins
             .iter()
             .map(|t| {

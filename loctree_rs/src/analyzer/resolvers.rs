@@ -975,6 +975,66 @@ pub(crate) fn resolve_rust_import(
     crate_root: &Path,
     root: &Path,
 ) -> Option<String> {
+    // Handle mod declarations: mod::foo or mod::path:foo.rs
+    if source.starts_with("mod::") {
+        let remainder = source.strip_prefix("mod::")?;
+
+        // Determine the directory to search for the module
+        // For mod.rs, lib.rs, main.rs: search in the same directory
+        // For other files like foo.rs: search in foo/ directory
+        let file_name = file_path.file_name()?.to_str()?;
+        let parent = file_path.parent()?;
+
+        let search_dir = if file_name == "mod.rs" || file_name == "lib.rs" || file_name == "main.rs"
+        {
+            parent.to_path_buf()
+        } else {
+            // For foo.rs, submodules are in foo/ directory
+            let stem = file_path.file_stem()?.to_str()?;
+            parent.join(stem)
+        };
+
+        let module_path = if let Some(explicit_path) = remainder.strip_prefix("path:") {
+            // #[path = "foo.rs"] mod bar; -> resolve the explicit path
+            let resolved = parent.join(explicit_path);
+            if resolved.exists() {
+                Some(resolved)
+            } else {
+                None
+            }
+        } else {
+            // Regular mod foo; -> check for foo.rs or foo/mod.rs
+            let mod_name = remainder;
+
+            // Try foo.rs first
+            let as_file = search_dir.join(format!("{}.rs", mod_name));
+            if as_file.exists() {
+                Some(as_file)
+            } else {
+                // Try foo/mod.rs
+                let as_mod = search_dir.join(mod_name).join("mod.rs");
+                if as_mod.exists() {
+                    Some(as_mod)
+                } else {
+                    // Also check in parent dir for foo.rs (for lib.rs/main.rs importing sibling modules)
+                    let sibling_file = parent.join(format!("{}.rs", mod_name));
+                    if sibling_file.exists() {
+                        Some(sibling_file)
+                    } else {
+                        let sibling_mod = parent.join(mod_name).join("mod.rs");
+                        if sibling_mod.exists() {
+                            Some(sibling_mod)
+                        } else {
+                            None
+                        }
+                    }
+                }
+            }
+        };
+
+        return module_path.and_then(|p| canonical_rel(&p, root).or_else(|| canonical_abs(&p)));
+    }
+
     if source.starts_with("std::")
         || source.starts_with("core::")
         || source.starts_with("alloc::")

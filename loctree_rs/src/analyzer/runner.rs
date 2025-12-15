@@ -99,7 +99,7 @@ fn print_py_race_indicators(analyses: &[crate::types::FileAnalysis], json: bool)
         println!("===================================\n");
 
         if !warnings.is_empty() {
-            println!("⚠️  WARNINGS ({}):", warnings.len());
+            println!("[!] WARNINGS ({}):", warnings.len());
             for (path, ind) in &warnings {
                 println!("  {}:{}", path, ind.line);
                 println!("    [{}] {}", ind.pattern, ind.message);
@@ -108,7 +108,7 @@ fn print_py_race_indicators(analyses: &[crate::types::FileAnalysis], json: bool)
         }
 
         if !infos.is_empty() {
-            println!("ℹ️  INFO ({}):", infos.len());
+            println!("[i] INFO ({}):", infos.len());
             for (path, ind) in &infos {
                 println!("  {}:{}", path, ind.line);
                 println!("    [{}] {}", ind.pattern, ind.message);

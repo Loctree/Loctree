@@ -1,8 +1,7 @@
 use serde_json::json;
 
-use crate::analyzer::RankedDup;
-use crate::analyzer::dead_parrots::DeadExport;
-use crate::analyzer::report::CommandGap;
+use super::dead_parrots::DeadExport;
+use super::report::{CommandGap, RankedDup};
 use crate::snapshot::Snapshot;
 
 pub struct SarifInputs<'a> {

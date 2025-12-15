@@ -480,6 +480,7 @@ mod tests {
                 kind: "emit_ident".to_string(),
                 awaited: false,
                 payload: None,
+                is_dynamic: false,
             }],
             event_consts: consts,
             ..Default::default()
@@ -529,6 +530,7 @@ mod tests {
                     kind: "listen_ident".to_string(),
                     awaited: false,
                     payload: None,
+                    is_dynamic: false,
                 }],
                 ..Default::default()
             },
@@ -559,6 +561,7 @@ mod tests {
                     kind: "emit_ident".to_string(),
                     awaited: false,
                     payload: None,
+                    is_dynamic: false,
                 }],
                 ..Default::default()
             },
@@ -578,6 +581,7 @@ mod tests {
                 kind: "emit_ident".to_string(),
                 awaited: false,
                 payload: None,
+                is_dynamic: false,
             }],
             ..Default::default()
         }];
@@ -626,6 +630,7 @@ mod tests {
                     kind: "emit_ident".to_string(),
                     awaited: false,
                     payload: None,
+                    is_dynamic: false,
                 }],
                 ..Default::default()
             },

@@ -789,9 +789,10 @@ mod watch_mode {
         // Run with timeout to avoid hanging
         // Note: This test is limited - real watch mode testing would require
         // simulating file changes or mocking the watcher
+        // Use new CLI syntax: `loct scan --watch` instead of legacy `loct --watch`
         loctree()
             .current_dir(&fixture)
-            .arg("--watch")
+            .args(["scan", "--watch"])
             .timeout(std::time::Duration::from_millis(100))
             .assert()
             .interrupted(); // Expect timeout/interrupt

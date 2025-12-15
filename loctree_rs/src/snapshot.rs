@@ -142,6 +142,12 @@ pub struct EventBridge {
     pub emits: Vec<(String, usize, String)>,
     /// Listen locations (file, line)
     pub listens: Vec<(String, usize)>,
+    /// True if this is a FE↔FE sync pattern (emit and listen both in frontend)
+    #[serde(default)]
+    pub is_fe_sync: bool,
+    /// True if emit and listen are in the same file (strongest FE↔FE indicator)
+    #[serde(default)]
+    pub same_file_sync: bool,
 }
 
 /// Export index entry (used by VS2 slice module)
@@ -955,17 +961,54 @@ pub fn run_init_with_options(
     all_events.extend(event_emits_map.keys().cloned());
     all_events.extend(event_listens_map.keys().cloned());
 
+    // Helper to check if a file is frontend code (TypeScript/JavaScript)
+    let is_frontend_file = |path: &str| {
+        snapshot
+            .files
+            .iter()
+            .find(|f| f.path == path)
+            .map(|f| f.language == "typescript" || f.language == "javascript")
+            .unwrap_or(false)
+    };
+
     for event_name in all_events {
+        let emits = event_emits_map
+            .get(&event_name)
+            .cloned()
+            .unwrap_or_default();
+        let listens = event_listens_map
+            .get(&event_name)
+            .cloned()
+            .unwrap_or_default();
+
+        // Detect FE↔FE sync pattern:
+        // 1. Has both emits and listens
+        // 2. All emits are from frontend files
+        // 3. All listens are from frontend files
+        // 4. No Rust involvement (Rust files would have "rust" language)
+        let has_emit = !emits.is_empty();
+        let has_listen = !listens.is_empty();
+        let all_emits_fe = emits.iter().all(|(path, _, _)| is_frontend_file(path));
+        let all_listens_fe = listens.iter().all(|(path, _)| is_frontend_file(path));
+        let is_fe_sync = has_emit && has_listen && all_emits_fe && all_listens_fe;
+
+        // Check if emit and listen are in the same file (strongest indicator)
+        let same_file_sync = if is_fe_sync {
+            let emit_files: HashSet<&str> =
+                emits.iter().map(|(path, _, _)| path.as_str()).collect();
+            let listen_files: HashSet<&str> =
+                listens.iter().map(|(path, _)| path.as_str()).collect();
+            !emit_files.is_disjoint(&listen_files)
+        } else {
+            false
+        };
+
         snapshot.event_bridges.push(EventBridge {
             name: event_name.clone(),
-            emits: event_emits_map
-                .get(&event_name)
-                .cloned()
-                .unwrap_or_default(),
-            listens: event_listens_map
-                .get(&event_name)
-                .cloned()
-                .unwrap_or_default(),
+            emits,
+            listens,
+            is_fe_sync,
+            same_file_sync,
         });
     }
 
@@ -1600,6 +1643,8 @@ mod tests {
             name: "user_updated".to_string(),
             emits: vec![("events.ts".to_string(), 10, "emit".to_string())],
             listens: vec![("listener.ts".to_string(), 20)],
+            is_fe_sync: false,
+            same_file_sync: false,
         });
 
         snapshot.save(tmp.path()).expect("save");

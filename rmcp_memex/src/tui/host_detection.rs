@@ -54,11 +54,11 @@ pub struct HostDetection {
 impl HostDetection {
     pub fn status_icon(&self) -> &'static str {
         if !self.exists {
-            "○"
+            "[ ]"
         } else if self.has_rmcp_memex {
-            "●"
+            "[x]"
         } else {
-            "◐"
+            "[~]"
         }
     }
 

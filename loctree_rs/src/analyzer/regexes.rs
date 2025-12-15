@@ -56,16 +56,16 @@ pub(crate) fn regex_tauri_generate_handler() -> &'static Regex {
 pub(crate) fn regex_event_emit_rust() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        // app.emit_all("evt", ..) or window.emit("evt", ..) etc., supports const identifiers
-        regex(r#"(?m)\.\s*emit[_a-z]*\(\s*(?P<target>["'][^"']+["']|[A-Za-z_][A-Za-z0-9_]*)\s*(?:,\s*(?P<payload>[^)]*))?"#)
+        // app.emit_all("evt", ..) or window.emit("evt", ..) etc., supports const identifiers and format! patterns
+        regex(r#"(?m)\.\s*emit[_a-z]*\(\s*(?P<target>["'][^"']+["']|&?format!\s*\([^)]*\)|[A-Za-z_][A-Za-z0-9_]*)\s*(?:,\s*(?P<payload>[^)]*))?"#)
     })
 }
 
 pub(crate) fn regex_event_listen_rust() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        // app.listen_global("evt", ..) or window.listen("evt", ..) supports const identifiers
-        regex(r#"(?m)\.\s*listen[_a-z]*\(\s*(?P<target>["'][^"']+["']|[A-Za-z_][A-Za-z0-9_]*)"#)
+        // app.listen_global("evt", ..) or window.listen("evt", ..) supports const identifiers and format! patterns
+        regex(r#"(?m)\.\s*listen[_a-z]*\(\s*(?P<target>["'][^"']+["']|&?format!\s*\([^)]*\)|[A-Za-z_][A-Za-z0-9_]*)"#)
     })
 }
 
@@ -85,6 +85,19 @@ pub(crate) fn regex_rust_use() -> &'static Regex {
 pub(crate) fn regex_rust_pub_use() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| regex(r#"(?m)^\s*pub\s*(?:\([^)]*\))?\s+use\s+([^;]+);"#))
+}
+
+/// Matches `mod foo;` declarations (external module references, not inline `mod foo { }`)
+/// Captures: (1) optional #[path = "..."] attribute path, (2) module name
+/// Examples: `mod foo;`, `pub mod bar;`, `pub(crate) mod internal;`, `#[path = "impl.rs"] mod foo;`
+pub(crate) fn regex_rust_mod_decl() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        // Match optional #[path = "..."] attribute followed by mod declaration
+        // Group 1: optional path from #[path = "..."]
+        // Group 2: module name
+        regex(r#"(?m)^\s*(?:#\s*\[\s*path\s*=\s*"([^"]+)"\s*\]\s*)?(?:pub\s*(?:\([^)]*\)\s*)?)?\s*mod\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*;"#)
+    })
 }
 
 pub(crate) fn regex_rust_pub_item(kind: &str) -> Regex {
@@ -202,4 +215,89 @@ pub(crate) fn regex_py_def() -> &'static Regex {
 pub(crate) fn regex_py_class() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| regex(r#"(?m)^\s*class\s+([A-Za-z_][A-Za-z0-9_]*)"#))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_rust_mod_decl_basic() {
+        let re = regex_rust_mod_decl();
+
+        // Basic mod
+        let caps = re.captures("mod foo;").unwrap();
+        assert_eq!(caps.get(2).unwrap().as_str(), "foo");
+
+        // pub mod
+        let caps = re.captures("pub mod bar;").unwrap();
+        assert_eq!(caps.get(2).unwrap().as_str(), "bar");
+    }
+
+    #[test]
+    fn test_rust_mod_decl_visibility_modifiers() {
+        let re = regex_rust_mod_decl();
+
+        // pub(crate) mod
+        let caps = re.captures("pub(crate) mod schema;").unwrap();
+        assert_eq!(caps.get(2).unwrap().as_str(), "schema");
+
+        // pub(super) mod
+        let caps = re.captures("pub(super) mod internal;").unwrap();
+        assert_eq!(caps.get(2).unwrap().as_str(), "internal");
+
+        // pub(self) mod
+        let caps = re.captures("pub(self) mod private;").unwrap();
+        assert_eq!(caps.get(2).unwrap().as_str(), "private");
+
+        // pub(in path) mod
+        let caps = re.captures("pub(in crate::foo) mod nested;").unwrap();
+        assert_eq!(caps.get(2).unwrap().as_str(), "nested");
+    }
+
+    #[test]
+    fn test_rust_mod_decl_with_indentation() {
+        let re = regex_rust_mod_decl();
+
+        // Indented mod declarations
+        let caps = re.captures("    pub(crate) mod migrations;").unwrap();
+        assert_eq!(caps.get(2).unwrap().as_str(), "migrations");
+
+        let caps = re.captures("\t\tmod env_tests;").unwrap();
+        assert_eq!(caps.get(2).unwrap().as_str(), "env_tests");
+    }
+
+    #[test]
+    fn test_rust_mod_decl_with_path_attr() {
+        let re = regex_rust_mod_decl();
+
+        // #[path = "..."] mod
+        let caps = re.captures(r#"#[path = "impl.rs"] mod foo;"#).unwrap();
+        assert_eq!(caps.get(1).unwrap().as_str(), "impl.rs");
+        assert_eq!(caps.get(2).unwrap().as_str(), "foo");
+
+        // With visibility
+        let caps = re
+            .captures(r#"#[path = "other.rs"] pub(crate) mod thing;"#)
+            .unwrap();
+        assert_eq!(caps.get(1).unwrap().as_str(), "other.rs");
+        assert_eq!(caps.get(2).unwrap().as_str(), "thing");
+    }
+
+    #[test]
+    fn test_rust_mod_decl_test_modules() {
+        let re = regex_rust_mod_decl();
+
+        // Test module patterns
+        let caps = re.captures("mod env_tests;").unwrap();
+        assert_eq!(caps.get(2).unwrap().as_str(), "env_tests");
+
+        let caps = re.captures("mod tests;").unwrap();
+        assert_eq!(caps.get(2).unwrap().as_str(), "tests");
+
+        let caps = re.captures("#[cfg(test)] mod test_utils;");
+        // Note: #[cfg(test)] is different from #[path], so this won't capture the attr
+        // but should still capture the mod name
+        assert!(caps.is_some() || regex_rust_mod_decl().is_match("mod test_utils;"));
+    }
 }

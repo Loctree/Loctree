@@ -17,6 +17,37 @@ use crate::types::{FileAnalysis, ReexportKind};
 
 use super::root_scan::normalize_module_id;
 
+/// Re-export info: (reexporter_file, original_name, exported_alias)
+type ReexportInfoEntry = (String, String, String);
+/// Map from (file_norm, symbol) to list of re-export entries
+type ReexportInfoMap = HashMap<(String, String), Vec<ReexportInfoEntry>>;
+
+/// Shadow export: export that exists but is never imported because another file exports the same symbol
+#[derive(Debug, Clone, Serialize)]
+pub struct ShadowExport {
+    /// Symbol name that is shadowed
+    pub symbol: String,
+    /// File that exports the symbol but is USED (imported through barrel/re-export)
+    pub used_file: String,
+    /// Line number in used file
+    pub used_line: Option<usize>,
+    /// Files that export the same symbol but are DEAD (never imported)
+    pub dead_files: Vec<ShadowExportFile>,
+    /// Total LOC across all dead files
+    pub total_dead_loc: usize,
+}
+
+/// Individual dead file in a shadow export scenario
+#[derive(Debug, Clone, Serialize)]
+pub struct ShadowExportFile {
+    /// File path
+    pub file: String,
+    /// Line number where symbol is exported
+    pub line: Option<usize>,
+    /// Lines of code in this file
+    pub loc: usize,
+}
+
 // Submodules
 mod filters;
 mod languages;
@@ -25,7 +56,8 @@ pub mod search;
 
 // Re-export public types and functions
 pub use output::{
-    print_dead_exports, print_impact_results, print_similarity_results, print_symbol_results,
+    print_dead_exports, print_impact_results, print_shadow_exports, print_similarity_results,
+    print_symbol_results,
 };
 pub use search::{
     ImpactResult, SimilarityCandidate, SymbolFileMatch, SymbolMatch, SymbolSearchResult,
@@ -189,6 +221,14 @@ pub fn find_dead_exports(
     // Track crate-internal imports for Rust: (raw_path, symbol_name)
     let mut crate_internal_imports: Vec<(String, String)> = Vec::new();
 
+    // === INFORMATIVE OUTPUT: Build detailed lookup maps for reason messages ===
+    // Import counts: how many times each (file, symbol) is imported
+    let mut import_counts: HashMap<(String, String), usize> = HashMap::new();
+    // Re-export info: (file_norm, symbol) -> Vec<(reexporter_file, original_name, exported_alias)>
+    let mut reexport_info: ReexportInfoMap = HashMap::new();
+    // Dynamic import sources: file_norm -> Vec<importer_file>
+    let mut dynamic_import_sources: HashMap<String, Vec<String>> = HashMap::new();
+
     for analysis in &analyses {
         for imp in &analysis.imports {
             let target_norm = if let Some(target) = &imp.resolved_path {
@@ -216,9 +256,22 @@ pub fn find_dead_exports(
 
                 // Track crate-internal imports (crate::, super::, self::)
                 if imp.is_crate_relative || imp.is_super_relative || imp.is_self_relative {
-                    crate_internal_imports.push((imp.raw_path.clone(), used_name));
+                    crate_internal_imports.push((imp.raw_path.clone(), used_name.clone()));
                 }
+
+                // INFORMATIVE: Count imports per (file, symbol)
+                *import_counts
+                    .entry((target_norm.clone(), used_name))
+                    .or_insert(0) += 1;
             }
+        }
+        // Track dynamic imports for informative output
+        for dyn_imp in &analysis.dynamic_imports {
+            let dyn_norm = normalize_module_id(dyn_imp).as_key();
+            dynamic_import_sources
+                .entry(dyn_norm)
+                .or_default()
+                .push(analysis.path.clone());
         }
         // Track re-exports as usage (if A re-exports B, A uses B)
         for re in &analysis.reexports {
@@ -232,8 +285,14 @@ pub fn find_dead_exports(
                     used_exports.insert((target_norm, "*".to_string()));
                 }
                 ReexportKind::Named(names) => {
-                    for name in names {
-                        used_exports.insert((target_norm.clone(), name.clone()));
+                    for (original, exported) in names {
+                        // Mark original name as used in target module
+                        used_exports.insert((target_norm.clone(), original.clone()));
+                        // INFORMATIVE: Track re-export info with alias
+                        reexport_info
+                            .entry((target_norm.clone(), original.clone()))
+                            .or_default()
+                            .push((analysis.path.clone(), original.clone(), exported.clone()));
                     }
                 }
             }
@@ -268,8 +327,8 @@ pub fn find_dead_exports(
             }
             ReexportKind::Named(names) => {
                 // Named re-export: mark specific symbols as used
-                for name in names {
-                    used_exports.insert((target_norm.clone(), name.clone()));
+                for (original, _exported) in names {
+                    used_exports.insert((target_norm.clone(), original.clone()));
                 }
             }
         }
@@ -596,24 +655,83 @@ pub fn find_dead_exports(
             {
                 let open_url = super::build_open_url(&analysis.path, exp.line, open_base);
 
+                // Calculate actual counts for informative output
+                let import_count = import_counts
+                    .get(&(path_norm.clone(), exp.name.clone()))
+                    .copied()
+                    .unwrap_or(0);
+                let reexport_entries = reexport_info
+                    .get(&(path_norm.clone(), exp.name.clone()))
+                    .cloned()
+                    .unwrap_or_default();
+                let reexport_count = reexport_entries.len();
+                let dynamic_count = dynamic_import_sources
+                    .get(&path_norm)
+                    .map(|v| v.len())
+                    .unwrap_or(0);
+
                 // Build human-readable reason with context for user decision
                 let reason = if is_rust_file {
                     format!(
                         "Exported symbol '{}' has no detected usages. \
-                         Checked: use statements (0), path-qualified calls (0), \
-                         crate:: imports (0), Tauri invoke_handler (not found). \
+                         Checked: use statements ({}), path-qualified calls (0), \
+                         crate:: imports ({}), Tauri invoke_handler (not found). \
                          Consider: If this is a public API consumed externally, it's expected. \
                          If internal-only, consider removing or making private.",
-                        exp.name
+                        exp.name, import_count, crate_import_count
                     )
                 } else {
+                    // Build detailed re-export info for informative output
+                    let reexport_details = if !reexport_entries.is_empty() {
+                        let details: Vec<String> = reexport_entries
+                            .iter()
+                            .take(3) // Limit to 3 for readability
+                            .map(|(file, original, alias)| {
+                                if original != alias {
+                                    format!("as '{}' in {}", alias, file)
+                                } else {
+                                    file.clone()
+                                }
+                            })
+                            .collect();
+                        let more = if reexport_entries.len() > 3 {
+                            format!(" (+{} more)", reexport_entries.len() - 3)
+                        } else {
+                            String::new()
+                        };
+                        format!(" ({}{})", details.join(", "), more)
+                    } else {
+                        String::new()
+                    };
+
+                    // Build dynamic import details
+                    let dynamic_details = if dynamic_count > 0 {
+                        let sources: Vec<String> = dynamic_import_sources
+                            .get(&path_norm)
+                            .map(|v| v.iter().take(2).cloned().collect())
+                            .unwrap_or_default();
+                        let more = if dynamic_count > 2 {
+                            format!(" +{} more", dynamic_count - 2)
+                        } else {
+                            String::new()
+                        };
+                        format!(" (by {}{})", sources.join(", "), more)
+                    } else {
+                        String::new()
+                    };
+
                     format!(
                         "Exported symbol '{}' has no detected imports. \
-                         Checked: import statements (0), re-exports (0), \
-                         dynamic imports (0), JSX references (0). \
+                         Checked: import statements ({}), re-exports ({}){}, \
+                         dynamic imports ({}){}, JSX references (0). \
                          Consider: If used via barrel exports or external packages, verify manually. \
                          If truly unused, safe to remove.",
-                        exp.name
+                        exp.name,
+                        import_count,
+                        reexport_count,
+                        reexport_details,
+                        dynamic_count,
+                        dynamic_details
                     )
                 };
 
@@ -635,6 +753,130 @@ pub fn find_dead_exports(
     }
 
     dead_candidates
+}
+
+/// Detect shadow exports: same symbol exported by multiple files, but only one is actually used.
+///
+/// This identifies "zombie" files that export symbols which are masked by barrel re-exports
+/// from other files. For example:
+/// - `stores/conversationHostStore.ts` exports `conversationHostStore` (361 LOC) - DEAD
+/// - `aiStore/slices/conversationHostSlice.ts` exports `conversationHostStore` - USED
+/// - Barrel `@ai-suite/state` re-exports from the NEW file, old file is zombie
+pub fn find_shadow_exports(analyses: &[FileAnalysis]) -> Vec<ShadowExport> {
+    // Build map of symbol_name -> Vec<(file_path, line, export)>
+    let mut symbol_map: HashMap<String, Vec<(String, Option<usize>, String)>> = HashMap::new();
+
+    for analysis in analyses {
+        for exp in &analysis.exports {
+            // Skip re-export bindings (we only care about original exports)
+            if exp.kind == "reexport" {
+                continue;
+            }
+
+            symbol_map.entry(exp.name.clone()).or_default().push((
+                analysis.path.clone(),
+                exp.line,
+                exp.kind.clone(),
+            ));
+        }
+    }
+
+    // Build set of (file, symbol) that are actually imported
+    let mut used_exports: HashSet<(String, String)> = HashSet::new();
+
+    for analysis in analyses {
+        for imp in &analysis.imports {
+            let target_norm = if let Some(target) = &imp.resolved_path {
+                normalize_module_id(target).as_key()
+            } else {
+                normalize_module_id(&imp.source).as_key()
+            };
+
+            for sym in &imp.symbols {
+                let used_name = if sym.is_default {
+                    "default".to_string()
+                } else {
+                    sym.name.clone()
+                };
+                used_exports.insert((target_norm.clone(), used_name));
+            }
+        }
+
+        // Also check re-exports
+        for re in &analysis.reexports {
+            let target_norm = re
+                .resolved
+                .as_ref()
+                .map(|t| normalize_module_id(t).as_key())
+                .unwrap_or_else(|| normalize_module_id(&re.source).as_key());
+            match &re.kind {
+                ReexportKind::Star => {
+                    used_exports.insert((target_norm, "*".to_string()));
+                }
+                ReexportKind::Named(names) => {
+                    for (original, _exported) in names {
+                        used_exports.insert((target_norm.clone(), original.clone()));
+                    }
+                }
+            }
+        }
+    }
+
+    let mut shadows = Vec::new();
+
+    // Find symbols exported by multiple files
+    for (symbol, exporters) in symbol_map {
+        if exporters.len() <= 1 {
+            continue; // Not a duplicate, skip
+        }
+
+        // Check which files are actually imported
+        let mut used_files = Vec::new();
+        let mut dead_files = Vec::new();
+
+        for (file, line, _kind) in &exporters {
+            let file_norm = normalize_module_id(file).as_key();
+            let is_used = used_exports.contains(&(file_norm.clone(), symbol.clone()))
+                || used_exports.contains(&(file_norm, "*".to_string()));
+
+            if is_used {
+                used_files.push((file.clone(), *line));
+            } else {
+                // Get LOC for this file
+                let loc = analyses
+                    .iter()
+                    .find(|a| a.path == *file)
+                    .map(|a| a.loc)
+                    .unwrap_or(0);
+
+                dead_files.push(ShadowExportFile {
+                    file: file.clone(),
+                    line: *line,
+                    loc,
+                });
+            }
+        }
+
+        // Only report if we have both used and dead files
+        if !used_files.is_empty() && !dead_files.is_empty() {
+            // Use the first used file as the canonical one
+            let (used_file, used_line) = used_files.into_iter().next().unwrap();
+            let total_dead_loc = dead_files.iter().map(|f| f.loc).sum();
+
+            shadows.push(ShadowExport {
+                symbol,
+                used_file,
+                used_line,
+                dead_files,
+                total_dead_loc,
+            });
+        }
+    }
+
+    // Sort by total_dead_loc descending (highest impact first)
+    shadows.sort_by(|a, b| b.total_dead_loc.cmp(&a.total_dead_loc));
+
+    shadows
 }
 
 #[cfg(test)]
@@ -1190,7 +1432,7 @@ mod tests {
         }
         barrel.reexports.push(ReexportEntry {
             source: "./foo".to_string(),
-            kind: ReexportKind::Named(vec!["Foo".to_string()]),
+            kind: ReexportKind::Named(vec![("Foo".to_string(), "Foo".to_string())]),
             resolved: Some("src/foo.ts".to_string()),
         });
 
@@ -1558,6 +1800,83 @@ mod tests {
     }
 
     #[test]
+    fn test_shadow_export_detection() {
+        // Test shadow export detection: same symbol exported by multiple files, only one used
+        // Pattern: stores/conversationHostStore.ts exports conversationHostStore (DEAD)
+        //          aiStore/slices/conversationHostSlice.ts exports conversationHostStore (USED)
+
+        use crate::types::{ImportEntry, ImportKind, ImportSymbol};
+
+        // Old file that exports conversationHostStore (361 LOC) - will be DEAD
+        let old_store = FileAnalysis {
+            path: "stores/conversationHostStore.ts".to_string(),
+            language: "ts".to_string(),
+            loc: 361,
+            exports: vec![ExportSymbol::new(
+                "conversationHostStore".to_string(),
+                "const",
+                "named",
+                Some(42),
+            )],
+            ..Default::default()
+        };
+
+        // New file that exports conversationHostStore - will be USED
+        let new_slice = FileAnalysis {
+            path: "aiStore/slices/conversationHostSlice.ts".to_string(),
+            language: "ts".to_string(),
+            loc: 120,
+            exports: vec![ExportSymbol::new(
+                "conversationHostStore".to_string(),
+                "const",
+                "named",
+                Some(15),
+            )],
+            ..Default::default()
+        };
+
+        // File that imports from the NEW location
+        let mut importer = FileAnalysis {
+            path: "components/Chat.tsx".to_string(),
+            language: "tsx".to_string(),
+            ..Default::default()
+        };
+        let mut imp = ImportEntry::new(
+            "aiStore/slices/conversationHostSlice".to_string(),
+            ImportKind::Static,
+        );
+        imp.resolved_path = Some("aiStore/slices/conversationHostSlice.ts".to_string());
+        imp.symbols.push(ImportSymbol {
+            name: "conversationHostStore".to_string(),
+            alias: None,
+            is_default: false,
+        });
+        importer.imports.push(imp);
+
+        let analyses = vec![old_store, new_slice, importer];
+        let shadows = find_shadow_exports(&analyses);
+
+        assert_eq!(shadows.len(), 1, "Should find exactly one shadow export");
+
+        let shadow = &shadows[0];
+        assert_eq!(shadow.symbol, "conversationHostStore");
+        assert_eq!(
+            shadow.used_file, "aiStore/slices/conversationHostSlice.ts",
+            "New file should be marked as USED"
+        );
+        assert_eq!(shadow.dead_files.len(), 1, "Should have one dead file");
+        assert_eq!(
+            shadow.dead_files[0].file, "stores/conversationHostStore.ts",
+            "Old file should be marked as DEAD"
+        );
+        assert_eq!(
+            shadow.dead_files[0].loc, 361,
+            "Should track LOC of dead file"
+        );
+        assert_eq!(shadow.total_dead_loc, 361);
+    }
+
+    #[test]
     fn test_python_non_stdlib_requires_all() {
         // Test that non-stdlib Python files still require proper __all__ or usage
         // to avoid being marked as dead
@@ -1675,9 +1994,9 @@ mod integration_tests {
         declaration.reexports.push(ReexportEntry {
             source: "./index.js".to_string(),
             kind: ReexportKind::Named(vec![
-                "linear".to_string(),
-                "backIn".to_string(),
-                "backOut".to_string(),
+                ("linear".to_string(), "linear".to_string()),
+                ("backIn".to_string(), "backIn".to_string()),
+                ("backOut".to_string(), "backOut".to_string()),
             ]),
             resolved: Some("packages/svelte/src/easing/index.js".to_string()),
         });

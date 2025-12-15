@@ -12,8 +12,8 @@ use std::path::PathBuf;
 use std::sync::mpsc::channel;
 use std::time::Duration;
 
-use notify::{RecommendedWatcher, RecursiveMode};
-use notify_debouncer_full::{DebounceEventResult, Debouncer, FileIdMap, new_debouncer};
+use notify::RecursiveMode;
+use notify_debouncer_full::{DebounceEventResult, new_debouncer};
 
 use crate::args::ParsedArgs;
 use crate::fs_utils::GitIgnoreChecker;
@@ -47,7 +47,7 @@ pub fn watch_and_rescan(config: WatchConfig, parsed_args: &ParsedArgs) -> anyhow
     let (tx, rx) = channel();
 
     // Create debouncer with specified duration
-    let mut debouncer: Debouncer<RecommendedWatcher, FileIdMap> = new_debouncer(
+    let mut debouncer = new_debouncer(
         config.debounce_duration,
         None, // No separate tick rate
         move |result: DebounceEventResult| {
@@ -76,7 +76,7 @@ pub fn watch_and_rescan(config: WatchConfig, parsed_args: &ParsedArgs) -> anyhow
     }
     let elapsed = start.elapsed();
     eprintln!(
-        "[watch] ✓ Scanned {} files in {:.2}s",
+        "[watch] [OK] Scanned {} files in {:.2}s",
         initial_count,
         elapsed.as_secs_f64()
     );
@@ -126,7 +126,7 @@ pub fn watch_and_rescan(config: WatchConfig, parsed_args: &ParsedArgs) -> anyhow
                 let current_count =
                     count_tracked_files(&config.roots, &config.extensions, &config.gitignore);
                 eprintln!(
-                    "[{}] ✓ Scanned {} files in {:.2}s",
+                    "[{}] [OK] Scanned {} files in {:.2}s",
                     chrono::Local::now().format("%H:%M:%S"),
                     current_count,
                     elapsed.as_secs_f64()
@@ -267,6 +267,7 @@ mod tests {
     #[test]
     fn test_count_tracked_files() {
         let temp = TempDir::new().unwrap();
+        let root = temp.path().to_path_buf();
 
         // Create test files
         fs::write(temp.path().join("test1.ts"), "").unwrap();
@@ -274,32 +275,33 @@ mod tests {
         fs::write(temp.path().join("test3.js"), "").unwrap();
         fs::write(temp.path().join("readme.txt"), "").unwrap();
 
-        let count = count_tracked_files(&vec![temp.path().to_path_buf()], &None, &None);
+        let count = count_tracked_files(std::slice::from_ref(&root), &None, &None);
         assert_eq!(count, 4); // All files
 
         let extensions = Some(vec!["ts".to_string()]);
-        let count_filtered =
-            count_tracked_files(&vec![temp.path().to_path_buf()], &extensions, &None);
+        let count_filtered = count_tracked_files(std::slice::from_ref(&root), &extensions, &None);
         assert_eq!(count_filtered, 2); // Only .ts files
     }
 
     #[test]
     fn test_count_tracked_files_empty_directory() {
         let temp = TempDir::new().unwrap();
-        let count = count_tracked_files(&vec![temp.path().to_path_buf()], &None, &None);
+        let root = temp.path().to_path_buf();
+        let count = count_tracked_files(&[root], &None, &None);
         assert_eq!(count, 0);
     }
 
     #[test]
     fn test_count_tracked_files_nested() {
         let temp = TempDir::new().unwrap();
+        let root = temp.path().to_path_buf();
         let subdir = temp.path().join("subdir");
         fs::create_dir(&subdir).unwrap();
 
         fs::write(temp.path().join("root.ts"), "").unwrap();
         fs::write(subdir.join("nested.ts"), "").unwrap();
 
-        let count = count_tracked_files(&vec![temp.path().to_path_buf()], &None, &None);
+        let count = count_tracked_files(&[root], &None, &None);
         assert_eq!(count, 2);
     }
 
@@ -307,21 +309,20 @@ mod tests {
     fn test_count_tracked_files_multiple_roots() {
         let temp1 = TempDir::new().unwrap();
         let temp2 = TempDir::new().unwrap();
+        let root1 = temp1.path().to_path_buf();
+        let root2 = temp2.path().to_path_buf();
 
         fs::write(temp1.path().join("file1.ts"), "").unwrap();
         fs::write(temp2.path().join("file2.ts"), "").unwrap();
 
-        let count = count_tracked_files(
-            &vec![temp1.path().to_path_buf(), temp2.path().to_path_buf()],
-            &None,
-            &None,
-        );
+        let count = count_tracked_files(&[root1, root2], &None, &None);
         assert_eq!(count, 2);
     }
 
     #[test]
     fn test_count_tracked_files_with_extension_filter() {
         let temp = TempDir::new().unwrap();
+        let root = temp.path().to_path_buf();
 
         fs::write(temp.path().join("file.ts"), "").unwrap();
         fs::write(temp.path().join("file.js"), "").unwrap();
@@ -329,19 +330,20 @@ mod tests {
         fs::write(temp.path().join("readme.md"), "").unwrap();
 
         let extensions = Some(vec!["ts".to_string(), "tsx".to_string()]);
-        let count = count_tracked_files(&vec![temp.path().to_path_buf()], &extensions, &None);
+        let count = count_tracked_files(&[root], &extensions, &None);
         assert_eq!(count, 2); // Only .ts and .tsx files
     }
 
     #[test]
     fn test_count_tracked_files_ignores_subdirectories() {
         let temp = TempDir::new().unwrap();
+        let root = temp.path().to_path_buf();
         let subdir = temp.path().join("subdir");
         fs::create_dir(&subdir).unwrap();
 
         fs::write(temp.path().join("file.ts"), "").unwrap();
 
-        let count = count_tracked_files(&vec![temp.path().to_path_buf()], &None, &None);
+        let count = count_tracked_files(&[root], &None, &None);
         assert_eq!(count, 1); // Only the file, not the directory
     }
 

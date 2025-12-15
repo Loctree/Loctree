@@ -11,9 +11,37 @@ use crate::types::ColorMode;
 
 /// Known subcommand names for the new CLI interface.
 const SUBCOMMANDS: &[&str] = &[
-    "auto", "agent", "scan", "tree", "slice", "find", "dead", "unused", "cycles", "commands",
-    "events", "info", "lint", "report", "help", "query", "diff", "memex", "crowd", "twins",
-    "routes", "dist", "coverage", "sniff", "impact",
+    "auto",
+    "agent",
+    "scan",
+    "tree",
+    "slice",
+    "find",
+    "dead",
+    "unused",
+    "cycles",
+    "commands",
+    "events",
+    "info",
+    "lint",
+    "report",
+    "help",
+    "query",
+    "diff",
+    "memex",
+    "crowd",
+    "tagmap",
+    "twins",
+    "suppress",
+    "routes",
+    "dist",
+    "coverage",
+    "sniff",
+    "impact",
+    "focus",
+    "hotspots",
+    "layoutmap",
+    "zombie",
 ];
 
 /// Check if an argument looks like a new-style subcommand.
@@ -52,18 +80,35 @@ fn is_jq_filter(arg: &str) -> bool {
 /// Returns true if the first non-flag argument is a known subcommand,
 /// or if only global flags like --help/--version are present.
 pub fn uses_new_syntax(args: &[String]) -> bool {
-    for arg in args {
+    let mut i = 0;
+    while i < args.len() {
+        let arg = &args[i];
+
         // Skip global flags that can appear before subcommand
         if arg == "--json"
             || arg == "--quiet"
             || arg == "--verbose"
-            || arg.starts_with("--color")
             || arg == "--library-mode"
+            || arg == "--python-library"
             || arg == "-v"
             || arg == "-q"
         {
+            i += 1;
             continue;
         }
+
+        // Handle flags with optional/required values
+        if arg.starts_with("--color") || arg.starts_with("--py-root") {
+            // --color=auto or --py-root=Lib (value in same arg)
+            if arg.contains('=') {
+                i += 1;
+            } else {
+                // --color auto or --py-root Lib (value in next arg)
+                i += 2;
+            }
+            continue;
+        }
+
         // These are always valid in new syntax (not legacy-specific)
         if arg == "--help"
             || arg == "-h"
@@ -147,6 +192,18 @@ pub fn parse_command(args: &[String]) -> Result<Option<ParsedCommand>, String> {
             }
             "--python-library" => {
                 global.python_library = true;
+                i += 1;
+            }
+            "--py-root" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--py-root requires a path".to_string())?;
+                global.py_roots.push(PathBuf::from(value));
+                i += 2;
+            }
+            _ if arg.starts_with("--py-root=") => {
+                let value = arg.trim_start_matches("--py-root=");
+                global.py_roots.push(PathBuf::from(value));
                 i += 1;
             }
             "--help" | "-h" => {
@@ -242,10 +299,16 @@ pub fn parse_command(args: &[String]) -> Result<Option<ParsedCommand>, String> {
         Some("diff") => parse_diff_command(&remaining_args)?,
         Some("memex") => parse_memex_command(&remaining_args)?,
         Some("crowd") => parse_crowd_command(&remaining_args)?,
+        Some("tagmap") => parse_tagmap_command(&remaining_args)?,
         Some("twins") => parse_twins_command(&remaining_args)?,
+        Some("suppress") => parse_suppress_command(&remaining_args)?,
         Some("sniff") => parse_sniff_command(&remaining_args)?,
         Some("dist") => parse_dist_command(&remaining_args)?,
         Some("coverage") => parse_coverage_command(&remaining_args)?,
+        Some("focus") => parse_focus_command(&remaining_args)?,
+        Some("hotspots") => parse_hotspots_command(&remaining_args)?,
+        Some("layoutmap") => parse_layoutmap_command(&remaining_args)?,
+        Some("zombie") => parse_zombie_command(&remaining_args)?,
         Some(unknown) => {
             return Err(format!(
                 "Unknown command '{}'. Run 'loct --help' for available commands.",
@@ -585,6 +648,7 @@ OPTIONS:
     --consumers, -c      Include reverse dependencies (files that import this file)
     --depth <N>          Maximum dependency depth to traverse (default: unlimited)
     --root <PATH>        Project root for resolving relative imports
+    --rescan             Force snapshot update before slicing (includes new/uncommitted files)
     --help, -h           Show this help message
 
 ARGUMENTS:
@@ -633,6 +697,10 @@ RELATED COMMANDS:
                     .ok_or_else(|| "--root requires a path".to_string())?;
                 opts.root = Some(PathBuf::from(value));
                 i += 2;
+            }
+            "--rescan" => {
+                opts.rescan = true;
+                i += 1;
             }
             _ if !arg.starts_with('-') => {
                 if opts.target.is_empty() {
@@ -888,6 +956,10 @@ RUST CRATE-INTERNAL IMPORTS:
                 opts.with_helpers = true;
                 i += 1;
             }
+            "--with-shadows" => {
+                opts.with_shadows = true;
+                i += 1;
+            }
             _ if !arg.starts_with('-') => {
                 opts.roots.push(PathBuf::from(arg));
                 i += 1;
@@ -1103,8 +1175,8 @@ DESCRIPTION:
     Helps maintain event contract integrity in Tauri applications.
 
 OPTIONS:
-    --ghost      Show only ghost events (emitted but never listened)
-    --orphan     Show only orphan listeners (listening but never emitted)
+    --ghost(s)   Show only ghost events (emitted but never listened)
+    --orphan(s)  Show only orphan listeners (listening but never emitted)
     --races      Show only potential race conditions (multiple emitters)
     --no-duplicates      Hide duplicate export sections in CLI output
     --no-dynamic-imports Hide dynamic import sections in CLI output
@@ -1124,11 +1196,11 @@ EXAMPLES:
     while i < args.len() {
         let arg = &args[i];
         match arg.as_str() {
-            "--ghost" => {
+            "--ghost" | "--ghosts" => {
                 opts.ghost = true;
                 i += 1;
             }
-            "--orphan" => {
+            "--orphan" | "--orphans" => {
                 opts.orphan = true;
                 i += 1;
             }
@@ -1142,6 +1214,10 @@ EXAMPLES:
             }
             "--no-dynamic-imports" => {
                 opts.suppress_dynamic = true;
+                i += 1;
+            }
+            "--fe-sync" => {
+                opts.fe_sync = true;
                 i += 1;
             }
             _ if !arg.starts_with('-') => {
@@ -1904,6 +1980,60 @@ EXAMPLES:
     Ok(Command::Crowd(opts))
 }
 
+fn parse_tagmap_command(args: &[String]) -> Result<Command, String> {
+    if args.is_empty() {
+        return Err("tagmap requires a keyword. Usage: loct tagmap <keyword>".to_string());
+    }
+
+    // Check for help flag first
+    if args.iter().any(|a| a == "--help" || a == "-h")
+        && let Some(help) = Command::format_command_help("tagmap")
+    {
+        println!("{}", help);
+        std::process::exit(0);
+    }
+
+    let mut opts = TagmapOptions::default();
+
+    // First positional argument is the keyword
+    if !args[0].starts_with('-') {
+        opts.keyword = args[0].clone();
+    } else {
+        return Err("tagmap requires a keyword as first argument".to_string());
+    }
+
+    let mut i = 1;
+    while i < args.len() {
+        let arg = &args[i];
+        match arg.as_str() {
+            "--include-tests" => {
+                opts.include_tests = true;
+                i += 1;
+            }
+            "--limit" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--limit requires a number".to_string())?;
+                opts.limit = Some(value.parse().map_err(|_| "--limit requires a number")?);
+                i += 2;
+            }
+            _ if !arg.starts_with('-') => {
+                opts.roots.push(PathBuf::from(arg));
+                i += 1;
+            }
+            _ => {
+                return Err(format!("Unknown option '{}' for 'tagmap' command.", arg));
+            }
+        }
+    }
+
+    if opts.roots.is_empty() {
+        opts.roots.push(PathBuf::from("."));
+    }
+
+    Ok(Command::Tagmap(opts))
+}
+
 fn parse_twins_command(args: &[String]) -> Result<Command, String> {
     // Check for help flag first
     if args.iter().any(|a| a == "--help" || a == "-h") {
@@ -1936,6 +2066,7 @@ DESCRIPTION:
 OPTIONS:
     --path <DIR>       Root directory to analyze (default: current directory)
     --dead-only        Show only dead parrots (exports with 0 imports)
+    --include-tests    Include test files in analysis (excluded by default)
     --help, -h         Show this help message
 
 ARGUMENTS:
@@ -1976,6 +2107,14 @@ RELATED COMMANDS:
                 opts.dead_only = true;
                 i += 1;
             }
+            "--include-suppressed" => {
+                opts.include_suppressed = true;
+                i += 1;
+            }
+            "--include-tests" => {
+                opts.include_tests = true;
+                i += 1;
+            }
             _ => {
                 // Treat as path if no flag prefix
                 if !arg.starts_with('-') {
@@ -1989,6 +2128,98 @@ RELATED COMMANDS:
     }
 
     Ok(Command::Twins(opts))
+}
+
+fn parse_suppress_command(args: &[String]) -> Result<Command, String> {
+    use super::command::SuppressOptions;
+
+    // Check for help flag first
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        return Err("loct suppress - Manage false positive suppressions
+
+USAGE:
+    loct suppress <type> <symbol> [OPTIONS]
+    loct suppress --list
+    loct suppress --clear
+
+TYPES:
+    twins         Exact twin (same symbol in multiple files)
+    dead_parrot   Dead parrot (export with 0 imports)
+    dead_export   Dead export (unused export)
+    circular      Circular import
+
+OPTIONS:
+    --file <path>       Suppress only for this specific file
+    --reason <text>     Reason for suppression (for documentation)
+    --remove            Remove a suppression instead of adding
+    --list              List all current suppressions
+    --clear             Clear all suppressions
+
+EXAMPLES:
+    loct suppress twins Message --reason \"FE/BE mirror OK\"
+    loct suppress dead_parrot unusedFunc --file src/utils.ts
+    loct suppress --list
+    loct suppress twins Message --remove"
+            .to_string());
+    }
+
+    let mut opts = SuppressOptions::default();
+    let mut i = 0;
+    let mut positional_count = 0;
+
+    while i < args.len() {
+        let arg = &args[i];
+        match arg.as_str() {
+            "--list" => {
+                opts.list = true;
+                i += 1;
+            }
+            "--clear" => {
+                opts.clear = true;
+                i += 1;
+            }
+            "--remove" => {
+                opts.remove = true;
+                i += 1;
+            }
+            "--file" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--file requires a path".to_string())?;
+                opts.file = Some(value.clone());
+                i += 2;
+            }
+            "--reason" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--reason requires a value".to_string())?;
+                opts.reason = Some(value.clone());
+                i += 2;
+            }
+            "--path" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--path requires a directory".to_string())?;
+                opts.path = Some(PathBuf::from(value));
+                i += 2;
+            }
+            _ => {
+                if arg.starts_with('-') {
+                    return Err(format!("Unknown option '{}' for 'suppress' command.", arg));
+                }
+                // Positional: first is type, second is symbol
+                match positional_count {
+                    0 => opts.suppression_type = Some(arg.clone()),
+                    1 => opts.symbol = Some(arg.clone()),
+                    _ => return Err(format!("Unexpected argument '{}'.", arg)),
+                }
+                positional_count += 1;
+                i += 1;
+            }
+        }
+    }
+
+    Ok(Command::Suppress(opts))
 }
 
 fn parse_sniff_command(args: &[String]) -> Result<Command, String> {
@@ -2238,6 +2469,216 @@ EXAMPLES:
     }
 
     Ok(Command::Coverage(opts))
+}
+
+/// Parse `loct focus <dir> [options]` command.
+fn parse_focus_command(args: &[String]) -> Result<Command, String> {
+    if args.is_empty() {
+        return Err("focus requires a target directory. Usage: loct focus <dir>".to_string());
+    }
+
+    // Check for --help first
+    if args.iter().any(|a| a == "--help" || a == "-h")
+        && let Some(help) = Command::format_command_help("focus")
+    {
+        println!("{}", help);
+        std::process::exit(0);
+    }
+
+    let mut opts = FocusOptions::default();
+
+    // First positional argument is the target directory
+    if !args[0].starts_with('-') {
+        opts.target = args[0].clone();
+    } else {
+        return Err("focus requires a target directory as first argument".to_string());
+    }
+
+    let mut i = 1;
+
+    while i < args.len() {
+        let arg = &args[i];
+        match arg.as_str() {
+            "--consumers" | "-c" => {
+                opts.consumers = true;
+                i += 1;
+            }
+            "--depth" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--depth requires a value".to_string())?;
+                opts.depth =
+                    Some(value.parse::<usize>().map_err(|_| {
+                        format!("Invalid depth value '{}', expected a number", value)
+                    })?);
+                i += 2;
+            }
+            "--root" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--root requires a path".to_string())?;
+                opts.root = Some(PathBuf::from(value));
+                i += 2;
+            }
+            _ => {
+                return Err(format!("Unknown option '{}' for 'focus' command.", arg));
+            }
+        }
+    }
+
+    Ok(Command::Focus(opts))
+}
+
+/// Parse `loct hotspots [options]` command.
+fn parse_hotspots_command(args: &[String]) -> Result<Command, String> {
+    // Check for --help first
+    if args.iter().any(|a| a == "--help" || a == "-h")
+        && let Some(help) = Command::format_command_help("hotspots")
+    {
+        println!("{}", help);
+        std::process::exit(0);
+    }
+
+    let mut opts = HotspotsOptions::default();
+    let mut i = 0;
+
+    while i < args.len() {
+        let arg = &args[i];
+        match arg.as_str() {
+            "--min" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--min requires a value".to_string())?;
+                opts.min_imports =
+                    Some(value.parse::<usize>().map_err(|_| {
+                        format!("Invalid min value '{}', expected a number", value)
+                    })?);
+                i += 2;
+            }
+            "--limit" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--limit requires a value".to_string())?;
+                opts.limit =
+                    Some(value.parse::<usize>().map_err(|_| {
+                        format!("Invalid limit value '{}', expected a number", value)
+                    })?);
+                i += 2;
+            }
+            "--leaves" => {
+                opts.leaves_only = true;
+                i += 1;
+            }
+            "--coupling" => {
+                opts.coupling = true;
+                i += 1;
+            }
+            "--root" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--root requires a path".to_string())?;
+                opts.root = Some(PathBuf::from(value));
+                i += 2;
+            }
+            _ => {
+                return Err(format!("Unknown option '{}' for 'hotspots' command.", arg));
+            }
+        }
+    }
+
+    Ok(Command::Hotspots(opts))
+}
+
+fn parse_layoutmap_command(args: &[String]) -> Result<Command, String> {
+    // Check for --help first
+    if args.iter().any(|a| a == "--help" || a == "-h")
+        && let Some(help) = Command::format_command_help("layoutmap")
+    {
+        println!("{}", help);
+        std::process::exit(0);
+    }
+
+    let mut opts = LayoutmapOptions::default();
+    let mut i = 0;
+
+    while i < args.len() {
+        let arg = &args[i];
+        match arg.as_str() {
+            "--zindex" | "--z-index" | "--zindex-only" => {
+                opts.zindex_only = true;
+                i += 1;
+            }
+            "--sticky" | "--sticky-only" => {
+                opts.sticky_only = true;
+                i += 1;
+            }
+            "--grid" | "--grid-only" => {
+                opts.grid_only = true;
+                i += 1;
+            }
+            "--min-zindex" | "--min-z" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--min-zindex requires a value".to_string())?;
+                opts.min_zindex = Some(value.parse::<i32>().map_err(|_| {
+                    format!("Invalid z-index value '{}', expected a number", value)
+                })?);
+                i += 2;
+            }
+            "--root" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--root requires a path".to_string())?;
+                opts.root = Some(PathBuf::from(value));
+                i += 2;
+            }
+            "--exclude" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--exclude requires a glob pattern".to_string())?;
+                opts.exclude.push(value.clone());
+                i += 2;
+            }
+            _ => {
+                return Err(format!("Unknown option '{}' for 'layoutmap' command.", arg));
+            }
+        }
+    }
+
+    Ok(Command::Layoutmap(opts))
+}
+
+fn parse_zombie_command(args: &[String]) -> Result<Command, String> {
+    // Check for --help first
+    if args.iter().any(|a| a == "--help" || a == "-h")
+        && let Some(help) = Command::format_command_help("zombie")
+    {
+        println!("{}", help);
+        std::process::exit(0);
+    }
+
+    let mut opts = ZombieOptions::default();
+    let mut i = 0;
+
+    while i < args.len() {
+        let arg = &args[i];
+        match arg.as_str() {
+            "--include-tests" => {
+                opts.include_tests = true;
+                i += 1;
+            }
+            _ => {
+                // Treat as root path
+                if arg.starts_with("--") {
+                    return Err(format!("Unknown option '{}' for 'zombie' command.", arg));
+                }
+                opts.roots.push(PathBuf::from(arg));
+                i += 1;
+            }
+        }
+    }
+
+    Ok(Command::Zombie(opts))
 }
 
 fn parse_jq_query_command(

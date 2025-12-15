@@ -35,6 +35,7 @@ pub fn handle_scan_watch_command(opts: &ScanOptions, global: &GlobalOptions) -> 
             &mut parsed_args.ignore_patterns,
             &mut parsed_args.tauri_preset,
             &mut library_mode,
+            &mut parsed_args.py_roots,
             parsed_args.verbose,
         );
         parsed_args.library_mode = library_mode;
@@ -147,7 +148,7 @@ pub fn handle_coverage_command(opts: &CoverageOptions, global: &GlobalOptions) -
             }
         }
     } else if gaps.is_empty() {
-        println!("✅ No coverage gaps found - all production code is tested!");
+        println!("[OK] No coverage gaps found - all production code is tested!");
     } else {
         println!("Test Coverage Gaps ({} found):\n", gaps.len());
 
@@ -172,8 +173,8 @@ pub fn handle_coverage_command(opts: &CoverageOptions, global: &GlobalOptions) -
         if !critical.is_empty() {
             println!("CRITICAL - Handlers without tests ({}):", critical.len());
             for gap in critical.iter().take(10) {
-                println!("  ❌ {} ({})", gap.target, gap.location);
-                println!("     {}", gap.recommendation);
+                println!("  [!!] {} ({})", gap.target, gap.location);
+                println!("       {}", gap.recommendation);
             }
             if critical.len() > 10 {
                 println!("  ... and {} more", critical.len() - 10);
@@ -184,8 +185,8 @@ pub fn handle_coverage_command(opts: &CoverageOptions, global: &GlobalOptions) -
         if !high.is_empty() {
             println!("HIGH - Events without tests ({}):", high.len());
             for gap in high.iter().take(10) {
-                println!("  ⚠️  {} ({})", gap.target, gap.location);
-                println!("     {}", gap.recommendation);
+                println!("  [!] {} ({})", gap.target, gap.location);
+                println!("      {}", gap.recommendation);
             }
             if high.len() > 10 {
                 println!("  ... and {} more", high.len() - 10);
@@ -196,7 +197,7 @@ pub fn handle_coverage_command(opts: &CoverageOptions, global: &GlobalOptions) -
         if !medium.is_empty() {
             println!("MEDIUM - Exports without tests ({}):", medium.len());
             for gap in medium.iter().take(5) {
-                println!("  📦 {} ({})", gap.target, gap.location);
+                println!("  [?] {} ({})", gap.target, gap.location);
             }
             if medium.len() > 5 {
                 println!("  ... and {} more", medium.len() - 5);
@@ -207,7 +208,7 @@ pub fn handle_coverage_command(opts: &CoverageOptions, global: &GlobalOptions) -
         if !low.is_empty() {
             println!("LOW - Tested but unused ({}):", low.len());
             for gap in low.iter().take(5) {
-                println!("  🧪 {} ({})", gap.target, gap.location);
+                println!("  [-] {} ({})", gap.target, gap.location);
             }
             if low.len() > 5 {
                 println!("  ... and {} more", low.len() - 5);

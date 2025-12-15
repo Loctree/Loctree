@@ -908,18 +908,25 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
         let line = self.get_line(decl.span);
 
         if let Some(src) = &decl.source {
-            // Re-export: export { foo } from 'bar';
+            // Re-export: export { foo } from 'bar' or export { foo as bar } from 'baz'
             let source = src.value.to_string();
             let resolved = self.resolve_path(&source);
-            let mut names = Vec::new();
+            let mut names: Vec<(String, String)> = Vec::new();
 
             for spec in &decl.specifiers {
-                let name = match &spec.local {
+                // local = name in source module
+                let local_name = match &spec.local {
                     ModuleExportName::IdentifierName(id) => id.name.to_string(),
                     ModuleExportName::IdentifierReference(id) => id.name.to_string(),
                     ModuleExportName::StringLiteral(str) => str.value.to_string(),
                 };
-                names.push(name);
+                // exported = name as exported (may be aliased)
+                let exported_name = match &spec.exported {
+                    ModuleExportName::IdentifierName(id) => id.name.to_string(),
+                    ModuleExportName::IdentifierReference(id) => id.name.to_string(),
+                    ModuleExportName::StringLiteral(str) => str.value.to_string(),
+                };
+                names.push((local_name, exported_name));
             }
 
             self.analysis.reexports.push(ReexportEntry {
@@ -928,10 +935,10 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                 resolved,
             });
 
-            // Also track as exports
-            for name in names {
+            // Also track as exports (use exported name, not local)
+            for (_, exported_name) in &names {
                 self.analysis.exports.push(ExportSymbol::new(
-                    name,
+                    exported_name.clone(),
                     "reexport",
                     "named",
                     Some(line),
@@ -1237,34 +1244,51 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                 && let Some(arg) = call.arguments.first()
             {
                 // Resolve event name from argument (literal or constant)
-                let (event_name, raw_name, kind) = match arg {
-                    Argument::StringLiteral(s) => {
-                        (s.value.to_string(), Some(s.value.to_string()), "literal")
-                    }
+                let (event_name, raw_name, kind, is_dynamic) = match arg {
+                    Argument::StringLiteral(s) => (
+                        s.value.to_string(),
+                        Some(s.value.to_string()),
+                        "literal",
+                        false,
+                    ),
                     Argument::TemplateLiteral(t) => {
                         if t.quasis.len() == 1 && t.expressions.is_empty() {
+                            // Static template literal: `event-name` with no expressions
                             if let Some(q) = t.quasis.first() {
                                 (
                                     q.value.raw.to_string(),
                                     Some(q.value.raw.to_string()),
                                     "literal",
+                                    false,
                                 )
                             } else {
-                                ("?".to_string(), None, "unknown")
+                                ("?".to_string(), None, "unknown", false)
                             }
                         } else {
-                            ("?".to_string(), None, "unknown")
+                            // Dynamic template literal: `event:${id}` with expressions
+                            // Build pattern by replacing ${...} with *
+                            let mut pattern = String::new();
+                            let mut raw_pattern = String::new();
+                            for (i, quasi) in t.quasis.iter().enumerate() {
+                                pattern.push_str(&quasi.value.raw);
+                                raw_pattern.push_str(&quasi.value.raw);
+                                if i < t.expressions.len() {
+                                    pattern.push('*');
+                                    raw_pattern.push_str("${...}");
+                                }
+                            }
+                            (pattern, Some(format!("`{}`", raw_pattern)), "dynamic", true)
                         }
                     }
                     Argument::Identifier(id) => {
                         let id_name = id.name.to_string();
                         if let Some(val) = self.analysis.event_consts.get(&id_name) {
-                            (val.clone(), Some(id_name), "const")
+                            (val.clone(), Some(id_name), "const", false)
                         } else {
-                            (id_name.clone(), Some(id_name), "ident")
+                            (id_name.clone(), Some(id_name), "ident", false)
                         }
                     }
-                    _ => ("?".to_string(), None, "unknown"),
+                    _ => ("?".to_string(), None, "unknown", false),
                 };
 
                 let line = self.get_line(call.span);
@@ -1278,6 +1302,7 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                         kind: format!("emit_{}", kind),
                         awaited: false, // Todo: check await parent
                         payload,
+                        is_dynamic,
                     });
                 } else {
                     // listen
@@ -1289,6 +1314,7 @@ impl<'a> Visit<'a> for JsVisitor<'a> {
                         kind: format!("listen_{}", kind),
                         awaited: false,
                         payload: None,
+                        is_dynamic,
                     });
                 }
             }

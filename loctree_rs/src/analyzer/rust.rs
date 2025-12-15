@@ -10,9 +10,9 @@ use std::sync::OnceLock;
 use super::offset_to_line;
 use super::regexes::{
     regex_custom_command_fn, regex_event_const_rust, regex_event_emit_rust,
-    regex_event_listen_rust, regex_rust_async_main_attr, regex_rust_fn_main, regex_rust_pub_use,
-    regex_rust_use, regex_tauri_command_fn, regex_tauri_generate_handler, rust_pub_const_regexes,
-    rust_pub_decl_regexes,
+    regex_event_listen_rust, regex_rust_async_main_attr, regex_rust_fn_main, regex_rust_mod_decl,
+    regex_rust_pub_use, regex_rust_use, regex_tauri_command_fn, regex_tauri_generate_handler,
+    rust_pub_const_regexes, rust_pub_decl_regexes,
 };
 
 fn split_words_lower(name: &str) -> Vec<String> {
@@ -197,7 +197,9 @@ fn exposed_command_name(attr_raw: &str, fn_name: &str) -> String {
     fn_name.to_string()
 }
 
-fn parse_rust_brace_names(raw: &str) -> Vec<String> {
+/// Parse brace names from Rust use statements, returning (original, exported) pairs.
+/// For `use foo::{Bar, Baz as Qux}` returns [("Bar", "Bar"), ("Baz", "Qux")]
+fn parse_rust_brace_names(raw: &str) -> Vec<(String, String)> {
     raw.split(',')
         .filter_map(|item| {
             let trimmed = item.trim();
@@ -207,15 +209,21 @@ fn parse_rust_brace_names(raw: &str) -> Vec<String> {
             if trimmed == "self" {
                 return None;
             }
-            if let Some((_, alias)) = trimmed.split_once(" as ") {
-                Some(alias.trim().to_string())
+            if let Some((original, alias)) = trimmed.split_once(" as ") {
+                let original_name = original
+                    .trim()
+                    .rsplit("::")
+                    .next()
+                    .unwrap_or(original.trim());
+                Some((original_name.to_string(), alias.trim().to_string()))
             } else {
                 // Extract the last segment for nested paths like `models::Visit`
                 let last_segment = trimmed.rsplit("::").next().unwrap_or(trimmed).trim();
                 if last_segment.is_empty() {
                     None
                 } else {
-                    Some(last_segment.to_string())
+                    // No alias - original and exported are the same
+                    Some((last_segment.to_string(), last_segment.to_string()))
                 }
             }
         })
@@ -382,34 +390,41 @@ fn strip_cfg_test_modules(content: &str) -> String {
                 }
 
                 if keyword == "mod" {
-                    // Skip until we find the opening brace
-                    let mut found_brace = false;
+                    // Skip the module name and look for either `;` (external) or `{` (inline)
+                    // Skip whitespace and module name first
+                    let mut found_end = false;
                     for next in chars.by_ref() {
+                        if next == ';' {
+                            // External module: #[cfg(test)] mod env_tests;
+                            // Just skip to the semicolon
+                            found_end = true;
+                            break;
+                        }
                         if next == '{' {
-                            found_brace = true;
+                            // Inline module: #[cfg(test)] mod tests { ... }
+                            // Skip the entire block (handle nested braces)
+                            let mut depth = 1;
+                            for inner in chars.by_ref() {
+                                match inner {
+                                    '{' => depth += 1,
+                                    '}' => {
+                                        depth -= 1;
+                                        if depth == 0 {
+                                            break;
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            found_end = true;
                             break;
                         }
                     }
 
-                    if found_brace {
-                        // Skip the entire block (handle nested braces)
-                        let mut depth = 1;
-                        for next in chars.by_ref() {
-                            match next {
-                                '{' => depth += 1,
-                                '}' => {
-                                    depth -= 1;
-                                    if depth == 0 {
-                                        break;
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
+                    if found_end {
+                        // Remove 'mod' we just added to result
+                        result.truncate(result.len() - 1); // Remove the 'm'
                     }
-
-                    // Remove 'mod' we just added to result
-                    result.truncate(result.len() - 1); // Remove the 'm'
                     in_cfg_test_attr = false;
                     continue;
                 } else {
@@ -768,10 +783,14 @@ pub(crate) fn analyze_rust_file(
             let prefix = parts.next().unwrap_or("").trim().trim_end_matches("::");
             let braces = parts.next().unwrap_or("").trim_end_matches('}').trim();
             let names = parse_rust_brace_names(braces);
-            for name in names {
+            for (original, exported) in names {
                 imp.symbols.push(crate::types::ImportSymbol {
-                    name,
-                    alias: None,
+                    name: original.clone(),
+                    alias: if original != exported {
+                        Some(exported)
+                    } else {
+                        None
+                    },
                     is_default: false,
                 });
             }
@@ -821,10 +840,10 @@ pub(crate) fn analyze_rust_file(
                 kind: ReexportKind::Named(names.clone()),
                 resolved: None,
             });
-            for name in names {
+            for (_, exported) in names {
                 analysis
                     .exports
-                    .push(ExportSymbol::new(name, "reexport", "named", None));
+                    .push(ExportSymbol::new(exported, "reexport", "named", None));
             }
         } else if raw.ends_with("::*") {
             analysis.reexports.push(ReexportEntry {
@@ -834,18 +853,24 @@ pub(crate) fn analyze_rust_file(
             });
         } else {
             // pub use foo::bar as Baz;
-            let (path_part, export_name) = if let Some((path, alias)) = raw.split_once(" as ") {
-                (path.trim(), alias.trim())
-            } else {
-                let mut segments = raw.rsplitn(2, "::");
-                let name = segments.next().unwrap_or(raw).trim();
-                let _ = segments.next();
-                (raw, name)
-            };
+            let (path_part, original_name, export_name) =
+                if let Some((path, alias)) = raw.split_once(" as ") {
+                    // Extract original name from path (last segment)
+                    let orig = path.trim().rsplit("::").next().unwrap_or(path.trim());
+                    (path.trim(), orig, alias.trim())
+                } else {
+                    let mut segments = raw.rsplitn(2, "::");
+                    let name = segments.next().unwrap_or(raw).trim();
+                    let _ = segments.next();
+                    (raw, name, name) // No alias - same name
+                };
 
             analysis.reexports.push(ReexportEntry {
                 source: path_part.to_string(),
-                kind: ReexportKind::Named(vec![export_name.to_string()]),
+                kind: ReexportKind::Named(vec![(
+                    original_name.to_string(),
+                    export_name.to_string(),
+                )]),
                 resolved: None,
             });
             analysis.exports.push(ExportSymbol::new(
@@ -854,6 +879,41 @@ pub(crate) fn analyze_rust_file(
                 "named",
                 None,
             ));
+        }
+    }
+
+    // Parse `mod foo;` declarations as imports
+    // This creates a dependency edge from the declaring file to the module file
+    for caps in regex_rust_mod_decl().captures_iter(&production_content) {
+        if let Some(mod_name) = caps.get(2) {
+            let mod_name = mod_name.as_str();
+
+            // Check for #[path = "..."] attribute (group 1)
+            let custom_path = caps.get(1).map(|m| m.as_str().to_string());
+
+            // Create import source in format: mod::name or mod::path::name for #[path]
+            let source = if let Some(path) = &custom_path {
+                // #[path = "foo.rs"] mod bar; -> mod::path:foo.rs
+                format!("mod::path:{}", path)
+            } else {
+                // Regular mod foo; -> mod::foo
+                format!("mod::{}", mod_name)
+            };
+
+            let mut imp = ImportEntry::new(source.clone(), ImportKind::Static);
+            imp.raw_path = source;
+            imp.is_crate_relative = false;
+            imp.is_super_relative = false;
+            imp.is_self_relative = false;
+
+            // Add the module name as an imported symbol
+            imp.symbols.push(crate::types::ImportSymbol {
+                name: mod_name.to_string(),
+                alias: None,
+                is_default: false,
+            });
+
+            analysis.imports.push(imp);
         }
     }
 
@@ -942,8 +1002,34 @@ pub(crate) fn analyze_rust_file(
         false
     };
 
-    let resolve_event = |token: &str| -> Option<(String, Option<String>, String)> {
+    let resolve_event = |token: &str| -> Option<(String, Option<String>, String, bool)> {
         let trimmed = token.trim();
+
+        // Detect format! pattern - e.g., format!("event:{}", var) or &format!(...)
+        if trimmed.contains("format!") {
+            // Extract the format string pattern
+            if let Some(start) = trimmed.find("format!(\"") {
+                let after_paren = &trimmed[start + 9..]; // Skip 'format!("'
+                if let Some(end) = after_paren.find('"') {
+                    let pattern = &after_paren[..end];
+                    // Replace {} placeholders with * for pattern matching
+                    let normalized = pattern.replace("{}", "*").replace("{:?}", "*");
+                    return Some((
+                        normalized.clone(),
+                        Some(format!("format!(\"{}\")", pattern)),
+                        "dynamic".to_string(),
+                        true, // is_dynamic
+                    ));
+                }
+            }
+            // Fallback for complex format patterns
+            return Some((
+                "dynamic-event:*".to_string(),
+                Some(trimmed.to_string()),
+                "dynamic".to_string(),
+                true,
+            ));
+        }
 
         // String literals are always valid event names
         if (trimmed.starts_with('"') && trimmed.ends_with('"'))
@@ -953,12 +1039,22 @@ pub(crate) fn analyze_rust_file(
                 .trim_start_matches(['"', '\''])
                 .trim_end_matches(['"', '\''])
                 .to_string();
-            return Some((name, Some(trimmed.to_string()), "literal".to_string()));
+            return Some((
+                name,
+                Some(trimmed.to_string()),
+                "literal".to_string(),
+                false,
+            ));
         }
 
         // Check if it's a known const
         if let Some(val) = analysis.event_consts.get(trimmed) {
-            return Some((val.clone(), Some(trimmed.to_string()), "const".to_string()));
+            return Some((
+                val.clone(),
+                Some(trimmed.to_string()),
+                "const".to_string(),
+                false,
+            ));
         }
 
         // For identifiers, apply filtering
@@ -970,13 +1066,15 @@ pub(crate) fn analyze_rust_file(
             trimmed.to_string(),
             Some(trimmed.to_string()),
             "ident".to_string(),
+            false,
         ))
     };
 
     for caps in regex_event_emit_rust().captures_iter(content) {
         if let Some(target) = caps.name("target") {
             // Skip if resolve_event filters out this identifier
-            if let Some((name, raw_name, source_kind)) = resolve_event(target.as_str()) {
+            if let Some((name, raw_name, source_kind, is_dynamic)) = resolve_event(target.as_str())
+            {
                 let payload = caps
                     .name("payload")
                     .map(|p| p.as_str().trim().trim_end_matches(')').trim().to_string())
@@ -989,6 +1087,7 @@ pub(crate) fn analyze_rust_file(
                     kind: format!("emit_{}", source_kind),
                     awaited: false,
                     payload,
+                    is_dynamic,
                 });
             }
         }
@@ -996,7 +1095,8 @@ pub(crate) fn analyze_rust_file(
     for caps in regex_event_listen_rust().captures_iter(content) {
         if let Some(target) = caps.name("target") {
             // Skip if resolve_event filters out this identifier
-            if let Some((name, raw_name, source_kind)) = resolve_event(target.as_str()) {
+            if let Some((name, raw_name, source_kind, is_dynamic)) = resolve_event(target.as_str())
+            {
                 let line = offset_to_line(content, caps.get(0).map(|m| m.start()).unwrap_or(0));
                 event_listens.push(EventRef {
                     raw_name,
@@ -1005,6 +1105,7 @@ pub(crate) fn analyze_rust_file(
                     kind: format!("listen_{}", source_kind),
                     awaited: false,
                     payload: None,
+                    is_dynamic,
                 });
             }
         }
@@ -1087,8 +1188,7 @@ pub(crate) fn analyze_rust_file(
                 // Use .last() to get the function name from paths like commands::foo::bar
                 let base = ident
                     .split(|c: char| c == ':' || c.is_whitespace() || c == '<')
-                    .filter(|s| !s.is_empty())
-                    .next_back()
+                    .rfind(|s| !s.is_empty())
                     .unwrap_or("")
                     .trim();
                 if base.is_empty() {
@@ -1863,7 +1963,68 @@ fn extract_struct_field_types(content: &str, local_uses: &mut Vec<String>) {
 
 #[cfg(test)]
 mod tests {
-    use super::analyze_rust_file;
+    use super::{analyze_rust_file, strip_cfg_test_modules};
+
+    #[test]
+    fn strip_cfg_test_handles_external_test_modules() {
+        // Bug fix: #[cfg(test)] mod env_tests; (external module with semicolon)
+        // should not consume following mod declarations
+        let content = r#"
+pub mod health;
+#[cfg(test)]
+mod env_tests;
+pub mod runtime;
+pub(crate) mod schema;
+"#;
+        let stripped = strip_cfg_test_modules(content);
+
+        // Should preserve non-test modules
+        assert!(
+            stripped.contains("pub mod health;"),
+            "Should preserve pub mod health; got: {}",
+            stripped
+        );
+        assert!(
+            stripped.contains("pub mod runtime;"),
+            "Should preserve pub mod runtime; got: {}",
+            stripped
+        );
+        assert!(
+            stripped.contains("pub(crate) mod schema;"),
+            "Should preserve pub(crate) mod schema; got: {}",
+            stripped
+        );
+
+        // Should strip the test module
+        assert!(
+            !stripped.contains("mod env_tests;"),
+            "Should strip mod env_tests; got: {}",
+            stripped
+        );
+    }
+
+    #[test]
+    fn strip_cfg_test_handles_inline_test_modules() {
+        let content = r#"
+pub mod api;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn it_works() {}
+}
+pub mod handlers;
+"#;
+        let stripped = strip_cfg_test_modules(content);
+
+        // Should preserve non-test modules
+        assert!(stripped.contains("pub mod api;"));
+        assert!(stripped.contains("pub mod handlers;"));
+
+        // Should strip inline test module
+        assert!(!stripped.contains("mod tests"));
+        assert!(!stripped.contains("fn it_works"));
+    }
 
     #[test]
     fn parses_generate_handler_multiline() {

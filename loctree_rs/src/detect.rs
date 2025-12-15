@@ -23,6 +23,8 @@ pub struct DetectedStack {
     pub description: String,
     /// Whether this appears to be a library/framework project (not an app)
     pub is_library: bool,
+    /// Additional Python import roots (e.g., "Lib" for CPython)
+    pub py_roots: Vec<std::path::PathBuf>,
 }
 
 impl DetectedStack {
@@ -30,6 +32,65 @@ impl DetectedStack {
     pub fn is_empty(&self) -> bool {
         self.extensions.is_empty() && self.preset_name.is_none()
     }
+}
+
+/// Detect additional Python package roots beyond the standard locations.
+///
+/// Heuristics:
+/// 1. CPython/PyPy layout: `Lib/` directory alongside `Python/`, `Modules/`
+/// 2. Directories with `__init__.py` that aren't standard names (src, tests, etc.)
+/// 3. Hints from pyproject.toml `[tool.setuptools.packages]` or similar
+fn detect_python_roots(root: &Path) -> Vec<std::path::PathBuf> {
+    let mut roots = Vec::new();
+
+    // CPython/PyPy detection: Lib/ alongside Python/ or Modules/
+    let lib_dir = root.join("Lib");
+    if lib_dir.is_dir() {
+        let has_python_dir = root.join("Python").is_dir();
+        let has_modules_dir = root.join("Modules").is_dir();
+        let has_include_dir = root.join("Include").is_dir();
+
+        // CPython has Lib + (Python or Modules or Include)
+        if has_python_dir || has_modules_dir || has_include_dir {
+            roots.push(std::path::PathBuf::from("Lib"));
+        }
+    }
+
+    // Check pyproject.toml for explicit package locations
+    let pyproject_path = root.join("pyproject.toml");
+    if pyproject_path.exists()
+        && let Ok(content) = std::fs::read_to_string(&pyproject_path)
+    {
+        // Look for [tool.setuptools.packages] or package-dir patterns
+        // Simple heuristic: find lines like `packages = ["something"]`
+        for line in content.lines() {
+            let trimmed = line.trim();
+            // Match patterns like: packages = ["Lib"] or package-dir = {src = "Lib"}
+            if (trimmed.starts_with("packages") || trimmed.starts_with("package-dir"))
+                && trimmed.contains('=')
+            {
+                // Extract directory names from the value
+                if let Some(value_part) = trimmed.split('=').nth(1) {
+                    for segment in value_part.split(['"', '\'', ',', '[', ']', '{', '}']) {
+                        let dir_name = segment.trim();
+                        if !dir_name.is_empty()
+                            && !dir_name.contains('=')
+                            && !dir_name.contains(':')
+                            && dir_name != "src"
+                            && dir_name != "."
+                        {
+                            let dir_path = root.join(dir_name);
+                            if dir_path.is_dir() && !roots.contains(&dir_name.into()) {
+                                roots.push(std::path::PathBuf::from(dir_name));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    roots
 }
 
 /// Detect project stack from root directory
@@ -247,6 +308,9 @@ pub fn detect_stack(root: &Path) -> DetectedStack {
         // uv specific
         result.ignores.push(".uv".to_string());
         detected_parts.push("Python");
+
+        // Auto-detect additional Python package roots
+        result.py_roots = detect_python_roots(root);
     }
 
     // Check for CSS files in common locations
@@ -379,6 +443,7 @@ pub fn apply_detected_stack(
     ignore_patterns: &mut Vec<String>,
     tauri_preset: &mut bool,
     library_mode: &mut bool,
+    py_roots: &mut Vec<std::path::PathBuf>,
     verbose: bool,
 ) {
     // Skip if user already specified extensions
@@ -424,6 +489,18 @@ pub fn apply_detected_stack(
         if verbose {
             eprintln!(
                 "[loctree][detect] Detected library/framework project - enabling library mode"
+            );
+        }
+    }
+
+    // Apply detected Python roots if user didn't specify any
+    if py_roots.is_empty() && !detected.py_roots.is_empty() {
+        *py_roots = detected.py_roots;
+        if verbose {
+            let roots_str: Vec<_> = py_roots.iter().map(|p| p.display().to_string()).collect();
+            eprintln!(
+                "[loctree][detect] Auto-detected Python roots: {}",
+                roots_str.join(", ")
             );
         }
     }
@@ -561,6 +638,7 @@ mod tests {
             &mut ignores,
             &mut tauri,
             &mut library_mode,
+            &mut Vec::new(),
             false,
         );
 
@@ -585,6 +663,7 @@ mod tests {
             &mut ignores,
             &mut tauri,
             &mut library_mode,
+            &mut Vec::new(),
             false,
         );
 
@@ -609,6 +688,7 @@ mod tests {
             &mut ignores,
             &mut tauri,
             &mut library_mode,
+            &mut Vec::new(),
             false,
         );
 
@@ -633,6 +713,7 @@ mod tests {
             &mut ignores,
             &mut tauri,
             &mut library_mode,
+            &mut Vec::new(),
             false,
         );
 
@@ -657,6 +738,7 @@ mod tests {
             &mut ignores,
             &mut tauri,
             &mut library_mode,
+            &mut Vec::new(),
             true,
         );
     }
@@ -817,12 +899,54 @@ mod tests {
             &mut ignores,
             &mut tauri,
             &mut library_mode,
+            &mut Vec::new(),
             false,
         );
 
         assert!(
             library_mode,
             "Library mode should be auto-enabled for library projects"
+        );
+    }
+
+    #[test]
+    fn test_detect_cpython_py_roots() {
+        // CPython layout: Lib/ alongside Python/ and Modules/
+        let tmp = TempDir::new().expect("create temp dir");
+        std::fs::write(
+            tmp.path().join("pyproject.toml"),
+            "[project]\nname = \"cpython\"",
+        )
+        .expect("write pyproject.toml");
+        std::fs::create_dir(tmp.path().join("Lib")).expect("mkdir Lib");
+        std::fs::create_dir(tmp.path().join("Python")).expect("mkdir Python");
+        std::fs::create_dir(tmp.path().join("Modules")).expect("mkdir Modules");
+
+        let detected = detect_stack(tmp.path());
+
+        assert!(detected.extensions.contains("py"));
+        assert_eq!(detected.py_roots.len(), 1);
+        assert_eq!(detected.py_roots[0], std::path::PathBuf::from("Lib"));
+    }
+
+    #[test]
+    fn test_detect_no_py_roots_for_standard_layout() {
+        // Standard Python project without special py_roots
+        let tmp = TempDir::new().expect("create temp dir");
+        std::fs::write(
+            tmp.path().join("pyproject.toml"),
+            "[project]\nname = \"myapp\"",
+        )
+        .expect("write pyproject.toml");
+        std::fs::create_dir(tmp.path().join("src")).expect("mkdir src");
+        std::fs::create_dir(tmp.path().join("tests")).expect("mkdir tests");
+
+        let detected = detect_stack(tmp.path());
+
+        assert!(detected.extensions.contains("py"));
+        assert!(
+            detected.py_roots.is_empty(),
+            "Standard layout should not add py_roots"
         );
     }
 }

@@ -592,15 +592,15 @@ pub fn handle_problems_only_diff(
         println!();
 
         if total_problems == 0 {
-            println!("✓ No new problems detected!");
+            println!("[OK] No new problems detected!");
         } else {
             if !new_dead_exports.is_empty() {
                 println!("New Dead Exports ({}):", new_dead_exports.len());
                 for export in &new_dead_exports {
                     let confidence_indicator = match export.confidence.as_str() {
-                        "high" => "🔴",
-                        "medium" => "🟡",
-                        _ => "⚪",
+                        "high" => "[!!]",
+                        "medium" => "[!]",
+                        _ => "[-]",
                     };
                     let line_info = export.line.map(|l| format!(":{}", l)).unwrap_or_default();
                     println!(
@@ -621,7 +621,7 @@ pub fn handle_problems_only_diff(
                     println!("  Cycle of {} files:", cycle.len());
                     for (i, file) in cycle.iter().enumerate() {
                         if i == cycle.len() - 1 {
-                            println!("    {} → (back to {})", file, cycle[0]);
+                            println!("    {} -> (back to {})", file, cycle[0]);
                         } else {
                             println!("    {}", file);
                         }

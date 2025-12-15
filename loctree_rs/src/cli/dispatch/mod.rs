@@ -30,6 +30,7 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
     };
     parsed.library_mode = global.library_mode;
     parsed.python_library = global.python_library;
+    parsed.py_roots = global.py_roots.clone();
 
     // Convert command-specific options
     match cmd {
@@ -101,6 +102,7 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
             parsed.mode = Mode::Slice;
             parsed.slice_target = Some(opts.target.clone());
             parsed.slice_consumers = opts.consumers;
+            parsed.slice_rescan = opts.rescan;
             parsed.root_list = if let Some(ref root) = opts.root {
                 vec![root.clone()]
             } else {
@@ -272,6 +274,11 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
             // as it doesn't go through ParsedArgs
         }
 
+        Command::Tagmap(_) => {
+            // Tagmap is handled specially in dispatch_command
+            // as it doesn't go through ParsedArgs
+        }
+
         Command::Twins(_) => {
             // Twins is handled specially in dispatch_command
             // as it doesn't go through ParsedArgs
@@ -279,6 +286,11 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
 
         Command::Sniff(_) => {
             // Sniff is handled specially in dispatch_command
+            // as it doesn't go through ParsedArgs
+        }
+
+        Command::Suppress(_) => {
+            // Suppress is handled specially in dispatch_command
             // as it doesn't go through ParsedArgs
         }
 
@@ -297,6 +309,26 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
         Command::JqQuery(_) => {
             // JqQuery is handled specially in dispatch_command
             // It doesn't use ParsedArgs, will be handled by jaq executor
+        }
+
+        Command::Focus(_) => {
+            // Focus is handled specially in dispatch_command
+            // as it doesn't go through ParsedArgs
+        }
+
+        Command::Hotspots(_) => {
+            // Hotspots is handled specially in dispatch_command
+            // as it doesn't go through ParsedArgs
+        }
+
+        Command::Layoutmap(_) => {
+            // Layoutmap is handled specially in dispatch_command
+            // as it doesn't go through ParsedArgs
+        }
+
+        Command::Zombie(_) => {
+            // Zombie is handled specially in dispatch_command
+            // as it doesn't go through ParsedArgs
         }
     }
 
@@ -370,11 +402,17 @@ pub fn dispatch_command(parsed_cmd: &ParsedCommand) -> DispatchResult {
         Command::Crowd(opts) => {
             return handlers::ai::handle_crowd_command(opts, &parsed_cmd.global);
         }
+        Command::Tagmap(opts) => {
+            return handlers::ai::handle_tagmap_command(opts, &parsed_cmd.global);
+        }
         Command::Twins(opts) => {
             return handlers::ai::handle_twins_command(opts, &parsed_cmd.global);
         }
         Command::Sniff(opts) => {
             return handlers::ai::handle_sniff_command(opts, &parsed_cmd.global);
+        }
+        Command::Suppress(opts) => {
+            return handlers::ai::handle_suppress_command(opts, &parsed_cmd.global);
         }
         Command::Dead(opts) => {
             return handlers::analysis::handle_dead_command(opts, &parsed_cmd.global);
@@ -402,6 +440,18 @@ pub fn dispatch_command(parsed_cmd: &ParsedCommand) -> DispatchResult {
         }
         Command::JqQuery(opts) => {
             return handlers::query::handle_jq_query_command(opts, &parsed_cmd.global);
+        }
+        Command::Focus(opts) => {
+            return handlers::analysis::handle_focus_command(opts, &parsed_cmd.global);
+        }
+        Command::Hotspots(opts) => {
+            return handlers::analysis::handle_hotspots_command(opts, &parsed_cmd.global);
+        }
+        Command::Layoutmap(opts) => {
+            return handlers::analysis::handle_layoutmap_command(opts, &parsed_cmd.global);
+        }
+        Command::Zombie(opts) => {
+            return handlers::analysis::handle_zombie_command(opts, &parsed_cmd.global);
         }
         Command::Scan(opts) if opts.watch => {
             return handlers::watch::handle_scan_watch_command(opts, &parsed_cmd.global);
@@ -521,6 +571,7 @@ mod tests {
             path_filter: None,
             with_tests: false,
             with_helpers: false,
+            with_shadows: false,
         });
         let global = GlobalOptions {
             json: true,
@@ -567,6 +618,7 @@ mod tests {
             root: None,
             consumers: true,
             depth: None,
+            rescan: false,
         });
         let global = GlobalOptions {
             json: true,

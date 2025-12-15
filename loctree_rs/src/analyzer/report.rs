@@ -6,15 +6,15 @@ use super::dead_parrots::DeadExport;
 
 /// Confidence level for dead export and handler detection.
 ///
-/// CERTAIN (🔴) - Will definitely break/is definitely unused
+/// CERTAIN - Will definitely break/is definitely unused
 ///   - Unregistered handlers (has #[tauri::command] but NOT in invoke_handler![])
 ///   - Missing handlers (FE calls invoke() but no handler exists)
 ///
-/// HIGH (🟡) - Very likely unused, worth fixing
+/// HIGH - Very likely unused, worth fixing
 ///   - Export with 0 imports across all scanned files
 ///   - Handler registered but 0 invoke() calls found
 ///
-/// SMELL (🟢) - Worth checking, might be intentional
+/// SMELL - Worth checking, might be intentional
 ///   - Twins (same name in multiple files)
 ///   - Low import count relative to codebase size
 ///   - String literal matches found (may be used dynamically)
@@ -29,12 +29,12 @@ pub enum Confidence {
 }
 
 impl Confidence {
-    /// Get emoji indicator for this confidence level
-    pub fn emoji(&self) -> &'static str {
+    /// Get indicator for this confidence level
+    pub fn indicator(&self) -> &'static str {
         match self {
-            Confidence::Certain => "🔴",
-            Confidence::High => "🟡",
-            Confidence::Smell => "🟢",
+            Confidence::Certain => "[!!]",
+            Confidence::High => "[!]",
+            Confidence::Smell => "[?]",
         }
     }
 }
@@ -289,10 +289,10 @@ mod tests {
     }
 
     #[test]
-    fn confidence_emoji() {
-        assert_eq!(Confidence::Certain.emoji(), "🔴");
-        assert_eq!(Confidence::High.emoji(), "🟡");
-        assert_eq!(Confidence::Smell.emoji(), "🟢");
+    fn confidence_indicator() {
+        assert_eq!(Confidence::Certain.indicator(), "[!!]");
+        assert_eq!(Confidence::High.indicator(), "[!]");
+        assert_eq!(Confidence::Smell.indicator(), "[?]");
     }
 
     #[test]

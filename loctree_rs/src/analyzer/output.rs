@@ -713,10 +713,11 @@ pub fn process_root_context(
     // Run twins analysis (dead parrots, exact twins, barrel chaos)
     let twins_data = if !parsed.skip_dead_symbols {
         // Find dead parrots (0 imports)
-        let twins_result = find_dead_parrots(&analyses, true);
+        // Note: include_tests=false for production reports
+        let twins_result = find_dead_parrots(&analyses, true, false);
 
         // Detect exact twins (same symbol exported from multiple files)
-        let exact_twins = detect_exact_twins(&analyses);
+        let exact_twins = detect_exact_twins(&analyses, false);
 
         // Analyze barrel chaos (missing barrels, deep chains, inconsistent paths)
         // Build snapshot from analyses for barrel analysis

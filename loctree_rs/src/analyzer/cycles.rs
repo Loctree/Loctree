@@ -46,8 +46,8 @@ impl CycleClassification {
     }
     pub fn severity_icon(&self) -> &'static str {
         match self.severity() {
-            3 | 2 => "⚠️ ",
-            _ => "ℹ️ ",
+            3 | 2 => "[!] ",
+            _ => "[i] ",
         }
     }
     pub fn description(&self) -> &'static str {

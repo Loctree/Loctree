@@ -875,7 +875,10 @@ pub(crate) fn analyze_py_file(
                             None,
                         ));
                     }
-                    entry.kind = ReexportKind::Named(names);
+                    // Star imports have no aliases - original and exported are the same
+                    let name_pairs: Vec<(String, String)> =
+                        names.into_iter().map(|n| (n.clone(), n)).collect();
+                    entry.kind = ReexportKind::Named(name_pairs);
                 }
                 analysis.reexports.push(entry);
             }
@@ -1660,8 +1663,10 @@ import sys
         match &reexports.kind {
             ReexportKind::Named(names) => {
                 assert_eq!(names.len(), 2);
-                assert!(names.contains(&"Foo".to_string()));
-                assert!(names.contains(&"Bar".to_string()));
+                // names is Vec<(original, exported)> - for star imports they're the same
+                let exported_names: Vec<_> = names.iter().map(|(_, e)| e.as_str()).collect();
+                assert!(exported_names.contains(&"Foo"));
+                assert!(exported_names.contains(&"Bar"));
             }
             other => panic!("expected named reexport, got {:?}", other),
         }

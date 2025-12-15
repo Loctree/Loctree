@@ -14,11 +14,42 @@ fn normalize_event(name: &str) -> String {
         .map(|c| {
             if c.is_alphanumeric() {
                 c.to_ascii_lowercase()
+            } else if c == '*' {
+                // Keep wildcards for dynamic pattern matching
+                '*'
             } else {
                 '_'
             }
         })
         .collect::<String>()
+}
+
+/// Check if two event patterns match, considering wildcards (*) for dynamic patterns.
+/// Examples:
+///   - "event" matches "event" (exact)
+///   - "event_*" matches "event_123" (pattern)
+///   - "event_*" matches "event_*" (same pattern)
+fn events_match(pattern1: &str, pattern2: &str) -> bool {
+    // Exact match
+    if pattern1 == pattern2 {
+        return true;
+    }
+
+    // Check if either is a dynamic pattern (contains *)
+    if !pattern1.contains('*') && !pattern2.contains('*') {
+        return false;
+    }
+
+    // Convert patterns to regex-like matching
+    let p1_parts: Vec<&str> = pattern1.split('*').collect();
+    let p2_parts: Vec<&str> = pattern2.split('*').collect();
+
+    // If both have same structure and non-wildcard parts match, they match
+    if p1_parts.len() == p2_parts.len() {
+        return p1_parts.iter().zip(p2_parts.iter()).all(|(a, b)| a == b);
+    }
+
+    false
 }
 
 /// Optional event aliasing via env `LOCT_EVENT_ALIASES` (comma or semicolon separated `old=new`).
@@ -133,6 +164,43 @@ pub fn build_pipeline_summary(
         }
     }
 
+    // Post-process: match dynamic patterns with each other
+    // If we have "event:*" emits and "event:*" listens, they should match
+    let event_keys: Vec<String> = events.keys().cloned().collect();
+    let mut matched_patterns: HashMap<String, String> = HashMap::new(); // pattern -> canonical
+
+    for i in 0..event_keys.len() {
+        for j in (i + 1)..event_keys.len() {
+            let key1 = &event_keys[i];
+            let key2 = &event_keys[j];
+
+            if events_match(key1, key2) {
+                // Merge these two event patterns
+                let canonical = if key1.contains('*') && !key2.contains('*') {
+                    key2.clone()
+                } else if !key1.contains('*') && key2.contains('*') {
+                    key1.clone()
+                } else {
+                    // Both are patterns or both are static, use the first one
+                    key1.clone()
+                };
+
+                matched_patterns.insert(key1.clone(), canonical.clone());
+                matched_patterns.insert(key2.clone(), canonical);
+            }
+        }
+    }
+
+    // Merge matched event records
+    let mut merged_events: HashMap<String, EventRecord> = HashMap::new();
+    for (key, mut rec) in events {
+        let canonical = matched_patterns.get(&key).unwrap_or(&key).clone();
+        let entry = merged_events.entry(canonical).or_default();
+        entry.raw_names.extend(rec.raw_names);
+        entry.emitters.append(&mut rec.emitters);
+        entry.listeners.append(&mut rec.listeners);
+    }
+
     let mut event_items = Vec::new();
     let mut ghost_emits = Vec::new();
     let mut orphan_listeners = Vec::new();
@@ -162,7 +230,7 @@ pub fn build_pipeline_summary(
             .extend(entries.clone());
     }
 
-    for (norm, rec) in &events {
+    for (norm, rec) in &merged_events {
         let mut emitters = rec.emitters.clone();
         emitters.sort_by(|a, b| a.path.cmp(&b.path).then(a.line.cmp(&b.line)));
         let mut listeners = rec.listeners.clone();
@@ -449,11 +517,11 @@ pub fn build_pipeline_summary(
     });
 
     let stats = json!({
-        "emitters": events.values().map(|r| r.emitters.len()).sum::<usize>(),
-        "listeners": events.values().map(|r| r.listeners.len()).sum::<usize>(),
-        "distinctEmitted": events.values().filter(|r| !r.emitters.is_empty()).count(),
-        "distinctListened": events.values().filter(|r| !r.listeners.is_empty()).count(),
-        "matched": events.values().filter(|r| !r.emitters.is_empty() && !r.listeners.is_empty()).count(),
+        "emitters": merged_events.values().map(|r| r.emitters.len()).sum::<usize>(),
+        "listeners": merged_events.values().map(|r| r.listeners.len()).sum::<usize>(),
+        "distinctEmitted": merged_events.values().filter(|r| !r.emitters.is_empty()).count(),
+        "distinctListened": merged_events.values().filter(|r| !r.listeners.is_empty()).count(),
+        "matched": merged_events.values().filter(|r| !r.emitters.is_empty() && !r.listeners.is_empty()).count(),
         "ghostCount": ghost_emits.len(),
         "orphanCount": orphan_listeners.len(),
     });
@@ -490,6 +558,7 @@ mod tests {
             kind: kind.to_string(),
             awaited,
             payload: None,
+            is_dynamic: false,
         }
     }
 
@@ -675,6 +744,7 @@ mod tests {
             kind: "emit_template".to_string(),
             awaited: false,
             payload: None,
+            is_dynamic: false,
         });
 
         let analyses = vec![be];
@@ -702,6 +772,84 @@ mod tests {
     }
 
     #[test]
+    fn dynamic_event_pattern_matching() {
+        // Test that dynamic patterns match each other
+        // Rust: format!("ai-stream-token:{}", req_id)
+        // TypeScript: `ai-stream-token:${requestId}`
+        let mut be = FileAnalysis::new("src/backend.rs".into());
+        be.event_emits.push(EventRef {
+            raw_name: Some("format!(\"ai-stream-token:{}\")".to_string()),
+            name: "ai-stream-token:*".to_string(), // normalized pattern with *
+            line: 10,
+            kind: "emit_dynamic".to_string(),
+            awaited: false,
+            payload: None,
+            is_dynamic: true,
+        });
+
+        let mut fe = FileAnalysis::new("src/frontend.ts".into());
+        fe.event_listens.push(EventRef {
+            raw_name: Some("`ai-stream-token:${...}`".to_string()),
+            name: "ai-stream-token:*".to_string(), // normalized pattern with *
+            line: 20,
+            kind: "listen_dynamic".to_string(),
+            awaited: false,
+            payload: None,
+            is_dynamic: true,
+        });
+
+        let analyses = vec![be, fe];
+        let fe_commands: HashMap<String, Vec<(String, usize, String)>> = HashMap::new();
+        let be_commands: HashMap<String, Vec<(String, usize, String)>> = HashMap::new();
+        let fe_payloads: HashMap<String, Vec<(String, usize, Option<String>)>> = HashMap::new();
+        let be_payloads: HashMap<String, Vec<(String, usize, Option<String>)>> = HashMap::new();
+
+        let summary = build_pipeline_summary(
+            &analyses,
+            &None,
+            &None,
+            &fe_commands,
+            &be_commands,
+            &fe_payloads,
+            &be_payloads,
+        );
+
+        let events = summary["events"].as_object().expect("events section");
+        let items = events["items"].as_array().expect("items array");
+
+        // Should have exactly one merged event (dynamic patterns matched)
+        assert_eq!(
+            items.len(),
+            1,
+            "Dynamic patterns should be merged into one event"
+        );
+
+        let event = &items[0];
+        assert_eq!(
+            event["status"], "ok",
+            "Dynamic pattern event should be matched (ok status)"
+        );
+        assert_eq!(event["emitCount"], 1);
+        assert_eq!(event["listenCount"], 1);
+
+        // Should not have orphan listeners or ghost emits
+        let orphans = events["orphanListeners"]
+            .as_array()
+            .expect("orphanListeners");
+        let ghosts = events["ghostEmits"].as_array().expect("ghostEmits");
+        assert_eq!(
+            orphans.len(),
+            0,
+            "Dynamic patterns should not create orphan listeners"
+        );
+        assert_eq!(
+            ghosts.len(),
+            0,
+            "Dynamic patterns should not create ghost emits"
+        );
+    }
+
+    #[test]
     fn ghost_emit_identifier_low_confidence() {
         // Ghost emit with identifier (not literal) should have low confidence
         let mut be = FileAnalysis::new("src/backend.rs".into());
@@ -712,6 +860,7 @@ mod tests {
             kind: "emit_ident".to_string(),
             awaited: false,
             payload: None,
+            is_dynamic: false,
         });
 
         let analyses = vec![be];

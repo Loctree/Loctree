@@ -48,7 +48,13 @@ pub fn format_crowd(crowd: &Crowd, _verbose: bool) -> String {
         "(LOW - probably fine)"
     };
 
-    lines.push(format!("CROWD: \"{}\"", crowd.pattern));
+    // Show context type if detected
+    let context_label = crowd
+        .context_type
+        .map(|ct| format!(" [{}]", ct))
+        .unwrap_or_default();
+
+    lines.push(format!("CROWD: \"{}\"{}", crowd.pattern, context_label));
     lines.push(format!(
         "Crowd Score: {:.1}/10 {}",
         crowd.score, score_label
