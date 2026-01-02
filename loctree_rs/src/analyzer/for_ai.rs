@@ -10,8 +10,10 @@
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 
-use super::report::{Confidence, ReportSection};
+use super::health_score::{HealthMetrics, calculate_health_score};
+use super::report::{Confidence, DupSeverity, RankedDup, ReportSection};
 use super::root_scan::normalize_module_id;
+use super::twins::{TwinCategory, categorize_twin};
 use crate::types::{FileAnalysis, SignatureUse, SignatureUseKind};
 
 /// Top-level AI summary - the entry point for agents
@@ -27,8 +29,12 @@ pub struct ForAiReport {
     pub sections: Vec<ForAiSectionRef>,
     /// Immediate actionable items
     pub quick_wins: Vec<QuickWin>,
+    /// Top actionable tasks with explicit verification commands
+    pub priority_tasks: Vec<PriorityTask>,
     /// Files with most connections (good context anchors)
     pub hub_files: Vec<HubFile>,
+    /// Agent-ready bundle with condensed lists (handlers, dupes, dead, dynamic, cycles)
+    pub bundle: AgentBundle,
 }
 
 /// Summary with counts and priority guidance
@@ -37,16 +43,30 @@ pub struct ForAiSummary {
     pub files_analyzed: usize,
     pub total_loc: usize,
     pub dead_exports: usize,
+    pub duplicate_exports: usize,
+    pub circular_imports: usize,
     pub missing_handlers: usize,
     pub unregistered_handlers: usize,
     pub unused_handlers: usize,
     pub unused_high_confidence: usize,
     pub cascade_imports: usize,
     pub dynamic_imports: usize,
+    /// Dead parrots from twins analysis (exports with 0 imports)
+    pub twins_dead_parrots: usize,
+    /// Same-language exact twins (likely real duplicates needing consolidation)
+    pub twins_same_language: usize,
+    /// Cross-language twins (FE/BE pairs, usually intentional)
+    pub twins_cross_language: usize,
     /// Priority message for the AI
     pub priority: String,
-    /// Health score 0-100
+    /// Health score 0-100 (vector-based with log-normalization)
     pub health_score: u8,
+    /// Breakdown by severity: certain (50%), high (30%), smell (20%)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub health_details: Option<super::health_score::HealthDetails>,
+    /// Normalized issue density (log-adjusted for project size)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub normalized_density: Option<f64>,
 }
 
 /// Reference to a section with command to get details
@@ -84,6 +104,20 @@ pub struct QuickWin {
     pub open_url: Option<String>,
 }
 
+/// High-priority task for a first-shot plan (action + verify)
+#[derive(Serialize, Clone)]
+pub struct PriorityTask {
+    pub priority: u8,
+    pub kind: String,
+    pub target: String,
+    pub location: String,
+    pub why: String,
+    /// Risk severity of leaving it unfixed: high|medium|low
+    pub risk: String,
+    pub fix_hint: String,
+    pub verify_cmd: String,
+}
+
 /// High-connectivity file that makes good context anchor
 #[derive(Serialize)]
 pub struct HubFile {
@@ -95,6 +129,87 @@ pub struct HubFile {
     pub commands_count: usize,
     /// Command to get full context
     pub slice_cmd: String,
+}
+
+/// Condensed agent bundle - one JSON instead of multiple artifacts.
+#[derive(Serialize)]
+pub struct AgentBundle {
+    pub handlers: AgentHandlerGroups,
+    pub duplicates: Vec<AgentDuplicate>,
+    pub dead_exports: Vec<AgentDeadExport>,
+    pub dynamic_imports: Vec<AgentDynamicImport>,
+    pub largest_files: Vec<AgentFile>,
+    pub cycles: Vec<AgentCycle>,
+}
+
+#[derive(Serialize, Default)]
+pub struct AgentHandlerGroups {
+    pub missing: Vec<AgentHandler>,
+    pub unused: Vec<AgentHandler>,
+    pub unregistered: Vec<AgentHandler>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct AgentHandler {
+    pub name: String,
+    pub status: String,
+    pub frontend: Vec<AgentLocation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backend: Option<AgentBackend>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct AgentBackend {
+    pub path: String,
+    pub line: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub symbol: Option<String>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct AgentLocation {
+    pub path: String,
+    pub line: usize,
+}
+
+#[derive(Serialize)]
+pub struct AgentDuplicate {
+    pub name: String,
+    pub canonical: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub canonical_line: Option<usize>,
+    pub score: usize,
+    pub severity: String,
+    pub files: usize,
+}
+
+#[derive(Serialize)]
+pub struct AgentDeadExport {
+    pub symbol: String,
+    pub file: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<usize>,
+    pub confidence: String,
+    pub reason: String,
+}
+
+#[derive(Serialize)]
+pub struct AgentDynamicImport {
+    pub file: String,
+    pub resolved: Vec<String>,
+    pub unresolved: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct AgentFile {
+    pub path: String,
+    pub loc: usize,
+}
+
+#[derive(Serialize)]
+pub struct AgentCycle {
+    pub kind: String,
+    pub members: Vec<String>,
 }
 
 /// Generate AI report from analysis results
@@ -111,7 +226,9 @@ pub fn generate_for_ai_report(
     let summary = compute_summary(sections, analyses);
     let section_refs = build_section_refs(sections);
     let quick_wins = extract_quick_wins(sections, analyses);
+    let priority_tasks = build_priority_tasks(&quick_wins);
     let hub_files = find_hub_files(analyses);
+    let bundle = build_agent_bundle(sections, analyses);
 
     ForAiReport {
         project: project_root.to_string(),
@@ -119,14 +236,68 @@ pub fn generate_for_ai_report(
         summary,
         sections: section_refs,
         quick_wins,
+        priority_tasks,
         hub_files,
+        bundle,
     }
 }
 
+fn build_priority_tasks(quick_wins: &[QuickWin]) -> Vec<PriorityTask> {
+    quick_wins
+        .iter()
+        .take(10)
+        .map(|w| {
+            let risk = match w.kind.as_str() {
+                "missing_handler" | "unregistered_handler" => "high",
+                "circular_import" | "opaque_passthrough" => "medium",
+                "unused_handler" | "dead_export" => "low",
+                _ => "medium",
+            }
+            .to_string();
+
+            let verify_cmd = match w.kind.as_str() {
+                "missing_handler" | "unregistered_handler" | "unused_handler" => {
+                    format!("loct trace {}", w.target)
+                }
+                "dead_export" | "opaque_passthrough" => {
+                    format!("loct query where-symbol {}", w.target)
+                }
+                "circular_import" => "loct cycles --explain".to_string(),
+                _ => w
+                    .trace_cmd
+                    .clone()
+                    .unwrap_or_else(|| "loct health".to_string()),
+            };
+
+            PriorityTask {
+                priority: w.priority,
+                kind: w.kind.clone(),
+                target: w.target.clone(),
+                location: w.location.clone(),
+                why: w.why.clone(),
+                risk,
+                fix_hint: w.fix_hint.clone(),
+                verify_cmd,
+            }
+        })
+        .collect()
+}
+
 fn compute_summary(sections: &[ReportSection], analyses: &[FileAnalysis]) -> ForAiSummary {
-    let files_analyzed: usize = sections.iter().map(|s| s.files_analyzed).sum();
-    let total_loc: usize = analyses.iter().map(|a| a.loc).sum();
-    let dead_exports: usize = sections.iter().map(|s| s.ranked_dups.len()).sum();
+    // When sections are empty but we have analyses (e.g., --full-scan), use analyses.len()
+    let files_analyzed: usize = if sections.is_empty() {
+        analyses.len()
+    } else {
+        sections.iter().map(|s| s.files_analyzed).sum()
+    };
+    // Prefer LOC from analyses, fallback to sections if analyses is empty
+    let total_loc: usize = if analyses.is_empty() {
+        sections.iter().map(|s| s.total_loc).sum()
+    } else {
+        analyses.iter().map(|a| a.loc).sum()
+    };
+    let dead_exports: usize = sections.iter().map(|s| s.dead_exports.len()).sum();
+    let duplicate_exports: usize = sections.iter().map(|s| s.ranked_dups.len()).sum();
     let missing_handlers: usize = sections.iter().map(|s| s.missing_handlers.len()).sum();
     let unregistered_handlers: usize = sections.iter().map(|s| s.unregistered_handlers.len()).sum();
     let unused_handlers: usize = sections.iter().map(|s| s.unused_handlers.len()).sum();
@@ -137,8 +308,25 @@ fn compute_summary(sections: &[ReportSection], analyses: &[FileAnalysis]) -> For
         .count();
     let cascade_imports: usize = sections.iter().map(|s| s.cascades.len()).sum();
     let dynamic_imports: usize = sections.iter().map(|s| s.dynamic.len()).sum();
+    let circular_imports: usize = sections.iter().map(|s| s.circular_imports.len()).sum();
 
-    // Generate priority message
+    // Collect twins data from sections
+    let twins_dead_parrots: usize = sections
+        .iter()
+        .filter_map(|s| s.twins_data.as_ref())
+        .map(|t| t.dead_parrots.len())
+        .sum();
+
+    let (twins_same_language, twins_cross_language): (usize, usize) = sections
+        .iter()
+        .filter_map(|s| s.twins_data.as_ref())
+        .flat_map(|t| &t.exact_twins)
+        .fold((0, 0), |(same, cross), twin| match categorize_twin(twin) {
+            TwinCategory::SameLanguage(_) => (same + 1, cross),
+            TwinCategory::CrossLanguage => (same, cross + 1),
+        });
+
+    // Generate priority message (now includes twins!)
     let priority = if missing_handlers > 0 {
         format!(
             "CRITICAL: Fix {} missing handlers first (runtime errors at invoke). Then {} unused handlers (tech debt).",
@@ -151,37 +339,86 @@ fn compute_summary(sections: &[ReportSection], analyses: &[FileAnalysis]) -> For
         )
     } else if unused_high_confidence > 0 {
         format!(
-            "CLEANUP: {} unused handlers (high confidence) can be safely removed. {} dead exports to consolidate.",
-            unused_high_confidence, dead_exports
+            "CLEANUP: {} unused handlers (high confidence) can be safely removed. {} dead exports, {} duplicate exports.",
+            unused_high_confidence, dead_exports, duplicate_exports
+        )
+    } else if twins_same_language > 0 {
+        format!(
+            "TECH DEBT: {} same-language twins (consolidate duplicates). {} dead parrots (0 imports). {} cross-lang pairs (likely OK).",
+            twins_same_language, twins_dead_parrots, twins_cross_language
+        )
+    } else if twins_dead_parrots > 0 {
+        format!(
+            "TECH DEBT: {} dead parrots (exports with 0 imports). Consider removing unused code.",
+            twins_dead_parrots
         )
     } else if dead_exports > 0 {
         format!(
+            "TECH DEBT: {} dead exports (unused). {} duplicate exports across files.",
+            dead_exports, duplicate_exports
+        )
+    } else if duplicate_exports > 0 {
+        format!(
             "TECH DEBT: {} duplicate exports across files. Consider consolidating to reduce confusion.",
-            dead_exports
+            duplicate_exports
+        )
+    } else if circular_imports > 0 {
+        format!(
+            "TECH DEBT: {} circular import cycles. Consider refactoring to break cycles.",
+            circular_imports
         )
     } else {
         "HEALTHY: No critical issues found. Good job!".to_string()
     };
 
-    // Health score (simple heuristic)
-    let issue_penalty = missing_handlers * 20
-        + unregistered_handlers * 15
-        + unused_high_confidence * 5
-        + (dead_exports / 10).min(20);
-    let health_score = 100u8.saturating_sub(issue_penalty.min(100) as u8);
+    // Vector-based health score with 3 severity dimensions:
+    // - CERTAIN (50%): missing_handlers, unregistered_handlers, breaking_cycles
+    // - HIGH (30%): unused_high_confidence, dead_exports, twins_dead_parrots
+    // - SMELL (20%): twins_same_language, barrel_chaos, structural_cycles, cascades, duplicates/5
+    //
+    // Log-normalized to project size: larger projects get less penalty per issue
+    let health_metrics = HealthMetrics {
+        // CERTAIN
+        missing_handlers,
+        unregistered_handlers,
+        breaking_cycles: circular_imports, // TODO: distinguish breaking vs structural
+        // HIGH
+        unused_high_confidence,
+        dead_exports,
+        twins_dead_parrots,
+        // SMELL
+        twins_same_language,
+        barrel_chaos_count: 0, // TODO: integrate barrel analysis
+        structural_cycles: 0,  // TODO: distinguish from breaking
+        cascade_imports,
+        duplicate_exports,
+        // Context
+        files: files_analyzed,
+        loc: total_loc,
+        ..Default::default()
+    };
+
+    let health = calculate_health_score(&health_metrics);
 
     ForAiSummary {
         files_analyzed,
         total_loc,
         dead_exports,
+        duplicate_exports,
+        circular_imports,
         missing_handlers,
         unregistered_handlers,
         unused_handlers,
         unused_high_confidence,
         cascade_imports,
         dynamic_imports,
+        twins_dead_parrots,
+        twins_same_language,
+        twins_cross_language,
         priority,
-        health_score,
+        health_score: health.health,
+        health_details: Some(health.details),
+        normalized_density: Some(health.normalized_density),
     }
 }
 
@@ -211,6 +448,186 @@ fn build_section_refs(sections: &[ReportSection]) -> Vec<ForAiSectionRef> {
             }
         })
         .collect()
+}
+
+fn build_agent_bundle(sections: &[ReportSection], analyses: &[FileAnalysis]) -> AgentBundle {
+    let handlers = build_handler_groups(sections);
+
+    let mut all_dups: Vec<RankedDup> = sections
+        .iter()
+        .flat_map(|s| s.ranked_dups.clone())
+        .collect();
+    all_dups.sort_by(|a, b| b.score.cmp(&a.score).then(a.name.cmp(&b.name)));
+    let mut seen_dup: HashSet<(String, String)> = HashSet::new();
+    let duplicates = all_dups
+        .into_iter()
+        .filter(|d| seen_dup.insert((d.name.clone(), d.canonical.clone())))
+        .take(20)
+        .map(|d| AgentDuplicate {
+            name: d.name,
+            canonical: d.canonical,
+            canonical_line: d.canonical_line,
+            score: d.score,
+            severity: severity_label(d.severity).to_string(),
+            files: d.files.len(),
+        })
+        .collect();
+
+    let mut seen_dead: HashSet<(String, String)> = HashSet::new();
+    let dead_exports = sections
+        .iter()
+        .flat_map(|s| s.dead_exports.clone())
+        .filter(|d| seen_dead.insert((d.file.clone(), d.symbol.clone())))
+        .take(50)
+        .map(|d| AgentDeadExport {
+            symbol: d.symbol,
+            file: d.file,
+            line: d.line,
+            confidence: d.confidence,
+            reason: d.reason,
+        })
+        .collect();
+
+    let dynamic_imports = sections
+        .iter()
+        .flat_map(|s| s.dynamic.clone())
+        .map(|(file, sources)| {
+            let mut resolved = Vec::new();
+            let mut unresolved = Vec::new();
+            for src in sources {
+                if is_resolved_dynamic(&src) {
+                    resolved.push(src);
+                } else {
+                    unresolved.push(src);
+                }
+            }
+            AgentDynamicImport {
+                file,
+                resolved,
+                unresolved,
+            }
+        })
+        .collect();
+
+    let mut largest_files: Vec<AgentFile> = analyses
+        .iter()
+        .map(|a| AgentFile {
+            path: a.path.clone(),
+            loc: a.loc,
+        })
+        .collect();
+    largest_files.sort_by(|a, b| b.loc.cmp(&a.loc).then(a.path.cmp(&b.path)));
+    largest_files.truncate(25);
+
+    let cycles = build_agent_cycles(sections);
+
+    AgentBundle {
+        handlers,
+        duplicates,
+        dead_exports,
+        dynamic_imports,
+        largest_files,
+        cycles,
+    }
+}
+
+fn build_handler_groups(sections: &[ReportSection]) -> AgentHandlerGroups {
+    let mut missing = Vec::new();
+    let mut unused = Vec::new();
+    let mut unregistered = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+
+    for bridge in sections.iter().flat_map(|s| s.command_bridges.iter()) {
+        // De-duplicate by command name to avoid repetition across roots
+        if !seen.insert(bridge.name.clone()) {
+            continue;
+        }
+
+        let handler = AgentHandler {
+            name: bridge.name.clone(),
+            status: bridge.status.clone(),
+            frontend: bridge
+                .fe_locations
+                .iter()
+                .map(|(path, line)| AgentLocation {
+                    path: path.clone(),
+                    line: *line,
+                })
+                .collect(),
+            backend: bridge
+                .be_location
+                .as_ref()
+                .map(|(path, line, symbol)| AgentBackend {
+                    path: path.clone(),
+                    line: *line,
+                    symbol: Some(symbol.clone()),
+                }),
+        };
+
+        match bridge.status.as_str() {
+            "missing_handler" => missing.push(handler),
+            "unused_handler" => unused.push(handler),
+            "unregistered_handler" => unregistered.push(handler),
+            _ => {}
+        }
+    }
+
+    AgentHandlerGroups {
+        missing,
+        unused,
+        unregistered,
+    }
+}
+
+fn build_agent_cycles(sections: &[ReportSection]) -> Vec<AgentCycle> {
+    let mut seen: HashSet<(String, String)> = HashSet::new();
+    let mut cycles = Vec::new();
+
+    for section in sections {
+        for cycle in &section.circular_imports {
+            let key = ("strict".to_string(), cycle.join("->"));
+            if seen.insert(key.clone()) {
+                cycles.push(AgentCycle {
+                    kind: key.0,
+                    members: cycle.clone(),
+                });
+            }
+        }
+        for cycle in &section.lazy_circular_imports {
+            let key = ("lazy".to_string(), cycle.join("->"));
+            if seen.insert(key.clone()) {
+                cycles.push(AgentCycle {
+                    kind: key.0,
+                    members: cycle.clone(),
+                });
+            }
+        }
+    }
+
+    cycles
+}
+
+fn is_resolved_dynamic(src: &str) -> bool {
+    let has_extension = src.ends_with(".ts")
+        || src.ends_with(".tsx")
+        || src.ends_with(".js")
+        || src.ends_with(".jsx")
+        || src.ends_with(".mjs")
+        || src.ends_with(".cjs")
+        || src.ends_with(".rs")
+        || src.ends_with(".py");
+    let has_path = src.contains('/') || src.starts_with("./") || src.starts_with("../");
+    has_extension || has_path
+}
+
+fn severity_label(severity: DupSeverity) -> &'static str {
+    match severity {
+        DupSeverity::CrossLangExpected => "cross_lang_expected",
+        DupSeverity::ReExportOrGeneric => "reexport_or_generic",
+        DupSeverity::SamePackage => "same_package",
+        DupSeverity::CrossModule => "cross_module",
+        DupSeverity::CrossCrate => "cross_crate",
+    }
 }
 
 fn extract_quick_wins(sections: &[ReportSection], analyses: &[FileAnalysis]) -> Vec<QuickWin> {
@@ -382,7 +799,7 @@ fn extract_quick_wins(sections: &[ReportSection], analyses: &[FileAnalysis]) -> 
                 ),
                 fix_hint: refactor_hint,
                 complexity: "easy".to_string(),
-                trace_cmd: Some(format!("loct trace {}", dup.name)),
+                trace_cmd: Some(format!("loct query where-symbol {}", dup.name)),
                 open_url,
             });
             priority += 1;
@@ -503,7 +920,7 @@ fn extract_quick_wins(sections: &[ReportSection], analyses: &[FileAnalysis]) -> 
             ),
             fix_hint,
             complexity: "medium".to_string(),
-            trace_cmd: Some(format!("loct trace {}", opaque.symbol)),
+            trace_cmd: Some(format!("loct query where-symbol {}", opaque.symbol)),
             open_url: Some(open_url),
         });
         priority += 1;
@@ -556,8 +973,8 @@ fn build_used_exports(analyses: &[FileAnalysis]) -> HashSet<(String, String)> {
                     used_exports.insert((target_norm, "*".to_string()));
                 }
                 crate::types::ReexportKind::Named(names) => {
-                    for name in names {
-                        used_exports.insert((target_norm.clone(), name.clone()));
+                    for (original, _exported) in names {
+                        used_exports.insert((target_norm.clone(), original.clone()));
                     }
                 }
             }
@@ -581,8 +998,8 @@ fn build_reexport_map(analyses: &[FileAnalysis]) -> HashMap<String, HashSet<Stri
                     entry.insert("*".to_string());
                 }
                 crate::types::ReexportKind::Named(names) => {
-                    for name in names {
-                        entry.insert(name.clone());
+                    for (original, _exported) in names {
+                        entry.insert(original.clone());
                     }
                 }
             }
@@ -763,10 +1180,13 @@ mod tests {
     }
 
     fn mock_section(root: &str, files: usize) -> ReportSection {
+        // Use realistic LOC for log-normalized health score testing
+        // 100 LOC per file is a reasonable default
+        let estimated_loc = files * 100;
         ReportSection {
             root: root.to_string(),
             files_analyzed: files,
-            total_loc: 0,
+            total_loc: estimated_loc,
             reexport_files_count: 0,
             dynamic_imports_count: 0,
             ranked_dups: vec![],
@@ -790,6 +1210,7 @@ mod tests {
             crowds: vec![],
             dead_exports: vec![],
             twins_data: None,
+            coverage_gaps: vec![],
         }
     }
 
@@ -802,6 +1223,25 @@ mod tests {
 
         assert_eq!(summary.files_analyzed, 0);
         assert_eq!(summary.total_loc, 0);
+        assert_eq!(summary.health_score, 100);
+        assert!(summary.priority.contains("HEALTHY"));
+    }
+
+    #[test]
+    fn test_compute_summary_empty_sections_with_analyses() {
+        // Bug fix test: when sections are empty but analyses exist (e.g., --full-scan),
+        // files_analyzed should be populated from analyses.len()
+        let sections: Vec<ReportSection> = vec![];
+        let analyses = vec![
+            mock_file("src/a.ts", 100),
+            mock_file("src/b.ts", 200),
+            mock_file("src/c.rs", 50),
+        ];
+
+        let summary = compute_summary(&sections, &analyses);
+
+        assert_eq!(summary.files_analyzed, 3);
+        assert_eq!(summary.total_loc, 350);
         assert_eq!(summary.health_score, 100);
         assert!(summary.priority.contains("HEALTHY"));
     }
@@ -971,6 +1411,7 @@ mod tests {
                 line: 10,
                 generic_type: None,
                 payload: None,
+                plugin_name: None,
             },
             CommandRef {
                 name: "cmd2".to_string(),
@@ -978,6 +1419,7 @@ mod tests {
                 line: 20,
                 generic_type: None,
                 payload: None,
+                plugin_name: None,
             },
         ];
 
@@ -1008,9 +1450,9 @@ mod tests {
 
     #[test]
     fn test_health_score_bounds() {
-        // Health score should be 0-100
+        // Health score should be 0-100 with log-normalized formula
         let mut section = mock_section("src", 10);
-        // Add lots of issues to test lower bound
+        // Add lots of issues to test penalty impact
         section.missing_handlers = (0..10)
             .map(|i| CommandGap {
                 name: format!("cmd{}", i),
@@ -1026,10 +1468,17 @@ mod tests {
 
         let summary = compute_summary(&sections, &analyses);
 
-        // Should not go below 0
+        // Should be in valid range
         assert!(summary.health_score <= 100);
-        // With 10 missing handlers (20 points each = 200), should be 0
-        assert_eq!(summary.health_score, 0);
+        // With 10 missing handlers in ~1000 LOC project, should have significant penalty
+        // Log-normalized: ln(11)/ln(1001) * 50 ≈ 17 penalty → health ≈ 83
+        assert!(
+            summary.health_score < 90,
+            "Expected health < 90 with 10 missing handlers, got {}",
+            summary.health_score
+        );
+        // But not zero - log normalization is more forgiving
+        assert!(summary.health_score > 0);
     }
 
     #[test]
@@ -1058,7 +1507,7 @@ mod tests {
             canonical: "src/types/user.ts".to_string(),
             canonical_line: Some(10),
             refactors: vec!["Move all imports to src/types/user.ts".to_string()],
-            severity: DupSeverity::SemanticConflict,
+            severity: DupSeverity::CrossCrate,
             is_cross_lang: false,
             packages: vec!["types".to_string(), "models".to_string(), "api".to_string()],
             reason: "Symbol in 3 different packages".to_string(),
@@ -1235,6 +1684,7 @@ mod tests {
             is_super_relative: false,
             is_self_relative: false,
             raw_path: String::new(),
+            is_mod_declaration: false,
         });
 
         let findings = detect_opaque_passthrough_types(&[producer.clone(), consumer.clone()]);
@@ -1247,5 +1697,160 @@ mod tests {
             wins.iter().any(|w| w.kind == "opaque_passthrough"),
             "Opaque passthrough quick win should be emitted"
         );
+    }
+
+    #[test]
+    fn test_compute_summary_with_twins_same_language() {
+        use crate::analyzer::report::TwinsData;
+        use crate::analyzer::twins::{ExactTwin, SymbolEntry, TwinLocation};
+
+        let mut section = mock_section("src", 10);
+        section.twins_data = Some(TwinsData {
+            dead_parrots: vec![SymbolEntry {
+                name: "unusedUtil".to_string(),
+                kind: "function".to_string(),
+                file_path: "src/utils.ts".to_string(),
+                line: 10,
+                import_count: 0,
+            }],
+            exact_twins: vec![ExactTwin {
+                name: "UserType".to_string(),
+                locations: vec![
+                    TwinLocation {
+                        file_path: "src/types/user.ts".to_string(),
+                        line: 5,
+                        kind: "type".to_string(),
+                        import_count: 10,
+                        is_canonical: true,
+                        signature_fingerprint: None,
+                    },
+                    TwinLocation {
+                        file_path: "src/models/user.ts".to_string(),
+                        line: 8,
+                        kind: "type".to_string(),
+                        import_count: 2,
+                        is_canonical: false,
+                        signature_fingerprint: None,
+                    },
+                ],
+                signature_similarity: None,
+            }],
+            barrel_chaos: Default::default(),
+        });
+
+        let sections = vec![section];
+        let analyses: Vec<FileAnalysis> = vec![];
+
+        let summary = compute_summary(&sections, &analyses);
+
+        // Check twins are counted
+        assert_eq!(summary.twins_dead_parrots, 1);
+        assert_eq!(summary.twins_same_language, 1);
+        assert_eq!(summary.twins_cross_language, 0);
+
+        // Health score should be reduced (but not much with log-normalization)
+        // 1 dead_parrot (HIGH) + 1 same_lang twin (SMELL) in ~1000 LOC
+        // Log-normalized penalties are small for few issues in decent-sized project
+        assert!(
+            summary.health_score < 100,
+            "Expected health < 100 with twins, got {}",
+            summary.health_score
+        );
+        assert!(
+            summary.health_score > 90,
+            "Expected health > 90 with only 2 minor issues, got {}",
+            summary.health_score
+        );
+
+        // Priority should mention twins
+        assert!(summary.priority.contains("same-language twins"));
+    }
+
+    #[test]
+    fn test_compute_summary_with_twins_cross_language() {
+        use crate::analyzer::report::TwinsData;
+        use crate::analyzer::twins::{ExactTwin, TwinLocation};
+
+        let mut section = mock_section("src", 10);
+        section.twins_data = Some(TwinsData {
+            dead_parrots: vec![],
+            exact_twins: vec![ExactTwin {
+                name: "Message".to_string(),
+                locations: vec![
+                    TwinLocation {
+                        file_path: "src/types/message.ts".to_string(),
+                        line: 5,
+                        kind: "interface".to_string(),
+                        import_count: 10,
+                        is_canonical: true,
+                        signature_fingerprint: None,
+                    },
+                    TwinLocation {
+                        file_path: "src-tauri/src/types.rs".to_string(),
+                        line: 20,
+                        kind: "struct".to_string(),
+                        import_count: 5,
+                        is_canonical: false,
+                        signature_fingerprint: None,
+                    },
+                ],
+                signature_similarity: None,
+            }],
+            barrel_chaos: Default::default(),
+        });
+
+        let sections = vec![section];
+        let analyses: Vec<FileAnalysis> = vec![];
+
+        let summary = compute_summary(&sections, &analyses);
+
+        // Cross-language twins should NOT add to penalty
+        assert_eq!(summary.twins_same_language, 0);
+        assert_eq!(summary.twins_cross_language, 1);
+
+        // Health score should be 100 (cross-lang twins don't penalize)
+        assert_eq!(summary.health_score, 100);
+        assert!(summary.priority.contains("HEALTHY"));
+    }
+
+    #[test]
+    fn test_compute_summary_twins_dead_parrots_penalty() {
+        use crate::analyzer::report::TwinsData;
+        use crate::analyzer::twins::SymbolEntry;
+
+        let mut section = mock_section("src", 10);
+        section.twins_data = Some(TwinsData {
+            dead_parrots: (0..10)
+                .map(|i| SymbolEntry {
+                    name: format!("unused{}", i),
+                    kind: "function".to_string(),
+                    file_path: format!("src/util{}.ts", i),
+                    line: i,
+                    import_count: 0,
+                })
+                .collect(),
+            exact_twins: vec![],
+            barrel_chaos: Default::default(),
+        });
+
+        let sections = vec![section];
+        let analyses: Vec<FileAnalysis> = vec![];
+
+        let summary = compute_summary(&sections, &analyses);
+
+        // 10 dead parrots (HIGH severity) in ~1000 LOC project
+        // Log-normalized: ln(11)/ln(1001) * 30 ≈ 10 penalty → health ≈ 90
+        assert_eq!(summary.twins_dead_parrots, 10);
+        assert!(
+            summary.health_score < 100,
+            "Expected health < 100 with 10 dead parrots, got {}",
+            summary.health_score
+        );
+        assert!(
+            summary.health_score > 80,
+            "Expected health > 80 with log-normalization, got {}",
+            summary.health_score
+        );
+        assert!(summary.priority.contains("dead parrots"));
     }
 }

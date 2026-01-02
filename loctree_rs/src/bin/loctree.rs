@@ -167,6 +167,16 @@ loctree git compare HEAD~5                 # What changed in last 5 commits\n"
 fn main() -> std::io::Result<()> {
     install_broken_pipe_handler();
 
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // DEPRECATION WARNING
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    eprintln!("\x1b[1;31m");
+    eprintln!("  +================================================================+");
+    eprintln!("  |  DEPRECATED: `loctree` will be removed in v0.9.0              |");
+    eprintln!("  |  Use `loct` instead - same features + agent optimizations     |");
+    eprintln!("  +================================================================+");
+    eprintln!("\x1b[0m");
+
     // Get raw args for the new parser
     // nosemgrep: rust.lang.security.args.args
     // SECURITY: args() is used only for CLI flag parsing (paths, --json, etc.),
@@ -220,13 +230,17 @@ fn main() -> std::io::Result<()> {
 
     // Auto-detect stack if no explicit extensions provided
     if !parsed.root_list.is_empty() {
+        let mut library_mode = parsed.library_mode; // Preserve user-set library_mode flag
         detect::apply_detected_stack(
             &parsed.root_list[0],
             &mut parsed.extensions,
             &mut parsed.ignore_patterns,
             &mut parsed.tauri_preset,
+            &mut library_mode,
+            &mut parsed.py_roots,
             parsed.verbose,
         );
+        parsed.library_mode = library_mode; // Apply auto-detected library mode
 
         // Load .loctreeignore from root (if exists)
         let loctreeignore_patterns = fs_utils::load_loctreeignore(&parsed.root_list[0]);
@@ -310,6 +324,12 @@ fn main() -> std::io::Result<()> {
         }
         Mode::ForAi => {
             run_for_ai(&root_list, &parsed)?;
+        }
+        Mode::Findings => {
+            run_findings(&root_list, &parsed, false)?;
+        }
+        Mode::Summary => {
+            run_findings(&root_list, &parsed, true)?;
         }
         Mode::Git(ref subcommand) => {
             run_git(subcommand, &parsed)?;
@@ -546,6 +566,87 @@ fn run_for_ai(root_list: &[PathBuf], parsed: &args::ParsedArgs) -> std::io::Resu
         analyzer::for_ai::print_agent_feed_jsonl(&report);
     } else {
         print_for_ai_json(&report);
+    }
+
+    Ok(())
+}
+
+/// Output findings.json or summary to stdout
+fn run_findings(
+    root_list: &[PathBuf],
+    parsed: &args::ParsedArgs,
+    summary_only: bool,
+) -> std::io::Result<()> {
+    use analyzer::findings::{Findings, FindingsConfig};
+    use analyzer::root_scan::{ScanConfig, scan_roots};
+    use analyzer::scan::{opt_globset, python_stdlib};
+    use std::collections::HashSet;
+
+    let extensions = parsed.extensions.clone().or_else(|| {
+        Some(
+            ["ts", "tsx", "js", "jsx", "mjs", "cjs", "rs", "css", "py"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        )
+    });
+
+    let py_stdlib = python_stdlib();
+    let focus_set = opt_globset(&parsed.focus_patterns);
+    let exclude_set = opt_globset(&parsed.exclude_report_patterns);
+
+    // Load custom config
+    let loctree_config = root_list
+        .first()
+        .map(|root| LoctreeConfig::load(root))
+        .unwrap_or_default();
+    let custom_command_macros = loctree_config.tauri.command_macros;
+    let command_detection = analyzer::ast_js::CommandDetectionConfig::new(
+        &loctree_config.tauri.dom_exclusions,
+        &loctree_config.tauri.non_invoke_exclusions,
+        &loctree_config.tauri.invalid_command_names,
+    );
+
+    // Scan the project
+    let scan_results = scan_roots(ScanConfig {
+        roots: root_list,
+        parsed,
+        extensions,
+        focus_set: &focus_set,
+        exclude_set: &exclude_set,
+        ignore_exact: HashSet::new(),
+        ignore_prefixes: Vec::new(),
+        py_stdlib: &py_stdlib,
+        cached_analyses: None,
+        collect_edges: true,
+        custom_command_macros: &custom_command_macros,
+        command_detection,
+    })?;
+
+    // Create a minimal snapshot for barrel chaos analysis
+    let snap = snapshot::Snapshot::new(root_list.iter().map(|p| p.display().to_string()).collect());
+
+    // Produce findings
+    let config = FindingsConfig {
+        high_confidence: parsed.dead_confidence.as_deref() == Some("high"),
+        library_mode: parsed.library_mode,
+        python_library: parsed.python_library,
+        example_globs: parsed.library_example_globs.clone(),
+    };
+
+    let findings = Findings::produce(&scan_results, &snap, config);
+
+    // Output to stdout
+    if summary_only {
+        let summary = findings.summary_only();
+        let json = serde_json::to_string_pretty(&summary)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        println!("{}", json);
+    } else {
+        let json = findings
+            .to_json()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        println!("{}", json);
     }
 
     Ok(())

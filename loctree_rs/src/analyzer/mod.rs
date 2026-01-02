@@ -7,6 +7,7 @@
 //! - [`py`] - Python import/export analysis
 //! - [`rust`] - Rust analysis (Tauri commands, mod statements)
 //! - [`css`] - CSS/SCSS dependency tracking
+//! - [`dart`] - Dart/Flutter import/export analysis (lightweight)
 //!
 //! ## Analysis Features
 //! - [`cycles`] - Circular import detection (Tarjan's SCC algorithm)
@@ -26,14 +27,22 @@ pub mod ast_js;
 pub mod barrels;
 pub mod classify;
 pub mod coverage;
+pub mod coverage_gaps;
 pub mod crowd;
 mod css;
 pub mod cycles;
+pub mod dart;
 pub mod dead_parrots;
+pub mod dist;
 pub mod entrypoints;
+pub mod findings;
 pub mod for_ai;
+pub mod frameworks;
+pub mod go;
 mod graph;
+pub mod health_score;
 pub mod html;
+pub(crate) mod html_analyzer;
 mod insights;
 pub mod js;
 pub mod open_server;
@@ -49,6 +58,7 @@ pub mod rust;
 pub mod sarif;
 pub mod scan;
 pub mod search;
+pub mod test_coverage;
 pub mod trace;
 mod tsconfig;
 pub mod twins;
@@ -78,6 +88,7 @@ pub fn build_open_url(file: &str, line: Option<usize>, open_base: Option<&str>) 
 }
 
 #[allow(unused_imports)]
+pub use cycles::{ClassifiedCycle, CycleClassification};
 pub use report::{
     AiInsight, CommandGap, DupLocation, DupSeverity, GraphComponent, GraphData, GraphNode,
     RankedDup, ReportSection,

@@ -407,6 +407,7 @@ mod tests {
                 line: 10,
                 generic_type: None,
                 payload: None,
+                plugin_name: None,
             }],
             ..Default::default()
         }
@@ -513,6 +514,7 @@ mod tests {
             line: 10,
             generic_type: None,
             payload: None,
+            plugin_name: None,
         }];
 
         let analyses = vec![ts_file];

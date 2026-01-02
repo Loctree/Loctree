@@ -1,12 +1,65 @@
 use std::any::Any;
+use std::fs;
+use std::io::{Write, stderr};
 use std::panic;
 use std::path::PathBuf;
+use std::thread;
+use std::time::Duration;
 
 use loctree::args::{self, parse_args};
 use loctree::cli::{self, Command, DispatchResult};
 use loctree::config::LoctreeConfig;
 use loctree::types::{GitSubcommand, Mode};
 use loctree::{OutputMode, analyzer, detect, diff, fs_utils, git, slicer, snapshot, tree};
+
+/// Micro-animation for loct startup
+/// Subtle flex - blink and you'll miss it, but those who see it know.
+fn print_animated_banner() {
+    // Skip in non-TTY (CI, pipes)
+    if !console::Term::stderr().is_term() {
+        return;
+    }
+
+    const RESET: &str = "\x1b[0m";
+    const BOLD: &str = "\x1b[1m";
+    const DIM: &str = "\x1b[2m";
+    const CYAN: &str = "\x1b[96m";
+    const WHITE: &str = "\x1b[97m";
+
+    // Phase 1: Letters materialize one by one with glow
+    let letters = ['l', 'o', 'c', 't'];
+    eprint!("\r");
+
+    for (i, ch) in letters.iter().enumerate() {
+        // Brief glow (white) then settle (cyan)
+        eprint!("{}{}{}", BOLD, WHITE, ch);
+        let _ = stderr().flush();
+        thread::sleep(Duration::from_millis(35));
+
+        // Rewrite settled letters + current
+        eprint!("\r{}{}", BOLD, CYAN);
+        for c in &letters[..=i] {
+            eprint!("{}", c);
+        }
+        let _ = stderr().flush();
+        thread::sleep(Duration::from_millis(25));
+    }
+
+    // Phase 2: Dot pulse (the magic touch)
+    let dots = ["", ".", "..", "...", "..", ".", ""];
+    for dot in dots {
+        eprint!("\r{}{}loct{}{}", BOLD, CYAN, DIM, dot);
+        // Pad to clear previous dots
+        eprint!("   ");
+        eprint!("\r{}{}loct{}{}", BOLD, CYAN, DIM, dot);
+        let _ = stderr().flush();
+        thread::sleep(Duration::from_millis(40));
+    }
+
+    // Phase 3: Final form - subtle tagline
+    eprint!("\r{}{}loct{} ▸{}", BOLD, CYAN, RESET, RESET);
+    eprintln!();
+}
 
 fn install_broken_pipe_handler() {
     let default_hook = panic::take_hook();
@@ -220,13 +273,17 @@ fn main() -> std::io::Result<()> {
 
     // Auto-detect stack if no explicit extensions provided
     if !parsed.root_list.is_empty() {
+        let mut library_mode = parsed.library_mode; // Preserve user-set library_mode flag
         detect::apply_detected_stack(
             &parsed.root_list[0],
             &mut parsed.extensions,
             &mut parsed.ignore_patterns,
             &mut parsed.tauri_preset,
+            &mut library_mode,
+            &mut parsed.py_roots,
             parsed.verbose,
         );
+        parsed.library_mode = library_mode; // Apply auto-detected library mode
 
         // Load .loctreeignore from root (if exists)
         let loctreeignore_patterns = fs_utils::load_loctreeignore(&parsed.root_list[0]);
@@ -284,7 +341,10 @@ fn main() -> std::io::Result<()> {
     match parsed.mode {
         Mode::AnalyzeImports => analyzer::run_import_analyzer(&root_list, &parsed)?,
         Mode::Tree => tree::run_tree(&root_list, &parsed)?,
-        Mode::Init => snapshot::run_init(&root_list, &parsed)?,
+        Mode::Init => {
+            print_animated_banner();
+            snapshot::run_init(&root_list, &parsed)?
+        }
         Mode::Slice => {
             let target = parsed.slice_target.as_ref().ok_or_else(|| {
                 std::io::Error::new(
@@ -296,6 +356,19 @@ fn main() -> std::io::Result<()> {
                 .first()
                 .cloned()
                 .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+
+            // Check if target is a directory
+            let target_path = root.join(target);
+            if target_path.is_dir() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!(
+                        "'{}' is a directory. slice works on files.\nFor directories use: loct focus {}",
+                        target, target
+                    ),
+                ));
+            }
+
             let json_output = matches!(parsed.output, OutputMode::Json);
             slicer::run_slice(&root, target, parsed.slice_consumers, json_output, &parsed)?;
         }
@@ -310,6 +383,12 @@ fn main() -> std::io::Result<()> {
         }
         Mode::ForAi => {
             run_for_ai(&root_list, &parsed)?;
+        }
+        Mode::Findings => {
+            run_findings(&root_list, &parsed, false)?;
+        }
+        Mode::Summary => {
+            run_findings(&root_list, &parsed, true)?;
         }
         Mode::Git(ref subcommand) => {
             run_git(subcommand, &parsed)?;
@@ -541,11 +620,119 @@ fn run_for_ai(root_list: &[PathBuf], parsed: &args::ParsedArgs) -> std::io::Resu
 
     let report = generate_for_ai_report(&project_root, &report_sections, &global_analyses);
 
+    // Persist agent bundle to disk for single-file consumption
+    if parsed.output == OutputMode::Json
+        && let Some(root) = root_list.first()
+    {
+        let agent_path = root.join(".loctree").join("agent.json");
+        if let Some(dir) = agent_path.parent() {
+            if let Err(e) = fs::create_dir_all(dir) {
+                eprintln!("[loct][agent] Failed to create {}: {}", dir.display(), e);
+            } else {
+                match serde_json::to_vec_pretty(&report) {
+                    Ok(data) => {
+                        if let Err(e) = fs::write(&agent_path, data) {
+                            eprintln!(
+                                "[loct][agent] Failed to write {}: {}",
+                                agent_path.display(),
+                                e
+                            );
+                        } else {
+                            eprintln!("[loct][agent] Bundle saved to {}", agent_path.display());
+                        }
+                    }
+                    Err(e) => eprintln!("[loct][agent] Failed to serialize agent bundle: {e}"),
+                }
+            }
+        }
+    }
+
     // JSONL mode outputs one QuickWin per line for streaming agent consumption
     if parsed.output == OutputMode::Jsonl {
         analyzer::for_ai::print_agent_feed_jsonl(&report);
     } else {
         print_for_ai_json(&report);
+    }
+
+    Ok(())
+}
+
+/// Output findings.json or summary to stdout
+fn run_findings(
+    root_list: &[PathBuf],
+    parsed: &args::ParsedArgs,
+    summary_only: bool,
+) -> std::io::Result<()> {
+    use analyzer::findings::{Findings, FindingsConfig};
+    use analyzer::root_scan::{ScanConfig, scan_roots};
+    use analyzer::scan::{opt_globset, python_stdlib};
+    use std::collections::HashSet;
+
+    let extensions = parsed.extensions.clone().or_else(|| {
+        Some(
+            ["ts", "tsx", "js", "jsx", "mjs", "cjs", "rs", "css", "py"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        )
+    });
+
+    let py_stdlib = python_stdlib();
+    let focus_set = opt_globset(&parsed.focus_patterns);
+    let exclude_set = opt_globset(&parsed.exclude_report_patterns);
+
+    // Load custom config
+    let loctree_config = root_list
+        .first()
+        .map(|root| LoctreeConfig::load(root))
+        .unwrap_or_default();
+    let custom_command_macros = loctree_config.tauri.command_macros;
+    let command_detection = analyzer::ast_js::CommandDetectionConfig::new(
+        &loctree_config.tauri.dom_exclusions,
+        &loctree_config.tauri.non_invoke_exclusions,
+        &loctree_config.tauri.invalid_command_names,
+    );
+
+    // Scan the project
+    let scan_results = scan_roots(ScanConfig {
+        roots: root_list,
+        parsed,
+        extensions,
+        focus_set: &focus_set,
+        exclude_set: &exclude_set,
+        ignore_exact: HashSet::new(),
+        ignore_prefixes: Vec::new(),
+        py_stdlib: &py_stdlib,
+        cached_analyses: None,
+        collect_edges: true,
+        custom_command_macros: &custom_command_macros,
+        command_detection,
+    })?;
+
+    // Create a minimal snapshot for barrel chaos analysis
+    let snap = snapshot::Snapshot::new(root_list.iter().map(|p| p.display().to_string()).collect());
+
+    // Produce findings
+    let config = FindingsConfig {
+        high_confidence: parsed.dead_confidence.as_deref() == Some("high"),
+        library_mode: parsed.library_mode,
+        python_library: parsed.python_library,
+        example_globs: parsed.library_example_globs.clone(),
+    };
+
+    let findings = Findings::produce(&scan_results, &snap, config);
+
+    // Output to stdout
+    if summary_only {
+        let summary = findings.summary_only();
+        let json = serde_json::to_string_pretty(&summary)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        println!("{}", json);
+    } else {
+        let json = findings
+            .to_json()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        println!("{}", json);
     }
 
     Ok(())

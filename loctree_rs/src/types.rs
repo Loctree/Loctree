@@ -57,6 +57,10 @@ pub enum Mode {
     Trace,
     /// AI-optimized JSON output with quick wins and slice references.
     ForAi,
+    /// Output findings.json to stdout (--findings flag)
+    Findings,
+    /// Output summary only to stdout (--summary flag)
+    Summary,
     /// Git awareness - temporal knowledge from repository history.
     Git(GitSubcommand),
     /// Unified search - returns symbol matches, semantic matches, dead status.
@@ -120,6 +124,8 @@ pub struct Options {
     pub summary: bool,
     /// Max items in summary lists.
     pub summary_limit: usize,
+    /// If true, only show summary/top entries (suppress full tree dump).
+    pub summary_only: bool,
     /// Include dotfiles/directories.
     pub show_hidden: bool,
     /// Include gitignored files.
@@ -162,6 +168,7 @@ impl Default for Options {
             output: OutputMode::Human,
             summary: false,
             summary_limit: 50,
+            summary_only: false,
             show_hidden: false,
             show_ignored: false,
             loc_threshold: 500,
@@ -265,6 +272,9 @@ pub struct ImportEntry {
     /// True if import starts with `self::` (Rust only).
     #[serde(default)]
     pub is_self_relative: bool,
+    /// True if this is a Rust `mod foo;` declaration (not a true import).
+    #[serde(default)]
+    pub is_mod_declaration: bool,
     /// Original raw path before resolution (Rust only).
     #[serde(default)]
     pub raw_path: String,
@@ -325,8 +335,9 @@ pub struct ReexportEntry {
 pub enum ReexportKind {
     /// `export * from './module'`
     Star,
-    /// `export { a, b } from './module'`
-    Named(Vec<String>),
+    /// `export { a, b as c } from './module'`
+    /// Each tuple is (original_name, exported_name) - same if no alias
+    Named(Vec<(String, String)>),
 }
 
 /// An exported symbol from a module.
@@ -355,6 +366,9 @@ pub struct CommandRef {
     pub generic_type: Option<String>,
     /// Payload type/shape if detected.
     pub payload: Option<String>,
+    /// Plugin name for Tauri plugin commands (e.g., "window" from `invoke('plugin:window|set_icon')`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin_name: Option<String>,
 }
 
 /// Casing inconsistency in command payload keys.
@@ -377,6 +391,37 @@ pub struct StringLiteral {
     pub line: usize,
 }
 
+/// Python/Backend route declaration (FastAPI/Flask/etc.)
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct RouteInfo {
+    /// Framework label (e.g., "fastapi", "flask")
+    pub framework: String,
+    /// HTTP method or decorator kind (GET/POST/route/etc.)
+    pub method: String,
+    /// Route path if extracted from decorator
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// Handler name (set when attached to a def)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// 1-based line number of the decorator
+    pub line: usize,
+}
+
+/// Python exec/eval/compile dynamic code generation pattern.
+/// Tracks template strings (e.g., "get%s", "set%s") passed to exec() that generate symbols dynamically.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct DynamicExecTemplate {
+    /// Template pattern containing placeholders (%s, %d, {name}, etc.)
+    pub template: String,
+    /// Generated symbol names extracted from the template (e.g., ["get", "set"] from "get%s", "set%s")
+    pub generated_prefixes: Vec<String>,
+    /// 1-based line number where exec/eval/compile is called
+    pub line: usize,
+    /// Type of dynamic call: "exec", "eval", or "compile"
+    pub call_type: String,
+}
+
 /// A Tauri event reference (emit or listen).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EventRef {
@@ -392,6 +437,9 @@ pub struct EventRef {
     pub awaited: bool,
     /// Payload type/shape if detected.
     pub payload: Option<String>,
+    /// True if this event uses a dynamic pattern (format!/template literal).
+    #[serde(default)]
+    pub is_dynamic: bool,
 }
 
 /// Python concurrency race indicator
@@ -433,6 +481,9 @@ pub struct FileAnalysis {
     /// True if generated file (has generation marker).
     #[serde(default)]
     pub is_generated: bool,
+    /// True if file uses Flow type annotations (@flow).
+    #[serde(default)]
+    pub is_flow_file: bool,
     /// Import statements found in file.
     #[serde(default)]
     pub imports: Vec<ImportEntry>,
@@ -496,6 +547,22 @@ pub struct FileAnalysis {
     /// Type usages that appear in function signatures (parameters/returns).
     #[serde(default)]
     pub signature_uses: Vec<SignatureUse>,
+
+    /// Web route handlers detected in Python/other backends
+    #[serde(default)]
+    pub routes: Vec<RouteInfo>,
+
+    /// Pytest fixtures defined in this file
+    #[serde(default)]
+    pub pytest_fixtures: Vec<String>,
+
+    /// True if file uses WeakMap or WeakSet (global registry pattern in React/libs)
+    #[serde(default)]
+    pub has_weak_collections: bool,
+
+    /// Python exec/eval/compile dynamic code generation templates.
+    #[serde(default)]
+    pub dynamic_exec_templates: Vec<DynamicExecTemplate>,
 }
 
 impl ImportEntry {
@@ -515,6 +582,7 @@ impl ImportEntry {
             is_super_relative: false,
             is_self_relative: false,
             raw_path: String::new(),
+            is_mod_declaration: false,
         }
     }
 }
@@ -539,6 +607,7 @@ impl FileAnalysis {
             kind: "code".to_string(),
             is_test: false,
             is_generated: false,
+            is_flow_file: false,
             imports: Vec::new(),
             reexports: Vec::new(),
             dynamic_imports: Vec::new(),
@@ -560,6 +629,10 @@ impl FileAnalysis {
             is_namespace_package: false,
             local_uses: Vec::new(),
             signature_uses: Vec::new(),
+            routes: Vec::new(),
+            pytest_fixtures: Vec::new(),
+            has_weak_collections: false,
+            dynamic_exec_templates: Vec::new(),
         }
     }
 }

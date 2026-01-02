@@ -48,22 +48,21 @@ pub fn format_crowd(crowd: &Crowd, _verbose: bool) -> String {
         "(LOW - probably fine)"
     };
 
-    lines.push(format!(
-        "╭─ CROWD: \"{}\" ─────────────────────────────────────╮",
-        crowd.pattern
-    ));
+    // Show context type if detected
+    let context_label = crowd
+        .context_type
+        .map(|ct| format!(" [{}]", ct))
+        .unwrap_or_default();
 
+    lines.push(format!("CROWD: \"{}\"{}", crowd.pattern, context_label));
     lines.push(format!(
-        "│ Crowd Score: {:.1}/10 {}",
+        "Crowd Score: {:.1}/10 {}",
         crowd.score, score_label
     ));
-    lines.push("│".to_string());
+    lines.push(String::new());
 
     // Members
-    lines.push(format!(
-        "│ 📁 FILES IN CROWD ({} files)",
-        crowd.members.len()
-    ));
+    lines.push(format!("📁 FILES IN CROWD ({} files)", crowd.members.len()));
 
     let max_importers = crowd
         .members
@@ -83,48 +82,46 @@ pub fn format_crowd(crowd: &Crowd, _verbose: bool) -> String {
         // Show shortened path that's still unique (last 2-3 path segments)
         let display_path = shorten_path(&member.file, 50);
         lines.push(format!(
-            "│   {:<50} {} {} importers",
+            "  {:<50} {} {} importers",
             display_path, bar, member.importer_count
         ));
     }
 
     // Issues
     if !crowd.issues.is_empty() {
-        lines.push("│".to_string());
-        lines.push("│ 🔍 ISSUES DETECTED".to_string());
+        lines.push(String::new());
+        lines.push("🔍 ISSUES DETECTED".to_string());
 
         for issue in &crowd.issues {
             match issue {
                 CrowdIssue::NameCollision { files } => {
                     lines.push(format!(
-                        "│   • Name collision: {} files with similar names",
+                        "  • Name collision: {} files with similar names",
                         files.len()
                     ));
                 }
                 CrowdIssue::UsageAsymmetry { primary, underused } => {
                     lines.push(format!(
-                        "│   • Usage asymmetry: {} is primary, {} underused",
+                        "  • Usage asymmetry: {} is primary, {} underused",
                         primary,
                         underused.len()
                     ));
                 }
                 CrowdIssue::ExportOverlap { files, overlap: _ } => {
                     lines.push(format!(
-                        "│   • Export overlap: {} files export similar things",
+                        "  • Export overlap: {} files export similar things",
                         files.len()
                     ));
                 }
                 CrowdIssue::Fragmentation { categories } => {
                     lines.push(format!(
-                        "│   • Fragmentation: functionality split across {} categories",
+                        "  • Fragmentation: functionality split across {} categories",
                         categories.len()
                     ));
                 }
             }
         }
     }
-
-    lines.push("╰───────────────────────────────────────────────────────╯".to_string());
 
     lines.join("\n")
 }
