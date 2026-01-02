@@ -469,21 +469,6 @@ pub(super) fn parse_audit_command(args: &[String]) -> Result<Command, String> {
                 opts.include_tests = true;
                 i += 1;
             }
-            "--todos" | "-t" => {
-                opts.todos = true;
-                i += 1;
-            }
-            "--limit" => {
-                i += 1;
-                if i < args.len() {
-                    opts.limit = args[i]
-                        .parse()
-                        .map_err(|_| format!("Invalid limit value: {}", args[i]))?;
-                    i += 1;
-                } else {
-                    return Err("--limit requires a numeric value".to_string());
-                }
-            }
             _ => {
                 // Treat as root path
                 if arg.starts_with("--") {

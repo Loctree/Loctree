@@ -611,31 +611,14 @@ pub struct HealthOptions {
 }
 
 /// Options for the `audit` command.
-/// Full audit combining all structural analyses into one actionable markdown report.
-#[derive(Debug, Clone)]
+/// Full audit combining all structural analyses into one actionable report.
+#[derive(Debug, Clone, Default)]
 pub struct AuditOptions {
     /// Root directories to analyze
     pub roots: Vec<PathBuf>,
 
     /// Include test files in analysis (default: false)
     pub include_tests: bool,
-
-    /// Output as actionable todo checklist (default: false)
-    pub todos: bool,
-
-    /// Maximum items per category (default: 20)
-    pub limit: usize,
-}
-
-impl Default for AuditOptions {
-    fn default() -> Self {
-        Self {
-            roots: Vec::new(),
-            include_tests: false,
-            todos: false,
-            limit: 20,
-        }
-    }
 }
 
 /// Options for the `doctor` command.

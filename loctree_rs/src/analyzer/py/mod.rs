@@ -27,7 +27,7 @@ pub(crate) use stdlib::python_stdlib_set;
 // Private imports from submodules
 use concurrency::detect_py_race_indicators;
 use decorators::{extract_decorator_type_usages, is_framework_decorator, parse_route_decorator};
-use dynamic::{detect_dynamic_exec_templates, detect_sys_modules_injection};
+use dynamic::detect_dynamic_exec_templates;
 use exports::{parse_all_list, read_all_from_resolved};
 use imports::resolve_python_import;
 use metadata::{check_namespace_package, check_typed_package, is_python_test_file};
@@ -39,241 +39,10 @@ use usages::{
 // External imports
 use super::regexes::{regex_py_dynamic_dunder, regex_py_dynamic_importlib};
 use crate::types::{
-    ExportSymbol, FileAnalysis, ImportEntry, ImportKind, ImportSymbol, ParamInfo, ReexportEntry,
-    ReexportKind,
+    ExportSymbol, FileAnalysis, ImportEntry, ImportKind, ImportSymbol, ReexportEntry, ReexportKind,
 };
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-
-/// Parse Python function parameters from the text between parentheses.
-///
-/// Handles formats like:
-/// - `x: int`
-/// - `y: str = 'default'`
-/// - `*args`
-/// - `**kwargs`
-/// - `self`
-fn parse_python_params(params_text: &str) -> Vec<ParamInfo> {
-    let mut params = Vec::new();
-    let trimmed = params_text.trim();
-    if trimmed.is_empty() {
-        return params;
-    }
-
-    // Split by commas, but respect brackets for generic types like List[int]
-    let mut current = String::new();
-    let mut bracket_depth: usize = 0;
-    let mut paren_depth: usize = 0;
-
-    for ch in trimmed.chars() {
-        match ch {
-            '[' => {
-                bracket_depth += 1;
-                current.push(ch);
-            }
-            ']' => {
-                bracket_depth = bracket_depth.saturating_sub(1);
-                current.push(ch);
-            }
-            '(' => {
-                paren_depth += 1;
-                current.push(ch);
-            }
-            ')' => {
-                paren_depth = paren_depth.saturating_sub(1);
-                current.push(ch);
-            }
-            ',' if bracket_depth == 0 && paren_depth == 0 => {
-                let param = parse_single_param(current.trim());
-                if let Some(p) = param {
-                    params.push(p);
-                }
-                current.clear();
-            }
-            _ => current.push(ch),
-        }
-    }
-
-    // Don't forget the last parameter
-    if !current.trim().is_empty()
-        && let Some(p) = parse_single_param(current.trim())
-    {
-        params.push(p);
-    }
-
-    params
-}
-
-/// Parse a single Python parameter like `x: int = 5` or `*args` or `**kwargs`.
-fn parse_single_param(param: &str) -> Option<ParamInfo> {
-    let param = param.trim();
-    if param.is_empty() {
-        return None;
-    }
-
-    // Handle *args and **kwargs
-    let (name_part, is_variadic) = if let Some(rest) = param.strip_prefix("**") {
-        (rest, true)
-    } else if let Some(rest) = param.strip_prefix('*') {
-        (rest, true)
-    } else {
-        (param, false)
-    };
-
-    // Check for default value
-    let (before_default, has_default) = if let Some(pos) = name_part.find('=') {
-        (&name_part[..pos], true)
-    } else {
-        (name_part, false)
-    };
-
-    // Check for type annotation
-    let (name, type_annotation) = if let Some(pos) = before_default.find(':') {
-        let n = before_default[..pos].trim();
-        let t = before_default[pos + 1..].trim();
-        (
-            n,
-            if t.is_empty() {
-                None
-            } else {
-                Some(t.to_string())
-            },
-        )
-    } else {
-        (before_default.trim(), None)
-    };
-
-    // Reconstruct name with prefix for variadic params
-    let final_name = if is_variadic {
-        if param.starts_with("**") {
-            format!("**{}", name)
-        } else {
-            format!("*{}", name)
-        }
-    } else {
-        name.to_string()
-    };
-
-    if final_name.is_empty() || final_name == "*" || final_name == "**" {
-        return None;
-    }
-
-    Some(ParamInfo {
-        name: final_name,
-        type_annotation,
-        has_default,
-    })
-}
-
-/// Process a `from X import Y, Z` statement and update analysis.
-///
-/// This is extracted to handle both single-line and multiline imports uniformly.
-#[allow(clippy::too_many_arguments)]
-fn process_from_import(
-    module: &str,
-    names_clean: &str,
-    path: &Path,
-    root: &Path,
-    py_roots: &[PathBuf],
-    extensions: Option<&HashSet<String>>,
-    stdlib: &HashSet<String>,
-    is_type_checking: bool,
-    is_lazy: bool,
-    _indent: usize,
-    line_num: usize,
-    is_package_init: bool,
-    analysis: &mut FileAnalysis,
-) {
-    let module = module.trim().trim_end_matches('.');
-    if module.is_empty() {
-        return;
-    }
-
-    let mut entry = ImportEntry::new(module.to_string(), ImportKind::Static);
-    let (resolved, resolution) =
-        resolve_python_import(module, path, root, py_roots, extensions, stdlib);
-    entry.resolution = resolution;
-    entry.resolved_path = resolved.clone();
-    entry.is_type_checking = is_type_checking;
-    entry.is_lazy = is_lazy;
-    entry.source_raw = format!("from {} import {}", module, names_clean);
-
-    if names_clean != "*" {
-        for sym in names_clean.split(',') {
-            let sym = sym.trim();
-            if sym.is_empty() {
-                continue;
-            }
-            let (name, alias) = if let Some((lhs, rhs)) = sym.split_once(" as ") {
-                (lhs.trim(), Some(rhs.trim().to_string()))
-            } else {
-                (sym, None)
-            };
-            entry.symbols.push(ImportSymbol {
-                name: name.to_string(),
-                alias,
-                is_default: false,
-            });
-        }
-    }
-    analysis.imports.push(entry);
-
-    // Python package API re-export pattern:
-    // __init__.py often re-exports names via `from .mod import Foo as Bar`.
-    // Treat these as re-exports (not fresh definitions) to reduce duplicate/dead noise.
-    if is_package_init && names_clean != "*" {
-        let mut name_pairs: Vec<(String, String)> = Vec::new();
-        for sym in names_clean.split(',') {
-            let sym = sym.trim();
-            if sym.is_empty() {
-                continue;
-            }
-            let (original, exported) = if let Some((lhs, rhs)) = sym.split_once(" as ") {
-                (lhs.trim(), rhs.trim())
-            } else {
-                (sym, sym)
-            };
-            if exported.is_empty() || exported.starts_with('_') {
-                continue;
-            }
-            name_pairs.push((original.to_string(), exported.to_string()));
-            analysis.exports.push(ExportSymbol::new(
-                exported.to_string(),
-                "reexport",
-                "named",
-                Some(line_num),
-            ));
-        }
-
-        if !name_pairs.is_empty() {
-            analysis.reexports.push(ReexportEntry {
-                source: module.to_string(),
-                kind: ReexportKind::Named(name_pairs),
-                resolved: resolved.clone(),
-            });
-        }
-    }
-
-    if names_clean == "*" {
-        let mut entry = ReexportEntry {
-            source: module.to_string(),
-            kind: ReexportKind::Star,
-            resolved: resolved.clone(),
-        };
-        if let Some(names) = read_all_from_resolved(&resolved, root) {
-            for name in &names {
-                analysis
-                    .exports
-                    .push(ExportSymbol::new(name.clone(), "reexport", "named", None));
-            }
-            // Star imports have no aliases - original and exported are the same
-            let name_pairs: Vec<(String, String)> =
-                names.into_iter().map(|n| (n.clone(), n)).collect();
-            entry.kind = ReexportKind::Named(name_pairs);
-        }
-        analysis.reexports.push(entry);
-    }
-}
 
 /// Main entry point for Python file analysis.
 ///
@@ -302,8 +71,6 @@ pub(crate) fn analyze_py_file(
     let mut pending_routes: Vec<crate::types::RouteInfo> = Vec::new();
     let mut pending_fixture_name: Option<String> = None;
     let mut in_docstring = false;
-    // State for multiline imports: (module, accumulated_symbols, start_line, is_type_checking, is_lazy)
-    let mut pending_multiline_from: Option<(String, Vec<String>, usize, bool, bool)> = None;
     let is_package_init = path
         .file_name()
         .and_then(|n| n.to_str())
@@ -388,55 +155,6 @@ pub(crate) fn analyze_py_file(
             continue;
         }
 
-        // Handle multiline import continuation
-        if let Some((ref module, ref mut symbols, start_line, is_tc, is_lz)) =
-            pending_multiline_from
-        {
-            // Accumulate symbols from continuation lines
-            let line_content = trimmed.trim_end_matches(')').trim_end_matches(',');
-            let line_content = line_content.split('#').next().unwrap_or("").trim();
-
-            // Parse symbols from this line
-            for sym in line_content.split(',') {
-                let sym = sym.trim();
-                if sym.is_empty() {
-                    continue;
-                }
-                symbols.push(sym.to_string());
-            }
-
-            // Check if this line closes the import (contains closing paren)
-            if trimmed.contains(')') {
-                // Process the complete multiline import
-                let module_clone = module.clone();
-                let symbols_clone = symbols.clone();
-                let start_line_val = start_line;
-                let is_type_checking = is_tc;
-                let is_lazy = is_lz;
-
-                // Clear pending state before processing
-                pending_multiline_from = None;
-
-                // Process the import
-                process_from_import(
-                    &module_clone,
-                    &symbols_clone.join(", "),
-                    path,
-                    root,
-                    py_roots,
-                    extensions,
-                    stdlib,
-                    is_type_checking,
-                    is_lazy,
-                    indent,
-                    start_line_val,
-                    is_package_init,
-                    &mut analysis,
-                );
-            }
-            continue;
-        }
-
         if let Some(rest) = trimmed.strip_prefix("import ") {
             for part in rest.split(',') {
                 let mut name = part.trim();
@@ -458,54 +176,98 @@ pub(crate) fn analyze_py_file(
             && let Some((module, names_raw)) = rest.split_once(" import ")
         {
             let module = module.trim().trim_end_matches('.');
-            let names_raw_trimmed = names_raw.trim();
+            let names_clean = names_raw.trim().trim_matches('(').trim_matches(')');
+            let names_clean = names_clean.split('#').next().unwrap_or("").trim();
+            if !module.is_empty() {
+                let mut entry = ImportEntry::new(module.to_string(), ImportKind::Static);
+                let (resolved, resolution) =
+                    resolve_python_import(module, path, root, py_roots, extensions, stdlib);
+                entry.resolution = resolution;
+                entry.resolved_path = resolved.clone();
+                entry.is_type_checking = in_type_checking;
+                entry.is_lazy = indent > 0;
+                entry.source_raw = format!("from {} import {}", module, names_clean);
 
-            // Check if this is a multiline import: starts with ( but doesn't end with )
-            let is_multiline_start =
-                names_raw_trimmed.starts_with('(') && !names_raw_trimmed.contains(')');
-
-            if is_multiline_start {
-                // Start accumulating multiline import
-                // Extract any symbols on the first line after the opening paren
-                let first_line_symbols = names_raw_trimmed
-                    .trim_start_matches('(')
-                    .split('#')
-                    .next()
-                    .unwrap_or("")
-                    .trim();
-                let mut initial_symbols: Vec<String> = Vec::new();
-                for sym in first_line_symbols.split(',') {
-                    let sym = sym.trim();
-                    if !sym.is_empty() {
-                        initial_symbols.push(sym.to_string());
+                if names_clean != "*" {
+                    for sym in names_clean.split(',') {
+                        let sym = sym.trim();
+                        if sym.is_empty() {
+                            continue;
+                        }
+                        let (name, alias) = if let Some((lhs, rhs)) = sym.split_once(" as ") {
+                            (lhs.trim(), Some(rhs.trim().to_string()))
+                        } else {
+                            (sym, None)
+                        };
+                        entry.symbols.push(ImportSymbol {
+                            name: name.to_string(),
+                            alias,
+                            is_default: false,
+                        });
                     }
                 }
-                pending_multiline_from = Some((
-                    module.to_string(),
-                    initial_symbols,
-                    line_num,
-                    in_type_checking,
-                    indent > 0,
-                ));
-            } else {
-                // Single-line import - process immediately
-                let names_clean = names_raw_trimmed.trim_matches('(').trim_matches(')');
-                let names_clean = names_clean.split('#').next().unwrap_or("").trim();
-                process_from_import(
-                    module,
-                    names_clean,
-                    path,
-                    root,
-                    py_roots,
-                    extensions,
-                    stdlib,
-                    in_type_checking,
-                    indent > 0,
-                    indent,
-                    line_num,
-                    is_package_init,
-                    &mut analysis,
-                );
+                analysis.imports.push(entry);
+
+                // Python package API re-export pattern:
+                // __init__.py often re-exports names via `from .mod import Foo as Bar`.
+                // Treat these as re-exports (not fresh definitions) to reduce duplicate/dead noise.
+                if is_package_init && indent == 0 && names_clean != "*" {
+                    let mut name_pairs: Vec<(String, String)> = Vec::new();
+                    for sym in names_clean.split(',') {
+                        let sym = sym.trim();
+                        if sym.is_empty() {
+                            continue;
+                        }
+                        let (original, exported) = if let Some((lhs, rhs)) = sym.split_once(" as ")
+                        {
+                            (lhs.trim(), rhs.trim())
+                        } else {
+                            (sym, sym)
+                        };
+                        if exported.is_empty() || exported.starts_with('_') {
+                            continue;
+                        }
+                        name_pairs.push((original.to_string(), exported.to_string()));
+                        analysis.exports.push(ExportSymbol::new(
+                            exported.to_string(),
+                            "reexport",
+                            "named",
+                            Some(line_num),
+                        ));
+                    }
+
+                    if !name_pairs.is_empty() {
+                        analysis.reexports.push(ReexportEntry {
+                            source: module.to_string(),
+                            kind: ReexportKind::Named(name_pairs),
+                            resolved: resolved.clone(),
+                        });
+                    }
+                }
+            }
+            if names_clean == "*" {
+                let (resolved, _) =
+                    resolve_python_import(module, path, root, py_roots, extensions, stdlib);
+                let mut entry = ReexportEntry {
+                    source: module.to_string(),
+                    kind: ReexportKind::Star,
+                    resolved: resolved.clone(),
+                };
+                if let Some(names) = read_all_from_resolved(&resolved, root) {
+                    for name in &names {
+                        analysis.exports.push(ExportSymbol::new(
+                            name.clone(),
+                            "reexport",
+                            "named",
+                            None,
+                        ));
+                    }
+                    // Star imports have no aliases - original and exported are the same
+                    let name_pairs: Vec<(String, String)> =
+                        names.into_iter().map(|n| (n.clone(), n)).collect();
+                    entry.kind = ReexportKind::Named(name_pairs);
+                }
+                analysis.reexports.push(entry);
             }
         } else {
             // Detect callback assignment patterns (callback=self.refresh or callback=refresh)
@@ -566,31 +328,19 @@ pub(crate) fn analyze_py_file(
                         }
                     }
                 }
-            } else if let Some(rest) = trimmed
-                .strip_prefix("async def ")
-                .or_else(|| trimmed.strip_prefix("def "))
-            {
-                // Handle both "def foo" and "async def foo"
-                // Extract function name and parameters
-                let (name, params_text) = if let Some(paren_pos) = rest.find('(') {
-                    let fn_name = rest[..paren_pos].trim().trim_matches(':');
-                    // Find matching closing paren
-                    let after_open = &rest[paren_pos + 1..];
-                    let close_pos = after_open.find(')').unwrap_or(after_open.len());
-                    let params = &after_open[..close_pos];
-                    (fn_name, params)
-                } else {
-                    (rest.trim().trim_matches(':'), "")
-                };
-
+            } else if let Some(rest) = trimmed.strip_prefix("def ") {
+                let name = rest
+                    .split('(')
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .trim_matches(':');
                 if indent == 0 && !name.starts_with('_') && !name.is_empty() {
-                    let params = parse_python_params(params_text);
-                    analysis.exports.push(ExportSymbol::with_params(
+                    analysis.exports.push(ExportSymbol::new(
                         name.to_string(),
                         "def",
                         "named",
                         Some(line_num),
-                        params,
                     ));
                 }
 
@@ -641,17 +391,10 @@ pub(crate) fn analyze_py_file(
         }
     }
 
-    // Process __all__ list: only add exports that aren't already defined
-    // in this file (e.g., by class/def). This avoids "twins" false positives
-    // where `__all__ = ["Foo"]` duplicates `class Foo:`.
-    let existing_export_names: std::collections::HashSet<String> =
-        analysis.exports.iter().map(|e| e.name.clone()).collect();
     for name in parse_all_list(content) {
-        if !existing_export_names.contains(&name) {
-            analysis
-                .exports
-                .push(ExportSymbol::new(name, "__all__", "named", None));
-        }
+        analysis
+            .exports
+            .push(ExportSymbol::new(name, "__all__", "named", None));
     }
 
     // Detect Python entry points
@@ -689,10 +432,6 @@ pub(crate) fn analyze_py_file(
     // Detect exec/eval/compile dynamic code generation patterns
     // This catches template strings like "def get%s" that generate symbols dynamically
     analysis.dynamic_exec_templates = detect_dynamic_exec_templates(content);
-
-    // Detect sys.modules monkey-patching (e.g., sys.modules['compat'] = wrapper)
-    // Files with these patterns have all exports accessible at runtime via the injected name
-    analysis.sys_modules_injections = detect_sys_modules_injection(content);
 
     // Detect Python concurrency race indicators
     analysis.py_race_indicators = detect_py_race_indicators(content);
@@ -1360,54 +1099,6 @@ def list_patients():
     }
 
     #[test]
-    fn captures_async_def_fastapi_route() {
-        let dir = tempdir().expect("tempdir");
-        let root = dir.path();
-
-        // Test that async def functions are correctly associated with routes
-        let content = r#"
-from fastapi import APIRouter
-router = APIRouter()
-
-@router.post("/items")
-async def create_item(data: dict):
-    return {"created": True}
-
-@router.get("/items/{item_id}")
-async def get_item(item_id: int):
-    return {"id": item_id}
-"#;
-
-        let analysis = analyze_py_file(
-            content,
-            &root.join("api.py"),
-            root,
-            Some(&py_exts()),
-            "api.py".to_string(),
-            &[root.to_path_buf()],
-            &HashSet::new(),
-        );
-
-        assert_eq!(
-            analysis.routes.len(),
-            2,
-            "Should detect both async def routes"
-        );
-
-        let post_route = &analysis.routes[0];
-        assert_eq!(post_route.framework, "fastapi");
-        assert_eq!(post_route.method, "POST");
-        assert_eq!(post_route.path.as_deref(), Some("/items"));
-        assert_eq!(post_route.name.as_deref(), Some("create_item"));
-
-        let get_route = &analysis.routes[1];
-        assert_eq!(get_route.framework, "fastapi");
-        assert_eq!(get_route.method, "GET");
-        assert_eq!(get_route.path.as_deref(), Some("/items/{item_id}"));
-        assert_eq!(get_route.name.as_deref(), Some("get_item"));
-    }
-
-    #[test]
     fn captures_flask_route_methods_list() {
         let dir = tempdir().expect("tempdir");
         let root = dir.path();
@@ -1612,414 +1303,5 @@ class MyHelper:
 
         assert!(analysis.exports.iter().any(|e| e.name == "MyClass"));
         assert!(analysis.exports.iter().any(|e| e.name == "MyHelper"));
-    }
-
-    #[test]
-    fn parses_multiline_from_import() {
-        let dir = tempdir().expect("tempdir");
-        let root = dir.path();
-        std::fs::create_dir_all(root.join("pkg/sub")).expect("mkdir pkg/sub");
-        std::fs::write(
-            root.join("pkg/sub/adapter.py"),
-            "class AnthropicMessagesAdapter:\n    pass\n\nclass OtherClass:\n    pass\n",
-        )
-        .expect("write adapter.py");
-        std::fs::write(root.join("pkg/__init__.py"), "").expect("write pkg init");
-        std::fs::write(root.join("pkg/sub/__init__.py"), "").expect("write sub init");
-
-        let content = r#"
-from pkg.sub.adapter import (
-    AnthropicMessagesAdapter,
-)
-
-def use_adapter():
-    return AnthropicMessagesAdapter()
-"#;
-
-        let path = root.join("router.py");
-        let analysis = analyze_py_file(
-            content,
-            &path,
-            root,
-            Some(&py_exts()),
-            "router.py".to_string(),
-            &[root.to_path_buf()],
-            python_stdlib_set(),
-        );
-
-        // Should have found the import
-        assert!(
-            !analysis.imports.is_empty(),
-            "multiline import should be parsed"
-        );
-
-        let imp = analysis
-            .imports
-            .iter()
-            .find(|i| i.source == "pkg.sub.adapter")
-            .expect("pkg.sub.adapter import should exist");
-
-        // Should have extracted the symbol
-        assert_eq!(imp.symbols.len(), 1, "should have one imported symbol");
-        assert_eq!(
-            imp.symbols[0].name, "AnthropicMessagesAdapter",
-            "symbol name should match"
-        );
-
-        // Should have resolved to local file
-        assert_eq!(
-            imp.resolution,
-            ImportResolutionKind::Local,
-            "should resolve as local"
-        );
-        assert!(
-            imp.resolved_path
-                .as_ref()
-                .is_some_and(|p| p.contains("adapter.py")),
-            "should resolve to adapter.py"
-        );
-    }
-
-    #[test]
-    fn parses_multiline_from_import_multiple_symbols() {
-        let dir = tempdir().expect("tempdir");
-        let root = dir.path();
-        std::fs::create_dir_all(root.join("mypackage")).expect("mkdir mypackage");
-        std::fs::write(
-            root.join("mypackage/models.py"),
-            "class Foo:\n    pass\n\nclass Bar:\n    pass\n\nclass Baz:\n    pass\n",
-        )
-        .expect("write models.py");
-        std::fs::write(root.join("mypackage/__init__.py"), "").expect("write init");
-
-        let content = r#"
-from mypackage.models import (
-    Foo,
-    Bar as AliasedBar,
-    Baz,  # trailing comma
-)
-
-x = Foo()
-"#;
-
-        let path = root.join("main.py");
-        let analysis = analyze_py_file(
-            content,
-            &path,
-            root,
-            Some(&py_exts()),
-            "main.py".to_string(),
-            &[root.to_path_buf()],
-            python_stdlib_set(),
-        );
-
-        let imp = analysis
-            .imports
-            .iter()
-            .find(|i| i.source == "mypackage.models")
-            .expect("mypackage.models import should exist");
-
-        assert_eq!(imp.symbols.len(), 3, "should have three imported symbols");
-
-        let foo = imp.symbols.iter().find(|s| s.name == "Foo");
-        assert!(foo.is_some(), "Foo should be imported");
-        assert!(foo.unwrap().alias.is_none(), "Foo should have no alias");
-
-        let bar = imp.symbols.iter().find(|s| s.name == "Bar");
-        assert!(bar.is_some(), "Bar should be imported");
-        assert_eq!(
-            bar.unwrap().alias.as_deref(),
-            Some("AliasedBar"),
-            "Bar should have alias AliasedBar"
-        );
-
-        let baz = imp.symbols.iter().find(|s| s.name == "Baz");
-        assert!(baz.is_some(), "Baz should be imported");
-    }
-
-    #[test]
-    fn parses_multiline_from_import_in_init_as_reexport() {
-        let dir = tempdir().expect("tempdir");
-        let root = dir.path();
-        std::fs::create_dir_all(root.join("chat/anthropic")).expect("mkdir");
-        std::fs::write(
-            root.join("chat/anthropic/anthropic_messages_adapter.py"),
-            "class AnthropicMessagesAdapter:\n    pass\n",
-        )
-        .expect("write adapter");
-        std::fs::write(root.join("chat/__init__.py"), "").expect("write chat init");
-        std::fs::write(root.join("chat/anthropic/__init__.py"), "").expect("write anthropic init");
-
-        // This is what __init__.py often looks like - multiline import for re-export
-        let content = r#"
-from .anthropic_messages_adapter import (
-    AnthropicMessagesAdapter,
-)
-"#;
-
-        let path = root.join("chat/anthropic/__init__.py");
-        let analysis = analyze_py_file(
-            content,
-            &path,
-            root,
-            Some(&py_exts()),
-            "chat/anthropic/__init__.py".to_string(),
-            &[root.to_path_buf()],
-            python_stdlib_set(),
-        );
-
-        // Should recognize this as a re-export
-        assert!(
-            !analysis.reexports.is_empty(),
-            "should have re-exports from __init__.py"
-        );
-
-        let reexport = analysis
-            .reexports
-            .iter()
-            .find(|r| r.source == ".anthropic_messages_adapter")
-            .expect("should have reexport from .anthropic_messages_adapter");
-
-        match &reexport.kind {
-            ReexportKind::Named(names) => {
-                assert!(
-                    names.iter().any(|(_, e)| e == "AnthropicMessagesAdapter"),
-                    "should re-export AnthropicMessagesAdapter"
-                );
-            }
-            other => panic!("expected named reexport, got {:?}", other),
-        }
-
-        // Should also appear in exports
-        assert!(
-            analysis
-                .exports
-                .iter()
-                .any(|e| e.name == "AnthropicMessagesAdapter" && e.kind == "reexport"),
-            "AnthropicMessagesAdapter should be in exports as reexport"
-        );
-    }
-
-    #[test]
-    fn all_list_does_not_duplicate_class_exports() {
-        let dir = tempdir().expect("tempdir");
-        let root = dir.path();
-
-        // Common Python pattern: class definition + __all__ list
-        let content = r#"
-__all__ = ["Foo", "Bar"]
-
-class Foo:
-    pass
-
-class Bar:
-    pass
-"#;
-
-        let analysis = analyze_py_file(
-            content,
-            &root.join("module.py"),
-            root,
-            Some(&py_exts()),
-            "module.py".to_string(),
-            &[root.to_path_buf()],
-            &HashSet::new(),
-        );
-
-        // Should have exactly 2 exports (Foo and Bar from class definitions)
-        // NOT 4 (which would happen if __all__ duplicated them)
-        let export_names: Vec<_> = analysis.exports.iter().map(|e| &e.name).collect();
-        assert_eq!(
-            export_names.len(),
-            2,
-            "should have 2 exports, not duplicates: {:?}",
-            export_names
-        );
-
-        // Both should be class exports, not __all__ exports
-        let foo_export = analysis.exports.iter().find(|e| e.name == "Foo");
-        assert!(foo_export.is_some());
-        assert_eq!(
-            foo_export.unwrap().kind,
-            "class",
-            "Foo should be class export, not __all__"
-        );
-    }
-
-    #[test]
-    fn all_list_adds_exports_not_defined_in_file() {
-        let dir = tempdir().expect("tempdir");
-        let root = dir.path();
-
-        // __all__ can export names imported from elsewhere (re-export pattern)
-        let content = r#"
-from .submodule import ExternalClass
-
-__all__ = ["ExternalClass", "LocalClass"]
-
-class LocalClass:
-    pass
-"#;
-
-        let analysis = analyze_py_file(
-            content,
-            &root.join("module.py"),
-            root,
-            Some(&py_exts()),
-            "module.py".to_string(),
-            &[root.to_path_buf()],
-            &HashSet::new(),
-        );
-
-        let export_names: Vec<_> = analysis.exports.iter().map(|e| &e.name).collect();
-
-        // LocalClass should be class export
-        let local = analysis.exports.iter().find(|e| e.name == "LocalClass");
-        assert!(local.is_some());
-        assert_eq!(local.unwrap().kind, "class");
-
-        // ExternalClass should be __all__ export (not defined locally)
-        let external = analysis.exports.iter().find(|e| e.name == "ExternalClass");
-        assert!(
-            external.is_some(),
-            "ExternalClass should be in exports: {:?}",
-            export_names
-        );
-        assert_eq!(
-            external.unwrap().kind,
-            "__all__",
-            "ExternalClass should be __all__ export since not defined locally"
-        );
-    }
-
-    #[test]
-    fn parses_function_params() {
-        let dir = tempdir().expect("tempdir");
-        let root = dir.path();
-
-        let content = r#"
-def simple(x, y):
-    pass
-
-def typed(x: int, y: str):
-    pass
-
-def with_defaults(x: int = 5, y: str = 'hello'):
-    pass
-
-def variadic(*args, **kwargs):
-    pass
-
-def typed_variadic(*args: tuple, **kwargs: dict):
-    pass
-
-def mixed(self, x: int, y: str = 'default', *args, **kwargs):
-    pass
-
-async def async_typed(request: Request, db: Database) -> Response:
-    pass
-"#;
-
-        let analysis = analyze_py_file(
-            content,
-            &root.join("module.py"),
-            root,
-            Some(&py_exts()),
-            "module.py".to_string(),
-            &[root.to_path_buf()],
-            &HashSet::new(),
-        );
-
-        // Test simple function
-        let simple = analysis.exports.iter().find(|e| e.name == "simple");
-        assert!(simple.is_some(), "simple function should be exported");
-        let simple_params = &simple.unwrap().params;
-        assert_eq!(simple_params.len(), 2);
-        assert_eq!(simple_params[0].name, "x");
-        assert!(simple_params[0].type_annotation.is_none());
-        assert!(!simple_params[0].has_default);
-
-        // Test typed function
-        let typed = analysis.exports.iter().find(|e| e.name == "typed");
-        assert!(typed.is_some());
-        let typed_params = &typed.unwrap().params;
-        assert_eq!(typed_params.len(), 2);
-        assert_eq!(typed_params[0].name, "x");
-        assert_eq!(typed_params[0].type_annotation.as_deref(), Some("int"));
-        assert_eq!(typed_params[1].type_annotation.as_deref(), Some("str"));
-
-        // Test function with defaults
-        let with_defaults = analysis.exports.iter().find(|e| e.name == "with_defaults");
-        assert!(with_defaults.is_some());
-        let wd_params = &with_defaults.unwrap().params;
-        assert!(wd_params[0].has_default);
-        assert!(wd_params[1].has_default);
-
-        // Test variadic function
-        let variadic = analysis.exports.iter().find(|e| e.name == "variadic");
-        assert!(variadic.is_some());
-        let var_params = &variadic.unwrap().params;
-        assert_eq!(var_params.len(), 2);
-        assert_eq!(var_params[0].name, "*args");
-        assert_eq!(var_params[1].name, "**kwargs");
-
-        // Test mixed function
-        let mixed = analysis.exports.iter().find(|e| e.name == "mixed");
-        assert!(mixed.is_some());
-        let mixed_params = &mixed.unwrap().params;
-        assert_eq!(mixed_params.len(), 5);
-        assert_eq!(mixed_params[0].name, "self");
-        assert_eq!(mixed_params[1].name, "x");
-        assert_eq!(mixed_params[1].type_annotation.as_deref(), Some("int"));
-        assert!(!mixed_params[1].has_default);
-        assert_eq!(mixed_params[2].name, "y");
-        assert!(mixed_params[2].has_default);
-        assert_eq!(mixed_params[3].name, "*args");
-        assert_eq!(mixed_params[4].name, "**kwargs");
-
-        // Test async function
-        let async_typed = analysis.exports.iter().find(|e| e.name == "async_typed");
-        assert!(async_typed.is_some());
-        let async_params = &async_typed.unwrap().params;
-        assert_eq!(async_params.len(), 2);
-        assert_eq!(async_params[0].name, "request");
-        assert_eq!(async_params[0].type_annotation.as_deref(), Some("Request"));
-        assert_eq!(async_params[1].type_annotation.as_deref(), Some("Database"));
-    }
-
-    #[test]
-    fn parses_complex_type_annotations() {
-        let dir = tempdir().expect("tempdir");
-        let root = dir.path();
-
-        let content = r#"
-def generic(items: List[Dict[str, Any]], callback: Callable[[int], bool]) -> Optional[str]:
-    pass
-"#;
-
-        let analysis = analyze_py_file(
-            content,
-            &root.join("module.py"),
-            root,
-            Some(&py_exts()),
-            "module.py".to_string(),
-            &[root.to_path_buf()],
-            &HashSet::new(),
-        );
-
-        let generic = analysis.exports.iter().find(|e| e.name == "generic");
-        assert!(generic.is_some());
-        let params = &generic.unwrap().params;
-        assert_eq!(params.len(), 2);
-        assert_eq!(params[0].name, "items");
-        assert_eq!(
-            params[0].type_annotation.as_deref(),
-            Some("List[Dict[str, Any]]")
-        );
-        assert_eq!(params[1].name, "callback");
-        assert_eq!(
-            params[1].type_annotation.as_deref(),
-            Some("Callable[[int], bool]")
-        );
     }
 }

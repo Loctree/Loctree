@@ -48,28 +48,10 @@ pub struct SimilarityCandidate {
     pub score: f64,
 }
 
-/// Search for symbol occurrences across analyzed files (case-insensitive).
-/// Supports regex patterns (e.g., `foo|bar` for OR matching).
+/// Search for symbol occurrences across analyzed files (case-insensitive, substring).
 /// Falls back to export list so it works even without `--symbol` pre-scan.
 pub fn search_symbol(symbol: &str, analyses: &[FileAnalysis]) -> SymbolSearchResult {
-    use regex::RegexBuilder;
-
-    // Build case-insensitive regex matcher
-    let matcher = RegexBuilder::new(symbol)
-        .case_insensitive(true)
-        .build()
-        .ok();
-
-    // Fallback to simple contains if regex is invalid
     let needle = symbol.to_lowercase();
-    let matches_text = |text: &str| -> bool {
-        if let Some(ref re) = matcher {
-            re.is_match(text)
-        } else {
-            text.to_lowercase().contains(&needle)
-        }
-    };
-
     let mut files = Vec::new();
     let mut total_matches = 0;
 
@@ -78,8 +60,8 @@ pub fn search_symbol(symbol: &str, analyses: &[FileAnalysis]) -> SymbolSearchRes
 
         // 1) Recorded line matches (only present if scan was run with --symbol)
         for m in &analysis.matches {
-            if matches_text(&m.context) {
-                let ctx_lower = m.context.to_lowercase();
+            let ctx_lower = m.context.to_lowercase();
+            if ctx_lower.contains(&needle) {
                 let is_def = ctx_lower.contains("export ")
                     || ctx_lower.contains("pub ")
                     || ctx_lower.contains("function ")
@@ -96,9 +78,9 @@ pub fn search_symbol(symbol: &str, analyses: &[FileAnalysis]) -> SymbolSearchRes
             }
         }
 
-        // 2) Exports list (always available) - regex or substring match
+        // 2) Exports list (always available) - substring / case-insensitive
         for exp in &analysis.exports {
-            if matches_text(&exp.name) {
+            if exp.name.to_lowercase().contains(&needle) {
                 matches.push(SymbolMatch {
                     line: exp.line.unwrap_or(0),
                     context: format!("export {} {}", exp.kind, exp.name),

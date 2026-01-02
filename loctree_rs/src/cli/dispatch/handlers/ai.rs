@@ -374,6 +374,9 @@ pub fn handle_twins_command(opts: &TwinsOptions, global: &GlobalOptions) -> Disp
     };
     use std::path::Path;
 
+    // Deprecation warning (goes to stderr, won't break piped output)
+    warn_deprecated("twins", "loct --findings");
+
     // Show spinner unless in quiet/json mode
     let spinner = if !global.quiet && !global.json {
         Some(Spinner::new("Analyzing semantic duplicates..."))
@@ -412,27 +415,8 @@ pub fn handle_twins_command(opts: &TwinsOptions, global: &GlobalOptions) -> Disp
         );
     }
 
-    // Load suppressions (unless --include-suppressed)
-    let suppressions = if opts.include_suppressed {
-        Suppressions::default()
-    } else {
-        Suppressions::load(root)
-    };
-
     // Run dead parrot analysis
-    let mut dead_result = find_dead_parrots(&snapshot.files, opts.dead_only, opts.include_tests);
-
-    // Filter out suppressed dead parrots
-    if !opts.include_suppressed {
-        dead_result.dead_parrots.retain(|dp| {
-            !suppressions.is_suppressed(&SuppressionType::DeadParrot, &dp.name, Some(&dp.file_path))
-                && !suppressions.is_suppressed(
-                    &SuppressionType::DeadExport,
-                    &dp.name,
-                    Some(&dp.file_path),
-                )
-        });
-    }
+    let dead_result = find_dead_parrots(&snapshot.files, opts.dead_only, opts.include_tests);
 
     // Run exact twins detection with framework awareness (unless dead_only)
     let frameworks_opt = if detected_frameworks.is_empty() {
@@ -441,16 +425,11 @@ pub fn handle_twins_command(opts: &TwinsOptions, global: &GlobalOptions) -> Disp
         Some(detected_frameworks.as_slice())
     };
 
-    let mut twins = if !opts.dead_only {
+    let twins = if !opts.dead_only {
         detect_exact_twins_with_frameworks(&snapshot.files, opts.include_tests, frameworks_opt)
     } else {
         Vec::new()
     };
-
-    // Filter out suppressed twins
-    if !opts.include_suppressed {
-        twins.retain(|twin| !suppressions.is_suppressed(&SuppressionType::Twins, &twin.name, None));
-    }
 
     // Run barrel chaos analysis (unless dead_only)
     let barrel_analysis = if !opts.dead_only {

@@ -451,7 +451,7 @@
 
       clearTimeout(nodeHoverTimeout);
       nodeHoverTimeout = setTimeout(() => {
-        tooltip.textContent = ''; // Clear previous
+        tooltip.innerHTML = ''; // Clear previous
 
         // File path
         const pathDiv = document.createElement('div');
@@ -459,22 +459,14 @@
         pathDiv.textContent = data.fullPath;
         tooltip.appendChild(pathDiv);
 
-        // Stats - using safe DOM APIs (no innerHTML with user data)
+        // Stats
         const statsDiv = document.createElement('div');
         statsDiv.style.cssText = 'margin-bottom: 8px; font-size: 11px; opacity: 0.9;';
-
-        const exportRow = document.createElement('div');
-        exportRow.textContent = `Exports: ${data.exportCount}`;
-        statsDiv.appendChild(exportRow);
-
-        const deadRow = document.createElement('div');
-        deadRow.textContent = `Dead Parrots: ${data.deadParrotCount}`;
-        statsDiv.appendChild(deadRow);
-
-        const connRow = document.createElement('div');
-        connRow.textContent = `Connections: ${node.degree()}`;
-        statsDiv.appendChild(connRow);
-
+        statsDiv.innerHTML = `
+          <div>Exports: ${data.exportCount}</div>
+          <div>Dead Parrots: ${data.deadParrotCount}</div>
+          <div>Connections: ${node.degree()}</div>
+        `;
         tooltip.appendChild(statsDiv);
 
         // Dead parrots list
@@ -529,7 +521,7 @@
 
       clearTimeout(edgeHoverTimeout);
       edgeHoverTimeout = setTimeout(() => {
-        tooltip.textContent = '';
+        tooltip.innerHTML = '';
 
         const titleDiv = document.createElement('div');
         titleDiv.style.cssText = 'font-weight: bold; margin-bottom: 8px; color: #a855f7;';
@@ -633,54 +625,30 @@
       color: #fff;
     `;
 
-    // Stats display - using safe DOM APIs
+    // Stats display
     const statsDiv = document.createElement('div');
     statsDiv.style.cssText = 'display: flex; gap: 16px; margin-right: auto;';
-
-    const filesSpan = document.createElement('span');
-    const filesLabel = document.createElement('strong');
-    filesLabel.textContent = 'Files:';
-    filesSpan.appendChild(filesLabel);
-    filesSpan.appendChild(document.createTextNode(` ${stats.totalFiles}`));
-    statsDiv.appendChild(filesSpan);
-
-    const twinsSpan = document.createElement('span');
-    const twinsLabel = document.createElement('strong');
-    twinsLabel.textContent = 'Twins:';
-    twinsSpan.appendChild(twinsLabel);
-    twinsSpan.appendChild(document.createTextNode(` ${stats.totalTwins}`));
-    statsDiv.appendChild(twinsSpan);
-
-    const deadSpan = document.createElement('span');
-    const deadLabel = document.createElement('strong');
-    deadLabel.textContent = 'Dead Parrots:';
-    deadSpan.appendChild(deadLabel);
-    deadSpan.appendChild(document.createTextNode(` ${stats.totalDeadParrots}`));
-    statsDiv.appendChild(deadSpan);
-
+    statsDiv.innerHTML = `
+      <span><strong>Files:</strong> ${stats.totalFiles}</span>
+      <span><strong>Twins:</strong> ${stats.totalTwins}</span>
+      <span><strong>Dead Parrots:</strong> ${stats.totalDeadParrots}</span>
+    `;
     toolbar.appendChild(statsDiv);
 
     // Layout selector
     const layoutLabel = document.createElement('label');
     layoutLabel.style.cssText = 'display: flex; gap: 6px; align-items: center;';
-    const layoutText = document.createElement('span');
-    layoutText.textContent = 'Layout:';
-    layoutLabel.appendChild(layoutText);
+    layoutLabel.innerHTML = '<span>Layout:</span>';
 
     const layoutSelect = document.createElement('select');
     layoutSelect.style.cssText = 'background: #1a1a2e; color: #fff; border: 1px solid #444; padding: 4px 8px; border-radius: 4px;';
-    [
-      { value: 'cose', text: 'Force (COSE)' },
-      { value: 'cose-bilkent', text: 'Force (Bilkent)' },
-      { value: 'concentric', text: 'Concentric' },
-      { value: 'circle', text: 'Circle' },
-      { value: 'grid', text: 'Grid' }
-    ].forEach(opt => {
-      const option = document.createElement('option');
-      option.value = opt.value;
-      option.textContent = opt.text;
-      layoutSelect.appendChild(option);
-    });
+    layoutSelect.innerHTML = `
+      <option value="cose">Force (COSE)</option>
+      <option value="cose-bilkent">Force (Bilkent)</option>
+      <option value="concentric">Concentric</option>
+      <option value="circle">Circle</option>
+      <option value="grid">Grid</option>
+    `;
     layoutLabel.appendChild(layoutSelect);
     toolbar.appendChild(layoutLabel);
 

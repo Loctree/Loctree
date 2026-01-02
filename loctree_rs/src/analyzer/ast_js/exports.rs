@@ -76,43 +76,18 @@ impl<'a> JsVisitor<'a> {
                         for d in &var.declarations {
                             if let BindingPatternKind::BindingIdentifier(id) = &d.id.kind {
                                 let name = id.name.to_string();
-                                // Check if it's a function expression or arrow function
+                                self.analysis.exports.push(ExportSymbol::new(
+                                    name,
+                                    "var",
+                                    "named",
+                                    Some(line),
+                                ));
                                 if let Some(init) = &d.init {
                                     if let Expression::FunctionExpression(fun) = init {
-                                        let params = self.extract_function_params(fun);
-                                        self.analysis.exports.push(ExportSymbol::with_params(
-                                            name,
-                                            "function",
-                                            "named",
-                                            Some(line),
-                                            params,
-                                        ));
                                         self.record_function_signature(id.name.as_str(), fun);
                                     } else if let Expression::ArrowFunctionExpression(fun) = init {
-                                        let params = self.extract_arrow_params(fun);
-                                        self.analysis.exports.push(ExportSymbol::with_params(
-                                            name,
-                                            "function",
-                                            "named",
-                                            Some(line),
-                                            params,
-                                        ));
                                         self.record_arrow_signature(id.name.as_str(), fun);
-                                    } else {
-                                        self.analysis.exports.push(ExportSymbol::new(
-                                            name,
-                                            "var",
-                                            "named",
-                                            Some(line),
-                                        ));
                                     }
-                                } else {
-                                    self.analysis.exports.push(ExportSymbol::new(
-                                        name,
-                                        "var",
-                                        "named",
-                                        Some(line),
-                                    ));
                                 }
                             }
                         }
@@ -122,13 +97,11 @@ impl<'a> JsVisitor<'a> {
                     Declaration::FunctionDeclaration(f) => {
                         if let Some(id) = &f.id {
                             let name = id.name.to_string();
-                            let params = self.extract_function_params(f);
-                            self.analysis.exports.push(ExportSymbol::with_params(
+                            self.analysis.exports.push(ExportSymbol::new(
                                 name,
                                 "function",
                                 "named",
                                 Some(line),
-                                params,
                             ));
                             self.record_function_signature(id.name.as_str(), f);
                         }
@@ -207,13 +180,11 @@ impl<'a> JsVisitor<'a> {
         match &decl.declaration {
             ExportDefaultDeclarationKind::FunctionDeclaration(f) => {
                 let original_name = f.id.as_ref().map(|i| i.name.to_string());
-                let params = self.extract_function_params(f);
-                self.analysis.exports.push(ExportSymbol::with_params(
+                self.analysis.exports.push(ExportSymbol::new(
                     "default".to_string(),
                     "default",
                     original_name.as_deref().unwrap_or("default"),
                     Some(line),
-                    params,
                 ));
                 if let Some(name) = &original_name {
                     self.record_function_signature(name, f);

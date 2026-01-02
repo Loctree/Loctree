@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use crate::types::{ColorMode, DEFAULT_LOC_THRESHOLD, GitSubcommand, Mode, OutputMode};
 
+#[derive(Clone)]
 pub struct ParsedArgs {
     pub extensions: Option<HashSet<String>>,
     pub ignore_patterns: Vec<String>,
@@ -18,6 +19,9 @@ pub struct ParsedArgs {
     pub json_output_path: Option<PathBuf>,
     pub summary: bool,
     pub summary_limit: usize,
+    pub summary_only: bool,
+    pub suppress_duplicates: bool,
+    pub suppress_dynamic: bool,
     pub show_help: bool,
     pub show_help_full: bool,
     pub show_version: bool,
@@ -63,6 +67,8 @@ pub struct ParsedArgs {
     pub full_scan: bool,
     pub slice_target: Option<String>,
     pub slice_consumers: bool,
+    /// Force rescan before slicing (for uncommitted files)
+    pub slice_rescan: bool,
     pub trace_handler: Option<String>,
     /// Unified search query
     pub search_query: Option<String>,
@@ -90,6 +96,18 @@ pub struct ParsedArgs {
     pub with_tests: bool,
     /// Include helper/docs/scripts in dead-export analysis
     pub with_helpers: bool,
+    /// Agent feed / JSON output mode
+    pub for_agent_feed: bool,
+    /// Write agent.json to disk
+    pub agent_json: bool,
+    /// Enforce fresh scan (no snapshot reuse) for agent mode
+    pub force_full_scan: bool,
+    /// Library/framework mode (ignore examples/demos from dead-code noise)
+    pub library_mode: bool,
+    /// Additional example/demo globs to ignore in library mode
+    pub library_example_globs: Vec<String>,
+    /// Python library mode: treat __all__ exports as public API
+    pub python_library: bool,
 }
 
 impl Default for ParsedArgs {
@@ -109,6 +127,9 @@ impl Default for ParsedArgs {
             json_output_path: None,
             summary: false,
             summary_limit: 5,
+            summary_only: false,
+            suppress_duplicates: false,
+            suppress_dynamic: false,
             show_help: false,
             show_help_full: false,
             show_version: false,
@@ -152,6 +173,7 @@ impl Default for ParsedArgs {
             full_scan: false,
             slice_target: None,
             slice_consumers: false,
+            slice_rescan: false,
             trace_handler: None,
             search_query: None,
             search_symbol_only: false,
@@ -166,6 +188,12 @@ impl Default for ParsedArgs {
             commands_unused_only: false,
             with_tests: false,
             with_helpers: false,
+            for_agent_feed: false,
+            agent_json: false,
+            force_full_scan: false,
+            library_mode: false,
+            library_example_globs: Vec::new(),
+            python_library: false,
         }
     }
 }
@@ -383,8 +411,17 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
                 parsed.graph = true;
                 i += 1;
             }
+            "--library-mode" => {
+                parsed.library_mode = true;
+                i += 1;
+            }
             "--verbose" | "-v" => {
                 parsed.verbose = true;
+                i += 1;
+            }
+            "--quiet" | "-q" => {
+                // Recognized but not used in legacy path (legacy mode doesn't emit progress)
+                // This prevents the "Ignoring unknown flag" warning
                 i += 1;
             }
             "--fail-on-missing-handlers" => {
@@ -837,11 +874,13 @@ pub fn parse_args() -> Result<ParsedArgs, String> {
             "--for-ai" | "for-ai" => {
                 parsed.mode = Mode::ForAi;
                 parsed.output = OutputMode::Json;
+                parsed.for_agent_feed = true; // Needed for twins_data in sections
                 i += 1;
             }
             "--for-agent-feed" => {
                 parsed.mode = Mode::ForAi;
                 parsed.output = OutputMode::Jsonl;
+                parsed.for_agent_feed = true; // Needed for twins_data in sections
                 i += 1;
             }
             "--confidence" => {

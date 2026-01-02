@@ -61,51 +61,39 @@ pub fn handle_query_command(opts: &QueryOptions, global: &GlobalOptions) -> Disp
 }
 
 /// Handle the jq query command - execute jaq filter on snapshot
-pub fn handle_jq_query_command(opts: &JqQueryOptions, global: &GlobalOptions) -> DispatchResult {
+pub fn handle_jq_query_command(opts: &JqQueryOptions, _global: &GlobalOptions) -> DispatchResult {
     use crate::jaq_query::{JaqExecutor, format_output};
-    use std::path::Path;
+    use crate::snapshot::Snapshot;
 
-    // Load snapshot (auto-scan if missing)
-    // If user specified explicit snapshot_path, try that first
-    let snapshot = if let Some(ref explicit_path) = opts.snapshot_path {
-        // User specified explicit path - use it directly without auto-create
-        use crate::snapshot::Snapshot;
-        let snapshot_path = match Snapshot::find_latest_snapshot(Some(explicit_path.as_ref())) {
-            Ok(p) => p,
-            Err(e) => {
-                eprintln!("[loct][error] {}", e);
-                eprintln!("[loct][hint] Specified snapshot path not found.");
-                return DispatchResult::Exit(1);
-            }
-        };
-        match std::fs::read_to_string(&snapshot_path)
-            .map_err(std::io::Error::other)
-            .and_then(|content| {
-                serde_json::from_str::<crate::snapshot::Snapshot>(&content)
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-            }) {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("[loct][error] Failed to load snapshot: {}", e);
-                return DispatchResult::Exit(1);
-            }
-        }
-    } else {
-        // No explicit path - use load_or_create_snapshot for auto-scan
-        match load_or_create_snapshot(Path::new("."), global) {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("[loct][error] {}", e);
-                return DispatchResult::Exit(1);
-            }
+    // Find snapshot path
+    let snapshot_path = match Snapshot::find_latest_snapshot(opts.snapshot_path.as_deref()) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("[loct][error] {}", e);
+            eprintln!("[loct][hint] Run 'loct scan' first to create a snapshot.");
+            return DispatchResult::Exit(1);
         }
     };
 
-    // Convert snapshot to JSON value for jaq
-    let snapshot_json = match serde_json::to_value(&snapshot) {
-        Ok(v) => v,
+    // Load snapshot from file directly
+    // snapshot_path is like .loctree/branch@commit/snapshot.json
+    // We need to read it directly, not through Snapshot::load which expects project root
+    let snapshot_json = match std::fs::read_to_string(&snapshot_path) {
+        Ok(content) => match serde_json::from_str::<crate::snapshot::Snapshot>(&content) {
+            Ok(snap) => match serde_json::to_value(&snap) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("[loct][error] Failed to serialize snapshot: {}", e);
+                    return DispatchResult::Exit(1);
+                }
+            },
+            Err(e) => {
+                eprintln!("[loct][error] Failed to parse snapshot: {}", e);
+                return DispatchResult::Exit(1);
+            }
+        },
         Err(e) => {
-            eprintln!("[loct][error] Failed to serialize snapshot: {}", e);
+            eprintln!("[loct][error] Failed to read snapshot file: {}", e);
             return DispatchResult::Exit(1);
         }
     };

@@ -32,22 +32,56 @@ pub struct QueryMatch {
     pub context: Option<String>,
 }
 
-/// Query for files that import a given file (who-imports)
+/// Query for files that import a given file or symbol (who-imports)
 /// Follows re-export chains transitively to find all importers
-pub fn query_who_imports(snapshot: &Snapshot, file: &str) -> QueryResult {
+///
+/// If the input looks like a symbol name (no path separators), it will first
+/// resolve the symbol to file paths where it's defined, then find importers.
+pub fn query_who_imports(snapshot: &Snapshot, target: &str) -> QueryResult {
     use std::collections::HashSet;
 
     let mut results = Vec::new();
     let mut visited: HashSet<String> = HashSet::new();
-    let mut to_check: Vec<String> = vec![file.to_string()];
 
-    // Also check for the file without index suffix (e.g., "foo/index.ts" matches "foo")
-    let normalized = file
-        .trim_end_matches("/index.ts")
-        .trim_end_matches("/index.tsx")
-        .trim_end_matches("/index.js");
-    if normalized != file {
-        to_check.push(normalized.to_string());
+    // Determine if target is a symbol name or file path
+    // Symbol names typically don't contain '/' or file extensions
+    let is_symbol = !target.contains('/')
+        && !target.ends_with(".ts")
+        && !target.ends_with(".tsx")
+        && !target.ends_with(".js")
+        && !target.ends_with(".jsx")
+        && !target.ends_with(".rs")
+        && !target.ends_with(".py");
+
+    // Collect starting files to check
+    let mut to_check: Vec<String> = if is_symbol {
+        // Resolve symbol to file paths
+        let symbol_query = query_where_symbol(snapshot, target);
+        if symbol_query.results.is_empty() {
+            // No definition found - return empty result
+            return QueryResult {
+                kind: "who-imports".to_string(),
+                target: target.to_string(),
+                results: vec![],
+            };
+        }
+        // Start with files where symbol is defined
+        symbol_query.results.into_iter().map(|m| m.file).collect()
+    } else {
+        // Target is already a file path
+        vec![target.to_string()]
+    };
+
+    // For each initial file, also check variants without index suffix
+    let initial_files: Vec<String> = to_check.clone();
+    for file in &initial_files {
+        let normalized = file
+            .trim_end_matches("/index.ts")
+            .trim_end_matches("/index.tsx")
+            .trim_end_matches("/index.js");
+        if normalized != file {
+            to_check.push(normalized.to_string());
+        }
     }
 
     // BFS to follow re-export chains
@@ -112,7 +146,7 @@ pub fn query_who_imports(snapshot: &Snapshot, file: &str) -> QueryResult {
 
     QueryResult {
         kind: "who-imports".to_string(),
-        target: file.to_string(),
+        target: target.to_string(),
         results,
     }
 }

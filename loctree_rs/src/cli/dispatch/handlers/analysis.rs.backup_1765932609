@@ -59,8 +59,6 @@ pub fn handle_dead_command(opts: &DeadOptions, global: &GlobalOptions) -> Dispat
             library_mode: global.library_mode,
             example_globs: Vec::new(),
             python_library_mode: global.python_library,
-            include_ambient: opts.with_ambient,
-            include_dynamic: opts.with_dynamic,
         },
     );
 
@@ -142,7 +140,7 @@ pub fn handle_cycles_command(opts: &CyclesOptions, global: &GlobalOptions) -> Di
     }
 
     // Count by compilability for spinner message
-    let bidirectional_count = classified_cycles
+    let breaking_count = classified_cycles
         .iter()
         .filter(|c| c.compilability == CycleCompilability::Breaking)
         .count();
@@ -158,15 +156,15 @@ pub fn handle_cycles_command(opts: &CyclesOptions, global: &GlobalOptions) -> Di
     if let Some(s) = spinner {
         if opts.breaking_only {
             s.finish_success(&format!(
-                "Found {} high-risk cycle(s) (filtered from {} total)",
-                bidirectional_count,
-                bidirectional_count + structural_count + diamond_count
+                "Found {} breaking cycle(s) (filtered from {} total)",
+                breaking_count,
+                breaking_count + structural_count + diamond_count
             ));
         } else {
             s.finish_success(&format!(
                 "Found {} cycle(s) ({} breaking, {} structural, {} diamond)",
                 classified_cycles.len(),
-                bidirectional_count,
+                breaking_count,
                 structural_count,
                 diamond_count
             ));
@@ -207,8 +205,8 @@ pub fn handle_cycles_command(opts: &CyclesOptions, global: &GlobalOptions) -> Di
         }
     }
 
-    // Exit code: 1 if there are high-risk cycles (for CI use)
-    if bidirectional_count > 0 && opts.breaking_only {
+    // Exit code: 1 if there are breaking cycles (for CI use)
+    if breaking_count > 0 && opts.breaking_only {
         DispatchResult::Exit(1)
     } else {
         DispatchResult::Exit(0)
@@ -1255,8 +1253,6 @@ pub fn handle_zombie_command(opts: &ZombieOptions, global: &GlobalOptions) -> Di
             library_mode: global.library_mode,
             example_globs: Vec::new(),
             python_library_mode: global.python_library,
-            include_ambient: false,
-            include_dynamic: false,
         },
     );
 
@@ -1535,7 +1531,7 @@ pub fn handle_health_command(opts: &HealthOptions, global: &GlobalOptions) -> Di
 
     let (classified_cycles, _) = find_cycles_classified_with_lazy(&edges);
 
-    let high_risk_cycles = classified_cycles
+    let hard_cycles = classified_cycles
         .iter()
         .filter(|c| c.compilability == CycleCompilability::Breaking)
         .count();
@@ -1556,8 +1552,6 @@ pub fn handle_health_command(opts: &HealthOptions, global: &GlobalOptions) -> Di
             library_mode: global.library_mode,
             example_globs: Vec::new(),
             python_library_mode: global.python_library,
-            include_ambient: false,
-            include_dynamic: false,
         },
     );
 
@@ -1581,7 +1575,7 @@ pub fn handle_health_command(opts: &HealthOptions, global: &GlobalOptions) -> Di
         let json = serde_json::json!({
             "cycles": {
                 "total": total_cycles,
-                "high_risk": high_risk_cycles,
+                "hard": hard_cycles,
                 "structural": structural_cycles
             },
             "dead_exports": {
@@ -1602,8 +1596,8 @@ pub fn handle_health_command(opts: &HealthOptions, global: &GlobalOptions) -> Di
             println!("Cycles:      OK (none detected)");
         } else {
             println!(
-                "Cycles:      {} total ({} high-risk, {} structural)",
-                total_cycles, high_risk_cycles, structural_cycles
+                "Cycles:      {} total ({} hard, {} structural)",
+                total_cycles, hard_cycles, structural_cycles
             );
         }
 
@@ -1679,7 +1673,7 @@ pub fn handle_audit_command(opts: &AuditOptions, global: &GlobalOptions) -> Disp
 
     let (classified_cycles, _) = find_cycles_classified_with_lazy(&edges);
 
-    let high_risk_cycles = classified_cycles
+    let hard_cycles = classified_cycles
         .iter()
         .filter(|c| c.compilability == CycleCompilability::Breaking)
         .count();
@@ -1700,8 +1694,6 @@ pub fn handle_audit_command(opts: &AuditOptions, global: &GlobalOptions) -> Disp
             library_mode: global.library_mode,
             example_globs: Vec::new(),
             python_library_mode: global.python_library,
-            include_ambient: false,
-            include_dynamic: false,
         },
     );
 
@@ -1797,7 +1789,7 @@ pub fn handle_audit_command(opts: &AuditOptions, global: &GlobalOptions) -> Disp
         let json = serde_json::json!({
             "cycles": {
                 "total": total_cycles,
-                "high_risk": high_risk_cycles,
+                "hard": hard_cycles,
                 "structural": structural_cycles
             },
             "dead_exports": {
@@ -1856,7 +1848,7 @@ pub fn handle_audit_command(opts: &AuditOptions, global: &GlobalOptions) -> Disp
         if total_cycles == 0 {
             println!("  ✓ No circular imports detected");
         } else {
-            println!("  {} high-risk cycles (breaking)", high_risk_cycles);
+            println!("  {} hard cycles (breaking)", hard_cycles);
             println!("  {} structural cycles", structural_cycles);
         }
         println!();
@@ -1985,7 +1977,7 @@ pub fn handle_doctor_command(opts: &DoctorOptions, global: &GlobalOptions) -> Di
 
     let (classified_cycles, _) = find_cycles_classified_with_lazy(&edges);
 
-    let high_risk_cycles: Vec<_> = classified_cycles
+    let hard_cycles: Vec<_> = classified_cycles
         .iter()
         .filter(|c| c.compilability == CycleCompilability::Breaking)
         .collect();
@@ -2005,8 +1997,6 @@ pub fn handle_doctor_command(opts: &DoctorOptions, global: &GlobalOptions) -> Di
             library_mode: global.library_mode,
             example_globs: Vec::new(),
             python_library_mode: global.python_library,
-            include_ambient: false,
-            include_dynamic: false,
         },
     );
 
@@ -2024,7 +2014,7 @@ pub fn handle_doctor_command(opts: &DoctorOptions, global: &GlobalOptions) -> Di
 
     // 4. Categorize findings
     let mut auto_fixable = high_confidence_dead.len();
-    let mut needs_review = low_confidence_dead.len() + high_risk_cycles.len();
+    let mut needs_review = low_confidence_dead.len() + hard_cycles.len();
     let mut false_positive_patterns: Vec<String> = Vec::new();
 
     for twin in &twins {
@@ -2063,7 +2053,7 @@ pub fn handle_doctor_command(opts: &DoctorOptions, global: &GlobalOptions) -> Di
                 "total_issues": auto_fixable + needs_review
             },
             "cycles": {
-                "high_risk": high_risk_cycles.len(),
+                "hard": hard_cycles.len(),
                 "structural": structural_cycles.len(),
                 "total": classified_cycles.len()
             },
@@ -2088,9 +2078,9 @@ pub fn handle_doctor_command(opts: &DoctorOptions, global: &GlobalOptions) -> Di
         // Cycles
         if !classified_cycles.is_empty() {
             println!("Circular Imports ({} total):", classified_cycles.len());
-            if !high_risk_cycles.is_empty() {
-                println!("  {} high-risk cycles (breaking)", high_risk_cycles.len());
-                for (i, cycle) in high_risk_cycles.iter().take(3).enumerate() {
+            if !hard_cycles.is_empty() {
+                println!("  {} hard cycles (breaking)", hard_cycles.len());
+                for (i, cycle) in hard_cycles.iter().take(3).enumerate() {
                     println!(
                         "    {}. {} -> {} files",
                         i + 1,
@@ -2098,8 +2088,8 @@ pub fn handle_doctor_command(opts: &DoctorOptions, global: &GlobalOptions) -> Di
                         cycle.nodes.len()
                     );
                 }
-                if high_risk_cycles.len() > 3 {
-                    println!("    ... and {} more", high_risk_cycles.len() - 3);
+                if hard_cycles.len() > 3 {
+                    println!("    ... and {} more", hard_cycles.len() - 3);
                 }
             }
             if !structural_cycles.is_empty() {
@@ -2196,7 +2186,7 @@ pub fn handle_doctor_command(opts: &DoctorOptions, global: &GlobalOptions) -> Di
         if needs_review > 0 {
             println!("  3. Investigate low-confidence findings manually");
         }
-        if !high_risk_cycles.is_empty() {
+        if !hard_cycles.is_empty() {
             println!("  4. Break circular imports using dependency injection or interfaces");
         }
         println!();

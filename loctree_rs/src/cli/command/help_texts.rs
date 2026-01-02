@@ -149,22 +149,17 @@ RELATED COMMANDS:
     loct auto --for-agent-feed       Full codebase context
     loct focus <dir>                 Slice for a directory";
 
-pub(super) const FIND_HELP: &str = "loct find - Semantic search for symbols and parameters
+pub(super) const FIND_HELP: &str = "loct find - Semantic search for symbols by name pattern
 
 USAGE:
     loct find [QUERY] [OPTIONS]
 
 DESCRIPTION:
-    Semantic search for symbols (functions, classes, types) AND function parameters.
-    Uses regex patterns to match names in your codebase.
+    Semantic search for symbols (functions, classes, types) matching a name pattern.
+    Uses regex patterns to match symbol names in your codebase.
 
-    Returns three types of matches:
-    - Symbol Matches: exported functions, classes, types
-    - Parameter Matches: function parameter names (NEW in 0.8.4)
-    - Semantic Matches: similar symbol names (fuzzy matching)
-
-    NOT impact analysis - for dependency impact, use 'loct impact'.
-    NOT dead code detection - use 'loct dead' or 'loct twins'.
+    NOT impact analysis - for dependency impact, use your editor's LSP or 'loct impact'.
+    NOT dead code detection - use 'loct dead' or 'loct twins' for that.
 
 OPTIONS:
     --symbol <PATTERN>   Search for symbols matching regex
@@ -177,24 +172,16 @@ OPTIONS:
     --help, -h           Show this help message
 
 EXAMPLES:
-    loct find request              # Find 'request' in symbols AND params
+    loct find Patient              # Find symbols containing \"Patient\"
     loct find --symbol \".*Config$\" # Regex: symbols ending with Config
     loct find --file \"utils\"       # Files containing \"utils\" in path
     loct find --dead --exported    # Dead exported symbols
-
-OUTPUT:
-    === Symbol Matches (10) ===
-      src/auth.py:45 - export def login
-    === Parameter Matches (34) ===
-      src/auth.py:45 - request: Request in login()
-    === Semantic Matches (5) ===
-      loginUser (score: 0.85) in src/users.py
 
 RELATED COMMANDS:
     loct dead              Find unused exports / dead code
     loct twins             Find duplicate exports and dead parrots
     loct slice <file>      Extract file dependencies
-    loct query where-symbol  Find where a symbol is defined";
+    loct query who-imports Show what imports a file";
 
 pub(super) const DEAD_HELP: &str = "loct dead - Detect unused exports / dead code
 

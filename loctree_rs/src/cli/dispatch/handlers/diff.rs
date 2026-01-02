@@ -13,58 +13,41 @@ pub fn handle_impact_command(
     use crate::impact::{ImpactOptions, analyze_impact, format_impact_text};
     use std::path::Path;
 
-    let target_path = Path::new(&opts.target);
-    let cwd = std::env::current_dir().unwrap_or_default();
-    // If absolute path outside cwd, find its git root; otherwise use opts.root or cwd
-    let root = if target_path.is_absolute() && !target_path.starts_with(&cwd) {
-        std::iter::successors(target_path.parent(), |p| p.parent())
-            .find(|p| p.join(".git").exists())
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| opts.root.clone().unwrap_or(cwd.clone()))
-    } else {
-        opts.root.clone().unwrap_or(cwd.clone())
-    };
-
-    let snapshot = match load_or_create_snapshot(&root, global) {
+    // Load snapshot (auto-scan if missing)
+    let root = opts.root.as_deref().unwrap_or(Path::new("."));
+    let snapshot = match load_or_create_snapshot(root, global) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("[loct][error] {}", e);
             return DispatchResult::Exit(1);
         }
     };
-    // Rebase target to relative path and validate it exists in snapshot
-    let rel_target = target_path
-        .strip_prefix(&root)
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or(opts.target.clone());
-    if !snapshot
-        .files
-        .iter()
-        .any(|f| f.path == rel_target || f.path.ends_with(&rel_target))
-    {
-        eprintln!("[loct][error] File not found in snapshot: {}", rel_target);
-        return DispatchResult::Exit(1);
-    }
 
-    let result = analyze_impact(
-        &snapshot,
-        &rel_target,
-        &ImpactOptions {
-            max_depth: opts.depth,
-            include_reexports: true,
-        },
-    );
+    // Build impact analysis options
+    let impact_opts = ImpactOptions {
+        max_depth: opts.depth,
+        include_reexports: true,
+    };
+
+    // Analyze impact
+    let result = analyze_impact(&snapshot, &opts.target, &impact_opts);
+
+    // Output results
     if global.json {
+        // JSON output
         match serde_json::to_string_pretty(&result) {
             Ok(json) => println!("{}", json),
             Err(e) => {
-                eprintln!("[loct][error] Failed to serialize: {}", e);
+                eprintln!("[loct][error] Failed to serialize results: {}", e);
                 return DispatchResult::Exit(1);
             }
         }
     } else {
-        print!("{}", format_impact_text(&result));
+        // Human-readable output
+        let output = format_impact_text(&result);
+        print!("{}", output);
     }
+
     DispatchResult::Exit(0)
 }
 
@@ -167,11 +150,12 @@ pub fn handle_auto_scan_base_diff(
         }
     };
 
-    // Load current snapshot (auto-scan if missing)
-    let current_snapshot = match load_or_create_snapshot(Path::new("."), global) {
+    // Load current snapshot
+    let current_snapshot = match Snapshot::load(Path::new(".")) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("[loct][error] Failed to load current snapshot: {}", e);
+            eprintln!("[loct][hint] Run 'loct scan' first to create a snapshot.");
             cleanup();
             return DispatchResult::Exit(1);
         }
@@ -337,11 +321,12 @@ pub fn handle_diff_command(opts: &DiffOptions, global: &GlobalOptions) -> Dispat
             }
         }
     } else {
-        // Load current snapshot from .loctree/ (auto-scan if missing)
-        match load_or_create_snapshot(Path::new("."), global) {
+        // Load current snapshot from .loctree/
+        match Snapshot::load(Path::new(".")) {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("[loct][error] Failed to load current snapshot: {}", e);
+                eprintln!("[loct][hint] Run 'loct scan' first to create a snapshot.");
                 return DispatchResult::Exit(1);
             }
         }
