@@ -12,6 +12,7 @@
 //!
 //! Developed with 💀 by The Loctree Team (c)2025
 
+use super::classify::is_test_path;
 use crate::snapshot::{CommandBridge, EventBridge, Snapshot};
 use crate::types::FileAnalysis;
 use serde::Serialize;
@@ -48,10 +49,10 @@ pub enum GapKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
-    Critical,  // Handler without test (can break runtime)
-    High,      // Event without test (data flow issues)
-    Medium,    // Export without test (integration gaps)
-    Low,       // Tested but unused (cleanup candidate)
+    Critical, // Handler without test (can break runtime)
+    High,     // Event without test (data flow issues)
+    Medium,   // Export without test (integration gaps)
+    Low,      // Tested but unused (cleanup candidate)
 }
 
 /// Find all coverage gaps in a snapshot
@@ -65,16 +66,17 @@ pub fn find_coverage_gaps(snapshot: &Snapshot) -> Vec<CoverageGap> {
     let test_imports = build_test_import_index(&snapshot.files, &test_files);
 
     // Gap 1: Handlers without tests
-    gaps.extend(find_handler_gaps(
-        &snapshot.command_bridges,
-        &test_imports,
-    ));
+    gaps.extend(find_handler_gaps(&snapshot.command_bridges, &test_imports));
 
     // Gap 2: Events without tests
     gaps.extend(find_event_gaps(&snapshot.event_bridges, &test_imports));
 
     // Gap 3: Exports without tests (from files with production usage)
-    gaps.extend(find_export_gaps(&snapshot.files, &test_imports, &test_files));
+    gaps.extend(find_export_gaps(
+        &snapshot.files,
+        &test_imports,
+        &test_files,
+    ));
 
     // Gap 4: Tested but unused (inverse analysis)
     gaps.extend(find_tested_but_unused(
@@ -93,28 +95,9 @@ pub fn find_coverage_gaps(snapshot: &Snapshot) -> Vec<CoverageGap> {
 fn detect_test_files(files: &[FileAnalysis]) -> HashSet<String> {
     files
         .iter()
-        .filter(|f| is_test_file(&f.path))
+        .filter(|f| is_test_path(&f.path))
         .map(|f| f.path.clone())
         .collect()
-}
-
-/// Check if a file path is a test file
-fn is_test_file(path: &str) -> bool {
-    // Common test patterns
-    path.contains("__tests__")
-        || path.contains("/tests/")
-        || path.contains("/test/")
-        || path.ends_with(".test.ts")
-        || path.ends_with(".test.tsx")
-        || path.ends_with(".test.js")
-        || path.ends_with(".test.jsx")
-        || path.ends_with(".spec.ts")
-        || path.ends_with(".spec.tsx")
-        || path.ends_with(".spec.js")
-        || path.ends_with(".spec.jsx")
-        || path.ends_with("_test.rs")
-        || path.ends_with("_test.py")
-        || path.contains("/test_")
 }
 
 /// Build index of what test files import
@@ -139,10 +122,7 @@ fn build_test_import_index(
                     symbol.name.clone()
                 };
 
-                index
-                    .entry(name)
-                    .or_default()
-                    .push(file.path.clone());
+                index.entry(name).or_default().push(file.path.clone());
             }
         }
 
@@ -252,7 +232,12 @@ fn find_event_gaps(
                 ),
                 context: Some(format!(
                     "Emitted from: {}",
-                    emit_files.iter().take(3).cloned().collect::<Vec<_>>().join(", ")
+                    emit_files
+                        .iter()
+                        .take(3)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 )),
                 files: emit_files,
             });
@@ -316,7 +301,12 @@ fn find_export_gaps(
                 ),
                 context: Some(format!(
                     "Used in: {}",
-                    usage_locations.iter().take(3).cloned().collect::<Vec<_>>().join(", ")
+                    usage_locations
+                        .iter()
+                        .take(3)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 )),
                 files: usage_locations,
             });
@@ -358,9 +348,8 @@ fn find_tested_but_unused(
             || symbol.starts_with("handle_")
             || symbol.starts_with("cmd_");
 
-        let looks_like_event = symbol.contains("Event")
-            || symbol.contains("event")
-            || symbol.ends_with("_event");
+        let looks_like_event =
+            symbol.contains("Event") || symbol.contains("event") || symbol.ends_with("_event");
 
         if looks_like_handler && !production_handlers.contains(symbol) {
             gaps.push(CoverageGap {

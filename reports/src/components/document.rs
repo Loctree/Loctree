@@ -3,23 +3,32 @@
 //! Implements the App Shell layout with Sidebar and Main Content areas.
 
 use super::{
-    Icon, ReportSectionView, ICON_COPY, ICON_GRAPH, ICON_LIGHTNING, ICON_SQUARES_FOUR,
-    ICON_TERMINAL,
+    Icon, ReportSectionView, ICON_ARROWS_CLOCKWISE, ICON_COPY, ICON_FLASK, ICON_GHOST, ICON_GRAPH,
+    ICON_LIGHTNING, ICON_PLUG, ICON_SQUARES_FOUR, ICON_TREE_STRUCTURE, ICON_TWINS, ICON_USERS,
 };
 use crate::styles::{CSP, REPORT_CSS};
 use crate::types::ReportSection;
 use crate::JsAssets;
 use leptos::prelude::*;
 
+// Inline data URI for the loctree logo (ensures logo renders offline in reports)
+const LOGO_DATA_URI: &str = "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzYwIiBoZWlnaHQ9IjM2MCIgdmlld0JveD0iMCAwIDM2MCAzNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsbGVkYnk9InRpdGxlIGRlc2MiPgogIDx0aXRsZSBpZD0idGl0bGUiPkxvY3RyZWUgTG9nbzwvdGl0bGU+CiAgPGRlc2MgaWQ9ImRlc2MiPk1pbmltYWxpc3Qgbm9kZSB0cmVlIC0gZHluYW1pYyBhbmQgc2xpZ2h0bHkgdW5zZXR0bGluZzwvZGVzYz4KCiAgPGRlZnM+CiAgICA8c3R5bGU+CiAgICAgIC5ub2RlIHsgZmlsbDogI2UwZTBlMDsgfQogICAgICAuc3RlbSB7IHN0cm9rZTogI2UwZTBlMDsgc3Ryb2tlLXdpZHRoOiAxMDsgc3Ryb2tlLWxpbmVjYXA6IHJvdW5kOyB9CiAgICA8L3N0eWxlPgogIDwvZGVmcz4KCiAgPCEtLSBSb3cgMSAtIDMgbm9kZXMgKHRvcCwgc3ltbWV0cmljLCB0aWdodGVuZWQgMjBweCkgLS0+CiAgPGNpcmNsZSBjbGFzcz0ibm9kZSIgY3g9Ijc1IiBjeT0iNTAiIHI9IjE2Ii8+CiAgPGNpcmNsZSBjbGFzcz0ibm9kZSIgY3g9IjE4MCIgY3k9IjUwIiByPSIxNiIvPgogIDxjaXJjbGUgY2xhc3M9Im5vZGUiIGN4PSIyODUiIGN5PSI1MCIgcj0iMTYiLz4KCiAgPCEtLSBSb3cgMiAtIDEgbm9kZSAodW5zZXR0bGluZ2x5IG9mZi1jZW50ZXIgdG8gbGVmdCkgLS0+CiAgPGNpcmNsZSBjbGFzcz0ibm9kZSIgY3g9IjE0MCIgY3k9IjEyMCIgcj0iMTYiLz4KCiAgPCEtLSBSb3cgMyAtIDMgbm9kZXMgKHN5bW1ldHJpYywgdGlnaHRlbmVkIDIwcHgpIC0tPgogIDxjaXJjbGUgY2xhc3M9Im5vZGUiIGN4PSI3NSIgY3k9IjE5MCIgcj0iMTYiLz4KICA8Y2lyY2xlIGNsYXNzPSJub2RlIiBjeD0iMTgwIiBjeT0iMTkwIiByPSIxNiIvPgogIDxjaXJjbGUgY2xhc3M9Im5vZGUiIGN4PSIyODUiIGN5PSIxOTAiIHI9IjE2Ii8+CgogIDwhLS0gU3RlbSAodmVydGljYWwsIHNoaWZ0ZWQgcmlnaHQsIHRoaWNrZXIpIC0tPgogIDxsaW5lIGNsYXNzPSJzdGVtIiB4MT0iMjEwIiB5MT0iMjIwIiB4Mj0iMjEwIiB5Mj0iMjc1Ii8+CgogIDwhLS0gUm9vdCBub2RlIGF0IGJvdHRvbSAtLT4KICA8Y2lyY2xlIGNsYXNzPSJub2RlIiBjeD0iMjA1IiBjeT0iMzEwIiByPSIxNiIvPgo8L3N2Zz4K";
+
 /// The complete HTML document for the report
 #[component]
-pub fn ReportDocument(sections: Vec<ReportSection>, js_assets: JsAssets) -> impl IntoView {
+pub fn ReportDocument(
+    sections: Vec<ReportSection>,
+    js_assets: JsAssets,
+    /// Whether to show Tauri coverage tab (only for Tauri projects)
+    #[prop(default = false)]
+    has_tauri: bool,
+) -> impl IntoView {
     view! {
         <html>
             <head>
                 <meta charset="UTF-8" />
                 <meta http-equiv="Content-Security-Policy" content=CSP />
-                <title>"loctree report"</title>
+                <title>"Loctree Report"</title>
                 <style>{REPORT_CSS}</style>
             </head>
             <body>
@@ -27,8 +36,11 @@ pub fn ReportDocument(sections: Vec<ReportSection>, js_assets: JsAssets) -> impl
                     <aside class="app-sidebar">
                         <div class="sidebar-header">
                             <div class="logo-box">
-                                <span style="color:var(--theme-accent)">"loctree"</span>
-                                <span style="opacity:0.5">"report"</span>
+                                <img class="logo-img" src=LOGO_DATA_URI alt="loctree logo" />
+                                <div class="logo-text">
+                                    <span style="color:var(--theme-accent)">"Loctree"</span>
+                                    <span style="opacity:0.5">"Report"</span>
+                                </div>
                             </div>
                             <button class="theme-toggle" data-role="theme-toggle" title="Toggle light/dark mode">
                                 <svg class="theme-icon-light" xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor" viewBox="0 0 256 256">
@@ -53,24 +65,60 @@ pub fn ReportDocument(sections: Vec<ReportSection>, js_assets: JsAssets) -> impl
                                 <Icon path=ICON_LIGHTNING class="icon-sm" />
                                 "Dynamic imports"
                             </button>
-                            <button class="nav-item" data-tab="commands">
-                                <Icon path=ICON_TERMINAL class="icon-sm" />
-                                "Tauri coverage"
+                            {if has_tauri {
+                                view! {
+                                    <button class="nav-item" data-tab="commands">
+                                        <Icon path=ICON_PLUG class="icon-sm" />
+                                        "Tauri coverage"
+                                    </button>
+                                    <button class="nav-item" data-tab="pipelines">
+                                        <Icon path=ICON_PLUG class="icon-sm" />
+                                        "Pipelines"
+                                    </button>
+                                }.into_any()
+                            } else {
+                                view! { "" }.into_any()
+                            }}
+                            <button class="nav-item" data-tab="crowds">
+                                <Icon path=ICON_USERS class="icon-sm" />
+                                "Crowds"
+                            </button>
+                            <button class="nav-item" data-tab="cycles">
+                                <Icon path=ICON_ARROWS_CLOCKWISE class="icon-sm" />
+                                "Cycles"
+                            </button>
+                            <button class="nav-item" data-tab="dead">
+                                <Icon path=ICON_GHOST class="icon-sm" />
+                                "Dead Code"
+                            </button>
+                            <button class="nav-item" data-tab="twins">
+                                <Icon path=ICON_TWINS class="icon-sm" />
+                                "Twins"
+                            </button>
+                            <button class="nav-item" data-tab="coverage">
+                                <Icon path=ICON_FLASK class="icon-sm" />
+                                "Coverage"
                             </button>
                             <button class="nav-item" data-tab="graph">
                                 <Icon path=ICON_GRAPH class="icon-sm" />
                                 "Graph"
                             </button>
                             <button class="nav-item" data-tab="tree">
-                                <Icon path=ICON_SQUARES_FOUR class="icon-sm" />
+                                <Icon path=ICON_TREE_STRUCTURE class="icon-sm" />
                                 "Tree"
                             </button>
                         </nav>
 
                         <div class="app-footer">
-                            "loctree v0.6.0-rc"
-                            <br />
-                            <span style="color:var(--theme-text-tertiary)">"Snapshot"</span>
+                            <button id="toggle-tests-btn" class="test-toggle-btn" title="Toggle test file visibility">
+                                <span id="test-toggle-icon"><Icon path=ICON_FLASK size="16" /></span>
+                                <span id="test-toggle-text">"Hide Tests"</span>
+                            </button>
+                            <div style="margin-top: 8px; font-size: 11px;">
+                                "loctree v0.7.4"
+                                <br />
+                                <span style="color:var(--theme-text-tertiary)">"Snapshot"</span>
+                            </div>
                         </div>
                     </aside>
 
@@ -113,6 +161,8 @@ fn GraphScripts(js_assets: JsAssets) -> impl IntoView {
             <script src=js_assets.cose_base_path.clone()></script>
             <script src=js_assets.cytoscape_cose_bilkent_path.clone()></script>
             <script>{include_str!("../graph_bootstrap.js")}</script>
+            <script>{include_str!("../twins_graph.js")}</script>
+            <script>{include_str!("../crowds_graph.js")}</script>
         })}
     }
 }
@@ -126,7 +176,7 @@ const APP_SCRIPT: &str = r#"
           const text = btn.dataset.copy;
           navigator.clipboard.writeText(text).then(() => {
               const orig = btn.textContent;
-              btn.textContent = '✓';
+              btn.textContent = 'Copied';
               setTimeout(() => btn.textContent = orig, 1500);
           });
       });
@@ -212,5 +262,92 @@ const APP_SCRIPT: &str = r#"
           }
       });
   });
+
+  // 3. Twins Section Toggle - handles collapsible sections in Twins tab
+  document.querySelectorAll('.twins-section-header[data-toggle]').forEach(btn => {
+      btn.addEventListener('click', () => {
+          const targetId = btn.dataset.toggle;
+          const content = document.getElementById(targetId);
+          const toggle = btn.querySelector('.twins-section-toggle');
+
+          if (content) {
+              const isHidden = content.style.display === 'none';
+              content.style.display = isHidden ? 'block' : 'none';
+              if (toggle) {
+                  toggle.textContent = isHidden ? '▼' : '▶';
+              }
+
+              // Initialize Cytoscape graph when twins-exact-content is opened
+              if (isHidden && targetId === 'twins-exact-content' && window.__TWINS_DATA__) {
+                  const container = document.getElementById('twins-graph-container');
+                  if (container && typeof buildTwinsGraph === 'function') {
+                      buildTwinsGraph(window.__TWINS_DATA__, 'twins-graph-container');
+                  }
+              }
+          }
+      });
+  });
+
+  // 3b. Crowds Graph Toggle - handles graph view in Crowds tab
+  document.querySelectorAll('.crowds-section-header[data-toggle]').forEach(btn => {
+      btn.addEventListener('click', () => {
+          const targetId = btn.dataset.toggle;
+          const content = document.getElementById(targetId);
+          const toggle = btn.querySelector('.crowds-graph-toggle');
+
+          if (content) {
+              const isHidden = content.style.display === 'none';
+              content.style.display = isHidden ? 'block' : 'none';
+              if (toggle) {
+                  toggle.textContent = isHidden ? '▼' : '▶';
+              }
+
+              // Initialize Cytoscape graph when crowds-graph-content is opened
+              if (isHidden && targetId === 'crowds-graph-content' && window.__CROWDS_DATA__) {
+                  const container = document.getElementById('crowds-graph-container');
+                  if (container && typeof buildCrowdsGraph === 'function') {
+                      buildCrowdsGraph(window.__CROWDS_DATA__, 'crowds-graph-container');
+                  }
+              }
+          }
+      });
+  });
+
+  // 4. Test Files Toggle - Hide/Show test file rows
+  const toggleTestsBtn = document.getElementById('toggle-tests-btn');
+  const toggleIcon = document.getElementById('test-toggle-icon');
+  const toggleText = document.getElementById('test-toggle-text');
+
+  // Initialize state from localStorage
+  const testsHidden = localStorage.getItem('loctree-hide-tests') === 'true';
+
+  const updateTestsVisibility = (hide) => {
+    const testItems = document.querySelectorAll('[data-is-test="true"]');
+    testItems.forEach(el => {
+      el.style.display = hide ? 'none' : '';
+    });
+
+    // Update button state
+    if (toggleText) {
+      toggleText.textContent = hide ? 'Show Tests' : 'Hide Tests';
+    }
+    if (toggleIcon) {
+      toggleIcon.style.opacity = hide ? '0.5' : '1';
+    }
+
+    // Save to localStorage
+    localStorage.setItem('loctree-hide-tests', hide ? 'true' : 'false');
+  };
+
+  // Apply initial state
+  updateTestsVisibility(testsHidden);
+
+  // Add click handler
+  if (toggleTestsBtn) {
+    toggleTestsBtn.addEventListener('click', () => {
+      const currentlyHidden = localStorage.getItem('loctree-hide-tests') === 'true';
+      updateTestsVisibility(!currentlyHidden);
+    });
+  }
 })();
 "#;

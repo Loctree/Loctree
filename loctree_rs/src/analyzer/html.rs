@@ -10,7 +10,10 @@ use super::assets::{
 
 /// Render HTML report using Leptos SSR
 pub(crate) fn render_html_report(path: &Path, sections: &[ReportSection]) -> io::Result<()> {
-    if let Some(dir) = path.parent() {
+    // Only write JS assets if there's an actual parent directory (not empty path)
+    if let Some(dir) = path.parent()
+        && !dir.as_os_str().is_empty()
+    {
         write_js_assets(dir)?;
     }
 
@@ -43,7 +46,17 @@ pub(crate) fn render_html_report(path: &Path, sections: &[ReportSection]) -> io:
         ..Default::default()
     };
 
-    let html = report_leptos::render_report(&leptos_sections, &js_assets);
+    // Check if this project has Tauri command data
+    let has_tauri = sections.iter().any(|s| {
+        !s.missing_handlers.is_empty()
+            || !s.unused_handlers.is_empty()
+            || !s.unregistered_handlers.is_empty()
+            || !s.command_bridges.is_empty()
+            || s.command_counts.0 > 0
+            || s.command_counts.1 > 0
+    });
+
+    let html = report_leptos::render_report(&leptos_sections, &js_assets, has_tauri);
     fs::write(path, html)
 }
 
@@ -142,6 +155,7 @@ mod tests {
             crowds: Vec::new(),
             dead_exports: Vec::new(),
             twins_data: None,
+            coverage_gaps: Vec::new(),
         };
 
         render_html_report(&out_path, &[section]).expect("render html");
@@ -149,7 +163,7 @@ mod tests {
 
         // Verify key parts exist in the Leptos-rendered output
         assert!(html.contains("<!DOCTYPE html>"));
-        assert!(html.contains("loctree report")); // Title in HTML
+        assert!(html.contains("Loctree Report")); // Title in new Vista design
 
         // The output format might differ slightly from legacy, check for content
         assert!(html.contains("Hint"));
@@ -189,6 +203,7 @@ mod tests {
             crowds: Vec::new(),
             dead_exports: Vec::new(),
             twins_data: None,
+            coverage_gaps: Vec::new(),
         };
 
         render_html_report(&out_path, &[section]).expect("render html");

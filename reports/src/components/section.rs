@@ -3,8 +3,9 @@
 //! Implements the "Section View" layout with a sticky header and scrollable content.
 
 use super::{
-    AiInsightsPanel, AnalysisSummary, CascadesList, DuplicateExportsTable, DynamicImportsTable,
-    GraphContainer, QuickCommandsPanel, TabContent, TauriCommandCoverage, TreeView,
+    AiInsightsPanel, AnalysisSummary, CascadesList, Coverage, Crowds, Cycles, DeadCode,
+    DuplicateExportsTable, DynamicImportsTable, GraphContainer, Pipelines, QuickCommandsPanel,
+    TabContent, TauriCommandCoverage, TreeView, Twins,
 };
 use crate::types::ReportSection;
 use leptos::prelude::*;
@@ -42,6 +43,12 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
     let root_id_dups = root_id_value.clone();
     let root_id_dynamic = root_id_value.clone();
     let root_id_commands = root_id_value.clone();
+    let root_id_pipelines = root_id_value.clone();
+    let root_id_crowds = root_id_value.clone();
+    let root_id_cycles = root_id_value.clone();
+    let root_id_dead = root_id_value.clone();
+    let root_id_twins = root_id_value.clone();
+    let root_id_coverage = root_id_value.clone();
     let root_id_graph = root_id_value.clone();
     let root_id_graph_tab = root_id_graph.clone();
     let root_id_graph_container = root_id_graph.clone();
@@ -162,6 +169,67 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
                             counts=section.command_counts
                             open_base=section.open_base.clone()
                         />
+                    </div>
+                </TabContent>
+
+                <TabContent
+                    root_id=root_id_pipelines
+                    tab_name="pipelines"
+                    active=false
+                >
+                    <div class="content-container">
+                        <Pipelines bridges=section.command_bridges.clone() />
+                    </div>
+                </TabContent>
+
+                <TabContent
+                    root_id=root_id_crowds
+                    tab_name="crowds"
+                    active=false
+                >
+                    <Crowds crowds=section.crowds.clone() />
+                </TabContent>
+
+                <TabContent
+                    root_id=root_id_cycles
+                    tab_name="cycles"
+                    active=false
+                >
+                    <div class="content-container">
+                        <Cycles
+                            strict_cycles=section.circular_imports.clone()
+                            lazy_cycles=section.lazy_circular_imports.clone()
+                        />
+                    </div>
+                </TabContent>
+
+                <TabContent
+                    root_id=root_id_dead
+                    tab_name="dead"
+                    active=false
+                >
+                    <div class="content-container">
+                        <DeadCode dead_exports=section.dead_exports.clone() />
+                    </div>
+                </TabContent>
+
+                <TabContent
+                    root_id=root_id_twins
+                    tab_name="twins"
+                    active=false
+                >
+                    <div class="content-container">
+                        <Twins twins=section.twins.clone() />
+                    </div>
+                </TabContent>
+
+                <TabContent
+                    root_id=root_id_coverage
+                    tab_name="coverage"
+                    active=false
+                >
+                    <div class="content-container">
+                        <Coverage coverage_gaps=section.coverage_gaps.clone() />
                     </div>
                 </TabContent>
 

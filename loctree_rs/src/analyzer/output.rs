@@ -13,6 +13,7 @@ use super::CommandGap;
 use super::ReportSection;
 use super::barrels::analyze_barrel_chaos;
 use super::classify::language_from_path;
+use super::coverage_gaps::find_coverage_gaps;
 use super::crowd::detect_all_crowds_with_edges;
 use super::cycles;
 use super::dead_parrots::{DeadFilterConfig, find_dead_exports};
@@ -37,13 +38,14 @@ fn build_tree(analyses: &[FileAnalysis], root_path: &std::path::Path) -> Vec<Tre
     let mut paths: Vec<(Vec<String>, usize)> = analyses
         .iter()
         .map(|a| {
-            let rel = std::path::Path::new(&a.path)
-                .strip_prefix(root_path)
-                .unwrap_or_else(|_| std::path::Path::new(&a.path))
+            let file_path = std::path::Path::new(&a.path);
+            // Try to strip root_path prefix for both absolute and relative paths
+            let rel = file_path.strip_prefix(root_path).unwrap_or(file_path);
+            let parts: Vec<_> = rel
                 .iter()
                 .map(|p| p.to_string_lossy().to_string())
-                .collect::<Vec<_>>();
-            (rel, a.loc)
+                .collect();
+            (parts, a.loc)
         })
         .collect();
     paths.sort_by(|a, b| a.0.cmp(&b.0));
@@ -95,7 +97,11 @@ fn build_cycle_edges(
     for analysis in analyses {
         for imp in &analysis.imports {
             if let Some(target) = &imp.resolved_path {
-                let kind = if imp.is_type_checking {
+                let kind = if imp.is_mod_declaration {
+                    // Rust `mod foo;` declarations create parent->child module relationships
+                    // These are NOT import edges and should not contribute to cycle detection
+                    "mod"
+                } else if imp.is_type_checking {
                     "type_import"
                 } else if imp.is_lazy {
                     "lazy_import"
@@ -174,7 +180,7 @@ pub fn process_root_context(
         .map(|a| (a.path.clone(), a.clone()))
         .collect();
 
-    let duplicate_exports: Vec<_> = export_index
+    let _duplicate_exports: Vec<_> = export_index
         .into_iter()
         .filter(|(_, files)| files.len() > 1)
         .collect();
@@ -487,6 +493,10 @@ pub fn process_root_context(
             if analysis.is_test {
                 continue;
             }
+            // Exclude test fixtures from duplicate reports
+            if super::classify::should_exclude_from_reports(&analysis.path) {
+                continue;
+            }
             if exp.export_type == "default" {
                 continue;
             }
@@ -661,6 +671,11 @@ pub fn process_root_context(
             DeadFilterConfig {
                 include_tests: parsed.with_tests,
                 include_helpers: parsed.with_helpers,
+                library_mode: parsed.library_mode,
+                example_globs: parsed.library_example_globs.clone(),
+                python_library_mode: parsed.python_library,
+                include_ambient: false,
+                include_dynamic: false,
             },
         );
 
@@ -704,10 +719,11 @@ pub fn process_root_context(
     // Run twins analysis (dead parrots, exact twins, barrel chaos)
     let twins_data = if !parsed.skip_dead_symbols {
         // Find dead parrots (0 imports)
-        let twins_result = find_dead_parrots(&analyses, true);
+        // Note: include_tests=false for production reports
+        let twins_result = find_dead_parrots(&analyses, true, false);
 
         // Detect exact twins (same symbol exported from multiple files)
-        let exact_twins = detect_exact_twins(&analyses);
+        let exact_twins = detect_exact_twins(&analyses, false);
 
         // Analyze barrel chaos (missing barrels, deep chains, inconsistent paths)
         // Build snapshot from analyses for barrel analysis
@@ -800,6 +816,46 @@ pub fn process_root_context(
         }));
     }
 
+    // Visibility toggles (noise reduction)
+    let duplicates_hidden = parsed.suppress_duplicates;
+    let dynamic_hidden = parsed.suppress_dynamic;
+    let filtered_ranked_for_output = if duplicates_hidden {
+        Vec::new()
+    } else {
+        filtered_ranked.clone()
+    };
+    let clusters_json_for_output = if duplicates_hidden {
+        Vec::new()
+    } else {
+        clusters_json.clone()
+    };
+    let top_clusters_for_output = if duplicates_hidden {
+        Vec::new()
+    } else {
+        top_clusters.clone()
+    };
+    let duplicate_clusters_count_for_output = if duplicates_hidden {
+        0
+    } else {
+        duplicate_clusters_count
+    };
+    let max_cluster_size_for_output = if duplicates_hidden {
+        0
+    } else {
+        max_cluster_size
+    };
+
+    let dynamic_imports_json_for_output = if dynamic_hidden {
+        Vec::new()
+    } else {
+        dynamic_imports_json.clone()
+    };
+    let dynamic_summary_for_output = if dynamic_hidden {
+        Vec::new()
+    } else {
+        dynamic_summary.clone()
+    };
+
     let generated_at = OffsetDateTime::now_utc()
         .format(&Rfc3339)
         .unwrap_or_else(|_| String::new());
@@ -860,9 +916,9 @@ pub fn process_root_context(
                 "languages": languages_vec,
                 "filesAnalyzed": analyses.len(),
                 "summary": {
-                    "duplicateExports": filtered_ranked.len(),
+                    "duplicateExports": filtered_ranked_for_output.len(),
                     "reexportFiles": reexport_files.len(),
-                    "dynamicImports": dynamic_summary.len(),
+                    "dynamicImports": dynamic_summary_for_output.len(),
                 "commands": {
                     "frontendCalls": fe_commands.len(),
                     "backendHandlers": be_commands.len(),
@@ -875,8 +931,8 @@ pub fn process_root_context(
                         "risks": pipeline_risks.len(),
                     },
                     "clusters": {
-                        "duplicateCount": duplicate_clusters_count,
-                        "maxClusterSize": max_cluster_size,
+                        "duplicateCount": duplicate_clusters_count_for_output,
+                        "maxClusterSize": max_cluster_size_for_output,
                     },
                     "barrels": {
                         "count": barrels.len(),
@@ -884,7 +940,7 @@ pub fn process_root_context(
                     },
                 },
                 "topIssues": {
-                    "duplicateExports": filtered_ranked.iter().take(top_limit).map(|dup| json!({
+                    "duplicateExports": filtered_ranked_for_output.iter().take(top_limit).map(|dup| json!({
                         "name": dup.name,
                         "canonical": dup.canonical,
                         "canonicalLine": dup.canonical_line,
@@ -915,7 +971,7 @@ pub fn process_root_context(
                     "events": event_alerts,
                     "pipelineRisks": pipeline_risks.iter().take(top_limit).cloned().collect::<Vec<_>>(),
                     "deadSymbols": dead_symbols.iter().take(parsed.top_dead_symbols).cloned().collect::<Vec<_>>(),
-                    "duplicateClusters": top_clusters,
+                    "duplicateClusters": top_clusters_for_output,
                     "bridges": bridges_for_ai,
                     "barrels": barrels_json.iter().take(barrel_limit).cloned().collect::<Vec<_>>(),
                 },
@@ -951,7 +1007,7 @@ pub fn process_root_context(
                 },
                 "languages": languages_vec,
                 "filesAnalyzed": analyses.len(),
-                "duplicateExports": filtered_ranked
+                "duplicateExports": filtered_ranked_for_output
                     .iter()
                     .map(|dup| json!({
                         "name": dup.name,
@@ -959,7 +1015,7 @@ pub fn process_root_context(
                         "locations": dup.locations,
                     }))
                     .collect::<Vec<_>>(),
-                "duplicateExportsRanked": filtered_ranked
+                "duplicateExportsRanked": filtered_ranked_for_output
                     .iter()
                     .map(|dup| json!({
                         "name": dup.name,
@@ -982,7 +1038,7 @@ pub fn process_root_context(
                     .map(|(from, to)| json!({"from": from, "to": to}))
                     .collect::<Vec<_>>(),
                 "barrels": barrels_json,
-                "dynamicImports": dynamic_imports_json,
+                "dynamicImports": dynamic_imports_json_for_output,
                 "commands": {
                     "frontend": fe_commands.iter().map(|(k,v)| json!({"name": k, "locations": v})).collect::<Vec<_>>(),
                     "backend": be_commands.iter().map(|(k,v)| json!({"name": k, "locations": v})).collect::<Vec<_>>(),
@@ -1019,7 +1075,7 @@ pub fn process_root_context(
                     "unregistered_handlers": unregistered_handlers.iter().map(|g| &g.name).collect::<Vec<_>>(),
                 },
                 "symbols": symbols_json,
-                "clusters": clusters_json,
+                "clusters": clusters_json_for_output,
                 "pipeline": pipeline_summary,
                 "aiViews": {
                     "defaultExportChains": default_export_chains,
@@ -1042,9 +1098,9 @@ pub fn process_root_context(
                         "items": barrels_json,
                     },
                     "ciSummary": {
-                        "duplicateClustersCount": duplicate_clusters_count,
-                        "maxClusterSize": max_cluster_size,
-                        "topClusters": top_clusters,
+                        "duplicateClustersCount": duplicate_clusters_count_for_output,
+                        "maxClusterSize": max_cluster_size_for_output,
+                        "topClusters": top_clusters_for_output,
                     }
                 },
                 "files": files_json,
@@ -1067,9 +1123,17 @@ pub fn process_root_context(
 
         println!("Import/export analysis for {}/", root_path.display());
         println!("  Files analyzed: {}", analyses.len());
-        println!("  Duplicate exports: {}", filtered_ranked.len());
+        if duplicates_hidden {
+            println!("  Duplicate exports: (hidden by --no-duplicates)");
+        } else {
+            println!("  Duplicate exports: {}", filtered_ranked_for_output.len());
+        }
         println!("  Files with re-exports: {}", reexport_files.len());
-        println!("  Dynamic imports: {}", dynamic_summary.len());
+        if dynamic_hidden {
+            println!("  Dynamic imports: (hidden by --no-dynamic-imports)");
+        } else {
+            println!("  Dynamic imports: {}", dynamic_summary_for_output.len());
+        }
         if dead_symbols_total > 0 {
             println!(
                 "  Dead exports (high confidence): {}{}",
@@ -1082,7 +1146,7 @@ pub fn process_root_context(
             );
         }
 
-        if !duplicate_exports.is_empty() {
+        if !duplicates_hidden && !filtered_ranked_for_output.is_empty() {
             // Count silenced (cross-lang) duplicates
             let cross_lang_count = filtered_ranked
                 .iter()
@@ -1117,8 +1181,10 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
                     .collect();
                 // Severity label
                 let severity_label = match dup.severity {
-                    DupSeverity::SemanticConflict => "[CONFLICT]",
+                    DupSeverity::CrossCrate => "[CROSS_CRATE]",
+                    DupSeverity::CrossModule => "[CROSS_MODULE]",
                     DupSeverity::SamePackage => "[SAME_PKG]",
+                    DupSeverity::ReExportOrGeneric => "[REEXPORT]",
                     DupSeverity::CrossLangExpected => "[CROSS_LANG]",
                 };
                 // Cross-lang indicator
@@ -1143,12 +1209,12 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
             }
         }
 
-        if !dynamic_summary.is_empty() {
+        if !dynamic_hidden && !dynamic_summary_for_output.is_empty() {
             println!(
                 "\nDynamic imports (showing up to {}):",
                 parsed.analyze_limit
             );
-            let mut sorted_dyn = dynamic_summary.clone();
+            let mut sorted_dyn = dynamic_summary_for_output.clone();
             sorted_dyn.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
             for (file, sources) in sorted_dyn.iter().take(parsed.analyze_limit) {
                 println!(
@@ -1183,9 +1249,9 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
                     .filter(|g| g.confidence == Some(Confidence::High))
                     .map(|g| g.name.clone())
                     .collect();
-                let low_conf: Vec<_> = unused_handlers
+                let smell_conf: Vec<_> = unused_handlers
                     .iter()
-                    .filter(|g| g.confidence == Some(Confidence::Low))
+                    .filter(|g| g.confidence == Some(Confidence::Smell))
                     .collect();
 
                 if !high_conf.is_empty() {
@@ -1194,9 +1260,9 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
                         high_conf.join(", ")
                     );
                 }
-                if !low_conf.is_empty() {
-                    println!("  Unused handlers (LOW confidence - possible dynamic usage):");
-                    for g in &low_conf {
+                if !smell_conf.is_empty() {
+                    println!("  Unused handlers (SMELL confidence - possible dynamic usage):");
+                    for g in &smell_conf {
                         let matches_note = if !g.string_literal_matches.is_empty() {
                             format!(
                                 " ({} string literal matches)",
@@ -1224,7 +1290,8 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
     }
 
     let mut report_section = None;
-    if parsed.report_path.is_some() {
+    // Build ReportSection for HTML reports OR for agent feed (--for-agent-feed/--agent-json)
+    if parsed.report_path.is_some() || parsed.for_agent_feed {
         let mut sorted_dyn = dynamic_summary.clone();
         sorted_dyn.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
         let insights = collect_ai_insights(
@@ -1245,6 +1312,51 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
         let total_loc: usize = analyses.iter().map(|a| a.loc).sum();
 
         let tree = build_tree(&analyses, &root_path);
+
+        // Compute coverage gaps by building a minimal snapshot
+        let coverage_gaps = {
+            use crate::snapshot::{
+                CommandBridge as SnapshotCommandBridge, EventBridge, Snapshot, SnapshotMetadata,
+            };
+
+            // Convert command_bridges to snapshot format
+            let snapshot_command_bridges: Vec<SnapshotCommandBridge> = command_bridges
+                .iter()
+                .map(|cb| {
+                    let has_handler = cb.be_location.is_some();
+                    let is_called = !cb.fe_locations.is_empty();
+                    let backend_handler = cb
+                        .be_location
+                        .as_ref()
+                        .map(|(path, line, _)| (path.clone(), *line));
+                    let frontend_calls = cb.fe_locations.clone();
+
+                    SnapshotCommandBridge {
+                        name: cb.name.clone(),
+                        has_handler,
+                        is_called,
+                        backend_handler,
+                        frontend_calls,
+                    }
+                })
+                .collect();
+
+            // Build event bridges from analyses (emit/listen patterns)
+            let event_bridges: Vec<EventBridge> = Vec::new(); // TODO: extract from analyses if available
+
+            // Create minimal snapshot for coverage analysis
+            let snapshot = Snapshot {
+                metadata: SnapshotMetadata::default(),
+                files: analyses.clone(),
+                edges: Vec::new(),
+                export_index: HashMap::new(),
+                command_bridges: snapshot_command_bridges,
+                event_bridges,
+                barrels: Vec::new(),
+            };
+
+            find_coverage_gaps(&snapshot)
+        };
 
         report_section = Some(ReportSection {
             insights,
@@ -1277,6 +1389,7 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
             crowds: crowds.clone(),
             dead_exports: dead_exports_for_report.clone(),
             twins_data: twins_data.clone(),
+            coverage_gaps,
         });
     }
 
@@ -1294,7 +1407,17 @@ pub fn write_report(
     if let Some(dir) = report_path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    render_html_report(report_path, sections)?;
+    // Show spinner during HTML generation (can be slow for large codebases)
+    let spinner = if !verbose {
+        Some(crate::progress::Spinner::new("Generating HTML report..."))
+    } else {
+        None
+    };
+    let result = render_html_report(report_path, sections);
+    if let Some(s) = spinner {
+        s.finish_clear();
+    }
+    result?;
     // Show relative path for cleaner output (with ./ prefix for consistency)
     let display_path = std::env::current_dir()
         .ok()

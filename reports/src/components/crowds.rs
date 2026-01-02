@@ -77,10 +77,57 @@ pub fn Crowds(crowds: Vec<Crowd>) -> impl IntoView {
                         <p class="muted">"No crowds detected. Your codebase has well-distributed naming patterns."</p>
                     }.into_any()
                 } else {
+                    // Serialize crowds data for JavaScript visualization
+                    let crowds_json = serde_json::to_string(&crowds).unwrap_or_else(|_| "[]".to_string());
+                    let graph_data_script = format!(
+                        r#"window.__CROWDS_DATA__ = {crowds};"#,
+                        crowds = crowds_json
+                    );
+
                     view! {
                         <p class="muted">
                             {format!("{} crowd patterns found - files with similar names that may indicate fragmentation or duplication", count)}
                         </p>
+
+                        // Graph visualization section
+                        <script>{graph_data_script}</script>
+                        <div class="crowds-graph-section" style="margin-bottom: 32px;">
+                            <button
+                                class="crowds-section-header"
+                                data-toggle="crowds-graph-content"
+                                style="width: 100%; text-align: left; background: transparent; border: none; color: inherit; cursor: pointer; padding: 12px 0; display: flex; justify-content: space-between; align-items: center;"
+                            >
+                                <span style="font-size: 16px; font-weight: 600;">"📊 Graph View"</span>
+                                <span class="crowds-graph-toggle">"▶"</span>
+                            </button>
+                            <div id="crowds-graph-content" style="display: none; margin-top: 16px;">
+                                <div
+                                    id="crowds-graph-container"
+                                    class="crowds-graph-container"
+                                    style="width: 100%; height: 600px; border: 1px solid var(--theme-border); border-radius: 8px; background: var(--theme-bg-secondary);"
+                                ></div>
+                                <div class="crowds-graph-legend" style="margin-top: 12px; display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; font-size: 12px;">
+                                    <span style="display: flex; align-items: center; gap: 4px;">
+                                        <span style="width: 12px; height: 12px; border-radius: 50%; background: #27ae60;"></span>
+                                        "Low severity (0-4)"
+                                    </span>
+                                    <span style="display: flex; align-items: center; gap: 4px;">
+                                        <span style="width: 12px; height: 12px; border-radius: 50%; background: #e67e22;"></span>
+                                        "Medium severity (4-7)"
+                                    </span>
+                                    <span style="display: flex; align-items: center; gap: 4px;">
+                                        <span style="width: 12px; height: 12px; border-radius: 50%; background: #c0392b;"></span>
+                                        "High severity (7-10)"
+                                    </span>
+                                    <span style="display: flex; align-items: center; gap: 4px;">
+                                        <span style="width: 16px; height: 16px; background: linear-gradient(90deg, #60a5fa, #ec4899); border-radius: 2px;"></span>
+                                        "Similarity edges"
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+
+                        // Table view section
                         <div class="crowds-list">
                             {crowds.into_iter().map(|crowd| {
                                 view! { <CrowdCard crowd=crowd /> }
@@ -154,9 +201,10 @@ fn CrowdCard(crowd: Crowd) -> impl IntoView {
 #[component]
 fn CrowdMemberRow(member: CrowdMember) -> impl IntoView {
     let match_reason_text = format_match_reason(&member.match_reason);
+    let is_test_attr = if member.is_test { "true" } else { "false" };
 
     view! {
-        <tr>
+        <tr data-is-test=is_test_attr>
             <td><code class="file-path">{member.file}</code></td>
             <td class="muted">{match_reason_text}</td>
             <td>{member.importer_count}</td>

@@ -2,7 +2,7 @@
 //!
 //! Shows helpful CLI commands based on the current report context.
 
-use crate::components::{Icon, ICON_TERMINAL};
+use crate::components::icons::{Icon, ICON_TERMINAL};
 use leptos::prelude::*;
 
 /// Quick Commands Panel - shows helpful CLI commands
@@ -128,7 +128,7 @@ fn CommandItem(#[prop(into)] cmd: String, #[prop(into)] desc: String) -> impl In
                 data-copy=cmd_for_copy
                 title="Copy to clipboard"
             >
-                "📋"
+                "Copy"
             </button>
         </div>
     }

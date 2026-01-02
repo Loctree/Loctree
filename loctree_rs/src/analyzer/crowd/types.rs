@@ -10,6 +10,46 @@
 
 use serde::{Deserialize, Serialize};
 
+/// UI context type for a crowd - helps AI agents understand the architectural role
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextType {
+    /// Navigation elements: sidebars, drawers, nav bars, rails
+    Rail,
+    /// Content panels: cards, sections, content areas
+    Panel,
+    /// Overlays: modals, dialogs, popups, toasts
+    Modal,
+    /// User input: forms, inputs, selects, pickers
+    Form,
+    /// Data display: lists, tables, grids, data views
+    List,
+    /// State management: hooks, stores, context providers
+    State,
+    /// API/data fetching: services, clients, fetchers
+    Api,
+    /// Utility/helper functions
+    Util,
+    /// Generic/unclassified
+    Other,
+}
+
+impl std::fmt::Display for ContextType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ContextType::Rail => write!(f, "rail"),
+            ContextType::Panel => write!(f, "panel"),
+            ContextType::Modal => write!(f, "modal"),
+            ContextType::Form => write!(f, "form"),
+            ContextType::List => write!(f, "list"),
+            ContextType::State => write!(f, "state"),
+            ContextType::Api => write!(f, "api"),
+            ContextType::Util => write!(f, "util"),
+            ContextType::Other => write!(f, "other"),
+        }
+    }
+}
+
 /// A detected "crowd" of files clustering around similar functionality
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Crowd {
@@ -21,6 +61,9 @@ pub struct Crowd {
     pub score: f32,
     /// Detected issues
     pub issues: Vec<CrowdIssue>,
+    /// Inferred UI/architectural context type
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_type: Option<ContextType>,
 }
 
 /// A file that's part of a crowd
@@ -34,6 +77,9 @@ pub struct CrowdMember {
     pub importer_count: usize,
     /// Similarity scores with other crowd members (file_path, similarity_score)
     pub similarity_scores: Vec<(String, f32)>,
+    /// Whether this is a test file
+    #[serde(default)]
+    pub is_test: bool,
 }
 
 /// Why a file matched the crowd pattern

@@ -1,23 +1,50 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::barrels::BarrelAnalysis;
 use super::crowd::types::Crowd;
 use super::dead_parrots::DeadExport;
 
-/// Confidence level for unused handler detection.
-/// HIGH = no string literal matches found (likely truly unused)
-/// LOW = string literal matches found (may be used dynamically)
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+/// Confidence level for dead export and handler detection.
+///
+/// CERTAIN - Will definitely break/is definitely unused
+///   - Unregistered handlers (has #[tauri::command] but NOT in invoke_handler![])
+///   - Missing handlers (FE calls invoke() but no handler exists)
+///
+/// HIGH - Very likely unused, worth fixing
+///   - Export with 0 imports across all scanned files
+///   - Handler registered but 0 invoke() calls found
+///
+/// SMELL - Worth checking, might be intentional
+///   - Twins (same name in multiple files)
+///   - Low import count relative to codebase size
+///   - String literal matches found (may be used dynamically)
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Confidence {
+    /// CERTAIN - Will definitely break/is definitely unused
+    Certain,
+    /// HIGH - Very likely unused, worth fixing
     High,
-    Low,
+    /// SMELL - Worth checking, might be intentional
+    Smell,
+}
+
+impl Confidence {
+    /// Get indicator for this confidence level
+    pub fn indicator(&self) -> &'static str {
+        match self {
+            Confidence::Certain => "[!!]",
+            Confidence::High => "[!]",
+            Confidence::Smell => "[?]",
+        }
+    }
 }
 
 impl std::fmt::Display for Confidence {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Confidence::Certain => write!(f, "CERTAIN"),
             Confidence::High => write!(f, "HIGH"),
-            Confidence::Low => write!(f, "LOW"),
+            Confidence::Smell => write!(f, "SMELL"),
         }
     }
 }
@@ -50,52 +77,9 @@ pub struct AiInsight {
     pub message: String,
 }
 
-#[derive(Clone, Serialize)]
-pub struct GraphNode {
-    pub id: String,
-    pub label: String,
-    pub loc: usize,
-    pub x: f32,
-    pub y: f32,
-    pub component: usize,
-    pub degree: usize,
-    pub detached: bool,
-}
-
-#[derive(Clone, Serialize)]
-pub struct GraphComponent {
-    pub id: usize,
-    pub size: usize,
-    #[serde(rename = "edges")]
-    pub edge_count: usize,
-    pub nodes: Vec<String>,
-    pub isolated_count: usize,
-    pub sample: String,
-    pub loc_sum: usize,
-    pub detached: bool,
-    pub tauri_frontend: usize,
-    pub tauri_backend: usize,
-}
-
-#[derive(Clone, Serialize)]
-pub struct GraphData {
-    pub nodes: Vec<GraphNode>,
-    pub edges: Vec<(String, String, String)>, // from, to, kind
-    pub components: Vec<GraphComponent>,
-    pub main_component_id: usize,
-    /// Whether this graph was truncated due to size limits
-    #[serde(default)]
-    pub truncated: bool,
-    /// Total number of nodes before truncation (same as nodes.len() if not truncated)
-    #[serde(default)]
-    pub total_nodes: usize,
-    /// Total number of edges before truncation (same as edges.len() if not truncated)
-    #[serde(default)]
-    pub total_edges: usize,
-    /// Reason for truncation, if any
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub truncation_reason: Option<String>,
-}
+// Re-export canonical graph types from report-leptos
+// These are the same types used by the HTML report renderer
+pub use report_leptos::types::{GraphComponent, GraphData, GraphNode};
 
 /// Location of a duplicate export with line number
 #[derive(Clone, Serialize)]
@@ -111,11 +95,15 @@ pub struct DupLocation {
 pub enum DupSeverity {
     /// Cross-language expected (Rust↔TS DTOs) - noise
     CrossLangExpected = 0,
-    /// Same-package TS duplicate - potential issue
+    /// Re-exports and generic names (new, from, clone) - usually OK
+    ReExportOrGeneric = 1,
+    /// Same-package duplicate - potential issue
     #[default]
-    SamePackage = 1,
-    /// Semantic conflict (different meanings) - needs attention
-    SemanticConflict = 2,
+    SamePackage = 2,
+    /// Same symbol in different modules/packages - worth reviewing
+    CrossModule = 3,
+    /// Same symbol in different crates/packages - REAL issue
+    CrossCrate = 4,
 }
 
 #[derive(Clone, Serialize)]
@@ -213,6 +201,9 @@ pub struct ReportSection {
     /// Twins analysis data (dead parrots, exact twins, barrel chaos)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub twins_data: Option<TwinsData>,
+    /// Test coverage gaps (handlers/events without tests)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub coverage_gaps: Vec<super::coverage_gaps::CoverageGap>,
 }
 
 /// Twins analysis data for the HTML report
@@ -232,20 +223,33 @@ mod tests {
     use crate::snapshot::CommandBridge;
 
     #[test]
+    fn confidence_display_certain() {
+        assert_eq!(format!("{}", Confidence::Certain), "CERTAIN");
+    }
+
+    #[test]
     fn confidence_display_high() {
         assert_eq!(format!("{}", Confidence::High), "HIGH");
     }
 
     #[test]
-    fn confidence_display_low() {
-        assert_eq!(format!("{}", Confidence::Low), "LOW");
+    fn confidence_display_smell() {
+        assert_eq!(format!("{}", Confidence::Smell), "SMELL");
     }
 
     #[test]
     fn confidence_equality() {
+        assert_eq!(Confidence::Certain, Confidence::Certain);
         assert_eq!(Confidence::High, Confidence::High);
-        assert_eq!(Confidence::Low, Confidence::Low);
-        assert_ne!(Confidence::High, Confidence::Low);
+        assert_eq!(Confidence::Smell, Confidence::Smell);
+        assert_ne!(Confidence::High, Confidence::Smell);
+    }
+
+    #[test]
+    fn confidence_indicator() {
+        assert_eq!(Confidence::Certain.indicator(), "[!!]");
+        assert_eq!(Confidence::High.indicator(), "[!]");
+        assert_eq!(Confidence::Smell.indicator(), "[?]");
     }
 
     #[test]

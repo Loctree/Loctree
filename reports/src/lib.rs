@@ -221,6 +221,7 @@ mod tests {
             edges: vec![("src/main.ts".into(), "src/utils.ts".into(), "import".into())],
             components: vec![],
             main_component_id: 0,
+            ..Default::default()
         };
 
         let dot = graph.to_dot();
@@ -251,6 +252,7 @@ mod tests {
             edges: vec![],
             components: vec![],
             main_component_id: 0,
+            ..Default::default()
         };
 
         let dot = graph.to_dot();

@@ -86,7 +86,9 @@
    * Process twins data into Cytoscape-compatible nodes and edges
    */
   function processTwinsData(twinsData) {
-    const { exactTwins, deadParrots } = twinsData;
+    // Support both camelCase and snake_case from Rust/Serde
+    const exactTwins = twinsData.exactTwins || twinsData.exact_twins || [];
+    const deadParrots = twinsData.deadParrots || twinsData.dead_parrots || [];
 
     // Build file->exports map and file->deadParrots map
     const fileExports = new Map(); // file -> Set of symbol names
@@ -95,15 +97,22 @@
 
     // Process dead parrots
     deadParrots.forEach(dp => {
-      if (!fileDeadParrots.has(dp.file)) {
-        fileDeadParrots.set(dp.file, []);
+      // Support both old format {file} and new format {file_path}
+      const file = dp.file || dp.file_path;
+      if (!file) return;
+      if (!fileDeadParrots.has(file)) {
+        fileDeadParrots.set(file, []);
       }
-      fileDeadParrots.get(dp.file).push(dp);
+      fileDeadParrots.get(file).push(dp);
     });
 
     // Process exact twins to build connections
     exactTwins.forEach(twin => {
-      const { symbol, files } = twin;
+      // Support both old format {symbol, files} and new format {name, locations}
+      const symbol = twin.symbol || twin.name;
+      const files = twin.files || (twin.locations ? twin.locations.map(loc => loc.file_path) : []);
+
+      if (!files || files.length === 0) return;
 
       // Add symbol to each file's exports
       files.forEach(file => {
@@ -442,7 +451,6 @@
 
       clearTimeout(nodeHoverTimeout);
       nodeHoverTimeout = setTimeout(() => {
-        // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method -- SAFETY: clearing tooltip with empty string, no user input
         tooltip.innerHTML = ''; // Clear previous
 
         // File path
@@ -454,14 +462,11 @@
         // Stats
         const statsDiv = document.createElement('div');
         statsDiv.style.cssText = 'margin-bottom: 8px; font-size: 11px; opacity: 0.9;';
-        const createStatDiv = (text) => {
-          const div = document.createElement('div');
-          div.textContent = text;
-          return div;
-        };
-        statsDiv.appendChild(createStatDiv('Exports: ' + data.exportCount));
-        statsDiv.appendChild(createStatDiv('Dead Parrots: ' + data.deadParrotCount));
-        statsDiv.appendChild(createStatDiv('Connections: ' + node.degree()));
+        statsDiv.innerHTML = `
+          <div>Exports: ${data.exportCount}</div>
+          <div>Dead Parrots: ${data.deadParrotCount}</div>
+          <div>Connections: ${node.degree()}</div>
+        `;
         tooltip.appendChild(statsDiv);
 
         // Dead parrots list
@@ -516,7 +521,6 @@
 
       clearTimeout(edgeHoverTimeout);
       edgeHoverTimeout = setTimeout(() => {
-        // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method -- SAFETY: clearing tooltip with empty string, no user input
         tooltip.innerHTML = '';
 
         const titleDiv = document.createElement('div');
@@ -624,28 +628,20 @@
     // Stats display
     const statsDiv = document.createElement('div');
     statsDiv.style.cssText = 'display: flex; gap: 16px; margin-right: auto;';
-    const createStatSpan = (label, value) => {
-      const span = document.createElement('span');
-      const strong = document.createElement('strong');
-      strong.textContent = label + ':';
-      span.appendChild(strong);
-      span.appendChild(document.createTextNode(' ' + value));
-      return span;
-    };
-    statsDiv.appendChild(createStatSpan('Files', stats.totalFiles));
-    statsDiv.appendChild(createStatSpan('Twins', stats.totalTwins));
-    statsDiv.appendChild(createStatSpan('Dead Parrots', stats.totalDeadParrots));
+    statsDiv.innerHTML = `
+      <span><strong>Files:</strong> ${stats.totalFiles}</span>
+      <span><strong>Twins:</strong> ${stats.totalTwins}</span>
+      <span><strong>Dead Parrots:</strong> ${stats.totalDeadParrots}</span>
+    `;
     toolbar.appendChild(statsDiv);
 
     // Layout selector
     const layoutLabel = document.createElement('label');
     layoutLabel.style.cssText = 'display: flex; gap: 6px; align-items: center;';
-    // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method -- SAFETY: static HTML label with no user input
     layoutLabel.innerHTML = '<span>Layout:</span>';
 
     const layoutSelect = document.createElement('select');
     layoutSelect.style.cssText = 'background: #1a1a2e; color: #fff; border: 1px solid #444; padding: 4px 8px; border-radius: 4px;';
-    // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method -- SAFETY: static dropdown options with no user input
     layoutSelect.innerHTML = `
       <option value="cose">Force (COSE)</option>
       <option value="cose-bilkent">Force (Bilkent)</option>

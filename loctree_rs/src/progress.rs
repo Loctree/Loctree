@@ -31,22 +31,22 @@ impl Spinner {
         self.bar.set_message(message.to_string());
     }
 
-    /// Finish with success message (green checkmark)
+    /// Finish with success message (green)
     pub fn finish_success(&self, message: &str) {
         self.bar.finish_and_clear();
-        println!("{} {}", style("✓").green().bold(), message);
+        println!("{} {}", style("[OK]").green().bold(), message);
     }
 
     /// Finish with warning message (yellow)
     pub fn finish_warning(&self, message: &str) {
         self.bar.finish_and_clear();
-        println!("{} {}", style("⚠").yellow().bold(), message);
+        println!("{} {}", style("[!]").yellow().bold(), message);
     }
 
     /// Finish with error message (red)
     pub fn finish_error(&self, message: &str) {
         self.bar.finish_and_clear();
-        eprintln!("{} {}", style("✗").red().bold(), message);
+        eprintln!("{} {}", style("[ERR]").red().bold(), message);
     }
 
     /// Just clear the spinner without message
@@ -55,24 +55,24 @@ impl Spinner {
     }
 }
 
-/// Print a success message (green checkmark)
+/// Print a success message (green)
 pub fn success(message: &str) {
-    println!("{} {}", style("✓").green().bold(), message);
+    println!("{} {}", style("[OK]").green().bold(), message);
 }
 
 /// Print an info message (blue)
 pub fn info(message: &str) {
-    println!("{} {}", style("ℹ").blue().bold(), message);
+    println!("{} {}", style("[i]").blue().bold(), message);
 }
 
 /// Print a warning message (yellow)
 pub fn warning(message: &str) {
-    println!("{} {}", style("⚠").yellow().bold(), message);
+    println!("{} {}", style("[!]").yellow().bold(), message);
 }
 
 /// Print an error message (red)
 pub fn error(message: &str) {
-    eprintln!("{} {}", style("✗").red().bold(), message);
+    eprintln!("{} {}", style("[ERR]").red().bold(), message);
 }
 
 /// Format duration in human-readable form
