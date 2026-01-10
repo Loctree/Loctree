@@ -462,12 +462,9 @@
         // Stats
         const statsDiv = document.createElement('div');
         statsDiv.style.cssText = 'margin-bottom: 8px; font-size: 11px; opacity: 0.9;';
-        // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method -- SAFETY: data.exportCount/deadParrotCount and node.degree() are numeric values from loctree internal analysis, not user input
-        statsDiv.innerHTML = `
-          <div>Exports: ${data.exportCount}</div>
-          <div>Dead Parrots: ${data.deadParrotCount}</div>
-          <div>Connections: ${node.degree()}</div>
-        `;
+        // SAFETY: data.exportCount/deadParrotCount and node.degree() are numeric values from loctree internal analysis, not user input
+        // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method
+        statsDiv.innerHTML = `<div>Exports: ${data.exportCount}</div><div>Dead Parrots: ${data.deadParrotCount}</div><div>Connections: ${node.degree()}</div>`;
         tooltip.appendChild(statsDiv);
 
         // Dead parrots list
@@ -629,12 +626,9 @@
     // Stats display
     const statsDiv = document.createElement('div');
     statsDiv.style.cssText = 'display: flex; gap: 16px; margin-right: auto;';
-    // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method -- SAFETY: stats.* are numeric values computed from loctree internal analysis, not user input
-    statsDiv.innerHTML = `
-      <span><strong>Files:</strong> ${stats.totalFiles}</span>
-      <span><strong>Twins:</strong> ${stats.totalTwins}</span>
-      <span><strong>Dead Parrots:</strong> ${stats.totalDeadParrots}</span>
-    `;
+    // SAFETY: stats.* are numeric values computed from loctree internal analysis, not user input
+    // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method
+    statsDiv.innerHTML = `<span><strong>Files:</strong> ${stats.totalFiles}</span><span><strong>Twins:</strong> ${stats.totalTwins}</span><span><strong>Dead Parrots:</strong> ${stats.totalDeadParrots}</span>`;
     toolbar.appendChild(statsDiv);
 
     // Layout selector

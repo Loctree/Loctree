@@ -100,10 +100,8 @@ fn main() -> std::io::Result<()> {
     eprintln!("\x1b[0m");
 
     // Get raw args for the new parser
-    // nosemgrep: rust.lang.security.args.args
-    // SECURITY: args() is used only for CLI flag parsing (paths, --json, etc.),
-    // not for security decisions. The executable path (args[0]) is skipped.
-    let raw_args: Vec<String> = std::env::args().skip(1).collect();
+    // SECURITY: args() is used only for CLI flag parsing, not for security decisions.
+    let raw_args: Vec<String> = std::env::args().skip(1).collect(); // nosemgrep: rust.lang.security.args.args
 
     // Preserve legacy full help output expected by CI/tests
     if raw_args.iter().any(|a| a == "--help-full") {
