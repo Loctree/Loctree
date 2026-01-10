@@ -332,8 +332,8 @@ pub fn preset_ignore_symbols(name: &str) -> Option<HashSet<String>> {
 }
 
 pub fn parse_args() -> Result<ParsedArgs, String> {
-    // nosemgrep:rust.lang.security.args-os.args-os - CLI arg parsing only; not used for security-sensitive decisions
-    let args: Vec<String> = std::env::args_os()
+    // SAFETY: CLI arg parsing only; not used for security-sensitive decisions
+    let args: Vec<String> = std::env::args_os() // nosemgrep: rust.lang.security.args-os.args-os
         .skip(1)
         .map(|s| s.to_string_lossy().into_owned())
         .collect();
