@@ -51,7 +51,7 @@ jobs:
           echo "## 🌳 Loctree Self-Analysis" >> $GITHUB_STEP_SUMMARY
 
           # Modern command: loct auto generates all artifacts
-          ./target/release/loct auto 2>/dev/null || true
+          ./target/release/loct auto || true
 
           if [ -f .loctree/agent.json ]; then
             HEALTH=$(jq -r '.summary.health_score // 0' .loctree/agent.json)
@@ -85,7 +85,7 @@ jobs:
       - name: Check Circular Imports
         run: |
           # Modern command: loct cycles
-          ./target/release/loct cycles 2>/dev/null || true
+          ./target/release/loct cycles || true
           CYCLES=${{ steps.scan.outputs.cycles }}
           if [ "$CYCLES" != "0" ] && [ -n "$CYCLES" ]; then
             echo "::warning::Found $CYCLES circular import(s)"
@@ -94,12 +94,12 @@ jobs:
       - name: Check Dead Exports
         run: |
           # Modern command: loct dead --confidence high
-          ./target/release/loct dead --confidence high --top 10 2>/dev/null || true
+          ./target/release/loct dead --confidence high --top 10 || true
 
       - name: Generate HTML Report
         run: |
           # Modern command: loct report
-          ./target/release/loct report --output loctree-report.html 2>/dev/null || true
+          ./target/release/loct report --output loctree-report.html || true
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4

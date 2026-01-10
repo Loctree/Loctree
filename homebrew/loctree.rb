@@ -1,9 +1,10 @@
 class Loctree < Formula
   desc "AI-oriented project analyzer for semantic code analysis"
-  homepage "https://github.com/m-szymanska/loctree"
-  url "https://static.crates.io/crates/loctree/loctree-0.6.10.crate"
-  sha256 "b97228ccf82ed224c2ccdf43010baab280cb0cc7a29004928bcf430472727d7e"
-  license "MIT"
+  homepage "https://github.com/Loctree/Loctree"
+  # NOTE: Update SHA256 after crates.io publish
+  url "https://static.crates.io/crates/loctree/loctree-0.8.4.crate"
+  sha256 "UPDATE_SHA256_AFTER_CRATES_PUBLISH"
+  license any_of: ["MIT", "Apache-2.0"]
 
   depends_on "rust" => :build
 
