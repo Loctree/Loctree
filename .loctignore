@@ -14,5 +14,6 @@ reports/wasm/assets/
 # External API declarations (used by npm consumers, not internally)
 distribution/npm/index.d.ts
 
-# Tools fixtures
+# Tools fixtures and test files
 tools/fixtures/
+tools/test_ts/

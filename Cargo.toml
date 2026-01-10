@@ -17,7 +17,7 @@ members = [
 
 [workspace.package]
 edition = "2024"
-license = "MIT"
+license = "MIT OR Apache-2.0"
 authors = ["Loctree <loct@loctree.io>"]
 
 [workspace.dependencies]

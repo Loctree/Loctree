@@ -17,7 +17,7 @@ use crate::args::ParsedArgs;
 use crate::types::{FileAnalysis, OutputMode};
 
 /// Current schema version for snapshot format
-pub const SNAPSHOT_SCHEMA_VERSION: &str = "0.5.0-rc";
+pub const SNAPSHOT_SCHEMA_VERSION: &str = "0.8.0";
 
 /// Default snapshot directory name
 pub const SNAPSHOT_DIR: &str = ".loctree";
