@@ -16,9 +16,6 @@ pub fn handle_dead_command(opts: &DeadOptions, global: &GlobalOptions) -> Dispat
     use crate::analyzer::dead_parrots::{DeadFilterConfig, find_dead_exports, print_dead_exports};
     use std::path::Path;
 
-    // Deprecation warning (goes to stderr, won't break piped output)
-    warn_deprecated("dead", "loct '.dead_parrots'");
-
     // Show spinner unless in quiet/json mode
     let spinner = if !global.quiet && !global.json {
         Some(Spinner::new("Analyzing dead exports..."))
@@ -96,9 +93,6 @@ pub fn handle_cycles_command(opts: &CyclesOptions, global: &GlobalOptions) -> Di
         print_cycles_classified_legacy,
     };
     use std::path::Path;
-
-    // Deprecation warning (goes to stderr, won't break piped output)
-    warn_deprecated("cycles", "loct '.cycles'");
 
     // Show spinner unless in quiet/json mode
     let spinner = if !global.quiet && !global.json {
@@ -216,14 +210,10 @@ pub fn handle_cycles_command(opts: &CyclesOptions, global: &GlobalOptions) -> Di
 }
 
 /// Handle the trace command - Tauri/IPC handler tracing
+///
+/// Uses snapshot's command_bridges for fast lookup (auto-creates snapshot if missing)
 pub fn handle_trace_command(opts: &TraceOptions, global: &GlobalOptions) -> DispatchResult {
-    use crate::analyzer::root_scan::{ScanConfig, scan_roots};
-    use crate::analyzer::scan::python_stdlib;
-    use crate::analyzer::trace::{print_trace_human, print_trace_json, trace_handler};
-    use crate::config::LoctreeConfig;
-    use crate::types::OutputMode;
-    use std::collections::HashSet;
-    use std::path::PathBuf;
+    use std::path::Path;
 
     let spinner = if !global.quiet && !global.json {
         Some(Spinner::new(&format!(
@@ -234,68 +224,18 @@ pub fn handle_trace_command(opts: &TraceOptions, global: &GlobalOptions) -> Disp
         None
     };
 
-    let root_list: Vec<PathBuf> = if opts.roots.is_empty() {
-        vec![PathBuf::from(".")]
-    } else {
-        opts.roots.clone()
-    };
+    // Load snapshot (auto-scan if missing)
+    let root = opts
+        .roots
+        .first()
+        .map(|p| p.as_path())
+        .unwrap_or(Path::new("."));
 
-    let parsed = crate::args::ParsedArgs {
-        output: if global.json {
-            OutputMode::Json
-        } else {
-            OutputMode::Human
-        },
-        verbose: global.verbose,
-        color: global.color,
-        library_mode: global.library_mode,
-        python_library: global.python_library,
-        py_roots: global.py_roots.clone(),
-        use_gitignore: true,
-        ..Default::default()
-    };
-
-    let extensions = parsed.extensions.clone().or_else(|| {
-        Some(
-            ["ts", "tsx", "js", "jsx", "mjs", "cjs", "rs", "css", "py"]
-                .iter()
-                .map(|s| s.to_string())
-                .collect(),
-        )
-    });
-
-    let py_stdlib = python_stdlib();
-
-    let loctree_config = LoctreeConfig::load(
-        root_list
-            .first()
-            .map(|p| p.as_path())
-            .unwrap_or_else(|| std::path::Path::new(".")),
-    );
-    let command_detection = crate::analyzer::ast_js::CommandDetectionConfig::new(
-        &loctree_config.tauri.dom_exclusions,
-        &loctree_config.tauri.non_invoke_exclusions,
-        &loctree_config.tauri.invalid_command_names,
-    );
-
-    let scan_results = match scan_roots(ScanConfig {
-        roots: &root_list,
-        parsed: &parsed,
-        extensions,
-        focus_set: &None,
-        exclude_set: &None,
-        ignore_exact: HashSet::new(),
-        ignore_prefixes: Vec::new(),
-        py_stdlib: &py_stdlib,
-        cached_analyses: None,
-        collect_edges: false,
-        custom_command_macros: &loctree_config.tauri.command_macros,
-        command_detection,
-    }) {
-        Ok(res) => res,
+    let snapshot = match load_or_create_snapshot(root, global) {
+        Ok(s) => s,
         Err(e) => {
             if let Some(s) = spinner {
-                s.finish_error(&format!("Failed to trace handler: {}", e));
+                s.finish_error(&format!("Failed to load snapshot: {}", e));
             } else {
                 eprintln!("[loct][error] {}", e);
             }
@@ -303,34 +243,105 @@ pub fn handle_trace_command(opts: &TraceOptions, global: &GlobalOptions) -> Disp
         }
     };
 
-    let crate::analyzer::root_scan::ScanResults {
-        global_fe_commands,
-        global_be_commands,
-        global_analyses,
-        ..
-    } = scan_results;
-
-    let registered_impls: HashSet<String> = global_analyses
+    // Find matching command bridges (case-insensitive partial match)
+    let handler_lower = opts.handler.to_lowercase();
+    let matching_bridges: Vec<_> = snapshot
+        .command_bridges
         .iter()
-        .flat_map(|a| a.tauri_registered_handlers.iter().cloned())
+        .filter(|b| b.name.to_lowercase().contains(&handler_lower))
         .collect();
-
-    let result = trace_handler(
-        &opts.handler,
-        &global_analyses,
-        &global_fe_commands,
-        &global_be_commands,
-        &registered_impls,
-    );
 
     if let Some(s) = spinner {
         s.finish_success("Trace complete");
     }
 
+    // Output results
     if global.json {
-        print_trace_json(&result);
+        let json_output = serde_json::json!({
+            "query": opts.handler,
+            "matches": matching_bridges.iter().map(|b| {
+                serde_json::json!({
+                    "name": b.name,
+                    "has_handler": b.has_handler,
+                    "is_called": b.is_called,
+                    "backend_handler": b.backend_handler,
+                    "frontend_calls": b.frontend_calls,
+                    "verdict": if !b.has_handler && b.is_called {
+                        "MISSING"
+                    } else if b.has_handler && !b.is_called {
+                        "UNUSED"
+                    } else if b.has_handler && b.is_called {
+                        "OK"
+                    } else {
+                        "UNKNOWN"
+                    }
+                })
+            }).collect::<Vec<_>>()
+        });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json_output).unwrap_or_default()
+        );
+    } else if matching_bridges.is_empty() {
+        println!("\nNo command bridges found matching '{}'", opts.handler);
+        println!("\nAvailable commands (sample):");
+        for bridge in snapshot.command_bridges.iter().take(10) {
+            println!("  - {}", bridge.name);
+        }
+        if snapshot.command_bridges.len() > 10 {
+            println!("  ... and {} more", snapshot.command_bridges.len() - 10);
+        }
     } else {
-        print_trace_human(&result);
+        println!(
+            "\nTrace for '{}' ({} match(es)):\n",
+            opts.handler,
+            matching_bridges.len()
+        );
+        for bridge in &matching_bridges {
+            let verdict = if !bridge.has_handler && bridge.is_called {
+                "MISSING"
+            } else if bridge.has_handler && !bridge.is_called {
+                "UNUSED"
+            } else if bridge.has_handler && bridge.is_called {
+                "OK"
+            } else {
+                "?"
+            };
+            println!("  [{}] {}", verdict, bridge.name);
+            if let Some((ref file, line)) = bridge.backend_handler {
+                println!("    Backend: {}:{}", file, line);
+            } else {
+                println!("    Backend: (not found)");
+            }
+            if bridge.frontend_calls.is_empty() {
+                println!("    Frontend: (no calls)");
+            } else {
+                println!("    Frontend calls ({}):", bridge.frontend_calls.len());
+                for (file, line) in bridge.frontend_calls.iter().take(5) {
+                    println!("      {}:{}", file, line);
+                }
+                if bridge.frontend_calls.len() > 5 {
+                    println!("      ... and {} more", bridge.frontend_calls.len() - 5);
+                }
+            }
+            if !bridge.has_handler && bridge.is_called {
+                println!(
+                    "    [!] Frontend calls invoke('{}') but no backend handler found.",
+                    bridge.name
+                );
+                println!(
+                    "    Fix: Add #[tauri::command] pub async fn {}(...) in src-tauri/",
+                    bridge.name
+                );
+            } else if bridge.has_handler && !bridge.is_called {
+                println!("    [i] Handler defined but not called from frontend.");
+                println!(
+                    "    Consider: Remove if unused, or add invoke('{}') call.",
+                    bridge.name
+                );
+            }
+            println!();
+        }
     }
 
     DispatchResult::Exit(0)
@@ -1497,9 +1508,6 @@ pub fn handle_health_command(opts: &HealthOptions, global: &GlobalOptions) -> Di
     use crate::analyzer::twins::detect_exact_twins;
     use std::path::Path;
 
-    // Deprecation warning (goes to stderr, won't break piped output)
-    warn_deprecated("health", "loct --summary");
-
     // Show spinner unless in quiet/json mode
     let spinner = if !global.quiet && !global.json {
         Some(Spinner::new("Running health check..."))
@@ -1632,17 +1640,17 @@ pub fn handle_health_command(opts: &HealthOptions, global: &GlobalOptions) -> Di
     DispatchResult::Exit(0)
 }
 
-/// Handle the audit command - full codebase audit with actionable findings
+/// Handle the audit command - full codebase audit with actionable markdown report
 pub fn handle_audit_command(opts: &AuditOptions, global: &GlobalOptions) -> DispatchResult {
+    use crate::analyzer::audit_report::{
+        AuditFindings, OrphanFile, ShadowExport, generate_markdown_report, generate_todos,
+    };
     use crate::analyzer::crowd::detect_all_crowds;
     use crate::analyzer::cycles::{CycleCompilability, find_cycles_classified_with_lazy};
     use crate::analyzer::dead_parrots::{DeadFilterConfig, find_dead_exports};
     use crate::analyzer::twins::{build_symbol_registry, detect_exact_twins};
     use std::collections::HashMap;
     use std::path::Path;
-
-    // Deprecation warning (goes to stderr, won't break piped output)
-    warn_deprecated("audit", "loct --findings");
 
     // Show spinner unless in quiet/json mode
     let spinner = if !global.quiet && !global.json {
@@ -1679,15 +1687,15 @@ pub fn handle_audit_command(opts: &AuditOptions, global: &GlobalOptions) -> Disp
 
     let (classified_cycles, _) = find_cycles_classified_with_lazy(&edges);
 
-    let high_risk_cycles = classified_cycles
+    let _high_risk_cycles = classified_cycles
         .iter()
         .filter(|c| c.compilability == CycleCompilability::Breaking)
         .count();
-    let structural_cycles = classified_cycles
+    let _structural_cycles = classified_cycles
         .iter()
         .filter(|c| c.compilability == CycleCompilability::Structural)
         .count();
-    let total_cycles = classified_cycles.len();
+    let _total_cycles = classified_cycles.len();
 
     // 2. Dead exports analysis
     let dead_exports = find_dead_exports(
@@ -1709,11 +1717,11 @@ pub fn handle_audit_command(opts: &AuditOptions, global: &GlobalOptions) -> Disp
         .iter()
         .filter(|d| d.confidence == "high")
         .count();
-    let low_confidence = dead_exports.len() - high_confidence;
+    let _low_confidence = dead_exports.len() - high_confidence;
 
     // 3. Twins analysis
     let twins = detect_exact_twins(&snapshot.files, opts.include_tests);
-    let twin_count = twins.len();
+    let _twin_count = twins.len();
 
     // 4. Orphan files (files with 0 importers)
     let mut in_degree: HashMap<String, usize> = HashMap::new();
@@ -1752,7 +1760,7 @@ pub fn handle_audit_command(opts: &AuditOptions, global: &GlobalOptions) -> Disp
         .collect();
 
     orphan_files.sort_by(|a, b| b.1.cmp(&a.1));
-    let orphan_loc: usize = orphan_files.iter().map(|(_, loc)| loc).sum();
+    let _orphan_loc: usize = orphan_files.iter().map(|(_, loc)| loc).sum();
 
     // 5. Shadow exports
     let registry = build_symbol_registry(&snapshot.files, opts.include_tests);
@@ -1784,30 +1792,65 @@ pub fn handle_audit_command(opts: &AuditOptions, global: &GlobalOptions) -> Disp
         s.finish_success("Audit complete");
     }
 
-    // Calculate total findings
-    let total_findings = total_cycles
-        + dead_exports.len()
-        + twin_count
-        + orphan_files.len()
-        + shadow_exports.len()
-        + crowds.len();
+    // Build AuditFindings struct
+    let total_loc: usize = snapshot.files.iter().map(|f| f.loc).sum();
+
+    let findings = AuditFindings {
+        cycles: classified_cycles,
+        dead_exports,
+        twins,
+        orphan_files: orphan_files
+            .into_iter()
+            .map(|(path, loc)| OrphanFile { path, loc })
+            .collect(),
+        shadow_exports: shadow_exports
+            .into_iter()
+            .map(|(name, total_locations, dead_locations)| ShadowExport {
+                name,
+                total_locations,
+                dead_locations,
+            })
+            .collect(),
+        crowds,
+        total_files: snapshot.files.len(),
+        total_loc,
+    };
 
     // Output results
     if global.json {
+        // Keep JSON output for --json flag (existing behavior)
+        let high_confidence = findings
+            .dead_exports
+            .iter()
+            .filter(|d| d.confidence == "high")
+            .count();
+        let low_confidence = findings.dead_exports.len() - high_confidence;
+        let high_risk_cycles = findings
+            .cycles
+            .iter()
+            .filter(|c| c.compilability == CycleCompilability::Breaking)
+            .count();
+        let structural_cycles = findings
+            .cycles
+            .iter()
+            .filter(|c| c.compilability == CycleCompilability::Structural)
+            .count();
+        let orphan_loc: usize = findings.orphan_files.iter().map(|f| f.loc).sum();
+
         let json = serde_json::json!({
             "cycles": {
-                "total": total_cycles,
+                "total": findings.cycles.len(),
                 "high_risk": high_risk_cycles,
                 "structural": structural_cycles
             },
             "dead_exports": {
-                "total": dead_exports.len(),
+                "total": findings.dead_exports.len(),
                 "high_confidence": high_confidence,
                 "low_confidence": low_confidence
             },
             "twins": {
-                "total": twin_count,
-                "groups": twins.iter().take(10).map(|t| {
+                "total": findings.twins.len(),
+                "groups": findings.twins.iter().take(10).map(|t| {
                     serde_json::json!({
                         "name": t.name,
                         "locations": t.locations.len()
@@ -1815,28 +1858,28 @@ pub fn handle_audit_command(opts: &AuditOptions, global: &GlobalOptions) -> Disp
                 }).collect::<Vec<_>>()
             },
             "orphan_files": {
-                "total": orphan_files.len(),
+                "total": findings.orphan_files.len(),
                 "total_loc": orphan_loc,
-                "files": orphan_files.iter().take(10).map(|(path, loc)| {
+                "files": findings.orphan_files.iter().take(10).map(|f| {
                     serde_json::json!({
-                        "path": path,
-                        "loc": loc
+                        "path": f.path,
+                        "loc": f.loc
                     })
                 }).collect::<Vec<_>>()
             },
             "shadow_exports": {
-                "total": shadow_exports.len(),
-                "items": shadow_exports.iter().take(10).map(|(name, total, dead)| {
+                "total": findings.shadow_exports.len(),
+                "items": findings.shadow_exports.iter().take(10).map(|s| {
                     serde_json::json!({
-                        "name": name,
-                        "total_locations": total,
-                        "dead_locations": dead
+                        "name": s.name,
+                        "total_locations": s.total_locations,
+                        "dead_locations": s.dead_locations
                     })
                 }).collect::<Vec<_>>()
             },
             "crowds": {
-                "total": crowds.len(),
-                "clusters": crowds.iter().take(5).map(|c| {
+                "total": findings.crowds.len(),
+                "clusters": findings.crowds.iter().take(5).map(|c| {
                     serde_json::json!({
                         "pattern": c.pattern,
                         "files": c.members.len()
@@ -1844,102 +1887,19 @@ pub fn handle_audit_command(opts: &AuditOptions, global: &GlobalOptions) -> Disp
                 }).collect::<Vec<_>>()
             },
             "summary": {
-                "total_findings": total_findings
+                "total_files": findings.total_files,
+                "total_loc": findings.total_loc
             }
         });
         println!("{}", serde_json::to_string_pretty(&json).unwrap());
+    } else if opts.todos {
+        // --todos flag: output actionable checklist only
+        let output = generate_todos(&findings, opts.limit);
+        print!("{}", output);
     } else {
-        println!("\n🔍 Full Codebase Audit\n");
-
-        // Cycles
-        println!("CYCLES ({} total)", total_cycles);
-        if total_cycles == 0 {
-            println!("  ✓ No circular imports detected");
-        } else {
-            println!("  {} high-risk cycles (breaking)", high_risk_cycles);
-            println!("  {} structural cycles", structural_cycles);
-        }
-        println!();
-
-        // Dead exports
-        println!("DEAD EXPORTS ({} total)", dead_exports.len());
-        if dead_exports.is_empty() {
-            println!("  ✓ No unused exports detected");
-        } else {
-            println!("  {} high confidence", high_confidence);
-            println!("  {} low confidence", low_confidence);
-        }
-        println!();
-
-        // Twins
-        println!("TWINS ({} groups)", twin_count);
-        if twin_count == 0 {
-            println!("  ✓ No duplicate symbols detected");
-        } else {
-            for twin in twins.iter().take(3) {
-                println!(
-                    "  {} exported from {} files",
-                    twin.name,
-                    twin.locations.len()
-                );
-            }
-            if twin_count > 3 {
-                println!("  ... and {} more", twin_count - 3);
-            }
-        }
-        println!();
-
-        // Orphan files
-        println!(
-            "ORPHAN FILES ({} files, {} LOC)",
-            orphan_files.len(),
-            orphan_loc
-        );
-        if orphan_files.is_empty() {
-            println!("  ✓ No orphan files detected");
-        } else {
-            for (path, loc) in orphan_files.iter().take(3) {
-                println!("  {} ({} LOC)", path, loc);
-            }
-            if orphan_files.len() > 3 {
-                println!("  ... and {} more", orphan_files.len() - 3);
-            }
-        }
-        println!();
-
-        // Shadow exports
-        println!("SHADOW EXPORTS ({} total)", shadow_exports.len());
-        if shadow_exports.is_empty() {
-            println!("  ✓ No shadow exports detected");
-        } else {
-            for (name, total, dead) in shadow_exports.iter().take(3) {
-                println!("  {} exported by {} files, {} dead", name, total, dead);
-            }
-            if shadow_exports.len() > 3 {
-                println!("  ... and {} more", shadow_exports.len() - 3);
-            }
-        }
-        println!();
-
-        // Crowds
-        println!("CROWDS ({} clusters)", crowds.len());
-        if crowds.is_empty() {
-            println!("  ✓ No similar file clusters detected");
-        } else {
-            for crowd in crowds.iter().take(3) {
-                println!("  {}: {} similar files", crowd.pattern, crowd.members.len());
-            }
-            if crowds.len() > 3 {
-                println!("  ... and {} more", crowds.len() - 3);
-            }
-        }
-        println!();
-
-        // Summary
-        println!("─────────────────────────────────");
-        println!("Total: {} findings to review", total_findings);
-        println!("Run individual commands for details.");
-        println!();
+        // Default: full markdown report
+        let output = generate_markdown_report(&findings, opts.limit);
+        print!("{}", output);
     }
 
     DispatchResult::Exit(0)

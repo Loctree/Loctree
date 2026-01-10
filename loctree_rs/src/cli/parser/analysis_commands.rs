@@ -188,11 +188,12 @@ pub(super) fn parse_find_command(args: &[String]) -> Result<Command, String> {
         return Err("loct find - Semantic search for symbols by name pattern
 
 USAGE:
-    loct find [QUERY] [OPTIONS]
+    loct find [QUERY...] [OPTIONS]
 
 DESCRIPTION:
-    Semantic search for symbols (functions, classes, types) matching a name pattern.
-    Uses regex patterns to match symbol names in your codebase.
+    Semantic search for symbols (functions, classes, types) matching name patterns.
+    Uses regex patterns. Multiple queries are combined with OR logic.
+    Uses snapshot for instant results (15x faster than re-scanning).
 
 OPTIONS:
     --symbol <PATTERN>, -s <PATTERN>    Search for symbols matching regex
@@ -207,11 +208,13 @@ OPTIONS:
 
 EXAMPLES:
     loct find Patient                   # Find symbols containing \"Patient\"
+    loct find foo bar baz               # Multi-query: find any of these (NEW!)
     loct find --symbol \".*Config$\"      # Regex: symbols ending with Config"
             .to_string());
     }
 
     let mut opts = FindOptions::default();
+    let mut queries: Vec<String> = Vec::new();
     let mut i = 0;
 
     while i < args.len() {
@@ -275,14 +278,19 @@ EXAMPLES:
                 i += 2;
             }
             _ if !arg.starts_with('-') => {
-                // Positional argument is the query
-                opts.query = Some(arg.clone());
+                // Collect all positional args as queries (multi-query support!)
+                queries.push(arg.clone());
                 i += 1;
             }
             _ => {
                 return Err(format!("Unknown option '{}' for 'find' command.", arg));
             }
         }
+    }
+
+    // Combine multiple queries with | for regex OR matching
+    if !queries.is_empty() {
+        opts.query = Some(queries.join("|"));
     }
 
     // Validate that at least one search criterion is specified and not empty

@@ -233,66 +233,59 @@ impl Snapshot {
         }
     }
 
-    /// Get git repository info (repo name, branch, commit)
-    fn get_git_info() -> (Option<String>, Option<String>, Option<String>) {
+    /// Get git repository info (repo name, branch, commit) for given root
+    fn get_git_info(root: &Path) -> (Option<String>, Option<String>, Option<String>) {
         use std::process::{Command, Stdio};
-
-        // Get repo name from remote origin URL
-        // Suppress stderr to avoid "not a git repository" spam in non-git dirs
         let repo = Command::new("git")
             .args(["remote", "get-url", "origin"])
+            .current_dir(root)
             .stderr(Stdio::null())
             .output()
             .ok()
-            .and_then(|output| {
-                if output.status.success() {
-                    String::from_utf8(output.stdout).ok()
+            .and_then(|o| {
+                if o.status.success() {
+                    String::from_utf8(o.stdout).ok()
                 } else {
                     None
                 }
             })
             .and_then(|url| {
-                // Extract repo name from URL like git@github.com:user/repo.git
-                // or https://github.com/user/repo.git
-                let url = url.trim();
-                url.rsplit('/')
+                url.trim()
+                    .rsplit('/')
                     .next()
-                    .or_else(|| url.rsplit(':').next())
+                    .or_else(|| url.trim().rsplit(':').next())
                     .map(|s| s.trim_end_matches(".git").to_string())
             });
-
-        // Get current branch
         let branch = Command::new("git")
             .args(["rev-parse", "--abbrev-ref", "HEAD"])
+            .current_dir(root)
             .stderr(Stdio::null())
             .output()
             .ok()
-            .and_then(|output| {
-                if output.status.success() {
-                    String::from_utf8(output.stdout)
+            .and_then(|o| {
+                if o.status.success() {
+                    String::from_utf8(o.stdout)
                         .ok()
                         .map(|s| s.trim().to_string())
                 } else {
                     None
                 }
             });
-
-        // Get short commit hash
         let commit = Command::new("git")
             .args(["rev-parse", "--short", "HEAD"])
+            .current_dir(root)
             .stderr(Stdio::null())
             .output()
             .ok()
-            .and_then(|output| {
-                if output.status.success() {
-                    String::from_utf8(output.stdout)
+            .and_then(|o| {
+                if o.status.success() {
+                    String::from_utf8(o.stdout)
                         .ok()
                         .map(|s| s.trim().to_string())
                 } else {
                     None
                 }
             });
-
         (repo, branch, commit)
     }
 
@@ -301,17 +294,15 @@ impl Snapshot {
         value.replace(['/', '\\', ' ', ':'], "_").trim().to_string()
     }
 
-    /// Build the current git context (repo, branch, commit, scan_id)
-    pub fn current_git_context() -> GitContext {
-        let (repo, branch, commit) = Self::get_git_info();
+    /// Build git context for given root (repo, branch, commit, scan_id)
+    pub fn git_context_for(root: &Path) -> GitContext {
+        let (repo, branch, commit) = Self::get_git_info(root);
         let scan_id = branch.as_ref().map(|b| {
-            let mut base = Self::sanitize_ref(b);
-            if let Some(c) = &commit {
-                base = format!("{}@{}", base, Self::sanitize_ref(c));
-            }
-            base
+            let base = Self::sanitize_ref(b);
+            commit.as_ref().map_or(base.clone(), |c| {
+                format!("{}@{}", base, Self::sanitize_ref(c))
+            })
         });
-
         GitContext {
             repo,
             branch,
@@ -319,10 +310,14 @@ impl Snapshot {
             scan_id,
         }
     }
+    /// Build git context for CWD (backwards compat)
+    pub fn current_git_context() -> GitContext {
+        Self::git_context_for(&std::env::current_dir().unwrap_or_default())
+    }
 
     fn candidate_snapshot_paths(root: &Path) -> Vec<PathBuf> {
         let mut paths = Vec::new();
-        if let Some(seg) = Self::current_git_context().scan_id {
+        if let Some(seg) = Self::git_context_for(root).scan_id {
             paths.push(root.join(SNAPSHOT_DIR).join(seg).join(SNAPSHOT_FILE));
         }
         paths.push(root.join(SNAPSHOT_DIR).join(SNAPSHOT_FILE));
@@ -633,6 +628,26 @@ impl Snapshot {
             .count();
         if duplicate_count > 0 {
             println!("Duplicates: {} export groups", duplicate_count);
+        }
+
+        // Count indexed parameters (NEW in 0.8.4)
+        let param_count: usize = self
+            .files
+            .iter()
+            .flat_map(|f| f.exports.iter())
+            .map(|e| e.params.len())
+            .sum();
+        if param_count > 0 {
+            let func_with_params = self
+                .files
+                .iter()
+                .flat_map(|f| f.exports.iter())
+                .filter(|e| !e.params.is_empty())
+                .count();
+            println!(
+                "Params: {} indexed ({} functions)",
+                param_count, func_with_params
+            );
         }
 
         println!("Status: OK");
@@ -1551,35 +1566,42 @@ mod tests {
     }
 
     #[test]
-    fn test_snapshot_path_prefers_scan_id_when_available() {
-        let ctx = Snapshot::current_git_context();
+    fn test_snapshot_path_uses_root_git_context() {
+        // Non-git directory should use legacy path (no scan_id)
+        let path = Snapshot::snapshot_path(Path::new("/tmp/loctree"));
+        assert!(
+            path.ends_with("snapshot.json"),
+            "should end with snapshot.json"
+        );
+        // Git directory (cwd) should include scan_id
+        let cwd = std::env::current_dir().unwrap();
+        let ctx = Snapshot::git_context_for(&cwd);
         if let Some(scan) = ctx.scan_id {
-            let path = Snapshot::snapshot_path(Path::new("/tmp/loctree"));
-            let display = path.display().to_string();
+            let path = Snapshot::snapshot_path(&cwd);
             assert!(
-                display.contains(&scan),
-                "expected snapshot path to include scan id {} but got {}",
-                scan,
-                display
+                path.display().to_string().contains(&scan),
+                "git dir should include scan_id"
             );
-            assert!(display.ends_with("/snapshot.json"));
         }
     }
 
     #[test]
-    fn test_artifacts_dir_prefers_scan_id() {
-        let ctx = Snapshot::current_git_context();
+    fn test_artifacts_dir_uses_root_git_context() {
+        // Non-git directory should use legacy path
         let dir = Snapshot::artifacts_dir(Path::new("/tmp/loctree"));
+        assert!(
+            dir.ends_with(Path::new(".loctree")),
+            "non-git should use .loctree"
+        );
+        // Git directory should include scan_id
+        let cwd = std::env::current_dir().unwrap();
+        let ctx = Snapshot::git_context_for(&cwd);
         if let Some(scan) = ctx.scan_id {
-            let display = dir.display().to_string();
+            let dir = Snapshot::artifacts_dir(&cwd);
             assert!(
-                display.contains(&scan),
-                "expected artifacts dir to include scan id {} but got {}",
-                scan,
-                display
+                dir.display().to_string().contains(&scan),
+                "git dir should include scan_id"
             );
-        } else {
-            assert!(dir.ends_with(Path::new(".loctree")));
         }
     }
 

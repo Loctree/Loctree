@@ -2,95 +2,65 @@
 
 Real-world validation of loctree on major open-source repositories.
 
-## Source Repository Tests (Language/Framework Origins)
+## Source Repository Tests
 
-| Repository | Stack | Files | FP Rate | Verdict |
-|------------|-------|-------|---------|---------|
-| [rust-lang/rust](rust-lang-rust.md) | Rust | 35,387 | 0% | EXCEPTIONAL |
-| [golang/go](golang-go.md) | Go | 17,182 | ~0% | PERFECT |
-| [facebook/react](facebook-react.md) | JSX/TSX | 3,951 | ~20% | B+ PASSED |
-| [sveltejs/svelte](sveltejs-svelte.md) | TS/JS | 405 | 70%* | PASSED |
-| [python/cpython](python-cpython.md) | Python | 842 | 100%* | N/A |
-| [denoland/deno](denoland-deno.md) | Rust | 611 | ~0% | EXCELLENT |
+| Repository | Stack | Files | FP Rate | Verdict | Details |
+|------------|-------|-------|---------|---------|---------|
+| rust-lang/rust | Rust | 35,387 | 0% | EXCEPTIONAL | [→](18_rust.md) |
+| golang/go | Go | 17,182 | ~0% | PERFECT | [→](14_golang.md) |
+| facebook/react | JSX/TSX | 3,951 | ~20% | B+ PASSED | [→](11_react.md) |
+| sveltejs/svelte | TS/JS | 405 | 70%* | PASSED | [→](20_svelte.md) |
+| python/cpython | Python | 842 | 100%* | N/A | [→](17_cpython.md) |
+| denoland/deno | Rust | 611 | ~0% | EXCELLENT | [→](10_deno.md) |
 
 *High FP expected for library/stdlib code - library mode auto-detection improves this
 
 ## Framework Tests
 
-| Repository | Stack | Files | FP Rate | Verdict |
-|------------|-------|-------|---------|---------|
-| [tauri-apps/tauri](tauri-apps-tauri.md) | Rust+TS | 385 | 0% | PERFECT |
-| [tiangolo/fastapi](fastapi-fastapi.md) | Python | 1,184 | 0% | PERFECT |
-| [vuejs/core](vuejs-core.md) | TS+Vue | ~500 | 0% | EXCELLENT |
-| [sveltejs/kit](sveltejs-kit.md) | TS+Svelte | 1,117 | ~0% | EXCELLENT |
+| Repository | Stack | Files | FP Rate | Verdict | Details |
+|------------|-------|-------|---------|---------|---------|
+| tauri-apps/tauri | Rust+TS | 385 | 0% | PERFECT | [→](21_tauri.md) |
+| tiangolo/fastapi | Python | 1,184 | 0% | PERFECT | [→](12_fastapi.md) |
+| vuejs/core | TS+Vue | ~500 | 0% | EXCELLENT | [→](22_vue.md) |
+| sveltejs/kit | TS+Svelte | 1,117 | ~0% | EXCELLENT | [→](19_sveltekit.md) |
 
-## Blocked Tests (UTF-8 Limitations)
+## Internal Use Cases
 
-| Repository | Issue | Workaround |
-|------------|-------|------------|
-| [nodejs/node](nodejs-node.md) | Binary ICU data files | Scan `lib/` only |
-| [microsoft/TypeScript](microsoft-typescript.md) | Malformed test fixtures | Scan `src/` only |
+| Use Case | Description | Details |
+|----------|-------------|---------|
+| Circular Imports Fix | How to detect and fix circular dependencies | [→](01_circular_imports_fix.md) |
+| Dead Exports Massacre | Cleaning up unused exports at scale | [→](02_dead_exports_massacre.md) |
+| Dogfooding False Positives | Tracking and fixing loctree's own FP issues | [→](03_dogfooding_false_positive.md) |
+| Event Flow Audit | Analyzing event-driven architectures | [→](04_event_flow_audit.md) |
+| Rust Crate Imports | Handling Rust module systems | [→](05_rust_crate_imports.md) |
+| Tauri Commands | Frontend-backend contract validation | [→](06_tauri_commands.md) |
+| Vista Tauri Contract | Full Tauri app analysis case study | [→](07_vista_tauri_contract.md) |
+| ripgrep + loct Synergy | Combining tools effectively | [→](08_rg_loct_synergy.md) |
 
-## Key Achievements
+## Performance Benchmarks
 
-### Performance
-- **rust-lang/rust**: 35K files in 45 seconds (~787 files/sec)
-- **golang/go**: 17K files in 107 seconds (~160 files/sec)
-- **facebook/react**: 4K files in 49 seconds (~81 files/sec)
+| Repository | Files | Time | Rate |
+|------------|-------|------|------|
+| rust-lang/rust | 35,387 | 45s | ~787 files/sec |
+| golang/go | 17,182 | 107s | ~160 files/sec |
+| facebook/react | 3,951 | 49s | ~81 files/sec |
 
-### Accuracy
-- **0% FP** on: Tauri, FastAPI, Go, Vue, SvelteKit, Deno
-- **~20% FP** on: React (WeakMap/WeakSet patterns, import aliasing, type-only exports)
-- **Cycle Detection**: 91 intra-crate cycles found in Rust compiler (architectural, not bugs)
+## Accuracy Summary
 
-### Features Validated
-- **Tauri Commands**: Perfect FE↔BE bridge tracking
-- **FastAPI Routes**: 451 endpoints detected
-- **Vue SFC**: Full `<script setup>` support
-- **Virtual Modules**: `$app/*`, `$lib/*` resolution
-
-## Known Limitations
-
-### Library Mode Auto-Detection
-For public API analysis (libraries, frameworks, stdlib):
-- npm packages with `package.json` "exports" field: auto-detected
-- Python stdlib (Lib/ directory): auto-detected
-- Python `__all__` exports: properly tracked and excluded
-
-**Remaining edge cases**:
-- sveltejs/svelte: 70% FP on public exports (type-only re-exports)
-- python/cpython: Manual `--library-mode` recommended for full stdlib analysis
-
-### Edge Cases
-- Svelte component method refs (GitButler regression)
-- Rust associated/const functions (Zed)
-- Python module attribute access patterns
-
-### UTF-8 Handling
-Repositories with intentionally malformed files (compiler test suites) need:
-- `--skip-invalid-utf8` flag (planned)
-- `.loctreeignore` support (planned)
-
-## Note on Rust Circular Dependencies
-
-Loctree detects intra-crate module cycles in Rust (91 in rust-lang/rust). These are **NOT bugs**:
-- Rust allows modules within the same crate to mutually import
-- Compiler resolves via lazy name resolution
-- Different from JS/Python where circular imports cause runtime issues
+- **0% FP**: Tauri, FastAPI, Go, Vue, SvelteKit, Deno
+- **~20% FP**: React (WeakMap/WeakSet patterns, import aliasing)
+- **High FP**: Library/stdlib code (use `--library-mode`)
 
 ## Test Methodology
 
-Each repository tested with:
 ```bash
 git clone --depth 1 <repo>
 cd <repo>
-rm -rf .loctree && loct           # Fresh snapshot
+loct                              # Build snapshot
 loct dead --confidence high       # Dead code analysis
 loct twins                        # Duplicate detection
 loct cycles                       # Circular imports
 ```
-
-Sample verification: 10 random findings checked with `rg`.
 
 ---
 

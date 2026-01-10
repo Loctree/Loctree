@@ -1,0 +1,84 @@
+#!/bin/sh
+set -e
+
+# Get repo root
+REPO_ROOT=$(git rev-parse --show-toplevel)
+cd "$REPO_ROOT"
+
+echo "=== Pre-commit (fast checks on staged files) ==="
+
+# Check if any Rust files are staged
+STAGED_RS=$(git diff --cached --name-only --diff-filter=ACM | grep '\.rs$' || true)
+
+if [ -n "$STAGED_RS" ]; then
+  echo "Running Rust fmt (auto-fix) on all crates..."
+
+  # Format all Rust crates
+  (cd loctree_rs && cargo fmt)
+  (cd reports && cargo fmt)
+  (cd landing && cargo fmt)
+  (cd loctree-mcp && cargo fmt)
+  (cd loctree_lsp && cargo fmt)
+
+  # Re-add formatted files
+  echo "$STAGED_RS" | xargs -I {} git add "{}" 2>/dev/null || true
+fi
+
+# Check if any JS/TS files are staged
+STAGED_JS=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(js|mjs|ts|tsx)$' || true)
+
+if [ -n "$STAGED_JS" ]; then
+  echo "Running Node unit tests..."
+  node tools/tests/test_loctree_node_unit.mjs
+fi
+
+# Check if any Python files are staged
+STAGED_PY=$(git diff --cached --name-only --diff-filter=ACM | grep '\.py$' || true)
+
+if [ -n "$STAGED_PY" ]; then
+  echo "Running Python unit tests..."
+  python3 tools/tests/test_loctree_py_unit.py
+fi
+
+# Quick Rust check if any .rs files staged
+if [ -n "$STAGED_RS" ]; then
+  echo "Running Rust quick check (cargo check) on all crates..."
+
+  # Check which crates have staged files
+  if echo "$STAGED_RS" | grep -q "^loctree_rs/"; then
+    (cd loctree_rs && cargo check --quiet) || {
+      echo "❌ loctree_rs compilation errors. Fix before committing."
+      exit 1
+    }
+  fi
+
+  if echo "$STAGED_RS" | grep -q "^reports/"; then
+    (cd reports && cargo check --quiet) || {
+      echo "❌ reports compilation errors. Fix before committing."
+      exit 1
+    }
+  fi
+
+  if echo "$STAGED_RS" | grep -q "^landing/"; then
+    (cd landing && cargo check --quiet) || {
+      echo "❌ landing compilation errors. Fix before committing."
+      exit 1
+    }
+  fi
+
+  if echo "$STAGED_RS" | grep -q "^loctree-mcp/"; then
+    (cd loctree-mcp && cargo check --quiet) || {
+      echo "❌ loctree-mcp compilation errors. Fix before committing."
+      exit 1
+    }
+  fi
+
+  if echo "$STAGED_RS" | grep -q "^loctree_lsp/"; then
+    (cd loctree_lsp && cargo check --quiet) || {
+      echo "❌ loctree_lsp compilation errors. Fix before committing."
+      exit 1
+    }
+  fi
+fi
+
+echo "✅ Pre-commit checks passed. Full tests run on push."

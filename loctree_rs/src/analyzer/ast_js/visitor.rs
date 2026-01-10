@@ -12,7 +12,7 @@ use std::path::Path;
 use oxc_ast::ast::*;
 use oxc_span::Span;
 
-use crate::types::{FileAnalysis, SignatureUse, SignatureUseKind, StringLiteral};
+use crate::types::{FileAnalysis, ParamInfo, SignatureUse, SignatureUseKind, StringLiteral};
 
 use super::config::CommandDetectionConfig;
 use crate::analyzer::resolvers::{TsPathResolver, resolve_reexport_target};
@@ -187,5 +187,66 @@ impl<'a> JsVisitor<'a> {
             );
         }
         self.record_param_types(fn_name, &func.params);
+    }
+
+    /// Extract parameter info from FormalParameters for export tracking.
+    pub(super) fn extract_params(&self, params: &FormalParameters<'a>) -> Vec<ParamInfo> {
+        let mut result = Vec::new();
+        for param in params.items.iter() {
+            let name = match &param.pattern.kind {
+                BindingPatternKind::BindingIdentifier(id) => id.name.to_string(),
+                BindingPatternKind::ObjectPattern(_) => "{...}".to_string(),
+                BindingPatternKind::ArrayPattern(_) => "[...]".to_string(),
+                BindingPatternKind::AssignmentPattern(ap) => match &ap.left.kind {
+                    BindingPatternKind::BindingIdentifier(id) => id.name.to_string(),
+                    _ => "_".to_string(),
+                },
+            };
+            let type_annotation = param
+                .pattern
+                .type_annotation
+                .as_ref()
+                .map(|ann| JsVisitor::type_to_string(&ann.type_annotation));
+            let has_default = matches!(
+                &param.pattern.kind,
+                BindingPatternKind::AssignmentPattern(_)
+            );
+            result.push(ParamInfo {
+                name,
+                type_annotation,
+                has_default,
+            });
+        }
+        // Handle rest parameter
+        if let Some(rest) = &params.rest {
+            let name = match &rest.argument.kind {
+                BindingPatternKind::BindingIdentifier(id) => format!("...{}", id.name),
+                _ => "...rest".to_string(),
+            };
+            let type_annotation = rest
+                .argument
+                .type_annotation
+                .as_ref()
+                .map(|ann| JsVisitor::type_to_string(&ann.type_annotation));
+            result.push(ParamInfo {
+                name,
+                type_annotation,
+                has_default: false,
+            });
+        }
+        result
+    }
+
+    /// Extract params from Function.
+    pub(super) fn extract_function_params(&self, func: &Function<'a>) -> Vec<ParamInfo> {
+        self.extract_params(&func.params)
+    }
+
+    /// Extract params from ArrowFunctionExpression.
+    pub(super) fn extract_arrow_params(
+        &self,
+        func: &ArrowFunctionExpression<'a>,
+    ) -> Vec<ParamInfo> {
+        self.extract_params(&func.params)
     }
 }

@@ -1,0 +1,18 @@
+# Loctree ignore patterns
+# Created by M&K (c)2026 VetCoders
+# Note: Only literal paths supported, no globs
+
+# Test fixtures - intentional patterns (cycles, dead code, etc)
+loctree_rs/tests/fixtures/
+
+# VSCode extension - depends on loctree-lsp (only in loctree-suite)
+editors/vscode/
+
+# Build outputs - not source code
+reports/wasm/assets/
+
+# External API declarations (used by npm consumers, not internally)
+distribution/npm/index.d.ts
+
+# Tools fixtures
+tools/fixtures/

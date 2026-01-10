@@ -1,0 +1,5 @@
+#!/usr/bin/env node
+
+console.error("loct binary not found!");
+console.error("Run 'npm rebuild loctree' or reinstall the package.");
+process.exit(1);

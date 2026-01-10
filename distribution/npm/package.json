@@ -1,0 +1,56 @@
+{
+  "name": "loctree",
+  "version": "0.8.4",
+  "description": "Fast, language-aware codebase analyzer for detecting dead exports, circular imports, and generating dependency graphs",
+  "keywords": [
+    "static-analysis",
+    "dead-code",
+    "imports",
+    "exports",
+    "codebase",
+    "typescript",
+    "javascript",
+    "rust",
+    "circular-dependencies",
+    "dependency-graph"
+  ],
+  "main": "index.js",
+  "types": "index.d.ts",
+  "bin": {
+    "loctree": "bin/loctree"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "bin/loctree",
+    "install.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "postinstall": "node install.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Loctree/Loctree.git"
+  },
+  "homepage": "https://github.com/Loctree/Loctree#readme",
+  "bugs": {
+    "url": "https://github.com/Loctree/Loctree/issues"
+  },
+  "license": "MIT",
+  "author": "Loctree Contributors",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "optionalDependencies": {
+    "@loctree/darwin-arm64": "0.8.4",
+    "@loctree/darwin-x64": "0.8.4",
+    "@loctree/linux-arm64-gnu": "0.8.4",
+    "@loctree/linux-arm64-musl": "0.8.4",
+    "@loctree/linux-x64-gnu": "0.8.4",
+    "@loctree/linux-x64-musl": "0.8.4",
+    "@loctree/win32-arm64-msvc": "0.8.4",
+    "@loctree/win32-x64-msvc": "0.8.4"
+  }
+}

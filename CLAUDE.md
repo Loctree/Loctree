@@ -1,1 +1,0 @@
-- "Kod jest teraz production-ready." za takie coś się wylatuje z teamu

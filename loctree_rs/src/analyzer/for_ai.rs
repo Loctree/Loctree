@@ -57,6 +57,10 @@ pub struct ForAiSummary {
     pub twins_same_language: usize,
     /// Cross-language twins (FE/BE pairs, usually intentional)
     pub twins_cross_language: usize,
+    /// Total indexed function parameters (NEW in 0.8.4)
+    pub indexed_params: usize,
+    /// Functions that have at least one parameter indexed
+    pub functions_with_params: usize,
     /// Priority message for the AI
     pub priority: String,
     /// Health score 0-100 (vector-based with log-normalization)
@@ -326,6 +330,18 @@ fn compute_summary(sections: &[ReportSection], analyses: &[FileAnalysis]) -> For
             TwinCategory::CrossLanguage => (same, cross + 1),
         });
 
+    // Count indexed parameters (NEW in 0.8.4)
+    let indexed_params: usize = analyses
+        .iter()
+        .flat_map(|f| f.exports.iter())
+        .map(|e| e.params.len())
+        .sum();
+    let functions_with_params: usize = analyses
+        .iter()
+        .flat_map(|f| f.exports.iter())
+        .filter(|e| !e.params.is_empty())
+        .count();
+
     // Generate priority message (now includes twins!)
     let priority = if missing_handlers > 0 {
         format!(
@@ -415,6 +431,8 @@ fn compute_summary(sections: &[ReportSection], analyses: &[FileAnalysis]) -> For
         twins_dead_parrots,
         twins_same_language,
         twins_cross_language,
+        indexed_params,
+        functions_with_params,
         priority,
         health_score: health.health,
         health_details: Some(health.details),
@@ -1211,6 +1229,7 @@ mod tests {
             dead_exports: vec![],
             twins_data: None,
             coverage_gaps: vec![],
+            health_score: None,
         }
     }
 

@@ -2,9 +2,18 @@
 resolver = "2"
 members = [
     "loctree_rs",
-    "loctree_server",
+    "loctree-mcp",
+    "loctree_lsp",
+    "rmcp-common",
     "reports",
+    "reports/wasm",
+    # landing - excluded from public repo (development only in loctree-suite)
 ]
+
+# Removed from workspace:
+# - rmcp-memex: use crates.io version (0.3.2+), standalone: ~/Libraxis/rmcp-memex
+# - rmcp-mux: deprecated (dead end approach)
+# - rmcp-config-ui: moved to ~/Libraxis/rmcp-config-ui
 
 [workspace.package]
 edition = "2024"

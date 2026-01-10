@@ -92,7 +92,10 @@ impl Command {
     /// Generate the main help text listing the core commands.
     pub fn format_help() -> String {
         let mut help = String::new();
-        help.push_str("loctree 0.7.0 - AI-oriented codebase analyzer\n\n");
+        help.push_str(&format!(
+            "loctree {} - AI-oriented codebase analyzer\n\n",
+            env!("CARGO_PKG_VERSION")
+        ));
 
         help.push_str("SCAN (produces artifacts):\n");
         help.push_str(
@@ -141,9 +144,24 @@ impl Command {
         help.push_str("    --help           Show this help\n");
         help.push_str("    --version        Show version\n\n");
 
-        help.push_str("ADVANCED COMMANDS:\n");
-        help.push_str("  For full command list, run: loct --help-full\n");
-        help.push_str("  For legacy flags, run: loct --help-legacy\n");
+        help.push_str("ANALYSIS:\n");
+        help.push_str("  loct dead             Find unused exports\n");
+        help.push_str("  loct cycles           Circular imports\n");
+        help.push_str("  loct twins            Dead parrots + duplicates\n");
+        help.push_str("  loct health           Quick health check\n");
+        help.push_str("  loct audit            Full codebase audit\n\n");
+
+        help.push_str("INSTANT (<100ms):\n");
+        help.push_str("  loct focus <dir>      Directory context\n");
+        help.push_str("  loct hotspots         Import frequency heatmap\n");
+        help.push_str("  loct commands         Tauri FE↔BE bridges\n");
+        help.push_str("  loct coverage         Test coverage gaps\n");
+        help.push_str("  loct impact <file>    What breaks if changed\n\n");
+
+        help.push_str("MORE:\n");
+        help.push_str("  loct --help-full      All 27 commands\n");
+        help.push_str("  loct <cmd> --help     Per-command help\n");
+        help.push_str("  loct --help-legacy    Deprecated flag migration\n");
 
         help
     }
@@ -187,6 +205,146 @@ impl Command {
             "jq" => Some(JQ_HELP),
             _ => None,
         }
+    }
+
+    /// Generate the full help text with ALL commands (auto-generated).
+    /// This replaces the hardcoded format_usage_full() in loct.rs.
+    pub fn format_help_full() -> String {
+        let mut help = String::new();
+        help.push_str(&format!(
+            "loctree {} - AI-oriented codebase analyzer (Full Reference)\n\n",
+            env!("CARGO_PKG_VERSION")
+        ));
+
+        help.push_str("PHILOSOPHY: Scan once, query everything.\n");
+        help.push_str(
+            "            Run `loct` to create artifacts, then query with subcommands.\n\n",
+        );
+
+        // === INSTANT COMMANDS (< 100ms) ===
+        help.push_str("=== INSTANT COMMANDS (<100ms) ===\n\n");
+        let instant_cmds = [
+            ("focus <dir>", "Holographic context for a directory"),
+            ("hotspots", "Import frequency heatmap (core vs peripheral)"),
+            ("commands", "Tauri FE↔BE handler bridges"),
+            ("events", "Event emit/listen flow analysis"),
+            ("coverage", "Test coverage gaps (structural)"),
+            ("health", "Quick health check (cycles + dead + twins)"),
+            ("slice <file>", "Context for a file (deps + consumers)"),
+            ("impact <file>", "What breaks if you modify this file"),
+            ("query <type>", "Graph queries (who-imports, where-symbol)"),
+        ];
+        for (cmd, desc) in instant_cmds {
+            help.push_str(&format!("  loct {:<16} {}\n", cmd, desc));
+        }
+        help.push('\n');
+
+        // === ANALYSIS COMMANDS ===
+        help.push_str("=== ANALYSIS COMMANDS ===\n\n");
+        let analysis_cmds = [
+            ("dead", "Find unused exports / dead code"),
+            ("cycles", "Detect circular import chains"),
+            ("twins", "Find dead parrots (0 imports) + duplicate exports"),
+            ("zombie", "Combined: dead + orphan files + shadows"),
+            ("audit", "Full codebase audit (all checks)"),
+            ("crowd <kw>", "Functional clustering around keyword"),
+            ("tagmap <kw>", "Unified search: files + crowd + dead"),
+            ("sniff", "Code smells aggregate (twins + dead + crowds)"),
+        ];
+        for (cmd, desc) in analysis_cmds {
+            help.push_str(&format!("  loct {:<16} {}\n", cmd, desc));
+        }
+        help.push('\n');
+
+        // === FRAMEWORK-SPECIFIC ===
+        help.push_str("=== FRAMEWORK-SPECIFIC ===\n\n");
+        let framework_cmds = [
+            ("trace <handler>", "Trace Tauri handler end-to-end"),
+            ("routes", "List FastAPI/Flask routes"),
+            ("dist", "Bundle analysis via source maps"),
+            ("layoutmap", "CSS z-index/position/grid analysis"),
+        ];
+        for (cmd, desc) in framework_cmds {
+            help.push_str(&format!("  loct {:<16} {}\n", cmd, desc));
+        }
+        help.push('\n');
+
+        // === MANAGEMENT ===
+        help.push_str("=== MANAGEMENT ===\n\n");
+        let mgmt_cmds = [
+            ("doctor", "Interactive diagnostics with recommendations"),
+            ("suppress", "Manage false positive suppressions"),
+            ("diff", "Compare snapshots between branches/commits"),
+            ("memex", "Index analysis into AI memory (vector DB)"),
+        ];
+        for (cmd, desc) in mgmt_cmds {
+            help.push_str(&format!("  loct {:<16} {}\n", cmd, desc));
+        }
+        help.push('\n');
+
+        // === CORE WORKFLOW ===
+        help.push_str("=== CORE WORKFLOW ===\n\n");
+        let core_cmds = [
+            ("auto", "Full scan → .loctree/ artifacts (default)"),
+            ("scan", "Build/update snapshot (supports --watch)"),
+            ("tree", "Directory tree with LOC counts"),
+            ("find <pattern>", "Search symbols/files with regex"),
+            ("report", "Generate HTML/JSON reports"),
+            ("lint", "Structural lint and policy checks"),
+        ];
+        for (cmd, desc) in core_cmds {
+            help.push_str(&format!("  loct {:<16} {}\n", cmd, desc));
+        }
+        help.push('\n');
+
+        // === JQ QUERIES ===
+        help.push_str("=== JQ QUERIES ===\n\n");
+        help.push_str("  loct '.metadata'              Extract metadata from snapshot\n");
+        help.push_str("  loct '.files | length'        Count analyzed files\n");
+        help.push_str("  loct '.dead_parrots[]'        List dead exports\n");
+        help.push_str("  loct '.cycles[]'              List circular imports\n\n");
+
+        // === GLOBAL OPTIONS ===
+        help.push_str("=== GLOBAL OPTIONS ===\n\n");
+        help.push_str("  --json             Output as JSON\n");
+        help.push_str("  --fresh            Force rescan (ignore cache)\n");
+        help.push_str("  --verbose          Detailed progress\n");
+        help.push_str("  --fail             Exit non-zero on findings (CI mode)\n");
+        help.push_str("  --sarif            SARIF 2.1.0 output for CI\n\n");
+
+        // === ARTIFACTS ===
+        help.push_str("=== ARTIFACTS (.loctree/) ===\n\n");
+        help.push_str("  snapshot.json      Full dependency graph (jq-queryable)\n");
+        help.push_str("  findings.json      All issues (dead, cycles, twins...)\n");
+        help.push_str("  agent.json         AI-optimized bundle with health_score\n");
+        help.push_str("  manifest.json      Index for tooling integration\n\n");
+
+        // === PER-COMMAND HELP ===
+        help.push_str("=== PER-COMMAND HELP ===\n\n");
+        help.push_str("  loct <command> --help    Detailed help for any command\n");
+        help.push_str("  loct --help-legacy       Legacy flag migration guide\n\n");
+
+        // === EXAMPLES ===
+        help.push_str("=== EXAMPLES ===\n\n");
+        help.push_str("  # Quick analysis\n");
+        help.push_str("  loct                       # Scan repo, create artifacts\n");
+        help.push_str("  loct health                # Quick health check\n");
+        help.push_str("  loct hotspots              # Find hub files (47ms!)\n\n");
+
+        help.push_str("  # Deep analysis\n");
+        help.push_str("  loct focus src/features/   # Directory context (67ms!)\n");
+        help.push_str("  loct coverage              # Test gaps (49ms!)\n");
+        help.push_str("  loct audit                 # Full audit\n\n");
+
+        help.push_str("  # AI integration\n");
+        help.push_str("  loct slice src/main.rs --json | claude\n");
+        help.push_str("  loct --for-ai > context.json\n\n");
+
+        help.push_str("  # CI integration\n");
+        help.push_str("  loct lint --fail --sarif > loctree.sarif\n");
+        help.push_str("  loct health --json | jq '.summary.health_score'\n");
+
+        help
     }
 
     /// Generate legacy help text with migration hints.

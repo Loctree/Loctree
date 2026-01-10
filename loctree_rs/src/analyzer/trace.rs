@@ -421,6 +421,7 @@ mod tests {
                 kind: "named".to_string(),
                 export_type: "export".to_string(),
                 line: Some(5),
+                params: Vec::new(),
             }],
             ..Default::default()
         }

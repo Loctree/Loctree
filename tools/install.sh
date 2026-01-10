@@ -4,7 +4,7 @@ umask 022
 
 # loctree install script
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/Loctree/Loctree/main/tools/install.sh | sh
+#   curl -fsSL https://loctree.io/install.sh | sh
 # Env overrides:
 #   INSTALL_DIR   where to place the runnable `loctree` wrapper (default: $HOME/.local/bin)
 #   CARGO_HOME    override cargo home (default: ~/.cargo)
@@ -24,9 +24,9 @@ command -v cargo >/dev/null 2>&1 || {
   exit 1;
 }
 
-info "Installing loctree from $REPO_URL (ref: $LOCTREE_REF)"
-# Install from git repo; --force replaces existing installation.
-cargo install --git "$REPO_URL" --branch "$LOCTREE_REF" --force loctree >/dev/null
+info "Installing loctree from crates.io"
+# Install from crates.io (faster than git); --force replaces existing installation.
+cargo install loctree --force 2>&1 | grep -v "Compiling\|Downloading\|Downloaded" || true
 
 installed_bin="$CARGO_BIN/loctree"
 if [[ ! -x $installed_bin ]]; then

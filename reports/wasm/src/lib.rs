@@ -3,10 +3,15 @@
 //! This module provides browser-native graph visualization using Rust/WASM.
 //! It accepts graph data as JSON, converts to DOT format, and renders SVG.
 //!
-//! Developed with 💀 by The Loctree Team (c)2025 
+//! Uses canonical types from `report-leptos::types` and provides WASM-specific
+//! rendering with themed color support.
+//!
+//! Developed with 💀 by The Loctree Team (c)2025
 
-use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
+
+// Re-export canonical types from report-leptos
+pub use report_leptos::types::{GraphComponent, GraphData, GraphNode};
 
 /// Initialize panic hook for better error messages in browser console.
 #[wasm_bindgen(start)]
@@ -14,141 +19,8 @@ pub fn init() {
     console_error_panic_hook::set_once();
 }
 
-/// Graph node representation matching report-leptos GraphNode.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GraphNode {
-    pub id: String,
-    pub label: String,
-    pub loc: usize,
-    pub x: f64,
-    pub y: f64,
-    pub component: usize,
-    pub degree: usize,
-    pub detached: bool,
-}
-
-/// Graph component (connected subgraph) representation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GraphComponent {
-    pub id: usize,
-    pub size: usize,
-    pub edge_count: usize,
-    pub nodes: Vec<String>,
-    pub isolated_count: usize,
-    pub sample: String,
-    pub loc_sum: usize,
-    pub detached: bool,
-    pub tauri_frontend: usize,
-    pub tauri_backend: usize,
-}
-
-/// Complete graph data structure matching report-leptos GraphData.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GraphData {
-    pub nodes: Vec<GraphNode>,
-    pub edges: Vec<(String, String, String)>,
-    pub components: Vec<GraphComponent>,
-    pub main_component_id: usize,
-}
-
-impl GraphData {
-    /// Convert graph to DOT format for graphviz rendering (light theme).
-    pub fn to_dot(&self) -> String {
-        self.to_dot_with_theme(false)
-    }
-
-    /// Convert graph to DOT format with dark theme colors.
-    pub fn to_dot_dark(&self) -> String {
-        self.to_dot_with_theme(true)
-    }
-
-    fn to_dot_with_theme(&self, dark: bool) -> String {
-        let mut dot = String::with_capacity(self.nodes.len() * 100 + self.edges.len() * 50);
-
-        // Graph header with layout settings
-        dot.push_str("digraph loctree {\n");
-        dot.push_str(
-            "  graph [rankdir=TB, splines=true, overlap=false, nodesep=0.5, ranksep=0.8];\n",
-        );
-        dot.push_str(
-            "  node [shape=box, style=\"rounded,filled\", fontname=\"sans-serif\", fontsize=10];\n",
-        );
-        dot.push_str("  edge [arrowsize=0.7];\n\n");
-
-        // Theme colors
-        let (bg_main, bg_detached, font_color, edge_color) = if dark {
-            ("#3b82f6", "#6b7280", "#e5e7eb", "#9ca3af")
-        } else {
-            ("#dbeafe", "#f3f4f6", "#1f2937", "#6b7280")
-        };
-
-        // Group nodes by component for subgraph clusters
-        let mut components_map: std::collections::HashMap<usize, Vec<&GraphNode>> =
-            std::collections::HashMap::new();
-
-        for node in &self.nodes {
-            components_map.entry(node.component).or_default().push(node);
-        }
-
-        // Render each component as a subgraph cluster
-        for (comp_id, nodes) in &components_map {
-            let is_main = *comp_id == self.main_component_id;
-            let cluster_color = if is_main { bg_main } else { bg_detached };
-
-            dot.push_str(&format!("  subgraph cluster_{} {{\n", comp_id));
-            dot.push_str(&format!("    style=filled;\n"));
-            dot.push_str(&format!("    color=\"{}\";\n", cluster_color));
-            dot.push_str(&format!(
-                "    label=\"Component {} ({} nodes)\";\n",
-                comp_id,
-                nodes.len()
-            ));
-
-            for node in nodes {
-                // Node size based on LOC (min 0.5, max 2.0)
-                let node_width = 0.5 + (node.loc as f64 / 500.0).min(1.5);
-                let fill = if node.detached { bg_detached } else { bg_main };
-
-                dot.push_str(&format!(
-                    "    \"{}\" [label=\"{}\\n({} LOC)\", width={:.2}, fillcolor=\"{}\", fontcolor=\"{}\"];\n",
-                    escape_dot_string(&node.id),
-                    escape_dot_string(&node.label),
-                    node.loc,
-                    node_width,
-                    fill,
-                    font_color
-                ));
-            }
-
-            dot.push_str("  }\n\n");
-        }
-
-        // Render edges
-        for (from, to, kind) in &self.edges {
-            let style = match kind.as_str() {
-                "reexport" => "dashed",
-                _ => "solid",
-            };
-            dot.push_str(&format!(
-                "  \"{}\" -> \"{}\" [style={}, color=\"{}\"];\n",
-                escape_dot_string(from),
-                escape_dot_string(to),
-                style,
-                edge_color
-            ));
-        }
-
-        dot.push_str("}\n");
-        dot
-    }
-}
-
-/// Escape special characters for DOT format strings.
-fn escape_dot_string(s: &str) -> String {
-    s.replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
-}
+// Note: GraphData::to_dot() and GraphData::to_dot_dark() are provided by report-leptos::types
+// No need to re-implement here - we use the canonical implementation
 
 // ============================================================================
 // WASM Exports
@@ -252,6 +124,7 @@ mod tests {
             edges: vec![],
             components: vec![],
             main_component_id: 0,
+            ..Default::default()
         };
 
         let dot = graph.to_dot();
@@ -261,9 +134,28 @@ mod tests {
     }
 
     #[test]
-    fn test_escape_special_chars() {
-        let escaped = escape_dot_string("file\"with\"quotes");
-        assert!(escaped.contains("\\\""));
+    fn test_graph_escapes_special_chars() {
+        // Test that the canonical to_dot() properly escapes quotes
+        let graph = GraphData {
+            nodes: vec![GraphNode {
+                id: "file\"with\"quotes.ts".into(),
+                label: "file\"quotes".into(),
+                loc: 10,
+                x: 0.0,
+                y: 0.0,
+                component: 0,
+                degree: 0,
+                detached: false,
+            }],
+            edges: vec![],
+            components: vec![],
+            main_component_id: 0,
+            ..Default::default()
+        };
+
+        let dot = graph.to_dot();
+        // Quotes should be escaped in the output
+        assert!(dot.contains("\\\""));
     }
 
     #[test]
@@ -282,14 +174,15 @@ mod tests {
             edges: vec![],
             components: vec![],
             main_component_id: 0,
+            ..Default::default()
         };
 
         let light = graph.to_dot();
         let dark = graph.to_dot_dark();
 
-        // Light theme uses lighter colors
-        assert!(light.contains("#dbeafe"));
-        // Dark theme uses darker colors
-        assert!(dark.contains("#3b82f6"));
+        // Light theme has standard colors, dark theme has dark background
+        assert!(dark.contains("bgcolor=\"#0f1115\""));
+        // Light version shouldn't have bgcolor
+        assert!(!light.contains("bgcolor"));
     }
 }
