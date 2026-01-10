@@ -3,9 +3,9 @@
 //! Implements the "Section View" layout with a sticky header and scrollable content.
 
 use super::{
-    AiInsightsPanel, AnalysisSummary, CascadesList, Coverage, Crowds, Cycles, DeadCode,
-    DuplicateExportsTable, DynamicImportsTable, GraphContainer, Pipelines, QuickCommandsPanel,
-    TabContent, TauriCommandCoverage, TreeView, Twins,
+    AiInsightsPanel, AiSummaryPanel, AnalysisSummary, AuditPanel, CascadesList, Coverage, Crowds,
+    Cycles, DeadCode, DuplicateExportsTable, DynamicImportsTable, GraphContainer, HealthScoreGauge,
+    Pipelines, QuickCommandsPanel, TabContent, TauriCommandCoverage, TreeView, Twins,
 };
 use crate::types::ReportSection;
 use leptos::prelude::*;
@@ -40,10 +40,12 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
         .collect::<String>();
     let root_id_value = root_id.clone();
     let root_id_overview = root_id_value.clone();
+    let root_id_audit = root_id_value.clone();
     let root_id_dups = root_id_value.clone();
     let root_id_dynamic = root_id_value.clone();
     let root_id_commands = root_id_value.clone();
     let root_id_pipelines = root_id_value.clone();
+    let open_base_pipelines = section.open_base.clone();
     let root_id_crowds = root_id_value.clone();
     let root_id_cycles = root_id_value.clone();
     let root_id_dead = root_id_value.clone();
@@ -55,6 +57,8 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
     let root_id_tree = root_id_value.clone();
 
     let section_clone = section.clone();
+    let section_for_ai_summary = section.clone();
+    let section_for_audit = section.clone();
     let view_class = if active {
         "section-view active"
     } else {
@@ -115,19 +119,35 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
                     active=true
                 >
                     <div class="content-container">
-                        <AnalysisSummary
-                            files_analyzed=file_count
-                            total_loc=total_loc
-                            duplicate_exports=duplicate_exports_count
-                            reexport_files=reexport_files_count
-                            dynamic_imports=dynamic_imports_count
-                        />
+                        <div class="overview-hero">
+                            <HealthScoreGauge score=section.health_score.unwrap_or(0) />
+                            <div class="overview-summary-wrapper">
+                                <AnalysisSummary
+                                    files_analyzed=file_count
+                                    total_loc=total_loc
+                                    duplicate_exports=duplicate_exports_count
+                                    reexport_files=reexport_files_count
+                                    dynamic_imports=dynamic_imports_count
+                                />
+                            </div>
+                        </div>
+                        <AiSummaryPanel sections=vec![section_for_ai_summary] />
                         <AiInsightsPanel insights=section.insights.clone() />
                         <QuickCommandsPanel
                             root=section.root.clone()
                             has_duplicates=has_duplicates
                             has_command_issues=has_command_issues
                         />
+                    </div>
+                </TabContent>
+
+                <TabContent
+                    root_id=root_id_audit
+                    tab_name="audit"
+                    active=false
+                >
+                    <div class="content-container">
+                        <AuditPanel section=section_for_audit />
                     </div>
                 </TabContent>
 
@@ -178,7 +198,7 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
                     active=false
                 >
                     <div class="content-container">
-                        <Pipelines bridges=section.command_bridges.clone() />
+                        <Pipelines bridges=section.command_bridges.clone() open_base=open_base_pipelines />
                     </div>
                 </TabContent>
 

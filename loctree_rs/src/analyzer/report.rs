@@ -149,6 +149,12 @@ pub struct CommandBridge {
     pub status: String,
     /// Language (ts, rs, etc.)
     pub language: String,
+    /// Communication pattern: "invoke" | "invoke+emit" | "emit-only"
+    #[serde(default)]
+    pub comm_type: String,
+    /// Events emitted by this command's handler
+    #[serde(default)]
+    pub emits_events: Vec<String>,
 }
 
 #[derive(Clone, Default, Serialize)]
@@ -204,6 +210,9 @@ pub struct ReportSection {
     /// Test coverage gaps (handlers/events without tests)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub coverage_gaps: Vec<super::coverage_gaps::CoverageGap>,
+    /// Overall health score 0-100 (higher is better)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health_score: Option<u8>,
 }
 
 /// Twins analysis data for the HTML report

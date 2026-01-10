@@ -17,8 +17,7 @@
   "main": "index.js",
   "types": "index.d.ts",
   "bin": {
-    "loctree": "bin/loctree",
-    "loct": "bin/loctree"
+    "loctree": "bin/loctree"
   },
   "files": [
     "index.js",
@@ -39,7 +38,7 @@
   "bugs": {
     "url": "https://github.com/Loctree/Loctree/issues"
   },
-  "license": "(MIT OR Apache-2.0)",
+  "license": "MIT",
   "author": "Loctree Contributors",
   "engines": {
     "node": ">=14.0.0"

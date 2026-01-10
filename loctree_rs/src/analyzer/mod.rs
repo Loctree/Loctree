@@ -24,6 +24,7 @@
 
 pub mod assets;
 pub mod ast_js;
+pub mod audit_report;
 pub mod barrels;
 pub mod classify;
 pub mod coverage;

@@ -340,6 +340,19 @@ pub enum ReexportKind {
     Named(Vec<(String, String)>),
 }
 
+/// Parameter information for function exports.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ParamInfo {
+    /// Parameter name.
+    pub name: String,
+    /// Type annotation if present (e.g., "string", "int", "&str").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub type_annotation: Option<String>,
+    /// Whether parameter has a default value.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub has_default: bool,
+}
+
 /// An exported symbol from a module.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ExportSymbol {
@@ -351,6 +364,9 @@ pub struct ExportSymbol {
     pub export_type: String,
     /// 1-based line number of declaration.
     pub line: Option<usize>,
+    /// Function parameters (empty for non-functions).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub params: Vec<ParamInfo>,
 }
 
 /// A Tauri command reference (handler or invocation).
@@ -420,6 +436,19 @@ pub struct DynamicExecTemplate {
     pub line: usize,
     /// Type of dynamic call: "exec", "eval", or "compile"
     pub call_type: String,
+}
+
+/// Python sys.modules monkey-patching pattern.
+/// Detects when a module injects itself into sys.modules under a different name,
+/// making all its exports accessible at runtime (should not be flagged as dead).
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct SysModulesInjection {
+    /// The module name being injected (e.g., "compat", "shim", or "__name__")
+    pub module_name: String,
+    /// 1-based line number where injection occurs
+    pub line: usize,
+    /// The value being assigned (variable name or expression)
+    pub value: String,
 }
 
 /// A Tauri event reference (emit or listen).
@@ -563,6 +592,11 @@ pub struct FileAnalysis {
     /// Python exec/eval/compile dynamic code generation templates.
     #[serde(default)]
     pub dynamic_exec_templates: Vec<DynamicExecTemplate>,
+
+    /// Python sys.modules monkey-patching injections.
+    /// Files with these injections have all exports accessible at runtime.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sys_modules_injections: Vec<SysModulesInjection>,
 }
 
 impl ImportEntry {
@@ -588,12 +622,31 @@ impl ImportEntry {
 }
 
 impl ExportSymbol {
+    /// Create export symbol without params (backwards compatible).
     pub fn new(name: String, kind: &str, export_type: &str, line: Option<usize>) -> Self {
         Self {
             name,
             kind: kind.to_string(),
             export_type: export_type.to_string(),
             line,
+            params: Vec::new(),
+        }
+    }
+
+    /// Create export symbol with params (for functions).
+    pub fn with_params(
+        name: String,
+        kind: &str,
+        export_type: &str,
+        line: Option<usize>,
+        params: Vec<ParamInfo>,
+    ) -> Self {
+        Self {
+            name,
+            kind: kind.to_string(),
+            export_type: export_type.to_string(),
+            line,
+            params,
         }
     }
 }
@@ -633,6 +686,7 @@ impl FileAnalysis {
             pytest_fixtures: Vec::new(),
             has_weak_collections: false,
             dynamic_exec_templates: Vec::new(),
+            sys_modules_injections: Vec::new(),
         }
     }
 }

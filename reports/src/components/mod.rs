@@ -41,6 +41,7 @@
 //! }
 //! ```
 
+mod audit;
 mod cascades;
 mod commands;
 mod coverage;
@@ -52,6 +53,7 @@ mod duplicates;
 mod dynamic_imports;
 mod for_ai;
 mod graph;
+mod health_gauge;
 pub mod icons;
 mod insights;
 mod pipelines;
@@ -61,6 +63,7 @@ mod tabs;
 mod tree;
 mod twins;
 
+pub use audit::AuditPanel;
 pub use cascades::CascadesList;
 pub use commands::TauriCommandCoverage;
 pub use coverage::Coverage;
@@ -72,6 +75,7 @@ pub use duplicates::DuplicateExportsTable;
 pub use dynamic_imports::DynamicImportsTable;
 pub use for_ai::AiSummaryPanel;
 pub use graph::GraphContainer;
+pub use health_gauge::{HealthIndicator, HealthScoreGauge};
 pub use icons::*;
 pub use insights::{AiInsightsPanel, AnalysisSummary};
 pub use pipelines::Pipelines;

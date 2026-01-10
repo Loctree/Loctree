@@ -402,3 +402,28 @@ pub(super) fn is_dynamic_exec_template(export_name: &str, analysis: &FileAnalysi
 
     false
 }
+
+/// Check if a file uses sys.modules monkey-patching.
+/// If a file injects itself into sys.modules (e.g., `sys.modules['compat'] = wrapper`),
+/// ALL exports from that file are accessible at runtime via the injected module name.
+/// Therefore, none of its exports should be flagged as dead code.
+///
+/// Example:
+/// ```python
+/// # compat.py
+/// import sys
+/// class CompatWrapper:
+///     # ... wrapper logic
+/// sys.modules['compat'] = CompatWrapper(sys.modules[__name__])
+/// ```
+///
+/// Even if `CompatWrapper` has no direct imports, it's accessible via `import compat`.
+pub(super) fn has_sys_modules_injection(analysis: &FileAnalysis) -> bool {
+    // Only applies to Python files
+    if !analysis.path.ends_with(".py") {
+        return false;
+    }
+
+    // If file has any sys.modules injections, all its exports are "alive"
+    !analysis.sys_modules_injections.is_empty()
+}

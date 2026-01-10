@@ -245,6 +245,7 @@ mod tests {
             kind: "function".to_string(),
             export_type: "named".to_string(),
             line: Some(10),
+            params: Vec::new(),
         });
 
         let mut file2 = FileAnalysis::new("src/app.ts".into());
@@ -253,6 +254,7 @@ mod tests {
             kind: "class".to_string(),
             export_type: "named".to_string(),
             line: Some(42),
+            params: Vec::new(),
         });
 
         snapshot.files.push(file1);
