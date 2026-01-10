@@ -358,7 +358,7 @@ mod tests {
         metrics.barrel_chaos_count = 100;
 
         let score = calculate_health_score(&metrics);
-        assert!(score.health >= 0, "health should never be negative");
+        assert!(score.health <= 100, "health should never exceed 100");
     }
 
     #[test]

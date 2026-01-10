@@ -18,6 +18,7 @@ use super::crowd::detect_all_crowds_with_edges;
 use super::cycles;
 use super::dead_parrots::{DeadFilterConfig, find_dead_exports};
 use super::graph::{MAX_GRAPH_EDGES, MAX_GRAPH_NODES, build_graph_data};
+use super::health_score::{HealthMetrics, calculate_health_score};
 use super::html::render_html_report;
 use super::insights::collect_ai_insights;
 use super::open_server::current_open_base;
@@ -469,12 +470,34 @@ pub fn process_root_context(
             "ok"
         };
 
+        // Check if the handler file emits any events
+        let (comm_type, emits_events) = if let Some((handler_path, _, _)) = &be_location {
+            if let Some(handler_analysis) = analysis_by_path.get(handler_path) {
+                let events: Vec<String> = handler_analysis
+                    .event_emits
+                    .iter()
+                    .map(|e| e.name.clone())
+                    .collect();
+                if events.is_empty() {
+                    ("invoke".to_string(), vec![])
+                } else {
+                    ("invoke+emit".to_string(), events)
+                }
+            } else {
+                ("invoke".to_string(), vec![])
+            }
+        } else {
+            ("invoke".to_string(), vec![])
+        };
+
         command_bridges.push(CommandBridge {
             name: name.clone(),
             fe_locations,
             be_location,
             status: status.to_string(),
             language,
+            comm_type,
+            emits_events,
         });
     }
 
@@ -1358,6 +1381,68 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
             find_coverage_gaps(&snapshot)
         };
 
+        // Calculate health score from available metrics
+        let health_score = {
+            // Count breaking cycles (hard bidirectional cycles)
+            let breaking_cycles = circular_imports.len();
+            // Count structural cycles (lazy/dynamic cycles)
+            let structural_cycles = lazy_circular_imports.len();
+
+            // Count dead exports (HIGH confidence)
+            let dead_exports_count = dead_exports_for_report.len();
+
+            // Count twins data if available
+            let (twins_dead_parrots, twins_same_language, barrel_chaos_count) =
+                if let Some(ref twins) = twins_data {
+                    (
+                        twins.dead_parrots.len(),
+                        twins.exact_twins.len(),
+                        twins.barrel_chaos.missing_barrels.len()
+                            + twins.barrel_chaos.deep_chains.len()
+                            + twins.barrel_chaos.inconsistent_paths.len(),
+                    )
+                } else {
+                    (0, 0, 0)
+                };
+
+            // Count duplicate exports
+            let duplicate_exports = filtered_ranked.len();
+
+            // Count cascade imports
+            let cascade_imports = cascades.len();
+
+            let metrics = HealthMetrics {
+                // CERTAIN severity
+                missing_handlers: missing_sorted.len(),
+                unregistered_handlers: unregistered_sorted.len(),
+                breaking_cycles,
+
+                // HIGH severity
+                unused_high_confidence: unused_sorted.len(),
+                dead_exports: dead_exports_count,
+                twins_dead_parrots,
+
+                // SMELL severity
+                twins_same_language,
+                barrel_chaos_count,
+                structural_cycles,
+                cascade_imports,
+                duplicate_exports,
+
+                // Project context
+                files: analyses.len(),
+                loc: total_loc,
+
+                // Optional: issue details (not populated for now)
+                certain_items: Vec::new(),
+                high_items: Vec::new(),
+                smell_items: Vec::new(),
+            };
+
+            let score = calculate_health_score(&metrics);
+            Some(score.health)
+        };
+
         report_section = Some(ReportSection {
             insights,
             root: root_path.display().to_string(),
@@ -1390,6 +1475,7 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
             dead_exports: dead_exports_for_report.clone(),
             twins_data: twins_data.clone(),
             coverage_gaps,
+            health_score,
         });
     }
 

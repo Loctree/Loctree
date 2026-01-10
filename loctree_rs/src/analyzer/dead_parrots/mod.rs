@@ -66,8 +66,8 @@ pub use search::{
 
 // Internal imports
 use filters::{
-    is_ambient_export, is_dynamic_exec_template, is_flow_type_export, is_jsx_runtime_export,
-    is_python_test_export, is_python_test_path, is_weakmap_registry_export,
+    has_sys_modules_injection, is_ambient_export, is_dynamic_exec_template, is_flow_type_export,
+    is_jsx_runtime_export, is_python_test_export, is_python_test_path, is_weakmap_registry_export,
     should_skip_dead_export_check,
 };
 use languages::{
@@ -389,6 +389,43 @@ pub fn find_dead_exports(
 
         // Collect initial set of dynamically imported files
         let mut reachable: HashSet<String> = HashSet::new();
+
+        // First, collect from ImportEntry items with ImportKind::Dynamic (has resolved_path)
+        // This is more reliable than raw dynamic_imports strings
+        for analysis in &analyses {
+            for imp in &analysis.imports {
+                if matches!(imp.kind, crate::types::ImportKind::Dynamic) {
+                    // Use resolved path if available (most reliable)
+                    if let Some(resolved) = &imp.resolved_path {
+                        let resolved_key = normalize_module_id(resolved).as_key();
+                        reachable.insert(resolved_key);
+                    }
+                    // Also try to match the raw source path
+                    let source_norm = normalize_module_id(&imp.source);
+                    let source_key = source_norm.as_key();
+                    let source_alias = strip_alias_prefix(&source_norm.path).to_string();
+
+                    // Find matching file in analyses
+                    for a in &analyses {
+                        let a_norm = normalize_module_id(&a.path);
+                        let a_key = a_norm.as_key();
+                        if paths_match(&imp.source, &a_norm.path)
+                            || paths_match(&imp.source, &a.path)
+                            || a_norm.path.ends_with(&source_alias)
+                        {
+                            reachable.insert(a_key);
+                            break;
+                        }
+                    }
+                    reachable.insert(source_key);
+                    if !source_alias.is_empty() {
+                        reachable.insert(source_alias);
+                    }
+                }
+            }
+        }
+
+        // Also check raw dynamic_imports strings as fallback
         for analysis in &analyses {
             for dyn_imp in &analysis.dynamic_imports {
                 let dyn_norm = normalize_module_id(dyn_imp);
@@ -658,6 +695,17 @@ pub fn find_dead_exports(
             let is_dynamic_generated =
                 !config.include_dynamic && is_dynamic_exec_template(&exp.name, analysis);
 
+            // Check if file uses sys.modules monkey-patching (e.g., sys.modules['compat'] = wrapper)
+            // ALL exports from such files are accessible at runtime via the injected module name
+            let is_sys_modules_injected =
+                !config.include_dynamic && has_sys_modules_injection(analysis);
+
+            // Check if this is a default export from a dynamically imported file
+            // React lazy(), Vue async components, and Next.js dynamic() use dynamic imports
+            // which typically only consume the default export
+            let is_dynamically_imported_default =
+                exp.export_type == "default" && dynamic_import_sources.contains_key(&path_norm);
+
             if !is_used
                 && !star_used
                 && !locally_used
@@ -672,6 +720,8 @@ pub fn find_dead_exports(
                 && !is_weak_registry
                 && !is_ambient
                 && !is_dynamic_generated
+                && !is_sys_modules_injected
+                && !is_dynamically_imported_default
             {
                 let open_url = super::build_open_url(&analysis.path, exp.line, open_base);
 
@@ -926,6 +976,7 @@ mod tests {
                     kind: "function".to_string(),
                     export_type: "named".to_string(),
                     line: Some(i + 1),
+                    params: Vec::new(),
                 })
                 .collect(),
             ..Default::default()
@@ -1443,6 +1494,108 @@ mod tests {
         assert!(
             result.is_empty(),
             "default import should mark export as used"
+        );
+    }
+
+    #[test]
+    fn test_react_lazy_default_export_not_dead() {
+        // React lazy() pattern: const Component = lazy(() => import('./Component'))
+        // This dynamically imports the default export, so default should NOT be dead
+        let mut importer = mock_file("src/App.tsx");
+        importer.dynamic_imports = vec!["./PasswordResetModal".to_string()];
+
+        let mut exporter = mock_file("src/PasswordResetModal.tsx");
+        exporter.exports = vec![ExportSymbol {
+            name: "PasswordResetModal".to_string(),
+            kind: "function".to_string(),
+            export_type: "default".to_string(),
+            line: Some(23),
+            params: Vec::new(),
+        }];
+
+        let result = find_dead_exports(
+            &[importer, exporter],
+            false,
+            None,
+            DeadFilterConfig::default(),
+        );
+        assert!(
+            result.is_empty(),
+            "React lazy() default export should NOT be marked as dead: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_react_lazy_with_subdirectory_resolved_path() {
+        // Vista pattern: lazy(() => import('./features/patient/PasswordResetModal').then(...))
+        // Component is in a subdirectory, import uses resolved_path via ImportKind::Dynamic
+        let mut importer = mock_file("src/App.tsx");
+        // Add dynamic import via ImportEntry with resolved_path (like real AST produces)
+        let mut dyn_import = ImportEntry::new(
+            "./features/patient/PasswordResetModal".to_string(),
+            ImportKind::Dynamic,
+        );
+        dyn_import.resolved_path = Some("src/features/patient/PasswordResetModal.tsx".to_string());
+        importer.imports.push(dyn_import);
+        // Also add to dynamic_imports for backward compat
+        importer.dynamic_imports = vec!["./features/patient/PasswordResetModal".to_string()];
+
+        let mut exporter = mock_file("src/features/patient/PasswordResetModal.tsx");
+        exporter.exports = vec![ExportSymbol {
+            name: "PasswordResetModal".to_string(),
+            kind: "function".to_string(),
+            export_type: "default".to_string(),
+            line: Some(23),
+            params: Vec::new(),
+        }];
+
+        let result = find_dead_exports(
+            &[importer, exporter],
+            false,
+            None,
+            DeadFilterConfig::default(),
+        );
+        assert!(
+            result.is_empty(),
+            "React lazy() with resolved_path in subdirectory should NOT be marked as dead: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_react_lazy_named_export_via_then_pattern() {
+        // Vista pattern: lazy(() => import('./X').then((m) => ({ default: m.ComponentName })))
+        // This extracts a NAMED export and re-wraps it as default for React.lazy()
+        // The file has NAMED export (not default), but it's still used via dynamic import
+        let mut importer = mock_file("src/App.tsx");
+        let mut dyn_import =
+            ImportEntry::new("./features/DashboardView".to_string(), ImportKind::Dynamic);
+        dyn_import.resolved_path = Some("src/features/DashboardView.tsx".to_string());
+        importer.imports.push(dyn_import);
+
+        let mut exporter = mock_file("src/features/DashboardView.tsx");
+        // Note: export_type is "named", not "default" - the .then() pattern wraps it
+        exporter.exports = vec![ExportSymbol {
+            name: "DashboardView".to_string(),
+            kind: "function".to_string(),
+            export_type: "named".to_string(),
+            line: Some(15),
+            params: Vec::new(),
+        }];
+
+        let result = find_dead_exports(
+            &[importer, exporter],
+            false,
+            None,
+            DeadFilterConfig::default(),
+        );
+        // The ENTIRE FILE should be skipped when it's dynamically imported
+        // because we can't know which exports the .then() pattern extracts
+        assert!(
+            result.is_empty(),
+            "Dynamic import with .then() pattern should skip entire file: {:?}",
+            result
         );
     }
 
@@ -1978,6 +2131,7 @@ mod integration_tests {
                 kind: "function".to_string(),
                 export_type: "named".to_string(),
                 line: Some(25),
+                params: Vec::new(),
             }],
             ..Default::default()
         };

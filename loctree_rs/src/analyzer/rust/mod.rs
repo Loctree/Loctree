@@ -30,9 +30,117 @@ use super::regexes::{
     rust_pub_const_regexes, rust_pub_decl_regexes,
 };
 use crate::types::{
-    CommandRef, EventRef, ExportSymbol, FileAnalysis, ImportEntry, ImportKind, ReexportEntry,
-    ReexportKind,
+    CommandRef, EventRef, ExportSymbol, FileAnalysis, ImportEntry, ImportKind, ParamInfo,
+    ReexportEntry, ReexportKind,
 };
+
+/// Extract params from content starting at a given position after function name.
+/// Looks for `(...)` and parses the params inside.
+fn extract_rust_fn_params(content: &str, after_name_pos: usize) -> Vec<ParamInfo> {
+    // Find opening paren
+    let rest = &content[after_name_pos..];
+    let Some(paren_start) = rest.find('(') else {
+        return Vec::new();
+    };
+
+    // Find matching closing paren (handle nested generics)
+    let params_start = after_name_pos + paren_start + 1;
+    let mut depth = 1;
+    let mut end_pos = params_start;
+    for (i, ch) in content[params_start..].char_indices() {
+        match ch {
+            '(' | '<' | '[' | '{' => depth += 1,
+            ')' | '>' | ']' | '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    end_pos = params_start + i;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if depth != 0 {
+        return Vec::new();
+    }
+
+    let params_text = &content[params_start..end_pos];
+    parse_rust_params(params_text)
+}
+
+/// Parse Rust function params like `x: i32, y: &str, z: Option<T>`.
+/// Skips `self`, `&self`, `&mut self`.
+fn parse_rust_params(params_text: &str) -> Vec<ParamInfo> {
+    let mut params = Vec::new();
+    let mut current = String::new();
+    let mut depth: usize = 0;
+
+    for ch in params_text.chars() {
+        match ch {
+            '<' | '(' | '[' | '{' => {
+                depth += 1;
+                current.push(ch);
+            }
+            '>' | ')' | ']' | '}' => {
+                depth = depth.saturating_sub(1);
+                current.push(ch);
+            }
+            ',' if depth == 0 => {
+                if let Some(p) = parse_single_rust_param(current.trim()) {
+                    params.push(p);
+                }
+                current.clear();
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    // Last param
+    if !current.trim().is_empty()
+        && let Some(p) = parse_single_rust_param(current.trim())
+    {
+        params.push(p);
+    }
+
+    params
+}
+
+/// Parse a single Rust param like `name: Type`.
+fn parse_single_rust_param(param: &str) -> Option<ParamInfo> {
+    let param = param.trim();
+    if param.is_empty() {
+        return None;
+    }
+
+    // Skip self variants
+    if param == "self"
+        || param == "&self"
+        || param == "&mut self"
+        || param == "mut self"
+        || param.starts_with("self:")
+    {
+        return None;
+    }
+
+    // Parse `name: Type` or `mut name: Type`
+    let param = param.strip_prefix("mut ").unwrap_or(param);
+
+    if let Some((name, type_ann)) = param.split_once(':') {
+        Some(ParamInfo {
+            name: name.trim().to_string(),
+            type_annotation: Some(type_ann.trim().to_string()),
+            has_default: false, // Rust doesn't have default params
+        })
+    } else {
+        // Just a name without type annotation (rare in Rust)
+        Some(ParamInfo {
+            name: param.to_string(),
+            type_annotation: None,
+            has_default: false,
+        })
+    }
+}
 
 pub(crate) fn analyze_rust_file(
     content: &str,
@@ -208,16 +316,28 @@ pub(crate) fn analyze_rust_file(
         }
     }
 
-    // public items
-    for regex in rust_pub_decl_regexes() {
+    // public items - process with proper kind detection
+    // rust_pub_decl_regexes() returns [fn, struct, enum, trait, type, union] in order
+    let kinds = ["function", "struct", "enum", "trait", "type", "union"];
+    for (regex, kind) in rust_pub_decl_regexes().iter().zip(kinds.iter()) {
         for caps in regex.captures_iter(content) {
             if let Some(name) = caps.get(1) {
                 let line = offset_to_line(content, name.start());
-                analysis.exports.push(ExportSymbol::new(
-                    name.as_str().to_string(),
-                    "const",
+                let name_str = name.as_str().to_string();
+
+                // Extract params only for functions
+                let params = if *kind == "function" {
+                    extract_rust_fn_params(content, name.end())
+                } else {
+                    Vec::new()
+                };
+
+                analysis.exports.push(ExportSymbol::with_params(
+                    name_str,
+                    kind,
                     "named",
                     Some(line),
+                    params,
                 ));
             }
         }

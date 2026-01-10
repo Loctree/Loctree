@@ -264,6 +264,52 @@ pub fn find_dead_parrots(
         })
         .collect();
 
+    // Build set of dynamically imported file paths (React lazy, Vue async components, etc.)
+    // These typically import the default export, so we track which files are dynamically imported
+    // Use normalize_module_id to get consistent path format for matching
+    use super::root_scan::normalize_module_id;
+    use crate::types::ImportKind;
+
+    // Build set of normalized file paths that are dynamically imported
+    let mut dynamic_import_targets: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+
+    // First, collect from ImportEntry items with ImportKind::Dynamic (has resolved_path)
+    // This is more reliable than raw dynamic_imports strings
+    for analysis in analyses {
+        for imp in &analysis.imports {
+            if matches!(imp.kind, ImportKind::Dynamic) {
+                // Use resolved path if available (most reliable)
+                if let Some(resolved) = &imp.resolved_path {
+                    dynamic_import_targets.insert(normalize_module_id(resolved).as_key());
+                }
+                // Also add the raw source path normalized
+                dynamic_import_targets.insert(normalize_module_id(&imp.source).as_key());
+            }
+        }
+    }
+
+    // Also check raw dynamic_imports strings as fallback and for matching
+    for analysis in analyses {
+        for dyn_imp in &analysis.dynamic_imports {
+            let dyn_norm = normalize_module_id(dyn_imp);
+            dynamic_import_targets.insert(dyn_norm.as_key());
+
+            // Also add suffix-matched files (handles ./components/X matching src/components/X)
+            let dyn_alias = dyn_norm
+                .path
+                .trim_start_matches("./")
+                .trim_start_matches('@')
+                .to_string();
+            for a in analyses {
+                let a_norm = normalize_module_id(&a.path);
+                if a_norm.path.ends_with(&dyn_alias) {
+                    dynamic_import_targets.insert(a_norm.as_key());
+                }
+            }
+        }
+    }
+
     let mut dead_parrots: Vec<SymbolEntry> = registry
         .values()
         .filter(|entry| {
@@ -297,6 +343,13 @@ pub fn find_dead_parrots(
             }
             // Skip barrel re-exports
             if is_barrel_reexport(&entry.name, &entry.kind) {
+                return false;
+            }
+            // Skip default exports from dynamically imported files (React lazy, Vue async, etc.)
+            // Dynamic imports like lazy(() => import('./Component')) only consume the default export
+            // Normalize the file path the same way dynamic imports are normalized
+            let file_norm = normalize_module_id(&entry.file_path).as_key();
+            if dynamic_import_targets.contains(&file_norm) {
                 return false;
             }
             true
@@ -770,8 +823,9 @@ pub fn detect_exact_twins_with_frameworks(
     let mut symbol_map: HashMap<String, Vec<(String, usize, String, usize)>> = HashMap::new();
 
     for ((file_path, symbol_name), entry) in &registry {
-        // Skip re-exports - they're intentional API design, not duplicates
-        if entry.kind == "reexport" || entry.kind == "re-export" {
+        // Skip re-exports and __all__ entries - they're intentional API design, not duplicates
+        // __all__ in Python is a declaration of public API, not a new definition
+        if entry.kind == "reexport" || entry.kind == "re-export" || entry.kind == "__all__" {
             continue;
         }
         symbol_map.entry(symbol_name.clone()).or_default().push((
@@ -1039,6 +1093,7 @@ mod tests {
                     kind: kind.to_string(),
                     export_type: "named".to_string(),
                     line: Some(i + 1),
+                    params: Vec::new(),
                 })
                 .collect(),
             ..Default::default()
@@ -1103,6 +1158,7 @@ mod tests {
                 kind: "class".to_string(),
                 export_type: "named".to_string(),
                 line: Some(10),
+                params: Vec::new(),
             }],
             ..Default::default()
         };
@@ -1142,6 +1198,39 @@ mod tests {
         assert_eq!(result.dead_parrots.len(), 1);
         assert_eq!(result.dead_parrots[0].name, "unused");
         assert_eq!(result.total_symbols, 2);
+    }
+
+    #[test]
+    fn test_find_dead_parrots_skips_dynamic_imports() {
+        // Create a component that is dynamically imported via React lazy()
+        let lazy_component = FileAnalysis {
+            path: "src/components/PasswordResetModal.tsx".to_string(),
+            exports: vec![ExportSymbol {
+                name: "PasswordResetModal".to_string(),
+                kind: "function".to_string(),
+                export_type: "default".to_string(),
+                line: Some(23),
+                params: Vec::new(),
+            }],
+            ..Default::default()
+        };
+
+        // Create a file that imports it dynamically
+        let importer = FileAnalysis {
+            path: "src/App.tsx".to_string(),
+            dynamic_imports: vec!["./components/PasswordResetModal".to_string()],
+            ..Default::default()
+        };
+
+        // Create a truly dead file (no static or dynamic imports)
+        let dead_file = mock_file_with_exports("dead.ts", vec![("unused", "function")]);
+
+        let result = find_dead_parrots(&[lazy_component, importer, dead_file], true, false);
+
+        // The dynamic import should NOT be marked as dead
+        // Only the truly unused export should be in dead_parrots
+        assert_eq!(result.dead_parrots.len(), 1);
+        assert_eq!(result.dead_parrots[0].name, "unused");
     }
 
     // Exact twin detection tests

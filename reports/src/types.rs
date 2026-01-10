@@ -119,6 +119,8 @@ pub struct StringLiteralMatch {
 ///     be_location: Some(("src-tauri/src/commands/user.rs".into(), 10, "get_user".into())),
 ///     status: "ok".into(),
 ///     language: "rs".into(),
+///     comm_type: "invoke".into(),
+///     emits_events: vec![],
 /// };
 /// ```
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -135,6 +137,12 @@ pub struct CommandBridge {
     /// Language (ts, rs, etc.)
     #[serde(default)]
     pub language: String,
+    /// Communication pattern: "invoke" | "invoke+emit" | "emit-only"
+    #[serde(default)]
+    pub comm_type: String,
+    /// Events emitted by this command's handler
+    #[serde(default)]
+    pub emits_events: Vec<String>,
 }
 
 /// Directory or file node used by the report tree view.
@@ -991,4 +999,7 @@ pub struct ReportSection {
     /// Test coverage gaps (handlers/events without tests)
     #[serde(default)]
     pub coverage_gaps: Vec<CoverageGap>,
+    /// Overall health score 0-100 (higher is better)
+    #[serde(default)]
+    pub health_score: Option<u8>,
 }

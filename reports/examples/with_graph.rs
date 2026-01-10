@@ -110,6 +110,7 @@ fn main() {
         edges,
         components,
         main_component_id: 0,
+        ..Default::default()
     };
 
     // Create insights
@@ -135,6 +136,7 @@ fn main() {
         dev_count: 0,
         canonical: "src/utils/date.ts".into(),
         refactors: vec!["src/helpers/format.ts".into()],
+        ..Default::default()
     }];
 
     // Create report section
@@ -165,7 +167,7 @@ fn main() {
     };
 
     // Render
-    let html = render_report(&[section], &js_assets);
+    let html = render_report(&[section], &js_assets, false);
 
     // Write
     let output_path = "graph_report.html";

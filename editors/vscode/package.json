@@ -1,0 +1,118 @@
+{
+  "name": "loctree",
+  "displayName": "Loctree",
+  "description": "Dead code detection, circular import analysis, and codebase navigation powered by loctree",
+  "version": "0.1.0",
+  "publisher": "libraxis",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LibraxisAI/loctree-suite"
+  },
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Linters",
+    "Programming Languages",
+    "Other"
+  ],
+  "keywords": [
+    "dead code",
+    "unused exports",
+    "circular imports",
+    "dependency graph",
+    "code analysis",
+    "typescript",
+    "javascript",
+    "rust"
+  ],
+  "activationEvents": [
+    "workspaceContains:.loctree"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "loctree.refresh",
+        "title": "Loctree: Refresh Analysis",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "loctree.openReport",
+        "title": "Loctree: Open HTML Report",
+        "icon": "$(open-preview)"
+      },
+      {
+        "command": "loctree.showHealth",
+        "title": "Loctree: Show Health Summary",
+        "icon": "$(heart)"
+      },
+      {
+        "command": "loctree.analyzeImpact",
+        "title": "Loctree: Analyze Change Impact",
+        "icon": "$(git-compare)"
+      }
+    ],
+    "configuration": {
+      "title": "Loctree",
+      "properties": {
+        "loctree.serverPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to loctree-lsp binary. Leave empty to use bundled or PATH."
+        },
+        "loctree.autoRefresh": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically refresh analysis on file save."
+        },
+        "loctree.showStatusBar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show loctree status in the status bar."
+        },
+        "loctree.diagnosticSeverity": {
+          "type": "string",
+          "enum": ["error", "warning", "information", "hint"],
+          "default": "warning",
+          "description": "Severity level for dead export diagnostics."
+        }
+      }
+    },
+    "languages": [
+      {
+        "id": "typescript",
+        "extensions": [".ts", ".tsx"]
+      },
+      {
+        "id": "javascript",
+        "extensions": [".js", ".jsx", ".mjs", ".cjs"]
+      },
+      {
+        "id": "rust",
+        "extensions": [".rs"]
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts",
+    "package": "vsce package",
+    "publish": "vsce publish"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.75.0",
+    "@typescript-eslint/eslint-plugin": "^6.19.0",
+    "@typescript-eslint/parser": "^6.19.0",
+    "eslint": "^8.56.0",
+    "typescript": "^5.3.3",
+    "@vscode/vsce": "^2.22.0"
+  }
+}

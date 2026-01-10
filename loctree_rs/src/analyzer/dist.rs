@@ -414,12 +414,14 @@ mod tests {
                     kind: "function".to_string(),
                     export_type: "named".to_string(),
                     line: Some(10),
+                    params: Vec::new(),
                 },
                 ExportSymbol {
                     name: "bar".to_string(),
                     kind: "const".to_string(),
                     export_type: "named".to_string(),
                     line: Some(20),
+                    params: Vec::new(),
                 },
             ],
             ..Default::default()
@@ -446,12 +448,14 @@ mod tests {
                     kind: "function".to_string(),
                     export_type: "named".to_string(),
                     line: Some(10),
+                    params: Vec::new(),
                 },
                 ExportSymbol {
                     name: "deadFunc".to_string(),
                     kind: "function".to_string(),
                     export_type: "named".to_string(),
                     line: Some(20),
+                    params: Vec::new(),
                 },
             ],
             ..Default::default()

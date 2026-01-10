@@ -1,0 +1,115 @@
+# Loctree CI for Python Projects
+# Compatible with loctree 0.8.0+ (artifact-first architecture)
+#
+# Created by M&K (c)2025 The LibraxisAI Team
+# Co-Authored-By: Maciej <void@div0.space> & Klaudiusz <the1st@whoai.am>
+
+name: Loctree Code Quality
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    paths:
+      - '**/*.py'
+  push:
+    branches: [main, develop]
+    paths:
+      - '**/*.py'
+
+jobs:
+  loctree-analysis:
+    name: Code Quality Analysis
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Loctree
+        run: |
+          pip install loctree-suite || {
+            echo "::warning::loctree-suite not available, trying cargo"
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+            source ~/.cargo/env
+            cargo install loctree --locked
+          }
+
+          # Verify
+          loct --version && echo "✓ loct installed"
+
+      - name: Run Loctree Scan
+        id: loctree
+        run: |
+          echo "## 🌳 Loctree Analysis" >> $GITHUB_STEP_SUMMARY
+
+          # Full scan with auto-detection
+          loct auto 2>/dev/null || true
+
+          # Check if artifacts were created
+          if [ -f .loctree/agent.json ]; then
+            # Extract metrics
+            HEALTH=$(jq -r '.summary.health_score // 0' .loctree/agent.json)
+            DEAD=$(jq -r '.summary.dead_exports // 0' .loctree/agent.json)
+            CYCLES=$(jq -r '.summary.circular_imports // 0' .loctree/agent.json)
+            FILES=$(jq -r '.summary.files_analyzed // 0' .loctree/agent.json)
+            LOC=$(jq -r '.summary.total_loc // 0' .loctree/agent.json)
+
+            echo "health=$HEALTH" >> $GITHUB_OUTPUT
+
+            # Health score badge
+            if [ "$HEALTH" -ge 80 ]; then
+              BADGE="🟢"
+            elif [ "$HEALTH" -ge 50 ]; then
+              BADGE="🟡"
+            else
+              BADGE="🔴"
+            fi
+
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### $BADGE Health Score: ${HEALTH}/100" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| Files analyzed | $FILES |" >> $GITHUB_STEP_SUMMARY
+            echo "| Total LOC | $LOC |" >> $GITHUB_STEP_SUMMARY
+            echo "| Dead exports | $DEAD |" >> $GITHUB_STEP_SUMMARY
+            echo "| Circular imports | $CYCLES |" >> $GITHUB_STEP_SUMMARY
+
+            # Show priority if present
+            PRIORITY=$(jq -r '.summary.priority // empty' .loctree/agent.json)
+            if [ -n "$PRIORITY" ]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "> **Priority**: $PRIORITY" >> $GITHUB_STEP_SUMMARY
+            fi
+
+            # Fail if health is too low
+            if [ "$HEALTH" -lt 50 ]; then
+              echo "::error::Health score $HEALTH is below threshold (50)"
+              exit 1
+            fi
+          else
+            echo "::notice::No analysis artifacts generated"
+          fi
+
+      - name: Check Dead Exports
+        if: always()
+        run: |
+          if command -v loct &>/dev/null; then
+            # High confidence dead exports only
+            loct dead --confidence high 2>/dev/null || true
+          fi
+
+      - name: Upload Loctree Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: loctree-report
+          path: .loctree/
+          if-no-files-found: ignore
