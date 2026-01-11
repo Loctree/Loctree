@@ -118,9 +118,14 @@ impl Command {
         help.push_str("  loct --summary        Health score + counts only\n\n");
 
         help.push_str("ALIASES:\n");
-        help.push_str("  loct s <file>         = slice\n");
-        help.push_str("  loct f <pattern>      = find\n");
-        help.push_str("  loct h                = --summary\n\n");
+        help.push_str("  loct h                = health (quick sanity check)\n");
+        help.push_str("  loct d                = dead (unused exports)\n");
+        help.push_str("  loct t                = twins (dead parrots + duplicates)\n");
+        help.push_str("  loct c                = cycles (circular imports)\n");
+        help.push_str("  loct s <file>         = slice (file context)\n");
+        help.push_str("  loct f <pattern>      = find (symbol search)\n");
+        help.push_str("  loct i <file>         = impact (what breaks?)\n");
+        help.push_str("  loct q <kind> <tgt>   = query (graph queries)\n\n");
 
         help.push_str("ARTIFACTS:\n");
         help.push_str("  .loctree/snapshot.json   Graph data (jq-able)\n");
