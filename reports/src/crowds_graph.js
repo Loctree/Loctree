@@ -474,7 +474,7 @@
 
       clearTimeout(nodeHoverTimeout);
       nodeHoverTimeout = setTimeout(() => {
-        tooltip.innerHTML = ''; // Clear previous
+        tooltip.textContent = ''; // Clear previous
 
         if (data.isCrowdLabel) {
           // Crowd label tooltip
@@ -485,12 +485,19 @@
 
           const statsDiv = document.createElement('div');
           statsDiv.style.cssText = 'margin-bottom: 8px; font-size: 11px; opacity: 0.9;';
-          // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method -- SAFETY: data.memberCount/score/issues are numeric values from loctree internal analysis, not user input
-          statsDiv.innerHTML = `
-            <div>Files: ${data.memberCount}</div>
-            <div>Severity: ${data.score.toFixed(1)}/10</div>
-            <div>Issues: ${data.issues.length}</div>
-          `;
+
+          const filesRow = document.createElement('div');
+          filesRow.textContent = `Files: ${data.memberCount}`;
+          statsDiv.appendChild(filesRow);
+
+          const severityRow = document.createElement('div');
+          severityRow.textContent = `Severity: ${data.score.toFixed(1)}/10`;
+          statsDiv.appendChild(severityRow);
+
+          const issuesRow = document.createElement('div');
+          issuesRow.textContent = `Issues: ${data.issues.length}`;
+          statsDiv.appendChild(issuesRow);
+
           tooltip.appendChild(statsDiv);
 
           if (data.issues.length > 0) {
@@ -520,20 +527,29 @@
 
           const statsDiv = document.createElement('div');
           statsDiv.style.cssText = 'margin-bottom: 8px; font-size: 11px; opacity: 0.9;';
-          // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method -- SAFETY: data.pattern/importerCount/score are from loctree internal analysis, not user input
-          statsDiv.innerHTML = `
-            <div>Pattern: ${data.pattern}</div>
-            <div>Importers: ${data.importerCount}</div>
-            <div>Severity: ${data.score.toFixed(1)}/10</div>
-          `;
+
+          const patternRow = document.createElement('div');
+          patternRow.textContent = `Pattern: ${data.pattern}`;
+          statsDiv.appendChild(patternRow);
+
+          const importersRow = document.createElement('div');
+          importersRow.textContent = `Importers: ${data.importerCount}`;
+          statsDiv.appendChild(importersRow);
+
+          const severityRow2 = document.createElement('div');
+          severityRow2.textContent = `Severity: ${data.score.toFixed(1)}/10`;
+          statsDiv.appendChild(severityRow2);
+
           tooltip.appendChild(statsDiv);
 
           // Match reason
           if (data.matchReason) {
             const reasonDiv = document.createElement('div');
             reasonDiv.style.cssText = 'margin-top: 8px; font-size: 11px; color: #95c56e;';
-            // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method -- SAFETY: formatMatchReason returns sanitized internal analysis data, not user input
-            reasonDiv.innerHTML = `<strong>Match:</strong> ${formatMatchReason(data.matchReason)}`;
+            const matchLabel = document.createElement('strong');
+            matchLabel.textContent = 'Match:';
+            reasonDiv.appendChild(matchLabel);
+            reasonDiv.appendChild(document.createTextNode(` ${formatMatchReason(data.matchReason)}`));
             tooltip.appendChild(reasonDiv);
           }
 
@@ -541,8 +557,10 @@
           if (data.issues && data.issues.length > 0) {
             const issuesDiv = document.createElement('div');
             issuesDiv.style.cssText = 'margin-top: 8px; font-size: 10px; color: #f39c12;';
-            // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method -- SAFETY: formatIssueType returns sanitized enum values from loctree analysis, not user input
-            issuesDiv.innerHTML = `<strong>Issues:</strong> ${data.issues.map(formatIssueType).join(', ')}`;
+            const issuesLabel = document.createElement('strong');
+            issuesLabel.textContent = 'Issues:';
+            issuesDiv.appendChild(issuesLabel);
+            issuesDiv.appendChild(document.createTextNode(` ${data.issues.map(formatIssueType).join(', ')}`));
             tooltip.appendChild(issuesDiv);
           }
 
@@ -574,7 +592,7 @@
 
       clearTimeout(edgeHoverTimeout);
       edgeHoverTimeout = setTimeout(() => {
-        tooltip.innerHTML = '';
+        tooltip.textContent = '';
 
         const titleDiv = document.createElement('div');
         titleDiv.style.cssText = 'font-weight: bold; color: #a855f7;';
@@ -710,30 +728,45 @@
       color: #fff;
     `;
 
-    // Stats display
+    // Stats display - using safe DOM APIs
     const statsDiv = document.createElement('div');
     statsDiv.style.cssText = 'display: flex; gap: 16px; margin-right: auto; flex-wrap: wrap;';
-    // nosemgrep: javascript.browser.security.insecure-document-method.insecure-document-method -- SAFETY: stats.* are numeric values computed from loctree internal analysis, not user input
-    statsDiv.innerHTML = `
-      <span><strong>Crowds:</strong> ${stats.totalCrowds}</span>
-      <span><strong>Files:</strong> ${stats.totalFiles}</span>
-      <span><strong>Issues:</strong> ${stats.totalIssues}</span>
-      <span><strong>Avg Severity:</strong> ${stats.averageScore.toFixed(1)}</span>
-    `;
+
+    [
+      { label: 'Crowds:', value: stats.totalCrowds },
+      { label: 'Files:', value: stats.totalFiles },
+      { label: 'Issues:', value: stats.totalIssues },
+      { label: 'Avg Severity:', value: stats.averageScore.toFixed(1) }
+    ].forEach(stat => {
+      const span = document.createElement('span');
+      const strong = document.createElement('strong');
+      strong.textContent = stat.label;
+      span.appendChild(strong);
+      span.appendChild(document.createTextNode(` ${stat.value}`));
+      statsDiv.appendChild(span);
+    });
+
     toolbar.appendChild(statsDiv);
 
     // Severity filter
     const severityLabel = document.createElement('label');
     severityLabel.style.cssText = 'display: flex; gap: 6px; align-items: center;';
-    severityLabel.innerHTML = '<span>Min Severity:</span>';
+    const severityText = document.createElement('span');
+    severityText.textContent = 'Min Severity:';
+    severityLabel.appendChild(severityText);
 
     const severitySelect = document.createElement('select');
     severitySelect.style.cssText = 'background: #1a1a2e; color: #fff; border: 1px solid #444; padding: 4px 8px; border-radius: 4px;';
-    severitySelect.innerHTML = `
-      <option value="0">All (0+)</option>
-      <option value="4">Medium (4+)</option>
-      <option value="7">High (7+)</option>
-    `;
+    [
+      { value: '0', text: 'All (0+)' },
+      { value: '4', text: 'Medium (4+)' },
+      { value: '7', text: 'High (7+)' }
+    ].forEach(opt => {
+      const option = document.createElement('option');
+      option.value = opt.value;
+      option.textContent = opt.text;
+      severitySelect.appendChild(option);
+    });
     severityLabel.appendChild(severitySelect);
     toolbar.appendChild(severityLabel);
 
@@ -755,16 +788,23 @@
     // Layout selector
     const layoutLabel = document.createElement('label');
     layoutLabel.style.cssText = 'display: flex; gap: 6px; align-items: center;';
-    layoutLabel.innerHTML = '<span>Layout:</span>';
+    const layoutText = document.createElement('span');
+    layoutText.textContent = 'Layout:';
+    layoutLabel.appendChild(layoutText);
 
     const layoutSelect = document.createElement('select');
     layoutSelect.style.cssText = 'background: #1a1a2e; color: #fff; border: 1px solid #444; padding: 4px 8px; border-radius: 4px;';
-    layoutSelect.innerHTML = `
-      <option value="cose">Force (COSE)</option>
-      <option value="concentric">Concentric</option>
-      <option value="circle">Circle</option>
-      <option value="grid">Grid</option>
-    `;
+    [
+      { value: 'cose', text: 'Force (COSE)' },
+      { value: 'concentric', text: 'Concentric' },
+      { value: 'circle', text: 'Circle' },
+      { value: 'grid', text: 'Grid' }
+    ].forEach(opt => {
+      const option = document.createElement('option');
+      option.value = opt.value;
+      option.textContent = opt.text;
+      layoutSelect.appendChild(option);
+    });
     layoutLabel.appendChild(layoutSelect);
     toolbar.appendChild(layoutLabel);
 

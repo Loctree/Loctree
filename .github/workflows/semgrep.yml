@@ -30,19 +30,9 @@ jobs:
       - name: Install Semgrep
         run: python -m pip install --upgrade pip && pip install semgrep
 
-      # EXCLUDED RULES RATIONALE:
-      # - insecure-document-method: innerHTML uses internal numeric stats from loctree, not user input
-      # - args-os/args: CLI tool parsing command line flags only, not for security decisions
+      # Exceptions documented in .semgrepignore (static templates, CLI entry points)
       - name: Run Semgrep
-        run: |
-          semgrep scan \
-            --config auto \
-            --config p/rust \
-            --config p/typescript \
-            --exclude-rule javascript.browser.security.insecure-document-method.insecure-document-method \
-            --exclude-rule rust.lang.security.args-os.args-os \
-            --exclude-rule rust.lang.security.args.args \
-            --sarif --output semgrep.sarif .
+        run: semgrep scan --config auto --config p/rust --config p/typescript --sarif --output semgrep.sarif .
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
 
