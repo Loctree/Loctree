@@ -496,20 +496,16 @@ impl HolographicSlice {
     }
 }
 
-/// Prompt user to create snapshot if it doesn't exist (TTY only)
-fn prompt_create_snapshot(root: &Path, parsed: &ParsedArgs) -> io::Result<bool> {
+/// Auto-create snapshot if it doesn't exist, or prompt in interactive mode
+fn ensure_snapshot(root: &Path, parsed: &ParsedArgs) -> io::Result<bool> {
     let snapshot_path = root.join(".loctree").join("snapshot.json");
 
     if !std::io::stdin().is_terminal() {
-        // Non-interactive: print clear error and exit (avoid ugly Debug output)
+        // Non-interactive: auto-create snapshot silently
+        eprintln!("[loct] No snapshot found, creating one...");
+        crate::snapshot::run_init(&[root.to_path_buf()], parsed)?;
         eprintln!();
-        eprintln!("❌ No snapshot found at {}", snapshot_path.display());
-        eprintln!();
-        eprintln!("   The `slice` command requires a snapshot. Create one with:");
-        eprintln!();
-        eprintln!("     cd {} && loctree", root.display());
-        eprintln!();
-        std::process::exit(1);
+        return Ok(true);
     }
 
     eprintln!("No snapshot found at {}", snapshot_path.display());
@@ -548,9 +544,15 @@ pub fn run_slice(
         })
         .unwrap_or_else(|| root.to_path_buf());
 
-    // Check if snapshot exists, prompt to create if not
-    if !Snapshot::exists(&effective_root) {
-        if prompt_create_snapshot(&effective_root, parsed)? {
+    // Force rescan if --rescan flag is set (for uncommitted files)
+    if parsed.slice_rescan {
+        if !std::io::stdin().is_terminal() {
+            eprintln!("[loct] Rescanning for new files...");
+        }
+        crate::snapshot::run_init(std::slice::from_ref(&effective_root), parsed)?;
+    } else if !Snapshot::exists(&effective_root) {
+        // Check if snapshot exists, prompt to create if not
+        if ensure_snapshot(&effective_root, parsed)? {
             // Snapshot was created, continue
         } else {
             return Err(io::Error::new(
@@ -571,12 +573,12 @@ pub fn run_slice(
         Some(s) => s,
         None => {
             eprintln!();
-            eprintln!("❌ Target file '{}' not found in snapshot.", target);
+            eprintln!("[ERR] Target file '{}' not found in snapshot.", target);
             eprintln!();
             eprintln!("   Possible causes:");
-            eprintln!("   • File path is incorrect or uses wrong case");
-            eprintln!("   • File was added after last snapshot (run `loctree` to update)");
-            eprintln!("   • File is excluded by .gitignore or .loctignore");
+            eprintln!("   - File path is incorrect or uses wrong case");
+            eprintln!("   - File was added after last snapshot (run `loctree` to update)");
+            eprintln!("   - File is excluded by .gitignore or .loctignore");
             eprintln!();
             std::process::exit(1);
         }
@@ -666,6 +668,8 @@ mod tests {
                 name: "test_event".to_string(),
                 emits: vec![("src/lib.rs".to_string(), 10, "emit".to_string())],
                 listens: vec![("src/main.rs".to_string(), 20)],
+                is_fe_sync: false,
+                same_file_sync: false,
             }],
             barrels: vec![],
         }
@@ -929,7 +933,10 @@ mod tests {
                     };
                     barrel.reexports.push(ReexportEntry {
                         source: "../Component".to_string(),
-                        kind: ReexportKind::Named(vec!["MyComponent".to_string()]),
+                        kind: ReexportKind::Named(vec![(
+                            "MyComponent".to_string(),
+                            "MyComponent".to_string(),
+                        )]),
                         resolved: Some("src/Component.tsx".to_string()),
                     });
                     barrel

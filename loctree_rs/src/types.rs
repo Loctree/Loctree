@@ -57,6 +57,10 @@ pub enum Mode {
     Trace,
     /// AI-optimized JSON output with quick wins and slice references.
     ForAi,
+    /// Output findings.json to stdout (--findings flag)
+    Findings,
+    /// Output summary only to stdout (--summary flag)
+    Summary,
     /// Git awareness - temporal knowledge from repository history.
     Git(GitSubcommand),
     /// Unified search - returns symbol matches, semantic matches, dead status.
@@ -268,6 +272,9 @@ pub struct ImportEntry {
     /// True if import starts with `self::` (Rust only).
     #[serde(default)]
     pub is_self_relative: bool,
+    /// True if this is a Rust `mod foo;` declaration (not a true import).
+    #[serde(default)]
+    pub is_mod_declaration: bool,
     /// Original raw path before resolution (Rust only).
     #[serde(default)]
     pub raw_path: String,
@@ -328,8 +335,22 @@ pub struct ReexportEntry {
 pub enum ReexportKind {
     /// `export * from './module'`
     Star,
-    /// `export { a, b } from './module'`
-    Named(Vec<String>),
+    /// `export { a, b as c } from './module'`
+    /// Each tuple is (original_name, exported_name) - same if no alias
+    Named(Vec<(String, String)>),
+}
+
+/// Parameter information for function exports.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ParamInfo {
+    /// Parameter name.
+    pub name: String,
+    /// Type annotation if present (e.g., "string", "int", "&str").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub type_annotation: Option<String>,
+    /// Whether parameter has a default value.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub has_default: bool,
 }
 
 /// An exported symbol from a module.
@@ -343,6 +364,9 @@ pub struct ExportSymbol {
     pub export_type: String,
     /// 1-based line number of declaration.
     pub line: Option<usize>,
+    /// Function parameters (empty for non-functions).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub params: Vec<ParamInfo>,
 }
 
 /// A Tauri command reference (handler or invocation).
@@ -358,6 +382,9 @@ pub struct CommandRef {
     pub generic_type: Option<String>,
     /// Payload type/shape if detected.
     pub payload: Option<String>,
+    /// Plugin name for Tauri plugin commands (e.g., "window" from `invoke('plugin:window|set_icon')`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin_name: Option<String>,
 }
 
 /// Casing inconsistency in command payload keys.
@@ -397,6 +424,33 @@ pub struct RouteInfo {
     pub line: usize,
 }
 
+/// Python exec/eval/compile dynamic code generation pattern.
+/// Tracks template strings (e.g., "get%s", "set%s") passed to exec() that generate symbols dynamically.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct DynamicExecTemplate {
+    /// Template pattern containing placeholders (%s, %d, {name}, etc.)
+    pub template: String,
+    /// Generated symbol names extracted from the template (e.g., ["get", "set"] from "get%s", "set%s")
+    pub generated_prefixes: Vec<String>,
+    /// 1-based line number where exec/eval/compile is called
+    pub line: usize,
+    /// Type of dynamic call: "exec", "eval", or "compile"
+    pub call_type: String,
+}
+
+/// Python sys.modules monkey-patching pattern.
+/// Detects when a module injects itself into sys.modules under a different name,
+/// making all its exports accessible at runtime (should not be flagged as dead).
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct SysModulesInjection {
+    /// The module name being injected (e.g., "compat", "shim", or "__name__")
+    pub module_name: String,
+    /// 1-based line number where injection occurs
+    pub line: usize,
+    /// The value being assigned (variable name or expression)
+    pub value: String,
+}
+
 /// A Tauri event reference (emit or listen).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EventRef {
@@ -412,6 +466,9 @@ pub struct EventRef {
     pub awaited: bool,
     /// Payload type/shape if detected.
     pub payload: Option<String>,
+    /// True if this event uses a dynamic pattern (format!/template literal).
+    #[serde(default)]
+    pub is_dynamic: bool,
 }
 
 /// Python concurrency race indicator
@@ -531,6 +588,15 @@ pub struct FileAnalysis {
     /// True if file uses WeakMap or WeakSet (global registry pattern in React/libs)
     #[serde(default)]
     pub has_weak_collections: bool,
+
+    /// Python exec/eval/compile dynamic code generation templates.
+    #[serde(default)]
+    pub dynamic_exec_templates: Vec<DynamicExecTemplate>,
+
+    /// Python sys.modules monkey-patching injections.
+    /// Files with these injections have all exports accessible at runtime.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sys_modules_injections: Vec<SysModulesInjection>,
 }
 
 impl ImportEntry {
@@ -550,17 +616,37 @@ impl ImportEntry {
             is_super_relative: false,
             is_self_relative: false,
             raw_path: String::new(),
+            is_mod_declaration: false,
         }
     }
 }
 
 impl ExportSymbol {
+    /// Create export symbol without params (backwards compatible).
     pub fn new(name: String, kind: &str, export_type: &str, line: Option<usize>) -> Self {
         Self {
             name,
             kind: kind.to_string(),
             export_type: export_type.to_string(),
             line,
+            params: Vec::new(),
+        }
+    }
+
+    /// Create export symbol with params (for functions).
+    pub fn with_params(
+        name: String,
+        kind: &str,
+        export_type: &str,
+        line: Option<usize>,
+        params: Vec<ParamInfo>,
+    ) -> Self {
+        Self {
+            name,
+            kind: kind.to_string(),
+            export_type: export_type.to_string(),
+            line,
+            params,
         }
     }
 }
@@ -599,6 +685,8 @@ impl FileAnalysis {
             routes: Vec::new(),
             pytest_fixtures: Vec::new(),
             has_weak_collections: false,
+            dynamic_exec_templates: Vec::new(),
+            sys_modules_injections: Vec::new(),
         }
     }
 }

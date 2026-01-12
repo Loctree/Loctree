@@ -1,11 +1,11 @@
 [package]
 name = "loctree"
-version = "0.6.8"
+version = "0.8.4"
 edition = "2024"
 default-run = "loctree"
 authors = ["Loctree <loct@loctree.io>"]
 description = "Fast, language-aware codebase analyzer for detecting dead exports, circular imports, and generating dependency graphs"
-license = "MIT"
+license = "MIT OR Apache-2.0"
 repository = "https://github.com/Loctree/Loctree"
 readme = "../README.md"
 keywords = ["static-analysis", "dead-code", "imports", "exports", "codebase"]
@@ -31,39 +31,52 @@ regex = "1.12"
 globset = "0.4"
 heck = "0.5"
 time = { version = "0.3", features = ["formatting"] }
-report-leptos = { version = "0.1.1", path = "../reports" }
+report-leptos = { version = "0.1.21", path = "../reports" }
 git2 = "0.20"
 toml = "0.8"
 urlencoding = "2.1"
 once_cell = "1.19"
 
 # AST Parsing (TypeScript/JavaScript) - OXC
-oxc_allocator = "0.100.0"
-oxc_parser = "0.100.0"
-oxc_span = "0.100.0"
-oxc_ast = "0.100.0"
-oxc_ast_visit = "0.100.0"
-oxc_semantic = "0.100.0"
+oxc_allocator = "0.102.0"
+oxc_parser = "0.102.0"
+oxc_span = "0.102.0"
+oxc_ast = "0.102.0"
+oxc_ast_visit = "0.102.0"
+oxc_semantic = "0.102.0"
 tempfile = "3"
 
 # AI Memory integration (memex command) - optional, pulls heavy deps (datafusion)
-rmcp-memex = { path = "../rmcp_memex", optional = true }
+# rmcp-memex = { version = "0.3", optional = true }
 tokio = { version = "1.0", features = ["rt-multi-thread"] }
 
 # Progress UI (spinners, progress bars)
-indicatif = "0.17"
-console = "0.15"
+indicatif = "0.18"
+console = "0.16"
 anyhow = "1.0"
 walkdir = "2.4"
 uuid = { version = "1.0", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
-colored = "2.1"
+colored = "3.0"
+
+# jq-compatible filtering for query mode
+jaq-core = "2.2"
+jaq-std = "2.1"
+jaq-json = "1.1"
+
+# Fuzzy string matching for command suggestions
+strsim = "0.11"
+
+# Watch mode for live snapshot refresh
+notify = "8.0"
+notify-debouncer-full = "0.6"
 
 [dev-dependencies]
 assert_cmd = "2.0"
 predicates = "3.1"
 regex = "1.12"
+serial_test = "3.2"
 
 [features]
 default = []
-memex = ["rmcp-memex"]
+memex = []  # feature gate for AI memory integration - enable with rmcp-memex dep when ready

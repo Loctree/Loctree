@@ -49,6 +49,7 @@ fn detect_crowd_internal(
             members: vec![],
             score: 0.0,
             issues: vec![],
+            context_type: None,
         };
     }
 
@@ -79,6 +80,13 @@ fn detect_crowd_internal(
                 })
                 .collect();
 
+            // Find the FileAnalysis for this path to get is_test flag
+            let is_test = files
+                .iter()
+                .find(|f| &f.path == path)
+                .map(|f| f.is_test)
+                .unwrap_or(false);
+
             CrowdMember {
                 file: path.clone(),
                 match_reason: MatchReason::NameMatch {
@@ -86,6 +94,7 @@ fn detect_crowd_internal(
                 },
                 importer_count,
                 similarity_scores,
+                is_test,
             }
         })
         .collect();
@@ -99,11 +108,15 @@ fn detect_crowd_internal(
     // 6. Calculate crowd score
     let score = calculate_crowd_score(&members, &issues);
 
+    // 7. Infer context type
+    let context_type = infer_context_type(pattern, &members);
+
     Crowd {
         pattern: pattern.to_string(),
         members,
         score,
         issues,
+        context_type,
     }
 }
 
@@ -188,6 +201,131 @@ fn calculate_crowd_score(members: &[CrowdMember], issues: &[CrowdIssue]) -> f32 
     }
 
     score.min(10.0)
+}
+
+/// Infer the UI/architectural context type for a crowd based on pattern and file paths
+fn infer_context_type(pattern: &str, members: &[CrowdMember]) -> Option<ContextType> {
+    let pattern_lower = pattern.to_lowercase();
+
+    // Collect all paths for additional signals
+    let paths: Vec<&str> = members.iter().map(|m| m.file.as_str()).collect();
+    let paths_lower: String = paths.join(" ").to_lowercase();
+
+    // Rail/Navigation patterns
+    if pattern_lower.contains("nav")
+        || pattern_lower.contains("sidebar")
+        || pattern_lower.contains("drawer")
+        || pattern_lower.contains("rail")
+        || pattern_lower.contains("menu")
+        || pattern_lower.contains("toolbar")
+        || paths_lower.contains("/nav/")
+        || paths_lower.contains("/navigation/")
+        || paths_lower.contains("/sidebar/")
+    {
+        return Some(ContextType::Rail);
+    }
+
+    // Modal/Dialog patterns
+    if pattern_lower.contains("modal")
+        || pattern_lower.contains("dialog")
+        || pattern_lower.contains("popup")
+        || pattern_lower.contains("overlay")
+        || pattern_lower.contains("toast")
+        || pattern_lower.contains("alert")
+        || pattern_lower.contains("confirm")
+        || paths_lower.contains("/modal/")
+        || paths_lower.contains("/dialog/")
+    {
+        return Some(ContextType::Modal);
+    }
+
+    // Form patterns
+    if pattern_lower.contains("form")
+        || pattern_lower.contains("input")
+        || pattern_lower.contains("field")
+        || pattern_lower.contains("select")
+        || pattern_lower.contains("picker")
+        || pattern_lower.contains("checkbox")
+        || pattern_lower.contains("radio")
+        || pattern_lower.contains("textarea")
+        || paths_lower.contains("/form/")
+        || paths_lower.contains("/forms/")
+        || paths_lower.contains("/inputs/")
+    {
+        return Some(ContextType::Form);
+    }
+
+    // List/Table patterns
+    if pattern_lower.contains("list")
+        || pattern_lower.contains("table")
+        || pattern_lower.contains("grid")
+        || pattern_lower.contains("row")
+        || pattern_lower.contains("column")
+        || pattern_lower.contains("data")
+        || paths_lower.contains("/list/")
+        || paths_lower.contains("/table/")
+    {
+        return Some(ContextType::List);
+    }
+
+    // Panel/Content patterns
+    if pattern_lower.contains("panel")
+        || pattern_lower.contains("card")
+        || pattern_lower.contains("section")
+        || pattern_lower.contains("content")
+        || pattern_lower.contains("view")
+        || pattern_lower.contains("page")
+        || paths_lower.contains("/panel/")
+        || paths_lower.contains("/cards/")
+    {
+        return Some(ContextType::Panel);
+    }
+
+    // State management patterns
+    if pattern_lower.contains("hook")
+        || pattern_lower.contains("store")
+        || pattern_lower.contains("context")
+        || pattern_lower.contains("state")
+        || pattern_lower.contains("provider")
+        || pattern_lower.contains("reducer")
+        || pattern_lower.contains("atom")
+        || paths_lower.contains("/hooks/")
+        || paths_lower.contains("/store/")
+        || paths_lower.contains("/stores/")
+        || paths_lower.contains("/context/")
+    {
+        return Some(ContextType::State);
+    }
+
+    // API/Service patterns
+    if pattern_lower.contains("api")
+        || pattern_lower.contains("service")
+        || pattern_lower.contains("client")
+        || pattern_lower.contains("fetch")
+        || pattern_lower.contains("request")
+        || pattern_lower.contains("endpoint")
+        || paths_lower.contains("/api/")
+        || paths_lower.contains("/services/")
+        || paths_lower.contains("/clients/")
+    {
+        return Some(ContextType::Api);
+    }
+
+    // Utility patterns
+    if pattern_lower.contains("util")
+        || pattern_lower.contains("helper")
+        || pattern_lower.contains("common")
+        || pattern_lower.contains("shared")
+        || pattern_lower.contains("lib")
+        || paths_lower.contains("/utils/")
+        || paths_lower.contains("/helpers/")
+        || paths_lower.contains("/lib/")
+    {
+        return Some(ContextType::Util);
+    }
+
+    // If no specific pattern matched, return None (will show as "other" if needed)
+    None
 }
 
 /// Auto-detect all crowds in the codebase

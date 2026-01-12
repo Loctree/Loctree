@@ -1,8 +1,8 @@
 use serde_json::json;
 
-use crate::analyzer::RankedDup;
-use crate::analyzer::dead_parrots::DeadExport;
-use crate::analyzer::report::CommandGap;
+use super::dead_parrots::DeadExport;
+use super::report::{CommandGap, RankedDup};
+use crate::snapshot::Snapshot;
 
 pub struct SarifInputs<'a> {
     pub duplicate_exports: &'a [RankedDup],
@@ -12,6 +12,40 @@ pub struct SarifInputs<'a> {
     /// Circular imports: each cycle is a Vec of file paths
     pub circular_imports: &'a [Vec<String>],
     pub pipeline_summary: &'a serde_json::Value,
+    /// Snapshot for enrichment metadata (blast radius, consumer count, etc.)
+    pub snapshot: Option<&'a Snapshot>,
+}
+
+/// Calculate blast radius: how many files depend on this file
+fn compute_blast_radius(snapshot: &Snapshot, file_path: &str) -> usize {
+    snapshot
+        .edges
+        .iter()
+        .filter(|edge| edge.from == file_path)
+        .count()
+}
+
+/// Calculate consumer count: how many files import this specific file
+fn compute_consumer_count(snapshot: &Snapshot, file_path: &str) -> usize {
+    snapshot
+        .edges
+        .iter()
+        .filter(|edge| {
+            edge.to == file_path
+                || edge.to.ends_with(&format!("/{}", file_path))
+                || (file_path.contains('/') && edge.to.contains(file_path))
+        })
+        .count()
+}
+
+/// Map loctree confidence to SARIF-compatible confidence level
+fn map_confidence_level(confidence: &str) -> &'static str {
+    match confidence.to_lowercase().as_str() {
+        "certain" => "CERTAIN",
+        "high" => "HIGH",
+        "medium" | "low" => "SMELL",
+        _ => "SMELL",
+    }
 }
 
 fn build_sarif(inputs: SarifInputs) -> serde_json::Value {
@@ -89,10 +123,33 @@ fn build_sarif(inputs: SarifInputs) -> serde_json::Value {
             }]
         });
 
+        // Build properties object with enrichment data
+        let mut properties = serde_json::Map::new();
+
+        // Add open_url if present (existing functionality)
         if let Some(ref open_url) = dead.open_url {
-            result["properties"] = json!({
-                "openUrl": open_url
-            });
+            properties.insert("openUrl".to_string(), json!(open_url));
+        }
+
+        // Add loctree enrichment fields if snapshot is available
+        if let Some(snapshot) = inputs.snapshot {
+            let blast_radius = compute_blast_radius(snapshot, &dead.file);
+            let consumer_count = compute_consumer_count(snapshot, &dead.file);
+            let confidence_level = map_confidence_level(&dead.confidence);
+
+            properties.insert(
+                "loctree".to_string(),
+                json!({
+                    "blast_radius": blast_radius,
+                    "is_dead_code": true,
+                    "consumer_count": consumer_count,
+                    "confidence_level": confidence_level
+                }),
+            );
+        }
+
+        if !properties.is_empty() {
+            result["properties"] = json!(properties);
         }
 
         results.push(result);
@@ -271,6 +328,7 @@ mod tests {
                 symbol
             ),
             open_url: None,
+            is_test: false,
         }
     }
 
@@ -283,6 +341,7 @@ mod tests {
             dead_exports: &[],
             circular_imports: &[],
             pipeline_summary: &json!({}),
+            snapshot: None,
         };
         assert!(print_sarif(inputs).is_ok());
     }
@@ -297,6 +356,7 @@ mod tests {
             dead_exports: &[],
             circular_imports: &[],
             pipeline_summary: &json!({}),
+            snapshot: None,
         };
         assert!(print_sarif(inputs).is_ok());
     }
@@ -311,6 +371,7 @@ mod tests {
             dead_exports: &[],
             circular_imports: &[],
             pipeline_summary: &json!({}),
+            snapshot: None,
         };
         assert!(print_sarif(inputs).is_ok());
     }
@@ -325,6 +386,7 @@ mod tests {
             dead_exports: &[],
             circular_imports: &[],
             pipeline_summary: &json!({}),
+            snapshot: None,
         };
         assert!(print_sarif(inputs).is_ok());
     }
@@ -342,6 +404,7 @@ mod tests {
             dead_exports: &dead,
             circular_imports: &[],
             pipeline_summary: &json!({}),
+            snapshot: None,
         };
         assert!(print_sarif(inputs).is_ok());
     }
@@ -360,6 +423,7 @@ mod tests {
             dead_exports: &[],
             circular_imports: &cycles,
             pipeline_summary: &json!({}),
+            snapshot: None,
         };
         assert!(print_sarif(inputs).is_ok());
     }
@@ -380,6 +444,7 @@ mod tests {
             dead_exports: &[],
             circular_imports: &[],
             pipeline_summary: &summary,
+            snapshot: None,
         };
         assert!(print_sarif(inputs).is_ok());
     }
@@ -400,6 +465,7 @@ mod tests {
             dead_exports: &[],
             circular_imports: &[],
             pipeline_summary: &summary,
+            snapshot: None,
         };
         assert!(print_sarif(inputs).is_ok());
     }
@@ -425,6 +491,7 @@ mod tests {
             dead_exports: &dead,
             circular_imports: &cycles,
             pipeline_summary: &summary,
+            snapshot: None,
         };
         assert!(print_sarif(inputs).is_ok());
     }
@@ -446,7 +513,63 @@ mod tests {
             dead_exports: &[],
             circular_imports: &[],
             pipeline_summary: &json!({}),
+            snapshot: None,
         };
         assert!(print_sarif(inputs).is_ok());
+    }
+
+    #[test]
+    fn test_print_sarif_with_enrichment() {
+        use crate::snapshot::{GraphEdge, Snapshot, SnapshotMetadata};
+
+        // Create a simple test snapshot with edges
+        let snapshot = Snapshot {
+            metadata: SnapshotMetadata::default(),
+            files: vec![],
+            edges: vec![
+                GraphEdge {
+                    from: "src/utils.ts".to_string(),
+                    to: "src/component.ts".to_string(),
+                    label: "import".to_string(),
+                },
+                GraphEdge {
+                    from: "src/other.ts".to_string(),
+                    to: "src/utils.ts".to_string(),
+                    label: "import".to_string(),
+                },
+            ],
+            export_index: Default::default(),
+            command_bridges: vec![],
+            event_bridges: vec![],
+            barrels: vec![],
+        };
+
+        let dead = vec![mock_dead("src/utils.ts", "unusedHelper", Some(10))];
+        let inputs = SarifInputs {
+            duplicate_exports: &[],
+            missing_handlers: &[],
+            unused_handlers: &[],
+            dead_exports: &dead,
+            circular_imports: &[],
+            pipeline_summary: &json!({}),
+            snapshot: Some(&snapshot),
+        };
+
+        let result = generate_sarif(inputs);
+
+        // Verify the result contains loctree enrichment fields
+        let results = result["runs"][0]["results"].as_array().unwrap();
+        assert_eq!(results.len(), 1);
+
+        let props = &results[0]["properties"];
+        assert!(props.get("loctree").is_some());
+
+        let loctree = &props["loctree"];
+        assert_eq!(loctree["is_dead_code"], true);
+        assert_eq!(loctree["confidence_level"], "HIGH");
+        // blast_radius: 1 (utils.ts imports component.ts)
+        assert_eq!(loctree["blast_radius"], 1);
+        // consumer_count: 1 (other.ts imports utils.ts)
+        assert_eq!(loctree["consumer_count"], 1);
     }
 }

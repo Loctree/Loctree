@@ -1,4 +1,4 @@
-use crate::components::{
+use crate::components::icons::{
     Icon, ICON_ARROWS_IN, ICON_ARROWS_OUT, ICON_CARET_RIGHT, ICON_FILE, ICON_FILE_CODE,
     ICON_FOLDER, ICON_FOLDER_OPEN,
 };
@@ -27,6 +27,26 @@ fn is_code_file(path: &str) -> bool {
 
 fn get_max_loc(nodes: &[TreeNode]) -> usize {
     nodes.iter().map(|n| n.loc).max().unwrap_or(1).max(1)
+}
+
+/// Count total files and LOC in tree (for summary display)
+fn count_tree_stats(nodes: &[TreeNode]) -> (usize, usize) {
+    fn count_recursive(nodes: &[TreeNode], files: &mut usize, loc: &mut usize) {
+        for node in nodes {
+            if node.children.is_empty() {
+                // Leaf node = file
+                *files += 1;
+                *loc += node.loc;
+            } else {
+                // Directory - recurse
+                count_recursive(&node.children, files, loc);
+            }
+        }
+    }
+    let mut files = 0;
+    let mut loc = 0;
+    count_recursive(nodes, &mut files, &mut loc);
+    (files, loc)
 }
 
 #[component]
@@ -191,6 +211,7 @@ pub fn TreeView(root_id: String, tree: Vec<TreeNode>) -> impl IntoView {
     let collapsed: RwSignal<HashSet<String>> = RwSignal::new(HashSet::new());
     let max_loc = get_max_loc(&tree);
     let tree_len = tree.len();
+    let (file_count, total_loc) = count_tree_stats(&tree);
 
     let expand_all = move |_| {
         collapsed.set(HashSet::new());
@@ -213,10 +234,22 @@ pub fn TreeView(root_id: String, tree: Vec<TreeNode>) -> impl IntoView {
         }
     };
 
+    // Format LOC with K/M suffix for readability
+    let loc_display = if total_loc >= 1_000_000 {
+        format!("{:.1}M", total_loc as f64 / 1_000_000.0)
+    } else if total_loc >= 1_000 {
+        format!("{:.1}K", total_loc as f64 / 1_000.0)
+    } else {
+        format!("{}", total_loc)
+    };
+
     view! {
         <div class="tree-panel" data-tab-scope=root_id.clone() data-tab-name="tree">
             <div class="tree-header">
-                <h3>"Project tree"</h3>
+                <h3>"Analyzed files "</h3>
+                <span class="tree-stats" title="Only code files loctree can analyze (JS/TS, Python, Rust, Go, etc.) are shown">
+                    {format!("{} files · {} LOC", file_count, loc_display)}
+                </span>
                 <div class="tree-controls">
                     <button class="tree-btn" on:click=expand_all title="Expand all">
                         <Icon path=ICON_ARROWS_OUT size="16" />

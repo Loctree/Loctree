@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use crate::args::{ParsedArgs, preset_ignore_symbols};
 use crate::config::LoctreeConfig;
-use crate::snapshot::Snapshot;
+use crate::snapshot::{Snapshot, SnapshotMetadata};
 use crate::types::OutputMode;
 
 use super::ReportSection;
@@ -99,7 +99,7 @@ fn print_py_race_indicators(analyses: &[crate::types::FileAnalysis], json: bool)
         println!("===================================\n");
 
         if !warnings.is_empty() {
-            println!("⚠️  WARNINGS ({}):", warnings.len());
+            println!("[!] WARNINGS ({}):", warnings.len());
             for (path, ind) in &warnings {
                 println!("  {}:{}", path, ind.line);
                 println!("    [{}] {}", ind.pattern, ind.message);
@@ -108,7 +108,7 @@ fn print_py_race_indicators(analyses: &[crate::types::FileAnalysis], json: bool)
         }
 
         if !infos.is_empty() {
-            println!("ℹ️  INFO ({}):", infos.len());
+            println!("[i] INFO ({}):", infos.len());
             for (path, ind) in &infos {
                 println!("  {}:{}", path, ind.line);
                 println!("    [{}] {}", ind.pattern, ind.message);
@@ -411,6 +411,8 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                 library_mode,
                 example_globs: parsed.library_example_globs.clone(),
                 python_library_mode: parsed.python_library,
+                include_ambient: false,
+                include_dynamic: false,
             },
         );
         // Apply --focus and --exclude-report filters to dead exports
@@ -550,11 +552,32 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                 library_mode,
                 example_globs: parsed.library_example_globs.clone(),
                 python_library_mode: parsed.python_library,
+                include_ambient: false,
+                include_dynamic: false,
             },
         );
 
         // Get circular imports
         let (circular_imports, _lazy) = super::cycles::find_cycles_with_lazy(&all_graph_edges);
+
+        // Build minimal snapshot for SARIF enrichment (blast radius, consumer count)
+        use crate::snapshot::GraphEdge;
+        let minimal_snapshot = Snapshot {
+            metadata: SnapshotMetadata::default(),
+            files: vec![],
+            edges: all_graph_edges
+                .iter()
+                .map(|(from, to, label)| GraphEdge {
+                    from: from.clone(),
+                    to: to.clone(),
+                    label: label.clone(),
+                })
+                .collect(),
+            export_index: Default::default(),
+            command_bridges: vec![],
+            event_bridges: vec![],
+            barrels: vec![],
+        };
 
         super::sarif::print_sarif(super::sarif::SarifInputs {
             duplicate_exports: &all_ranked_dups,
@@ -563,6 +586,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             dead_exports: &dead_exports,
             circular_imports: &circular_imports,
             pipeline_summary: &pipeline_summary,
+            snapshot: Some(&minimal_snapshot),
         })
         .map_err(|err| io::Error::other(format!("Failed to serialize SARIF: {err}")))?;
         return Ok(());
@@ -723,6 +747,8 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                 library_mode,
                 example_globs: parsed.library_example_globs.clone(),
                 python_library_mode: parsed.python_library,
+                include_ambient: false,
+                include_dynamic: false,
             },
         );
         let dead_count = dead_exports.len();

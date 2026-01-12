@@ -1,0 +1,22 @@
+# Semgrep ignore patterns
+# Created by M&K (c)2026 VetCoders
+
+# ============================================================================
+# STATIC HTML TEMPLATES
+# These files use innerHTML with static HTML strings only (no user input).
+# Converting to DOM API would make code unreadable without security benefit.
+# ============================================================================
+
+# Graph visualization - static UI templates for toolbar, panels
+reports/src/graph_bootstrap.js
+
+# ============================================================================
+# CLI ENTRY POINTS
+# args()/args_os() is required pattern for any CLI tool.
+# Not used for security-sensitive decisions, only CLI flag parsing.
+# ============================================================================
+
+# Main binary entry points
+loctree_rs/src/bin/loct.rs
+loctree_rs/src/bin/loctree.rs
+loctree_rs/src/args.rs

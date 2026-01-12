@@ -51,18 +51,22 @@ pub struct TwinsResult {
 /// Build symbol registry from file analyses
 ///
 /// Counts how many times each symbol is imported across the codebase.
-pub fn build_symbol_registry(analyses: &[FileAnalysis]) -> HashMap<(String, String), SymbolEntry> {
+/// If `include_tests` is false, test files and fixtures are excluded.
+pub fn build_symbol_registry(
+    analyses: &[FileAnalysis],
+    include_tests: bool,
+) -> HashMap<(String, String), SymbolEntry> {
     use crate::analyzer::classify::should_exclude_from_reports;
     let mut registry: HashMap<(String, String), SymbolEntry> = HashMap::new();
 
     // First pass: Register all exports
     for analysis in analyses {
         // Skip test files to avoid pytest/Jest fixtures being treated as dead parrots
-        if analysis.is_test {
+        if !include_tests && analysis.is_test {
             continue;
         }
         // Skip test fixtures and mock files
-        if should_exclude_from_reports(&analysis.path) {
+        if !include_tests && should_exclude_from_reports(&analysis.path) {
             continue;
         }
         for export in &analysis.exports {
@@ -112,16 +116,69 @@ fn is_entry_point(path: &str) -> bool {
         || path == "main.rs"
         || path.ends_with("/lib.rs")
         || path.ends_with("/main.rs")
-        // TypeScript/JavaScript entry points
+        // TypeScript/JavaScript index entry points
         || path.ends_with("/index.ts")
         || path.ends_with("/index.tsx")
         || path.ends_with("/index.js")
         || path.ends_with("/index.jsx")
         || path.ends_with("/index.mjs")
+        // TypeScript/JavaScript App entry points (React, Vue, Tauri, etc.)
+        || path.ends_with("/App.tsx")
+        || path.ends_with("/App.jsx")
+        || path.ends_with("/App.ts")
+        || path.ends_with("/App.js")
+        || path.ends_with("/app.tsx")
+        || path.ends_with("/app.jsx")
+        // TypeScript/JavaScript main entry points (Vite, Tauri, Electron, etc.)
+        || path.ends_with("/main.ts")
+        || path.ends_with("/main.tsx")
+        || path.ends_with("/main.js")
+        || path.ends_with("/main.jsx")
+        // Next.js special files (App Router + Pages Router)
+        || path.ends_with("/_app.tsx")
+        || path.ends_with("/_app.jsx")
+        || path.ends_with("/_document.tsx")
+        || path.ends_with("/_document.jsx")
+        || path.ends_with("/layout.tsx")
+        || path.ends_with("/layout.jsx")
+        || path.ends_with("/page.tsx")
+        || path.ends_with("/page.jsx")
         // Python package roots
         || path.ends_with("/__init__.py")
         // Go package main
         || (path.ends_with(".go") && path.contains("/cmd/"))
+        // Custom application entry points (common naming patterns)
+        || is_application_entry_pattern(path)
+}
+
+/// Check if file matches common application entry point naming patterns
+fn is_application_entry_pattern(path: &str) -> bool {
+    // Extract filename from path
+    let filename = path.rsplit('/').next().unwrap_or(path);
+    let name_lower = filename.to_lowercase();
+
+    // Common entry point patterns (case-insensitive base check)
+    // MainApplication.tsx, AppEntry.ts, Bootstrap.tsx, etc.
+    let entry_patterns = [
+        "application.", // MainApplication.tsx, Application.tsx
+        "bootstrap.",   // Bootstrap.tsx, bootstrap.ts
+        "entry.",       // Entry.tsx, AppEntry.ts
+        "appshell.",    // AppShell.tsx
+        "appinit.",     // AppInit.tsx
+    ];
+
+    for pattern in entry_patterns {
+        if name_lower.contains(pattern) {
+            return true;
+        }
+    }
+
+    // Also check for app-shell directory pattern (common in Tauri/Electron)
+    if path.contains("/app-shell/") || path.contains("/app_shell/") {
+        return true;
+    }
+
+    false
 }
 
 /// Check if a file is a mod.rs (Rust module declaration file)
@@ -174,8 +231,12 @@ fn is_barrel_reexport(_name: &str, kind: &str) -> bool {
 }
 
 /// Find dead parrots - symbols with 0 imports
-pub fn find_dead_parrots(analyses: &[FileAnalysis], _dead_only: bool) -> TwinsResult {
-    let registry = build_symbol_registry(analyses);
+pub fn find_dead_parrots(
+    analyses: &[FileAnalysis],
+    _dead_only: bool,
+    include_tests: bool,
+) -> TwinsResult {
+    let registry = build_symbol_registry(analyses, include_tests);
 
     // Build set of Tauri handlers (registered commands)
     let tauri_handlers: std::collections::HashSet<String> = analyses
@@ -202,6 +263,52 @@ pub fn find_dead_parrots(analyses: &[FileAnalysis], _dead_only: bool) -> TwinsRe
             }
         })
         .collect();
+
+    // Build set of dynamically imported file paths (React lazy, Vue async components, etc.)
+    // These typically import the default export, so we track which files are dynamically imported
+    // Use normalize_module_id to get consistent path format for matching
+    use super::root_scan::normalize_module_id;
+    use crate::types::ImportKind;
+
+    // Build set of normalized file paths that are dynamically imported
+    let mut dynamic_import_targets: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+
+    // First, collect from ImportEntry items with ImportKind::Dynamic (has resolved_path)
+    // This is more reliable than raw dynamic_imports strings
+    for analysis in analyses {
+        for imp in &analysis.imports {
+            if matches!(imp.kind, ImportKind::Dynamic) {
+                // Use resolved path if available (most reliable)
+                if let Some(resolved) = &imp.resolved_path {
+                    dynamic_import_targets.insert(normalize_module_id(resolved).as_key());
+                }
+                // Also add the raw source path normalized
+                dynamic_import_targets.insert(normalize_module_id(&imp.source).as_key());
+            }
+        }
+    }
+
+    // Also check raw dynamic_imports strings as fallback and for matching
+    for analysis in analyses {
+        for dyn_imp in &analysis.dynamic_imports {
+            let dyn_norm = normalize_module_id(dyn_imp);
+            dynamic_import_targets.insert(dyn_norm.as_key());
+
+            // Also add suffix-matched files (handles ./components/X matching src/components/X)
+            let dyn_alias = dyn_norm
+                .path
+                .trim_start_matches("./")
+                .trim_start_matches('@')
+                .to_string();
+            for a in analyses {
+                let a_norm = normalize_module_id(&a.path);
+                if a_norm.path.ends_with(&dyn_alias) {
+                    dynamic_import_targets.insert(a_norm.as_key());
+                }
+            }
+        }
+    }
 
     let mut dead_parrots: Vec<SymbolEntry> = registry
         .values()
@@ -236,6 +343,13 @@ pub fn find_dead_parrots(analyses: &[FileAnalysis], _dead_only: bool) -> TwinsRe
             }
             // Skip barrel re-exports
             if is_barrel_reexport(&entry.name, &entry.kind) {
+                return false;
+            }
+            // Skip default exports from dynamically imported files (React lazy, Vue async, etc.)
+            // Dynamic imports like lazy(() => import('./Component')) only consume the default export
+            // Normalize the file path the same way dynamic imports are normalized
+            let file_norm = normalize_module_id(&entry.file_path).as_key();
+            if dynamic_import_targets.contains(&file_norm) {
                 return false;
             }
             true
@@ -344,6 +458,9 @@ pub struct TwinLocation {
     pub import_count: usize,
     /// True if this is the "source of truth" (canonical definition)
     pub is_canonical: bool,
+    /// Signature fingerprint for functions (sorted types used in params/return)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature_fingerprint: Option<String>,
 }
 
 /// An exact twin - a symbol exported from multiple files
@@ -353,63 +470,362 @@ pub struct ExactTwin {
     pub name: String,
     /// All locations where this symbol is exported
     pub locations: Vec<TwinLocation>,
+    /// Signature similarity score (0.0 = different, 1.0 = identical signatures)
+    /// None if signatures couldn't be computed (non-functions, missing data)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signature_similarity: Option<f32>,
+}
+
+/// Language category for twin classification
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
+pub enum Language {
+    TypeScript,
+    JavaScript,
+    Rust,
+    Python,
+    Go,
+    Other,
+}
+
+/// Twin category based on language distribution
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub enum TwinCategory {
+    /// All locations are in the same language (likely a real duplicate)
+    SameLanguage(Language),
+    /// Locations span multiple languages (likely intentional FE/BE pair)
+    CrossLanguage,
+}
+
+/// Detect language from file extension
+pub fn detect_language(path: &str) -> Language {
+    if path.ends_with(".ts") || path.ends_with(".tsx") || path.ends_with(".mts") {
+        Language::TypeScript
+    } else if path.ends_with(".js")
+        || path.ends_with(".jsx")
+        || path.ends_with(".mjs")
+        || path.ends_with(".cjs")
+    {
+        Language::JavaScript
+    } else if path.ends_with(".rs") {
+        Language::Rust
+    } else if path.ends_with(".py") || path.ends_with(".pyi") {
+        Language::Python
+    } else if path.ends_with(".go") {
+        Language::Go
+    } else {
+        Language::Other
+    }
+}
+
+/// Categorize a twin based on languages of its locations
+pub fn categorize_twin(twin: &ExactTwin) -> TwinCategory {
+    let languages: std::collections::HashSet<Language> = twin
+        .locations
+        .iter()
+        .map(|loc| detect_language(&loc.file_path))
+        .collect();
+
+    if languages.len() == 1 {
+        TwinCategory::SameLanguage(languages.into_iter().next().unwrap())
+    } else {
+        TwinCategory::CrossLanguage
+    }
 }
 
 /// Generic method names that should be excluded from twin detection
-const GENERIC_METHOD_NAMES: &[&str] = &[
+/// These are common names that appear in many files by design, not by accident.
+pub const GENERIC_METHOD_NAMES: &[&str] = &[
+    // Rust/OOP constructors and traits
     "new",
     "default",
     "from",
     "into",
     "clone",
-    "process",
-    "load",
-    "save",
-    "run",
+    "drop",
+    "deref",
+    "as_ref",
+    "as_mut",
+    "try_from",
+    "try_into",
+    "with_config",
+    // Entry points (every binary has one)
+    "main",
+    "app",
+    "App",
+    // Lifecycle methods
     "init",
-    "build",
-    "execute",
+    "setup",
+    "teardown",
+    "cleanup",
+    "dispose",
+    "destroy",
+    "mount",
+    "unmount",
+    // CRUD operations
     "create",
+    "read",
     "update",
     "delete",
     "get",
     "set",
-    "handle",
-    "render",
-    "parse",
-    "format",
-    "serialize",
-    "deserialize",
+    "load",
+    "save",
+    "fetch",
+    "store",
+    // Process/execution
+    "run",
     "start",
     "stop",
-    "reset",
-    "clear",
-    "close",
+    "execute",
+    "process",
+    "handle",
+    "dispatch",
+    // I/O operations
     "open",
-    "read",
+    "close",
     "write",
     "send",
     "receive",
     "connect",
     "disconnect",
+    // Serialization
+    "parse",
+    "format",
+    "serialize",
+    "deserialize",
+    "encode",
+    "decode",
+    "to_string",
+    "from_str",
+    "to_json",
+    "from_json",
+    "to_bytes",
+    "from_bytes",
+    "as_str",
+    "as_bytes",
+    "into_inner",
+    "inner",
+    "get_inner",
+    "unwrap",
+    "unwrap_or",
+    "ok",
+    "err",
+    // State management
+    "reset",
+    "clear",
+    "flush",
+    "refresh",
+    // UI/rendering
+    "render",
+    "draw",
+    "display",
+    "show",
+    "hide",
+    // Validation/configuration
     "validate",
     "configure",
+    "build",
+    // Testing (fixtures, setup)
+    "test",
+    "fixture",
+    "mock",
+    "stub",
+    "spy",
+    // Python special methods
+    "__init__",
+    "__new__",
+    "__str__",
+    "__repr__",
+    // Common generic names
+    "apply",
+    "call",
+    "invoke",
+    "notify",
+    "emit",
+    "on",
+    "off",
+    "add",
+    "remove",
+    "insert",
+    "push",
+    "pop",
+    "len",
+    "size",
+    "count",
+    "index",
+    "find",
+    "search",
+    "filter",
+    "map",
+    "reduce",
+    "sort",
+    "compare",
+    "equals",
+    "hash",
+    "copy",
+    "merge",
+    "split",
+    "join",
+    "concat",
+    "append",
+    "extend",
+    "contains",
+    "exists",
+    "is_empty",
+    "is_valid",
+    "check",
+    "verify",
+    "assert",
+    "expect",
+    "should",
+    "must",
+    "can",
+    "will",
+    "with",
+    "label",
+    "name",
+    "id",
+    "key",
+    "value",
+    "data",
+    "info",
+    "error",
+    "warn",
+    "debug",
+    "log",
+    "print",
+    "trace",
 ];
 
 fn is_generic_method(name: &str) -> bool {
     GENERIC_METHOD_NAMES.contains(&name)
 }
 
+/// Compute a fingerprint for a function's signature based on its parameter and return types.
+/// Returns a sorted, normalized string like "String,User|Result<bool>" (params|return).
+fn compute_signature_fingerprint(
+    analyses: &[FileAnalysis],
+    file_path: &str,
+    function_name: &str,
+) -> Option<String> {
+    // Find the FileAnalysis for this file
+    let analysis = analyses.iter().find(|a| a.path == file_path)?;
+
+    // Collect types used in this function's signature
+    let mut param_types: Vec<String> = Vec::new();
+    let mut return_types: Vec<String> = Vec::new();
+
+    for sig_use in &analysis.signature_uses {
+        if sig_use.function == function_name {
+            match sig_use.usage {
+                crate::types::SignatureUseKind::Parameter => {
+                    param_types.push(sig_use.type_name.clone());
+                }
+                crate::types::SignatureUseKind::Return => {
+                    return_types.push(sig_use.type_name.clone());
+                }
+            }
+        }
+    }
+
+    // If no signature info found, return None
+    if param_types.is_empty() && return_types.is_empty() {
+        return None;
+    }
+
+    // Sort for consistent comparison
+    param_types.sort();
+    return_types.sort();
+
+    // Create fingerprint: "param1,param2|return1,return2"
+    let params_str = param_types.join(",");
+    let returns_str = return_types.join(",");
+
+    Some(format!("{}|{}", params_str, returns_str))
+}
+
+/// Compute Jaccard similarity between two fingerprints.
+/// Returns 1.0 for identical, 0.0 for completely different.
+fn fingerprint_similarity(fp1: &str, fp2: &str) -> f32 {
+    if fp1 == fp2 {
+        return 1.0;
+    }
+
+    // Split into individual types
+    let types1: std::collections::HashSet<&str> =
+        fp1.split([',', '|']).filter(|s| !s.is_empty()).collect();
+    let types2: std::collections::HashSet<&str> =
+        fp2.split([',', '|']).filter(|s| !s.is_empty()).collect();
+
+    if types1.is_empty() && types2.is_empty() {
+        return 1.0; // Both empty = same
+    }
+
+    let intersection = types1.intersection(&types2).count();
+    let union = types1.union(&types2).count();
+
+    if union == 0 {
+        return 0.0;
+    }
+
+    intersection as f32 / union as f32
+}
+
+/// Compute average pairwise similarity for a group of fingerprints.
+fn compute_group_similarity(fingerprints: &[Option<String>]) -> Option<f32> {
+    let valid_fps: Vec<&String> = fingerprints.iter().filter_map(|f| f.as_ref()).collect();
+
+    if valid_fps.len() < 2 {
+        return None; // Need at least 2 to compare
+    }
+
+    let mut total_similarity = 0.0;
+    let mut count = 0;
+
+    for i in 0..valid_fps.len() {
+        for j in (i + 1)..valid_fps.len() {
+            total_similarity += fingerprint_similarity(valid_fps[i], valid_fps[j]);
+            count += 1;
+        }
+    }
+
+    if count == 0 {
+        return None;
+    }
+
+    Some(total_similarity / count as f32)
+}
+
 /// Detect exact twins: symbols with the same name exported from different files
-pub fn detect_exact_twins(analyses: &[FileAnalysis]) -> Vec<ExactTwin> {
-    let registry = build_symbol_registry(analyses);
+///
+/// This is the simple version without framework awareness.
+/// For framework-aware filtering, use `detect_exact_twins_with_frameworks`.
+pub fn detect_exact_twins(analyses: &[FileAnalysis], include_tests: bool) -> Vec<ExactTwin> {
+    detect_exact_twins_with_frameworks(analyses, include_tests, None)
+}
+
+/// Detect exact twins with framework-aware filtering
+///
+/// # Arguments
+/// * `analyses` - File analysis data
+/// * `include_tests` - Whether to include test files
+/// * `frameworks` - Optional list of detected frameworks. When provided, intentional
+///   framework conventions (like GET in SvelteKit +server.ts) are filtered out.
+///   Pass `None` or `&[]` to show all duplicates.
+pub fn detect_exact_twins_with_frameworks(
+    analyses: &[FileAnalysis],
+    include_tests: bool,
+    frameworks: Option<&[crate::analyzer::frameworks::Framework]>,
+) -> Vec<ExactTwin> {
+    let registry = build_symbol_registry(analyses, include_tests);
 
     // Build map: symbol_name -> Vec<(file_path, line, kind, import_count)>
     let mut symbol_map: HashMap<String, Vec<(String, usize, String, usize)>> = HashMap::new();
 
     for ((file_path, symbol_name), entry) in &registry {
-        // Skip re-exports - they're intentional API design, not duplicates
-        if entry.kind == "reexport" || entry.kind == "re-export" {
+        // Skip re-exports and __all__ entries - they're intentional API design, not duplicates
+        // __all__ in Python is a declaration of public API, not a new definition
+        if entry.kind == "reexport" || entry.kind == "re-export" || entry.kind == "__all__" {
             continue;
         }
         symbol_map.entry(symbol_name.clone()).or_default().push((
@@ -419,6 +835,9 @@ pub fn detect_exact_twins(analyses: &[FileAnalysis]) -> Vec<ExactTwin> {
             entry.import_count,
         ));
     }
+
+    // Get frameworks slice for filtering
+    let fw_slice = frameworks.unwrap_or(&[]);
 
     // Filter to only symbols exported from multiple files
     let mut twins: Vec<ExactTwin> = Vec::new();
@@ -434,17 +853,53 @@ pub fn detect_exact_twins(analyses: &[FileAnalysis]) -> Vec<ExactTwin> {
             continue;
         }
 
-        // Build locations with import counts
+        // Framework convention filtering:
+        // If ALL locations are framework conventions for the same export,
+        // it's an intentional pattern (e.g., GET in every +server.ts)
+        if !fw_slice.is_empty() {
+            let all_are_conventions = locations_raw.iter().all(|(file_path, _, _, _)| {
+                crate::analyzer::frameworks::is_framework_convention(&name, file_path, fw_slice)
+            });
+            if all_are_conventions {
+                continue;
+            }
+        }
+
+        // Build locations with import counts and signature fingerprints
         let mut locations: Vec<TwinLocation> = locations_raw
             .iter()
-            .map(|(file, line, kind, import_count)| TwinLocation {
-                file_path: file.clone(),
-                line: *line,
-                kind: kind.clone(),
-                import_count: *import_count,
-                is_canonical: false, // Will determine below
+            .map(|(file, line, kind, import_count)| {
+                // Compute signature fingerprint for functions (including const arrow functions)
+                // TS arrow functions: export const foo = () => {}
+                // Named exports that might be functions
+                let signature_fingerprint = if kind == "function"
+                    || kind == "var"
+                    || kind == "decl"
+                    || kind == "const"
+                    || kind == "named"
+                {
+                    compute_signature_fingerprint(analyses, file, &name)
+                } else {
+                    None
+                };
+
+                TwinLocation {
+                    file_path: file.clone(),
+                    line: *line,
+                    kind: kind.clone(),
+                    import_count: *import_count,
+                    is_canonical: false, // Will determine below
+                    signature_fingerprint,
+                }
             })
             .collect();
+
+        // Compute signature similarity across all locations
+        let fingerprints: Vec<Option<String>> = locations
+            .iter()
+            .map(|l| l.signature_fingerprint.clone())
+            .collect();
+        let signature_similarity = compute_group_similarity(&fingerprints);
 
         // Determine canonical location:
         // 1. Most imports
@@ -469,7 +924,11 @@ pub fn detect_exact_twins(analyses: &[FileAnalysis]) -> Vec<ExactTwin> {
             }
         }
 
-        twins.push(ExactTwin { name, locations });
+        twins.push(ExactTwin {
+            name,
+            locations,
+            signature_similarity,
+        });
     }
 
     // Sort by number of locations (most duplicated first)
@@ -485,46 +944,124 @@ pub fn print_exact_twins_human(twins: &[ExactTwin]) {
         return;
     }
 
-    println!("👯 EXACT TWINS ({} found)", twins.len());
+    // Categorize twins
+    let (same_lang, cross_lang): (Vec<_>, Vec<_>) = twins
+        .iter()
+        .partition(|twin| matches!(categorize_twin(twin), TwinCategory::SameLanguage(_)));
+
+    println!("EXACT TWINS ({} found)", twins.len());
     println!();
 
-    for twin in twins {
-        println!("  Symbol: {}", twin.name);
-        for loc in &twin.locations {
-            let canonical_marker = if loc.is_canonical { " CANONICAL" } else { "" };
-            println!(
-                "    ├─ {}:{} ({}) - {} imports{}",
-                loc.file_path, loc.line, loc.kind, loc.import_count, canonical_marker
-            );
-        }
+    // Same-language twins (actionable)
+    if !same_lang.is_empty() {
+        println!(
+            "  [!] SAME-LANGUAGE DUPLICATES ({} groups) - likely need consolidation:",
+            same_lang.len()
+        );
         println!();
+        for twin in &same_lang {
+            print_twin_details(twin);
+        }
+    }
+
+    // Cross-language twins (informational)
+    if !cross_lang.is_empty() {
+        println!(
+            "  [i] CROSS-LANGUAGE PAIRS ({} groups) - likely intentional FE/BE mirrors:",
+            cross_lang.len()
+        );
+        println!();
+        for twin in &cross_lang {
+            print_twin_details(twin);
+        }
     }
 
     println!("Summary:");
-    println!("  Total exact twins: {}", twins.len());
+    println!(
+        "  Same-language duplicates: {} (actionable)",
+        same_lang.len()
+    );
+    println!("  Cross-language pairs: {} (usually OK)", cross_lang.len());
     let total_dups: usize = twins.iter().map(|t| t.locations.len()).sum();
-    println!("  Total duplicate exports: {}", total_dups);
+    println!("  Total duplicate definitions: {}", total_dups);
+}
+
+/// Helper to print individual twin details
+fn print_twin_details(twin: &ExactTwin) {
+    println!("  Symbol: {}", twin.name);
+    for loc in &twin.locations {
+        let canonical_marker = if loc.is_canonical { " CANONICAL" } else { "" };
+        println!(
+            "    ├─ {}:{} ({}) - {} imports{}",
+            loc.file_path, loc.line, loc.kind, loc.import_count, canonical_marker
+        );
+    }
+    // Add suggestion based on import counts
+    let zero_import_count = twin
+        .locations
+        .iter()
+        .filter(|l| l.import_count == 0)
+        .count();
+    if zero_import_count > 0 && zero_import_count < twin.locations.len() {
+        println!(
+            "    └─ [TIP] {} location(s) have 0 imports - candidates for removal or consolidation",
+            zero_import_count
+        );
+    }
+    println!();
 }
 
 /// Print exact twins in JSON format
 pub fn print_exact_twins_json(twins: &[ExactTwin]) {
+    // Categorize twins
+    let (same_lang, cross_lang): (Vec<_>, Vec<_>) = twins
+        .iter()
+        .partition(|twin| matches!(categorize_twin(twin), TwinCategory::SameLanguage(_)));
+
+    // Count twins with high signature similarity (likely real duplicates)
+    let high_similarity_count = twins
+        .iter()
+        .filter(|t| t.signature_similarity.map(|s| s >= 0.8).unwrap_or(false))
+        .count();
+
+    let twin_to_json = |twin: &ExactTwin| {
+        let category = categorize_twin(twin);
+        let mut json = serde_json::json!({
+            "name": twin.name,
+            "category": match category {
+                TwinCategory::SameLanguage(lang) => format!("same_language:{:?}", lang).to_lowercase(),
+                TwinCategory::CrossLanguage => "cross_language".to_string(),
+            },
+            "locations": twin.locations.iter().map(|loc| {
+                let mut loc_json = serde_json::json!({
+                    "file": loc.file_path,
+                    "line": loc.line,
+                    "kind": loc.kind,
+                    "imports": loc.import_count,
+                    "canonical": loc.is_canonical,
+                    "language": format!("{:?}", detect_language(&loc.file_path)).to_lowercase(),
+                });
+                // Add signature fingerprint if present
+                if let Some(ref fp) = loc.signature_fingerprint {
+                    loc_json["signature_fingerprint"] = serde_json::json!(fp);
+                }
+                loc_json
+            }).collect::<Vec<_>>(),
+        });
+        // Add signature similarity if computed
+        if let Some(sim) = twin.signature_similarity {
+            json["signature_similarity"] = serde_json::json!(sim);
+        }
+        json
+    };
+
     let output = serde_json::json!({
-        "exact_twins": twins.iter().map(|twin| {
-            serde_json::json!({
-                "name": twin.name,
-                "locations": twin.locations.iter().map(|loc| {
-                    serde_json::json!({
-                        "file": loc.file_path,
-                        "line": loc.line,
-                        "kind": loc.kind,
-                        "imports": loc.import_count,
-                        "canonical": loc.is_canonical,
-                    })
-                }).collect::<Vec<_>>(),
-            })
-        }).collect::<Vec<_>>(),
+        "exact_twins": twins.iter().map(twin_to_json).collect::<Vec<_>>(),
         "summary": {
-            "twins": twins.len(),
+            "total_groups": twins.len(),
+            "same_language_groups": same_lang.len(),
+            "cross_language_groups": cross_lang.len(),
+            "high_similarity_groups": high_similarity_count,
             "total_duplicates": twins.iter().map(|t| t.locations.len()).sum::<usize>(),
         }
     });
@@ -556,6 +1093,7 @@ mod tests {
                     kind: kind.to_string(),
                     export_type: "named".to_string(),
                     line: Some(i + 1),
+                    params: Vec::new(),
                 })
                 .collect(),
             ..Default::default()
@@ -565,7 +1103,7 @@ mod tests {
     #[test]
     fn test_build_symbol_registry_empty() {
         let analyses: Vec<FileAnalysis> = vec![];
-        let registry = build_symbol_registry(&analyses);
+        let registry = build_symbol_registry(&analyses, false);
         assert!(registry.is_empty());
     }
 
@@ -576,7 +1114,7 @@ mod tests {
             mock_file_with_exports("b.ts", vec![("bar", "function")]),
         ];
 
-        let registry = build_symbol_registry(&analyses);
+        let registry = build_symbol_registry(&analyses, false);
         assert_eq!(registry.len(), 2);
 
         let foo_entry = registry
@@ -602,7 +1140,7 @@ mod tests {
         });
         importer.imports.push(import);
 
-        let registry = build_symbol_registry(&[exporter, importer]);
+        let registry = build_symbol_registry(&[exporter, importer], false);
 
         let helper_entry = registry
             .get(&("utils.ts".to_string(), "helper".to_string()))
@@ -620,16 +1158,20 @@ mod tests {
                 kind: "class".to_string(),
                 export_type: "named".to_string(),
                 line: Some(10),
+                params: Vec::new(),
             }],
             ..Default::default()
         };
         let normal_file = mock_file_with_exports("app.py", vec![("App", "class")]);
 
-        let registry = build_symbol_registry(&[test_file, normal_file]);
-
-        // Only the non-test export should remain
+        // With include_tests=false, test files should be skipped
+        let registry = build_symbol_registry(&[test_file.clone(), normal_file.clone()], false);
         assert_eq!(registry.len(), 1);
         assert!(registry.contains_key(&("app.py".to_string(), "App".to_string())));
+
+        // With include_tests=true, test files should be included
+        let registry_with_tests = build_symbol_registry(&[test_file, normal_file], true);
+        assert_eq!(registry_with_tests.len(), 2);
     }
 
     #[test]
@@ -651,11 +1193,44 @@ mod tests {
         });
         importer.imports.push(import);
 
-        let result = find_dead_parrots(&[used_file, dead_file, importer], true);
+        let result = find_dead_parrots(&[used_file, dead_file, importer], true, false);
 
         assert_eq!(result.dead_parrots.len(), 1);
         assert_eq!(result.dead_parrots[0].name, "unused");
         assert_eq!(result.total_symbols, 2);
+    }
+
+    #[test]
+    fn test_find_dead_parrots_skips_dynamic_imports() {
+        // Create a component that is dynamically imported via React lazy()
+        let lazy_component = FileAnalysis {
+            path: "src/components/PasswordResetModal.tsx".to_string(),
+            exports: vec![ExportSymbol {
+                name: "PasswordResetModal".to_string(),
+                kind: "function".to_string(),
+                export_type: "default".to_string(),
+                line: Some(23),
+                params: Vec::new(),
+            }],
+            ..Default::default()
+        };
+
+        // Create a file that imports it dynamically
+        let importer = FileAnalysis {
+            path: "src/App.tsx".to_string(),
+            dynamic_imports: vec!["./components/PasswordResetModal".to_string()],
+            ..Default::default()
+        };
+
+        // Create a truly dead file (no static or dynamic imports)
+        let dead_file = mock_file_with_exports("dead.ts", vec![("unused", "function")]);
+
+        let result = find_dead_parrots(&[lazy_component, importer, dead_file], true, false);
+
+        // The dynamic import should NOT be marked as dead
+        // Only the truly unused export should be in dead_parrots
+        assert_eq!(result.dead_parrots.len(), 1);
+        assert_eq!(result.dead_parrots[0].name, "unused");
     }
 
     // Exact twin detection tests
@@ -666,7 +1241,7 @@ mod tests {
             mock_file_with_exports("b.ts", vec![("bar", "function")]),
         ];
 
-        let twins = detect_exact_twins(&analyses);
+        let twins = detect_exact_twins(&analyses, false);
         assert!(twins.is_empty());
     }
 
@@ -677,7 +1252,7 @@ mod tests {
             mock_file_with_exports("b.ts", vec![("Button", "class")]),
         ];
 
-        let twins = detect_exact_twins(&analyses);
+        let twins = detect_exact_twins(&analyses, false);
         assert_eq!(twins.len(), 1);
         assert_eq!(twins[0].name, "Button");
         assert_eq!(twins[0].locations.len(), 2);
@@ -690,7 +1265,7 @@ mod tests {
             mock_file_with_exports("hooks/useChat.ts", vec![("Message", "type")]),
         ];
 
-        let twins = detect_exact_twins(&analyses);
+        let twins = detect_exact_twins(&analyses, false);
         assert_eq!(twins.len(), 1);
 
         // Canonical should be shortest path
@@ -717,7 +1292,7 @@ mod tests {
         });
         importer.imports.push(import);
 
-        let twins = detect_exact_twins(&[a, b, importer]);
+        let twins = detect_exact_twins(&[a, b, importer], false);
         assert_eq!(twins.len(), 1);
 
         // Canonical should be the one with imports (a.ts)
@@ -734,7 +1309,7 @@ mod tests {
             mock_file_with_exports("c.ts", vec![("Common", "type")]),
         ];
 
-        let twins = detect_exact_twins(&analyses);
+        let twins = detect_exact_twins(&analyses, false);
         assert_eq!(twins.len(), 1);
         assert_eq!(twins[0].locations.len(), 3);
     }

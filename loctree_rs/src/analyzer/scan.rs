@@ -10,6 +10,7 @@ use crate::types::{FileAnalysis, Options};
 use super::classify::{detect_language, file_kind};
 use super::css::analyze_css_file;
 use super::dart::analyze_dart_file;
+use super::html_analyzer::analyze_html_file;
 use super::js::analyze_js_file;
 use super::py::{analyze_py_file, python_stdlib_set};
 use super::resolvers::{
@@ -240,6 +241,15 @@ pub(crate) fn analyze_file(
         ),
         "go" => crate::analyzer::go::analyze_go_file(&content, relative),
         "dart" => analyze_dart_file(&content, relative),
+        "html" | "htm" => analyze_html_file(
+            &content,
+            &canonical,
+            root_canon,
+            extensions,
+            ts_resolver,
+            relative,
+            command_cfg,
+        ),
         _ => analyze_js_file(
             &content,
             &canonical,
@@ -269,14 +279,23 @@ pub(crate) fn analyze_file(
     analysis.is_test = is_test;
     analysis.is_generated = is_generated;
 
-    // Resolve Rust imports
+    // Resolve Rust imports and reexports
     if ext == "rs" {
         let crate_root = find_rust_crate_root(&canonical);
         if let Some(ref crate_root) = crate_root {
+            // Resolve imports
             for imp in analysis.imports.iter_mut() {
                 if imp.resolved_path.is_none() {
                     imp.resolved_path =
                         resolve_rust_import(&imp.source, &canonical, crate_root, root_canon);
+                }
+            }
+            // Resolve reexports (pub use statements)
+            // This is critical for dead code detection - reexported symbols are NOT dead
+            for re in analysis.reexports.iter_mut() {
+                if re.resolved.is_none() {
+                    re.resolved =
+                        resolve_rust_import(&re.source, &canonical, crate_root, root_canon);
                 }
             }
         }
@@ -287,13 +306,12 @@ pub(crate) fn analyze_file(
         if imp.resolved_path.is_none() && imp.source.starts_with('.') {
             let resolved = match ext.as_str() {
                 "py" => resolve_python_relative(&imp.source, &canonical, root_canon, extensions),
-                "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "css" | "svelte" | "vue" => {
-                    ts_resolver
-                        .and_then(|r| r.resolve(&imp.source, extensions))
-                        .or_else(|| {
-                            resolve_js_relative(&canonical, root_canon, &imp.source, extensions)
-                        })
-                }
+                "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "css" | "svelte" | "vue" | "html"
+                | "htm" => ts_resolver
+                    .and_then(|r| r.resolve(&imp.source, extensions))
+                    .or_else(|| {
+                        resolve_js_relative(&canonical, root_canon, &imp.source, extensions)
+                    }),
                 _ => None,
             };
             imp.resolved_path = resolved;
@@ -480,6 +498,7 @@ mod tests {
                 kind: "emit_ident".to_string(),
                 awaited: false,
                 payload: None,
+                is_dynamic: false,
             }],
             event_consts: consts,
             ..Default::default()
@@ -521,6 +540,7 @@ mod tests {
                     is_super_relative: false,
                     is_self_relative: false,
                     raw_path: String::new(),
+                    is_mod_declaration: false,
                 }],
                 event_listens: vec![crate::types::EventRef {
                     raw_name: Some("EVENT_NAME".to_string()),
@@ -529,6 +549,7 @@ mod tests {
                     kind: "listen_ident".to_string(),
                     awaited: false,
                     payload: None,
+                    is_dynamic: false,
                 }],
                 ..Default::default()
             },
@@ -559,6 +580,7 @@ mod tests {
                     kind: "emit_ident".to_string(),
                     awaited: false,
                     payload: None,
+                    is_dynamic: false,
                 }],
                 ..Default::default()
             },
@@ -578,6 +600,7 @@ mod tests {
                 kind: "emit_ident".to_string(),
                 awaited: false,
                 payload: None,
+                is_dynamic: false,
             }],
             ..Default::default()
         }];
@@ -618,6 +641,7 @@ mod tests {
                     is_super_relative: false,
                     is_self_relative: false,
                     raw_path: String::new(),
+                    is_mod_declaration: false,
                 }],
                 event_emits: vec![crate::types::EventRef {
                     raw_name: Some("ALIASED".to_string()),
@@ -626,6 +650,7 @@ mod tests {
                     kind: "emit_ident".to_string(),
                     awaited: false,
                     payload: None,
+                    is_dynamic: false,
                 }],
                 ..Default::default()
             },

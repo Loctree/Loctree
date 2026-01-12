@@ -23,7 +23,7 @@ use super::resolvers::{
 use super::scan::{
     analyze_file, matches_focus, resolve_event_constants_across_files, strip_excluded,
 };
-use super::{DupLocation, DupSeverity, RankedDup, coverage::CommandUsage};
+use super::{DupLocation, DupSeverity, RankedDup, coverage::CommandUsage, twins};
 
 pub struct ScanConfig<'a> {
     pub roots: &'a [PathBuf],
@@ -660,7 +660,11 @@ fn scan_single_root(
                     _ => None,
                 });
                 if let Some(target) = resolved {
-                    let label = if imp.is_type_checking {
+                    let label = if imp.is_mod_declaration {
+                        // Rust `mod foo;` declarations create parent->child module relationships
+                        // These are NOT import edges and should not contribute to cycle detection
+                        "mod"
+                    } else if imp.is_type_checking {
                         "type_import"
                     } else if imp.is_lazy {
                         "lazy_import"
@@ -1235,7 +1239,11 @@ pub fn scan_results_from_snapshot(snapshot: &Snapshot) -> ScanResults {
         let languages: HashSet<String> = root_analyses.iter().map(|a| a.language.clone()).collect();
 
         // Calculate ranked duplicates
-        let filtered_ranked = rank_duplicates(&export_index, &root_analyses, &HashSet::new(), &[]);
+        let ignore_exact: HashSet<String> = twins::GENERIC_METHOD_NAMES
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let filtered_ranked = rank_duplicates(&export_index, &root_analyses, &ignore_exact, &[]);
 
         // Build cascades (re-export chains)
         let cascades = build_cascades(&root_analyses);

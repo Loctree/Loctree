@@ -16,6 +16,17 @@ loctree_rs/tarpaulin-report.json
 *.log
 /.claude
 
+# Root Markdown policy: ignore root .md files except core docs that are tracked
+/*.md
+!/README.md
+!/CHANGELOG.md
+!/CONTRIBUTING.md
+!/replit.md
+
+# Local patch/diff artifacts
+*.patch
+*.diff
+
 # Python cache
 __pycache__/
 .mypy_cache/
@@ -34,6 +45,7 @@ loctree-*.min.js
 /reports/wasm/target
 /loctree_rs/.fastembed_cache
 *.txt
+!tools/fixtures/**/*.txt
 /assets/Icon Exports
 /loctree_rs/tests/fixtures/tauri_app/src/.loctree
 .replit
@@ -42,9 +54,24 @@ loctree-*.min.js
 .gemini/
 gha-creds-*.json
 GEMINI.md
+gemini.md
 **/.loctree/**/report.html
 /loctree_memex/target
 /loctree_server/target
 /target
 brave-mcp-servers-report.md
+reports/report.html
+/loctree_rs/src/.loctree
+
+# npm package - downloaded binaries (keep placeholders)
+/bin/*.tar.gz
+/bin/*.zip
+# Keep placeholder scripts but ignore actual binaries that overwrite them
+# (they have no extension on Unix, .exe on Windows)
+
+# macOS
+**/.DS_Store
+/.idea
+SeniorDev/
+/public_dist
 reports/report.html

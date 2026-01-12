@@ -27,151 +27,81 @@ fn install_broken_pipe_handler() {
 }
 
 fn format_usage() -> &'static str {
-    "loctree - Static Analysis for AI Agents\n\n\
-PHILOSOPHY: Scan the WHOLE repo once, then use `slice` to extract context.\n\
-            Never scan subdirectories - always maintain full repo context.\n\n\
-Quick Start:\n  \
-  loctree                        Scan repo → .loctree/snapshot.json\n  \
-  loctree slice src/foo.ts       Extract file context for AI agent\n  \
-  loctree -A --report r.html     Full analysis with visual report\n\n\
-Core Commands:\n  \
-  (no args)         Scan whole repo, save snapshot (incremental)\n  \
-  slice <file>      Extract file + dependencies + consumers for AI\n  \
-  search <query>    Find symbols, semantic matches, dead code status\n  \
-  trace <handler>   Debug why a Tauri handler is unused/missing\n  \
-  --for-ai          Quick-wins + hub files summary (JSON)\n\n\
-Analysis (-A):\n  \
-  -A                Full import/export analysis\n  \
-  -A --dead         Find unused exports (Janitor mode)\n  \
-  -A --circular     Find circular imports\n  \
-  -A --graph        Visualize import graph\n  \
-  -A --report <f>   HTML report with FE↔BE coverage\n\n\
-Slice options:\n  \
-  --consumers       Include files that import the target\n  \
-  --json            Machine-readable output (pipe to AI)\n\n\
-Common:\n  \
-  -g, --gitignore   Respect .gitignore\n  \
-  --verbose         Detailed progress\n  \
-  --help-full       All options (for agents)\n\n\
-Examples:\n  \
-  loctree                                    # Init/update snapshot\n  \
-  loctree slice src/main.rs --consumers      # Context for AI\n  \
-  loctree slice src/App.tsx --json | llm     # Pipe to LLM\n  \
-  loctree -A --dead --confidence high        # Find dead code\n  \
-  loctree -A --report out.html --serve       # Interactive report\n\n\
-IMPORTANT: Always run bare `loctree` from repo root first!\n\
-           Then use `slice` for specific files/components.\n\n\
-More: loctree --help-full\n"
+    "loctree (DEPRECATED - use `loct` instead)\n\n\
+This binary will be removed in v0.9.0. All commands work with `loct`.\n\n\
+Migration Guide:\n  \
+  loctree                    ->  loct auto\n  \
+  loctree -A --dead          ->  loct dead\n  \
+  loctree -A --circular      ->  loct cycles\n  \
+  loctree -A --report f.html ->  loct report --html f.html\n  \
+  loctree slice file         ->  loct slice file\n  \
+  loctree --for-ai           ->  loct --for-ai\n\n\
+New Features in `loct`:\n  \
+  loct auto              Full scan + findings (.loctree/)\n  \
+  loct doctor            Interactive diagnostics\n  \
+  loct dead              Find unused exports\n  \
+  loct cycles            Find circular imports\n  \
+  loct twins             Find duplicate symbols\n  \
+  loct health            Quick health check\n  \
+  loct find <name>       Find symbol definitions\n\n\
+Run `loct --help` for full documentation.\n"
 }
 
 fn format_usage_full() -> &'static str {
-    "loctree - Static Analysis for AI Agents (Full Reference)\n\n\
-PHILOSOPHY: Scan the WHOLE repo once, then use `slice` to extract context.\n\
-            Don't scan subdirectories - always maintain full repo context.\n\n\
-Usage: loctree [options]\n\n\
-=== MODES ===\n\n  \
-(default)         Scan repo, save snapshot to .loctree/snapshot.json\n  \
-slice <file>      Extract file + deps + consumers for AI agents\n  \
-search <query>    Find symbols, semantic matches, check dead code\n  \
-trace <handler>   Debug Tauri handler (shows BE def, FE calls, verdict)\n  \
---for-ai          Quick-wins + hub files + slice commands (JSON)\n  \
--A                Import/export analyzer (duplicates, dead, coverage)\n  \
---tree            Directory tree with LOC counts\n\n\
-=== SLICE MODE ===\n\n  \
-slice <file>      Target file to extract context for\n  \
---consumers       Include files that import the target\n  \
---json            JSON output (pipe to AI agent)\n\n\
-=== SEARCH MODE ===\n\n  \
-search <query>    Find symbols across codebase\n  \
---symbol-only     Only show exact symbol matches\n  \
---semantic-only   Only show semantic (fuzzy) matches\n  \
---dead-only       Only show if symbol is dead code\n\n\
-=== ANALYZER MODE (-A) ===\n\n\
-Analysis:\n  \
-  --dead            Find unused exports (Janitor mode)\n  \
-  --circular        Find circular imports (SCC analysis)\n  \
-  --entrypoints     List entry points (main, __main__, index)\n  \
-  --symbol <name>   Search for symbol across all files\n  \
-  --impact <file>   Show what imports the target file\n  \
-  --check <query>   Find similar components/symbols (fuzzy match)\n\n\
-Output:\n  \
-  --report <file>   HTML report (alias: --html-report)\n  \
-  --graph           Embed import graph in HTML report\n  \
-  --json            JSON output\n  \
-  --jsonl           JSON Lines (one object per line)\n  \
-  --sarif           SARIF 2.1.0 for CI integration\n\n\
-Filtering:\n  \
-  --ext <list>              Extensions (default: auto-detected)\n  \
-  --focus <glob[,..]>       Filter to matching globs\n  \
-  --exclude-report <glob>   Exclude from report (e.g. **/__tests__/**)\n  \
-  --ignore-symbols <list>   Skip symbols in duplicate counting\n  \
-  --ignore-symbols-preset   Presets: common | tauri\n  \
-  --confidence <level>      Dead exports filter: normal | high\n  \
-  --limit <N>               Top-N duplicates (default 8)\n\n\
-Server:\n  \
-  --serve           Local server for editor click-to-open\n  \
-  --serve-once      Exit after report generation\n  \
-  --port <n>        Port (default: random)\n  \
-  --editor <name>   code|cursor|windsurf|jetbrains|none\n\n\
-=== GIT INTEGRATION ===\n\n  \
-git compare <from> [to]           Compare snapshots between commits\n  \
-git blame <file>                  Symbol-level blame (planned)\n  \
-git history --symbol <name>       Track symbol history (planned)\n  \
-git when-introduced --dead <sym>  Find when issue appeared (planned)\n\n\
-=== CI PIPELINE ===\n\n  \
---fail-on-missing-handlers   Exit 1 if FE calls missing BE handlers\n  \
---fail-on-ghost-events       Exit 1 if events lack listeners/emitters\n  \
---fail-on-races              Exit 1 if listener/await races detected\n\n\
-=== PRESETS ===\n\n  \
---preset-tauri    Tauri defaults (ts,tsx,rs + tauri ignore-symbols)\n  \
---preset-styles   CSS/Tailwind defaults (css,scss,ts,tsx)\n\n\
-=== COMMON OPTIONS ===\n\n  \
--g, --gitignore           Respect .gitignore rules\n  \
--I, --ignore <path>       Ignore path (repeatable)\n  \
-.loctignore               Auto-loaded gitignore-style patterns\n  \
---full-scan               Ignore mtime cache, re-analyze all\n  \
---scan-all                Include node_modules, target, .venv\n  \
---verbose                 Detailed progress\n  \
---color[=mode]            auto|always|never\n  \
---version                 Show version\n\n\
-=== TREE MODE ===\n\n  \
---tree                    Directory tree with LOC counts\n  \
---summary[=N]             Show totals + top N large files\n  \
---loc <n>                 LOC threshold (default 1000)\n  \
--L, --max-depth <n>       Limit recursion depth\n  \
---show-hidden, -H         Include dotfiles\n  \
---find-artifacts          Find node_modules, target, .venv\n\n\
-=== ADVANCED ===\n\n  \
---py-root <path>          Extra Python import roots\n  \
---max-graph-nodes <N>     Truncate graph to N nodes (default: 8000)\n  \
---max-graph-edges <N>     Truncate graph to N edges (default: 12000)\n  \
---editor-cmd <tpl>        Custom open command template\n  \
---top-dead-symbols <N>    Cap dead-symbol list (default 20)\n  \
---skip-dead-symbols       Omit dead-symbol analysis\n\n\
-=== EXAMPLES ===\n\n  \
-# Core workflow - scan once, slice many\n  \
-loctree                                    # Scan repo\n  \
-loctree slice src/main.rs --consumers      # Extract context\n  \
-loctree slice src/App.tsx --json | claude  # Pipe to AI\n\n  \
-# Analysis\n  \
-loctree -A --dead --confidence high        # Find dead exports\n  \
-loctree -A --circular                      # Find circular imports\n  \
-loctree -A --report out.html --serve       # Interactive report\n\n  \
-# CI integration\n  \
-loctree -A --sarif > results.sarif\n  \
-loctree -A --fail-on-missing-handlers\n\n  \
-# Git integration\n  \
-loctree git compare HEAD~5                 # What changed in last 5 commits\n"
+    "loctree (DEPRECATED - Full Reference)\n\n\
+⚠️  This binary will be removed in v0.9.0. Use `loct` instead.\n\n\
+=== MIGRATION GUIDE ===\n\n\
+Old Command                      New Command\n\
+─────────────────────────────────────────────────────────────\n\
+loctree                       -> loct auto\n\
+loctree -A                    -> loct report\n\
+loctree -A --dead             -> loct dead\n\
+loctree -A --circular         -> loct cycles\n\
+loctree -A --report f.html    -> loct report --html f.html\n\
+loctree -A --sarif            -> loct report --sarif\n\
+loctree slice <file>          -> loct slice <file>\n\
+loctree search <query>        -> loct find <query>\n\
+loctree trace <handler>       -> loct trace <handler>\n\
+loctree --for-ai              -> loct --for-ai\n\
+loctree --tree                -> loct tree\n\
+loctree git compare           -> loct git compare\n\n\
+=== NEW SUBCOMMANDS IN `loct` ===\n\n\
+loct auto         Full scan + findings → .loctree/\n\
+loct doctor       Interactive diagnostics + quick-wins\n\
+loct dead         Find unused exports (dead code)\n\
+loct cycles       Find circular imports\n\
+loct twins        Find duplicate symbol names\n\
+loct crowds       Find hub files (high connectivity)\n\
+loct health       Quick structural health check\n\
+loct find <name>  Find symbol definitions\n\
+loct impact <f>   Show what breaks if file changes\n\
+loct hotspots     Find complex/large files\n\
+loct focus <g>    Analyze subset matching glob\n\n\
+=== WHY SWITCH? ===\n\n\
+• `loct` is 4 chars vs 7 chars\n\
+• Subcommand-first design (loct dead vs -A --dead)\n\
+• Artifact-first: scan once, query many times\n\
+• .loctree/ artifacts work with jq, AI agents, CI\n\
+• New commands: doctor, health, crowds, hotspots\n\n\
+Run `loct --help-full` for complete documentation.\n"
 }
 
 fn main() -> std::io::Result<()> {
     install_broken_pipe_handler();
 
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // DEPRECATION WARNING
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    eprintln!("\x1b[1;31m");
+    eprintln!("  +================================================================+");
+    eprintln!("  |  DEPRECATED: `loctree` will be removed in v0.9.0              |");
+    eprintln!("  |  Use `loct` instead - same features + agent optimizations     |");
+    eprintln!("  +================================================================+");
+    eprintln!("\x1b[0m");
+
     // Get raw args for the new parser
-    // nosemgrep: rust.lang.security.args.args
-    // SECURITY: args() is used only for CLI flag parsing (paths, --json, etc.),
-    // not for security decisions. The executable path (args[0]) is skipped.
-    let raw_args: Vec<String> = std::env::args().skip(1).collect();
+    // SECURITY: args() is used only for CLI flag parsing, not for security decisions.
+    let raw_args: Vec<String> = std::env::args().skip(1).collect(); // nosemgrep: rust.lang.security.args.args
 
     // Preserve legacy full help output expected by CI/tests
     if raw_args.iter().any(|a| a == "--help-full") {
@@ -227,6 +157,7 @@ fn main() -> std::io::Result<()> {
             &mut parsed.ignore_patterns,
             &mut parsed.tauri_preset,
             &mut library_mode,
+            &mut parsed.py_roots,
             parsed.verbose,
         );
         parsed.library_mode = library_mode; // Apply auto-detected library mode
@@ -313,6 +244,12 @@ fn main() -> std::io::Result<()> {
         }
         Mode::ForAi => {
             run_for_ai(&root_list, &parsed)?;
+        }
+        Mode::Findings => {
+            run_findings(&root_list, &parsed, false)?;
+        }
+        Mode::Summary => {
+            run_findings(&root_list, &parsed, true)?;
         }
         Mode::Git(ref subcommand) => {
             run_git(subcommand, &parsed)?;
@@ -549,6 +486,87 @@ fn run_for_ai(root_list: &[PathBuf], parsed: &args::ParsedArgs) -> std::io::Resu
         analyzer::for_ai::print_agent_feed_jsonl(&report);
     } else {
         print_for_ai_json(&report);
+    }
+
+    Ok(())
+}
+
+/// Output findings.json or summary to stdout
+fn run_findings(
+    root_list: &[PathBuf],
+    parsed: &args::ParsedArgs,
+    summary_only: bool,
+) -> std::io::Result<()> {
+    use analyzer::findings::{Findings, FindingsConfig};
+    use analyzer::root_scan::{ScanConfig, scan_roots};
+    use analyzer::scan::{opt_globset, python_stdlib};
+    use std::collections::HashSet;
+
+    let extensions = parsed.extensions.clone().or_else(|| {
+        Some(
+            ["ts", "tsx", "js", "jsx", "mjs", "cjs", "rs", "css", "py"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        )
+    });
+
+    let py_stdlib = python_stdlib();
+    let focus_set = opt_globset(&parsed.focus_patterns);
+    let exclude_set = opt_globset(&parsed.exclude_report_patterns);
+
+    // Load custom config
+    let loctree_config = root_list
+        .first()
+        .map(|root| LoctreeConfig::load(root))
+        .unwrap_or_default();
+    let custom_command_macros = loctree_config.tauri.command_macros;
+    let command_detection = analyzer::ast_js::CommandDetectionConfig::new(
+        &loctree_config.tauri.dom_exclusions,
+        &loctree_config.tauri.non_invoke_exclusions,
+        &loctree_config.tauri.invalid_command_names,
+    );
+
+    // Scan the project
+    let scan_results = scan_roots(ScanConfig {
+        roots: root_list,
+        parsed,
+        extensions,
+        focus_set: &focus_set,
+        exclude_set: &exclude_set,
+        ignore_exact: HashSet::new(),
+        ignore_prefixes: Vec::new(),
+        py_stdlib: &py_stdlib,
+        cached_analyses: None,
+        collect_edges: true,
+        custom_command_macros: &custom_command_macros,
+        command_detection,
+    })?;
+
+    // Create a minimal snapshot for barrel chaos analysis
+    let snap = snapshot::Snapshot::new(root_list.iter().map(|p| p.display().to_string()).collect());
+
+    // Produce findings
+    let config = FindingsConfig {
+        high_confidence: parsed.dead_confidence.as_deref() == Some("high"),
+        library_mode: parsed.library_mode,
+        python_library: parsed.python_library,
+        example_globs: parsed.library_example_globs.clone(),
+    };
+
+    let findings = Findings::produce(&scan_results, &snap, config);
+
+    // Output to stdout
+    if summary_only {
+        let summary = findings.summary_only();
+        let json = serde_json::to_string_pretty(&summary)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        println!("{}", json);
+    } else {
+        let json = findings
+            .to_json()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        println!("{}", json);
     }
 
     Ok(())

@@ -13,10 +13,12 @@ use super::CommandGap;
 use super::ReportSection;
 use super::barrels::analyze_barrel_chaos;
 use super::classify::language_from_path;
+use super::coverage_gaps::find_coverage_gaps;
 use super::crowd::detect_all_crowds_with_edges;
 use super::cycles;
 use super::dead_parrots::{DeadFilterConfig, find_dead_exports};
 use super::graph::{MAX_GRAPH_EDGES, MAX_GRAPH_NODES, build_graph_data};
+use super::health_score::{HealthMetrics, calculate_health_score};
 use super::html::render_html_report;
 use super::insights::collect_ai_insights;
 use super::open_server::current_open_base;
@@ -37,13 +39,14 @@ fn build_tree(analyses: &[FileAnalysis], root_path: &std::path::Path) -> Vec<Tre
     let mut paths: Vec<(Vec<String>, usize)> = analyses
         .iter()
         .map(|a| {
-            let rel = std::path::Path::new(&a.path)
-                .strip_prefix(root_path)
-                .unwrap_or_else(|_| std::path::Path::new(&a.path))
+            let file_path = std::path::Path::new(&a.path);
+            // Try to strip root_path prefix for both absolute and relative paths
+            let rel = file_path.strip_prefix(root_path).unwrap_or(file_path);
+            let parts: Vec<_> = rel
                 .iter()
                 .map(|p| p.to_string_lossy().to_string())
-                .collect::<Vec<_>>();
-            (rel, a.loc)
+                .collect();
+            (parts, a.loc)
         })
         .collect();
     paths.sort_by(|a, b| a.0.cmp(&b.0));
@@ -95,7 +98,11 @@ fn build_cycle_edges(
     for analysis in analyses {
         for imp in &analysis.imports {
             if let Some(target) = &imp.resolved_path {
-                let kind = if imp.is_type_checking {
+                let kind = if imp.is_mod_declaration {
+                    // Rust `mod foo;` declarations create parent->child module relationships
+                    // These are NOT import edges and should not contribute to cycle detection
+                    "mod"
+                } else if imp.is_type_checking {
                     "type_import"
                 } else if imp.is_lazy {
                     "lazy_import"
@@ -463,12 +470,34 @@ pub fn process_root_context(
             "ok"
         };
 
+        // Check if the handler file emits any events
+        let (comm_type, emits_events) = if let Some((handler_path, _, _)) = &be_location {
+            if let Some(handler_analysis) = analysis_by_path.get(handler_path) {
+                let events: Vec<String> = handler_analysis
+                    .event_emits
+                    .iter()
+                    .map(|e| e.name.clone())
+                    .collect();
+                if events.is_empty() {
+                    ("invoke".to_string(), vec![])
+                } else {
+                    ("invoke+emit".to_string(), events)
+                }
+            } else {
+                ("invoke".to_string(), vec![])
+            }
+        } else {
+            ("invoke".to_string(), vec![])
+        };
+
         command_bridges.push(CommandBridge {
             name: name.clone(),
             fe_locations,
             be_location,
             status: status.to_string(),
             language,
+            comm_type,
+            emits_events,
         });
     }
 
@@ -668,6 +697,8 @@ pub fn process_root_context(
                 library_mode: parsed.library_mode,
                 example_globs: parsed.library_example_globs.clone(),
                 python_library_mode: parsed.python_library,
+                include_ambient: false,
+                include_dynamic: false,
             },
         );
 
@@ -711,10 +742,11 @@ pub fn process_root_context(
     // Run twins analysis (dead parrots, exact twins, barrel chaos)
     let twins_data = if !parsed.skip_dead_symbols {
         // Find dead parrots (0 imports)
-        let twins_result = find_dead_parrots(&analyses, true);
+        // Note: include_tests=false for production reports
+        let twins_result = find_dead_parrots(&analyses, true, false);
 
         // Detect exact twins (same symbol exported from multiple files)
-        let exact_twins = detect_exact_twins(&analyses);
+        let exact_twins = detect_exact_twins(&analyses, false);
 
         // Analyze barrel chaos (missing barrels, deep chains, inconsistent paths)
         // Build snapshot from analyses for barrel analysis
@@ -1240,9 +1272,9 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
                     .filter(|g| g.confidence == Some(Confidence::High))
                     .map(|g| g.name.clone())
                     .collect();
-                let low_conf: Vec<_> = unused_handlers
+                let smell_conf: Vec<_> = unused_handlers
                     .iter()
-                    .filter(|g| g.confidence == Some(Confidence::Low))
+                    .filter(|g| g.confidence == Some(Confidence::Smell))
                     .collect();
 
                 if !high_conf.is_empty() {
@@ -1251,9 +1283,9 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
                         high_conf.join(", ")
                     );
                 }
-                if !low_conf.is_empty() {
-                    println!("  Unused handlers (LOW confidence - possible dynamic usage):");
-                    for g in &low_conf {
+                if !smell_conf.is_empty() {
+                    println!("  Unused handlers (SMELL confidence - possible dynamic usage):");
+                    for g in &smell_conf {
                         let matches_note = if !g.string_literal_matches.is_empty() {
                             format!(
                                 " ({} string literal matches)",
@@ -1304,6 +1336,113 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
 
         let tree = build_tree(&analyses, &root_path);
 
+        // Compute coverage gaps by building a minimal snapshot
+        let coverage_gaps = {
+            use crate::snapshot::{
+                CommandBridge as SnapshotCommandBridge, EventBridge, Snapshot, SnapshotMetadata,
+            };
+
+            // Convert command_bridges to snapshot format
+            let snapshot_command_bridges: Vec<SnapshotCommandBridge> = command_bridges
+                .iter()
+                .map(|cb| {
+                    let has_handler = cb.be_location.is_some();
+                    let is_called = !cb.fe_locations.is_empty();
+                    let backend_handler = cb
+                        .be_location
+                        .as_ref()
+                        .map(|(path, line, _)| (path.clone(), *line));
+                    let frontend_calls = cb.fe_locations.clone();
+
+                    SnapshotCommandBridge {
+                        name: cb.name.clone(),
+                        has_handler,
+                        is_called,
+                        backend_handler,
+                        frontend_calls,
+                    }
+                })
+                .collect();
+
+            // Build event bridges from analyses (emit/listen patterns)
+            let event_bridges: Vec<EventBridge> = Vec::new(); // TODO: extract from analyses if available
+
+            // Create minimal snapshot for coverage analysis
+            let snapshot = Snapshot {
+                metadata: SnapshotMetadata::default(),
+                files: analyses.clone(),
+                edges: Vec::new(),
+                export_index: HashMap::new(),
+                command_bridges: snapshot_command_bridges,
+                event_bridges,
+                barrels: Vec::new(),
+            };
+
+            find_coverage_gaps(&snapshot)
+        };
+
+        // Calculate health score from available metrics
+        let health_score = {
+            // Count breaking cycles (hard bidirectional cycles)
+            let breaking_cycles = circular_imports.len();
+            // Count structural cycles (lazy/dynamic cycles)
+            let structural_cycles = lazy_circular_imports.len();
+
+            // Count dead exports (HIGH confidence)
+            let dead_exports_count = dead_exports_for_report.len();
+
+            // Count twins data if available
+            let (twins_dead_parrots, twins_same_language, barrel_chaos_count) =
+                if let Some(ref twins) = twins_data {
+                    (
+                        twins.dead_parrots.len(),
+                        twins.exact_twins.len(),
+                        twins.barrel_chaos.missing_barrels.len()
+                            + twins.barrel_chaos.deep_chains.len()
+                            + twins.barrel_chaos.inconsistent_paths.len(),
+                    )
+                } else {
+                    (0, 0, 0)
+                };
+
+            // Count duplicate exports
+            let duplicate_exports = filtered_ranked.len();
+
+            // Count cascade imports
+            let cascade_imports = cascades.len();
+
+            let metrics = HealthMetrics {
+                // CERTAIN severity
+                missing_handlers: missing_sorted.len(),
+                unregistered_handlers: unregistered_sorted.len(),
+                breaking_cycles,
+
+                // HIGH severity
+                unused_high_confidence: unused_sorted.len(),
+                dead_exports: dead_exports_count,
+                twins_dead_parrots,
+
+                // SMELL severity
+                twins_same_language,
+                barrel_chaos_count,
+                structural_cycles,
+                cascade_imports,
+                duplicate_exports,
+
+                // Project context
+                files: analyses.len(),
+                loc: total_loc,
+
+                // Optional: issue details (not populated for now)
+                certain_items: Vec::new(),
+                high_items: Vec::new(),
+                smell_items: Vec::new(),
+            };
+
+            let score = calculate_health_score(&metrics);
+            Some(score.health)
+        };
+
         report_section = Some(ReportSection {
             insights,
             root: root_path.display().to_string(),
@@ -1335,6 +1474,8 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
             crowds: crowds.clone(),
             dead_exports: dead_exports_for_report.clone(),
             twins_data: twins_data.clone(),
+            coverage_gaps,
+            health_score,
         });
     }
 
@@ -1352,7 +1493,17 @@ pub fn write_report(
     if let Some(dir) = report_path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    render_html_report(report_path, sections)?;
+    // Show spinner during HTML generation (can be slow for large codebases)
+    let spinner = if !verbose {
+        Some(crate::progress::Spinner::new("Generating HTML report..."))
+    } else {
+        None
+    };
+    let result = render_html_report(report_path, sections);
+    if let Some(s) = spinner {
+        s.finish_clear();
+    }
+    result?;
     // Show relative path for cleaner output (with ./ prefix for consistency)
     let display_path = std::env::current_dir()
         .ok()

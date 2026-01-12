@@ -10,7 +10,10 @@ use super::assets::{
 
 /// Render HTML report using Leptos SSR
 pub(crate) fn render_html_report(path: &Path, sections: &[ReportSection]) -> io::Result<()> {
-    if let Some(dir) = path.parent() {
+    // Only write JS assets if there's an actual parent directory (not empty path)
+    if let Some(dir) = path.parent()
+        && !dir.as_os_str().is_empty()
+    {
         write_js_assets(dir)?;
     }
 
@@ -152,6 +155,8 @@ mod tests {
             crowds: Vec::new(),
             dead_exports: Vec::new(),
             twins_data: None,
+            coverage_gaps: Vec::new(),
+            health_score: None,
         };
 
         render_html_report(&out_path, &[section]).expect("render html");
@@ -199,6 +204,8 @@ mod tests {
             crowds: Vec::new(),
             dead_exports: Vec::new(),
             twins_data: None,
+            coverage_gaps: Vec::new(),
+            health_score: None,
         };
 
         render_html_report(&out_path, &[section]).expect("render html");

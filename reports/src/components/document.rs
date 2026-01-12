@@ -3,8 +3,9 @@
 //! Implements the App Shell layout with Sidebar and Main Content areas.
 
 use super::{
-    Icon, ReportSectionView, ICON_ARROWS_CLOCKWISE, ICON_COPY, ICON_FLASK, ICON_GHOST, ICON_GRAPH,
-    ICON_LIGHTNING, ICON_PLUG, ICON_SQUARES_FOUR, ICON_TREE_STRUCTURE, ICON_TWINS, ICON_USERS,
+    Icon, ReportSectionView, ICON_ARROWS_CLOCKWISE, ICON_CLIPBOARD_LIST, ICON_COPY, ICON_FLASK,
+    ICON_GHOST, ICON_GRAPH, ICON_LIGHTNING, ICON_PLUG, ICON_SQUARES_FOUR, ICON_TREE_STRUCTURE,
+    ICON_TWINS, ICON_USERS,
 };
 use crate::styles::{CSP, REPORT_CSS};
 use crate::types::ReportSection;
@@ -57,6 +58,10 @@ pub fn ReportDocument(
                                 <Icon path=ICON_SQUARES_FOUR class="icon-sm" />
                                 "Overview"
                             </button>
+                            <button class="nav-item" data-tab="audit">
+                                <Icon path=ICON_CLIPBOARD_LIST class="icon-sm" />
+                                "Audit"
+                            </button>
                             <button class="nav-item" data-tab="dups">
                                 <Icon path=ICON_COPY class="icon-sm" />
                                 "Duplicates"
@@ -70,6 +75,10 @@ pub fn ReportDocument(
                                     <button class="nav-item" data-tab="commands">
                                         <Icon path=ICON_PLUG class="icon-sm" />
                                         "Tauri coverage"
+                                    </button>
+                                    <button class="nav-item" data-tab="pipelines">
+                                        <Icon path=ICON_PLUG class="icon-sm" />
+                                        "Pipelines"
                                     </button>
                                 }.into_any()
                             } else {
@@ -91,6 +100,10 @@ pub fn ReportDocument(
                                 <Icon path=ICON_TWINS class="icon-sm" />
                                 "Twins"
                             </button>
+                            <button class="nav-item" data-tab="coverage">
+                                <Icon path=ICON_FLASK class="icon-sm" />
+                                "Coverage"
+                            </button>
                             <button class="nav-item" data-tab="graph">
                                 <Icon path=ICON_GRAPH class="icon-sm" />
                                 "Graph"
@@ -107,7 +120,7 @@ pub fn ReportDocument(
                                 <span id="test-toggle-text">"Hide Tests"</span>
                             </button>
                             <div style="margin-top: 8px; font-size: 11px;">
-                                "loctree v0.6.8"
+                                "loctree v0.8.4"
                                 <br />
                                 <span style="color:var(--theme-text-tertiary)">"Snapshot"</span>
                             </div>
@@ -154,6 +167,7 @@ fn GraphScripts(js_assets: JsAssets) -> impl IntoView {
             <script src=js_assets.cytoscape_cose_bilkent_path.clone()></script>
             <script>{include_str!("../graph_bootstrap.js")}</script>
             <script>{include_str!("../twins_graph.js")}</script>
+            <script>{include_str!("../crowds_graph.js")}</script>
         })}
     }
 }
@@ -277,6 +291,153 @@ const APP_SCRIPT: &str = r#"
               }
           }
       });
+  });
+
+  // 3b. Crowds Graph Toggle - handles graph view in Crowds tab
+  document.querySelectorAll('.crowds-section-header[data-toggle]').forEach(btn => {
+      btn.addEventListener('click', () => {
+          const targetId = btn.dataset.toggle;
+          const content = document.getElementById(targetId);
+          const toggle = btn.querySelector('.crowds-graph-toggle');
+
+          if (content) {
+              const isHidden = content.style.display === 'none';
+              content.style.display = isHidden ? 'block' : 'none';
+              if (toggle) {
+                  toggle.textContent = isHidden ? '▼' : '▶';
+              }
+
+              // Initialize Cytoscape graph when crowds-graph-content is opened
+              if (isHidden && targetId === 'crowds-graph-content' && window.__CROWDS_DATA__) {
+                  const container = document.getElementById('crowds-graph-container');
+                  if (container && typeof buildCrowdsGraph === 'function') {
+                      buildCrowdsGraph(window.__CROWDS_DATA__, 'crowds-graph-container');
+                  }
+              }
+          }
+      });
+  });
+
+  // 3c. Pipeline Card Toggle - expand/collapse pipeline cards
+  document.querySelectorAll('.card-header[data-pipeline-toggle]').forEach(header => {
+      header.addEventListener('click', () => {
+          const card = header.closest('.pipeline-card');
+          const details = card.querySelector('.card-details');
+          const toggle = header.querySelector('.expand-icon');
+
+          if (details) {
+              const isHidden = details.style.display === 'none';
+              details.style.display = isHidden ? 'block' : 'none';
+              if (toggle) {
+                  toggle.textContent = isHidden ? '▼' : '▶';
+              }
+          }
+      });
+  });
+
+  // 3d. Pipeline Filter Buttons - filter cards by status
+  document.querySelectorAll('[data-pipeline-filter]').forEach(btn => {
+      btn.addEventListener('click', () => {
+          const filter = btn.dataset.pipelineFilter;
+
+          // Update active button
+          document.querySelectorAll('[data-pipeline-filter]').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+
+          // Filter cards
+          document.querySelectorAll('.pipeline-card').forEach(card => {
+              const status = card.dataset.pipelineStatus;
+              const show = filter === 'all' || status === filter;
+              card.style.display = show ? '' : 'none';
+          });
+      });
+  });
+
+  // 3e. Pipeline Search - filter cards by name
+  const pipelineSearch = document.querySelector('[data-pipeline-search]');
+  if (pipelineSearch) {
+      pipelineSearch.addEventListener('input', (e) => {
+          const query = e.target.value.toLowerCase();
+
+          document.querySelectorAll('.pipeline-card').forEach(card => {
+              const name = card.dataset.pipelineName || '';
+              const matchesSearch = name.includes(query);
+              // Also respect current filter
+              const currentFilter = document.querySelector('[data-pipeline-filter].active')?.dataset.pipelineFilter || 'all';
+              const status = card.dataset.pipelineStatus;
+              const matchesFilter = currentFilter === 'all' || status === currentFilter;
+
+              card.style.display = (matchesSearch && matchesFilter) ? '' : 'none';
+          });
+      });
+  }
+
+  // 3f. Pipeline View Toggle - switch between card grid and split panel views
+  document.querySelectorAll('[data-pipeline-view]').forEach(btn => {
+      btn.addEventListener('click', function() {
+          const mode = this.dataset.pipelineView;
+
+          // Toggle active button
+          document.querySelectorAll('[data-pipeline-view]').forEach(b => b.classList.remove('active'));
+          this.classList.add('active');
+
+          // Toggle views
+          const gridView = document.querySelector('.cards-grid');
+          const splitView = document.querySelector('.split-panel-container');
+
+          if (mode === 'split') {
+              if (gridView) gridView.style.display = 'none';
+              if (splitView) {
+                  splitView.style.display = 'grid';
+                  setTimeout(drawPipelineConnections, 100);
+              }
+          } else {
+              if (gridView) gridView.style.display = 'grid';
+              if (splitView) splitView.style.display = 'none';
+          }
+      });
+  });
+
+  // Draw SVG connections between FE and BE items in split panel view
+  function drawPipelineConnections() {
+      const svg = document.querySelector('.connection-svg');
+      if (!svg) return;
+
+      // Clear existing paths
+      svg.innerHTML = '';
+
+      const svgRect = svg.getBoundingClientRect();
+
+      document.querySelectorAll('[data-split-fe]').forEach(fe => {
+          const name = fe.dataset.splitFe;
+          const be = document.querySelector('[data-split-be="' + name + '"]');
+
+          const feRect = fe.getBoundingClientRect();
+          const y1 = feRect.top + feRect.height / 2 - svgRect.top;
+
+          const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+
+          if (be) {
+              const beRect = be.getBoundingClientRect();
+              const y2 = beRect.top + beRect.height / 2 - svgRect.top;
+              // Bezier curve from left to right
+              path.setAttribute('d', 'M 0 ' + y1 + ' C 40 ' + y1 + ', 40 ' + y2 + ', 80 ' + y2);
+              path.classList.add('connection-line');
+          } else {
+              // Missing handler - draw dashed line to middle
+              path.setAttribute('d', 'M 0 ' + y1 + ' L 60 ' + y1);
+              path.classList.add('connection-line', 'missing');
+          }
+
+          svg.appendChild(path);
+      });
+  }
+
+  // Redraw connections on window resize
+  window.addEventListener('resize', () => {
+      if (document.querySelector('.split-panel-container')?.style.display !== 'none') {
+          drawPipelineConnections();
+      }
   });
 
   // 4. Test Files Toggle - Hide/Show test file rows

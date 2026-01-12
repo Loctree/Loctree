@@ -24,9 +24,11 @@
 
 pub mod assets;
 pub mod ast_js;
+pub mod audit_report;
 pub mod barrels;
 pub mod classify;
 pub mod coverage;
+pub mod coverage_gaps;
 pub mod crowd;
 mod css;
 pub mod cycles;
@@ -34,10 +36,14 @@ pub mod dart;
 pub mod dead_parrots;
 pub mod dist;
 pub mod entrypoints;
+pub mod findings;
 pub mod for_ai;
+pub mod frameworks;
 pub mod go;
 mod graph;
+pub mod health_score;
 pub mod html;
+pub(crate) mod html_analyzer;
 mod insights;
 pub mod js;
 pub mod open_server;
@@ -83,6 +89,7 @@ pub fn build_open_url(file: &str, line: Option<usize>, open_base: Option<&str>) 
 }
 
 #[allow(unused_imports)]
+pub use cycles::{ClassifiedCycle, CycleClassification};
 pub use report::{
     AiInsight, CommandGap, DupLocation, DupSeverity, GraphComponent, GraphData, GraphNode,
     RankedDup, ReportSection,

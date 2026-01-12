@@ -5,7 +5,7 @@
 //! 2. Exact Twins - symbols with identical names in different files
 //! 3. Barrel Chaos - missing/deep/inconsistent barrel files
 
-use crate::components::{Icon, ICON_COPY, ICON_FOLDER_OPEN, ICON_GHOST, ICON_TWINS};
+use crate::components::icons::{Icon, ICON_COPY, ICON_FOLDER_OPEN, ICON_GHOST, ICON_TWINS};
 use crate::types::{BarrelChaos, DeadParrot, ExactTwin, TwinsData};
 use leptos::prelude::*;
 
@@ -144,8 +144,9 @@ fn DeadParrotsTable(dead_parrots: Vec<DeadParrot>) -> impl IntoView {
                 {files.into_iter().flat_map(|file| {
                     let parrots = by_file.get(&file).unwrap().clone();
                     parrots.into_iter().map(move |parrot| {
+                        let is_test_attr = if parrot.is_test { "true" } else { "false" };
                         view! {
-                            <tr>
+                            <tr data-is-test=is_test_attr>
                                 <td class="file-cell">
                                     <code>{parrot.file_path.clone()}</code>
                                 </td>

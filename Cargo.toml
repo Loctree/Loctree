@@ -2,22 +2,22 @@
 resolver = "2"
 members = [
     "loctree_rs",
-    "loctree_server",
-    "loctree_memex",
-    "rmcp_memex",
-    "rmcp_mux",
+    "loctree-mcp",
+    "loctree_lsp",
+    "rmcp-common",
     "reports",
-    "landing",
+    "reports/wasm",
+    # landing - excluded from public repo (development only in loctree-suite)
 ]
 
-# Note: rmcp_memex requires protobuf for lancedb
-# Use `make build` to auto-install protobuf, or run:
-#   brew install protobuf (macOS)
-#   apt install protobuf-compiler (Linux)
+# Removed from workspace:
+# - rmcp-memex: use crates.io version (0.3.2+), standalone: ~/Libraxis/rmcp-memex
+# - rmcp-mux: deprecated (dead end approach)
+# - rmcp-config-ui: moved to ~/Libraxis/rmcp-config-ui
 
 [workspace.package]
 edition = "2024"
-license = "MIT"
+license = "MIT OR Apache-2.0"
 authors = ["Loctree <loct@loctree.io>"]
 
 [workspace.dependencies]
@@ -36,7 +36,7 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 
 # MCP
-rmcp = { version = "0.10", features = ["server"] }
+rmcp = { version = "0.12", features = ["server"] }
 
 # Async
 futures = "0.3"
