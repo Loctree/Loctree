@@ -4,11 +4,98 @@
 //! - `who-imports <file>` - Find all files that import a given file
 //! - `where-symbol <symbol>` - Find where a symbol is defined
 //! - `component-of <file>` - Show what component/module a file belongs to
+//!
+//! Vibecrafted with AI Agents by VetCoders (c)2026 VetCoders
 
 use serde::{Deserialize, Serialize};
 
 use crate::analyzer::dead_parrots::search_symbol;
 use crate::snapshot::Snapshot;
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+/// Maximum depth for BFS traversal of re-export chains.
+/// Prevents infinite loops in pathological cases (circular re-exports).
+const MAX_REEXPORT_DEPTH: usize = 50;
+
+/// File extensions we recognize for index file detection
+const INDEX_EXTENSIONS: [&str; 3] = ["ts", "tsx", "js"];
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/// Generate index file variants for a directory path.
+/// `foo/bar` → `["foo/bar/index.ts", "foo/bar/index.tsx", "foo/bar/index.js"]`
+fn index_variants(path: &str) -> Vec<String> {
+    INDEX_EXTENSIONS
+        .iter()
+        .map(|ext| format!("{}/index.{}", path, ext))
+        .collect()
+}
+
+/// Strip index file suffix from a path if present.
+/// `foo/bar/index.ts` → `Some("foo/bar")`
+/// `foo/bar/utils.ts` → `None`
+fn strip_index_suffix(path: &str) -> Option<&str> {
+    for ext in INDEX_EXTENSIONS {
+        let suffix = format!("/index.{}", ext);
+        if let Some(stripped) = path.strip_suffix(&suffix) {
+            return Some(stripped);
+        }
+    }
+    None
+}
+
+/// Check if a path looks like a file (has known extension)
+fn has_file_extension(path: &str) -> bool {
+    path.ends_with(".ts")
+        || path.ends_with(".tsx")
+        || path.ends_with(".js")
+        || path.ends_with(".jsx")
+        || path.ends_with(".rs")
+        || path.ends_with(".py")
+}
+
+/// Normalize path for comparison (handles relative vs absolute, trailing slashes)
+fn normalize_path(path: &str) -> String {
+    path.trim_start_matches("./")
+        .trim_end_matches('/')
+        .to_string()
+}
+
+/// Check if two paths match, considering:
+/// - Exact match
+/// - Suffix match (edge.to ends with /target)
+/// - Folder match (target is index file, edge.to is folder)
+///
+/// STRICTER than before: avoids `utils.ts` matching `other-utils.ts`
+fn paths_match(edge_to: &str, target: &str) -> bool {
+    let edge_norm = normalize_path(edge_to);
+    let target_norm = normalize_path(target);
+
+    // Exact match
+    if edge_norm == target_norm {
+        return true;
+    }
+
+    // Suffix match: edge.to ends with /target (full path segment)
+    if edge_norm.ends_with(&format!("/{}", target_norm)) {
+        return true;
+    }
+
+    // Folder match: target is index file, edge.to points to folder
+    // e.g., target = "foo/index.ts", edge.to = "foo"
+    if let Some(folder) = strip_index_suffix(&target_norm)
+        && (edge_norm == folder || edge_norm.ends_with(&format!("/{}", folder)))
+    {
+        return true;
+    }
+
+    false
+}
 
 /// Result of a query operation
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,10 +120,18 @@ pub struct QueryMatch {
 }
 
 /// Query for files that import a given file or symbol (who-imports)
-/// Follows re-export chains transitively to find all importers
+/// Follows re-export chains transitively to find all importers.
 ///
 /// If the input looks like a symbol name (no path separators), it will first
 /// resolve the symbol to file paths where it's defined, then find importers.
+///
+/// ## Algorithm
+/// Uses BFS with depth limiting to traverse re-export chains:
+/// `App.tsx → features/index.ts (reexport) → Component.tsx`
+///
+/// ## Path Matching
+/// Uses `paths_match()` for strict comparison - avoids false positives
+/// like `utils.ts` matching `other-utils.ts`.
 pub fn query_who_imports(snapshot: &Snapshot, target: &str) -> QueryResult {
     use std::collections::HashSet;
 
@@ -44,92 +139,65 @@ pub fn query_who_imports(snapshot: &Snapshot, target: &str) -> QueryResult {
     let mut visited: HashSet<String> = HashSet::new();
 
     // Determine if target is a symbol name or file path
-    // Symbol names typically don't contain '/' or file extensions
-    let is_symbol = !target.contains('/')
-        && !target.ends_with(".ts")
-        && !target.ends_with(".tsx")
-        && !target.ends_with(".js")
-        && !target.ends_with(".jsx")
-        && !target.ends_with(".rs")
-        && !target.ends_with(".py");
+    let is_symbol = !target.contains('/') && !has_file_extension(target);
 
     // Collect starting files to check
     let mut to_check: Vec<String> = if is_symbol {
-        // Resolve symbol to file paths
+        // Resolve symbol to file paths first
         let symbol_query = query_where_symbol(snapshot, target);
         if symbol_query.results.is_empty() {
-            // No definition found - return empty result
             return QueryResult {
                 kind: "who-imports".to_string(),
                 target: target.to_string(),
                 results: vec![],
             };
         }
-        // Start with files where symbol is defined
         symbol_query.results.into_iter().map(|m| m.file).collect()
     } else {
-        // Target is already a file path
-        vec![target.to_string()]
+        vec![normalize_path(target)]
     };
 
-    // For each initial file, also check variants without index suffix
+    // For each initial file, also check folder variant (strip index suffix)
     let initial_files: Vec<String> = to_check.clone();
     for file in &initial_files {
-        let normalized = file
-            .trim_end_matches("/index.ts")
-            .trim_end_matches("/index.tsx")
-            .trim_end_matches("/index.js");
-        if normalized != file {
-            to_check.push(normalized.to_string());
+        if let Some(folder) = strip_index_suffix(file) {
+            to_check.push(folder.to_string());
         }
     }
 
-    // BFS to follow re-export chains
+    // BFS with depth limiting
+    let mut depth = 0;
     while let Some(current) = to_check.pop() {
+        // Safety: prevent infinite loops in pathological cases
+        if depth > MAX_REEXPORT_DEPTH {
+            break;
+        }
+
         if visited.contains(&current) {
             continue;
         }
         visited.insert(current.clone());
+        depth += 1;
 
-        // Also add the index.ts variant if this is a folder path
-        // This handles: edge.to = "foo/bar" when we need to match edge.from = "foo/bar/index.ts"
-        if !current.ends_with(".ts") && !current.ends_with(".tsx") && !current.ends_with(".js") {
-            let index_variants = [
-                format!("{}/index.ts", current),
-                format!("{}/index.tsx", current),
-                format!("{}/index.js", current),
-            ];
-            for variant in index_variants {
+        // If this looks like a folder, also check index file variants
+        if !has_file_extension(&current) {
+            for variant in index_variants(&current) {
                 if !visited.contains(&variant) {
                     to_check.push(variant);
                 }
             }
         }
 
+        // Find edges pointing to current target
         for edge in &snapshot.edges {
-            // Check if this edge points to our target (direct or via folder)
-            // Also handle folder references: if current is "foo/index.ts", match edge.to = "foo"
-            let current_folder = current
-                .strip_suffix("/index.ts")
-                .or_else(|| current.strip_suffix("/index.tsx"))
-                .or_else(|| current.strip_suffix("/index.js"));
-
-            let matches = edge.to == current
-                || edge.to.ends_with(&format!("/{}", current))
-                || (current.contains('/') && edge.to.contains(&current))
-                || current_folder
-                    .map(|f| edge.to == f || edge.to.ends_with(f))
-                    .unwrap_or(false);
-
-            if matches {
-                // If this is a reexport, add the source to our search queue
-                // This follows the chain: App.tsx → index.ts → Component.tsx
+            if paths_match(&edge.to, &current) {
                 if edge.label == "reexport" {
+                    // Follow re-export chain
                     if !visited.contains(&edge.from) {
                         to_check.push(edge.from.clone());
                     }
                 } else {
-                    // Regular import - this is an actual importer
+                    // Regular import - this is an actual consumer
                     results.push(QueryMatch {
                         file: edge.from.clone(),
                         line: None,
@@ -140,7 +208,7 @@ pub fn query_who_imports(snapshot: &Snapshot, target: &str) -> QueryResult {
         }
     }
 
-    // Deduplicate results
+    // Deduplicate and sort results
     results.sort_by(|a, b| a.file.cmp(&b.file));
     results.dedup_by(|a, b| a.file == b.file);
 
@@ -152,7 +220,10 @@ pub fn query_who_imports(snapshot: &Snapshot, target: &str) -> QueryResult {
 }
 
 /// Query for where a symbol is defined (where-symbol)
+/// Uses exact matching first, then falls back to fuzzy/semantic matching
 pub fn query_where_symbol(snapshot: &Snapshot, symbol: &str) -> QueryResult {
+    use crate::analyzer::dead_parrots::find_similar;
+
     let mut results = Vec::new();
 
     // Use search_symbol from dead_parrots
@@ -160,7 +231,10 @@ pub fn query_where_symbol(snapshot: &Snapshot, symbol: &str) -> QueryResult {
 
     for file_match in search_result.files {
         for symbol_match in file_match.matches {
-            if symbol_match.is_definition {
+            if matches!(
+                symbol_match.kind,
+                crate::analyzer::dead_parrots::SymbolMatchKind::Definition
+            ) {
                 results.push(QueryMatch {
                     file: file_match.file.clone(),
                     line: Some(symbol_match.line),
@@ -170,7 +244,7 @@ pub fn query_where_symbol(snapshot: &Snapshot, symbol: &str) -> QueryResult {
         }
     }
 
-    // Fallback: if no matches found, look at exports directly
+    // Fallback 1: if no matches found, look at exports directly
     if results.is_empty() {
         for file in &snapshot.files {
             for exp in &file.exports {
@@ -182,6 +256,39 @@ pub fn query_where_symbol(snapshot: &Snapshot, symbol: &str) -> QueryResult {
                     });
                 }
             }
+        }
+    }
+
+    // Fallback 2: if still no matches, try fuzzy/semantic matching
+    if results.is_empty() {
+        let similar = find_similar(symbol, &snapshot.files);
+        // Take top 5 fuzzy matches with score > 0.5
+        for candidate in similar.into_iter().filter(|c| c.score > 0.5).take(5) {
+            // For export matches, extract file path from "export in <path>" format
+            let (file, context) = if candidate.file.starts_with("export in ") {
+                let path = candidate
+                    .file
+                    .strip_prefix("export in ")
+                    .unwrap_or(&candidate.file);
+                (
+                    path.to_string(),
+                    format!(
+                        "fuzzy match: {} (score: {:.2})",
+                        candidate.symbol, candidate.score
+                    ),
+                )
+            } else {
+                (
+                    candidate.symbol.clone(),
+                    format!("fuzzy match (score: {:.2})", candidate.score),
+                )
+            };
+
+            results.push(QueryMatch {
+                file,
+                line: None,
+                context: Some(context),
+            });
         }
     }
 
@@ -368,6 +475,95 @@ mod tests {
         assert!(
             !result.results.is_empty(),
             "Should find importers through re-export chain"
+        );
+    }
+
+    // ========================================
+    // Path matching tests (stricter matching)
+    // ========================================
+
+    #[test]
+    fn test_paths_match_exact() {
+        assert!(paths_match("src/utils.ts", "src/utils.ts"));
+        assert!(paths_match("./src/utils.ts", "src/utils.ts"));
+        assert!(paths_match("src/utils.ts", "./src/utils.ts"));
+    }
+
+    #[test]
+    fn test_paths_match_suffix() {
+        assert!(paths_match("src/components/utils.ts", "utils.ts"));
+        assert!(paths_match("src/deep/nested/file.ts", "file.ts"));
+    }
+
+    #[test]
+    fn test_paths_match_no_false_positives() {
+        // CRITICAL: utils.ts should NOT match other-utils.ts
+        assert!(!paths_match("src/other-utils.ts", "utils.ts"));
+        assert!(!paths_match("src/my-utils.ts", "utils.ts"));
+        assert!(!paths_match("src/utils-helper.ts", "utils.ts"));
+    }
+
+    #[test]
+    fn test_paths_match_folder_to_index() {
+        // foo/index.ts should match foo
+        assert!(paths_match("src/components", "src/components/index.ts"));
+        assert!(paths_match("features", "features/index.tsx"));
+    }
+
+    #[test]
+    fn test_index_variants() {
+        let variants = index_variants("src/components");
+        assert_eq!(variants.len(), 3);
+        assert!(variants.contains(&"src/components/index.ts".to_string()));
+        assert!(variants.contains(&"src/components/index.tsx".to_string()));
+        assert!(variants.contains(&"src/components/index.js".to_string()));
+    }
+
+    #[test]
+    fn test_strip_index_suffix() {
+        assert_eq!(strip_index_suffix("foo/bar/index.ts"), Some("foo/bar"));
+        assert_eq!(strip_index_suffix("foo/bar/index.tsx"), Some("foo/bar"));
+        assert_eq!(strip_index_suffix("foo/bar/index.js"), Some("foo/bar"));
+        assert_eq!(strip_index_suffix("foo/bar/utils.ts"), None);
+        assert_eq!(strip_index_suffix("foo/bar"), None);
+    }
+
+    #[test]
+    fn test_has_file_extension() {
+        assert!(has_file_extension("foo.ts"));
+        assert!(has_file_extension("bar.tsx"));
+        assert!(has_file_extension("baz.rs"));
+        assert!(has_file_extension("qux.py"));
+        assert!(!has_file_extension("foo"));
+        assert!(!has_file_extension("foo/bar"));
+    }
+
+    #[test]
+    fn test_query_who_imports_stricter_matching() {
+        let mut snapshot = Snapshot::new(vec!["src".to_string()]);
+
+        // Setup: app.ts imports utils.ts, NOT other-utils.ts
+        snapshot.edges.push(crate::snapshot::GraphEdge {
+            from: "src/app.ts".to_string(),
+            to: "src/utils.ts".to_string(),
+            label: "import".to_string(),
+        });
+        snapshot.edges.push(crate::snapshot::GraphEdge {
+            from: "src/other.ts".to_string(),
+            to: "src/other-utils.ts".to_string(),
+            label: "import".to_string(),
+        });
+
+        // Query who imports utils.ts - should find app.ts but NOT other.ts
+        let result = query_who_imports(&snapshot, "src/utils.ts");
+
+        assert!(
+            result.results.iter().any(|r| r.file == "src/app.ts"),
+            "Should find app.ts as importer of utils.ts"
+        );
+        assert!(
+            !result.results.iter().any(|r| r.file == "src/other.ts"),
+            "Should NOT find other.ts (imports other-utils.ts, not utils.ts)"
         );
     }
 }

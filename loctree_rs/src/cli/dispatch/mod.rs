@@ -8,7 +8,7 @@ mod handlers;
 
 use std::path::PathBuf;
 
-use crate::args::ParsedArgs;
+use crate::args::{ParsedArgs, SearchQueryMode};
 use crate::types::{DEFAULT_LOC_THRESHOLD, Mode, OutputMode};
 
 use super::command::*;
@@ -127,12 +127,50 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
 
         Command::Find(opts) => {
             parsed.mode = Mode::Search;
+            parsed.search_query_mode = SearchQueryMode::Single;
+            parsed.search_queries.clear();
+
             parsed.search_query = opts
                 .query
                 .clone()
                 .or_else(|| opts.symbol.clone())
                 .or_else(|| opts.similar.clone())
-                .or_else(|| opts.impact.clone());
+                .or_else(|| opts.impact.clone())
+                .or_else(|| {
+                    if opts.queries.is_empty() {
+                        return None;
+                    }
+
+                    // Multi-arg positional query handling:
+                    // - `loct find A B C` => split-mode (separate subqueries + cross-match)
+                    // - `loct find "A B C"` => AND-mode (intersection)
+                    // - `loct find --or A B C` => legacy OR (A|B|C)
+                    if opts.queries.len() >= 2 {
+                        if opts.or_mode {
+                            Some(opts.queries.join("|"))
+                        } else {
+                            parsed.search_query_mode = SearchQueryMode::Split;
+                            parsed.search_queries = opts.queries.clone();
+                            None
+                        }
+                    } else {
+                        // Single positional query: if it contains whitespace, treat as AND-mode.
+                        let raw = opts.queries[0].trim().to_string();
+                        if raw.chars().any(|c| c.is_whitespace()) && !raw.contains('|') {
+                            let terms: Vec<String> =
+                                raw.split_whitespace().map(|t| t.to_string()).collect();
+                            if terms.len() >= 2 {
+                                parsed.search_query_mode = SearchQueryMode::And;
+                                parsed.search_queries = terms;
+                                None
+                            } else {
+                                Some(raw)
+                            }
+                        } else {
+                            Some(raw)
+                        }
+                    }
+                });
             parsed.symbol = opts.symbol.clone();
             parsed.impact = opts.impact.clone();
             parsed.check_sim = opts.similar.clone();
@@ -209,6 +247,33 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
             parsed.use_gitignore = true;
             parsed.suppress_duplicates = opts.suppress_duplicates;
             parsed.suppress_dynamic = opts.suppress_dynamic;
+        }
+        Command::Pipelines(opts) => {
+            parsed.mode = Mode::AnalyzeImports;
+            parsed.root_list = if opts.roots.is_empty() {
+                vec![PathBuf::from(".")]
+            } else {
+                opts.roots.clone()
+            };
+            parsed.use_gitignore = true;
+        }
+        Command::Insights(opts) => {
+            parsed.mode = Mode::AnalyzeImports;
+            parsed.root_list = if opts.roots.is_empty() {
+                vec![PathBuf::from(".")]
+            } else {
+                opts.roots.clone()
+            };
+            parsed.use_gitignore = true;
+        }
+        Command::Manifests(opts) => {
+            parsed.mode = Mode::AnalyzeImports;
+            parsed.root_list = if opts.roots.is_empty() {
+                vec![PathBuf::from(".")]
+            } else {
+                opts.roots.clone()
+            };
+            parsed.use_gitignore = true;
         }
 
         Command::Info(_opts) => {
@@ -364,6 +429,11 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
             // Doctor is handled specially in dispatch_command
             // as it doesn't go through ParsedArgs
         }
+
+        Command::Plan(_) => {
+            // Plan is handled specially in dispatch_command
+            // as it doesn't go through ParsedArgs
+        }
     }
 
     parsed
@@ -466,6 +536,15 @@ pub fn dispatch_command(parsed_cmd: &ParsedCommand) -> DispatchResult {
         Command::Events(opts) => {
             return handlers::analysis::handle_events_command(opts, &parsed_cmd.global);
         }
+        Command::Pipelines(opts) => {
+            return handlers::analysis::handle_pipelines_command(opts, &parsed_cmd.global);
+        }
+        Command::Insights(opts) => {
+            return handlers::analysis::handle_insights_command(opts, &parsed_cmd.global);
+        }
+        Command::Manifests(opts) => {
+            return handlers::analysis::handle_manifests_command(opts, &parsed_cmd.global);
+        }
         Command::Lint(opts) => {
             return handlers::output::handle_lint_command(opts, &parsed_cmd.global);
         }
@@ -499,6 +578,9 @@ pub fn dispatch_command(parsed_cmd: &ParsedCommand) -> DispatchResult {
         Command::Doctor(opts) => {
             return handlers::analysis::handle_doctor_command(opts, &parsed_cmd.global);
         }
+        Command::Plan(opts) => {
+            return handlers::analysis::handle_plan_command(opts, &parsed_cmd.global);
+        }
         Command::Scan(opts) if opts.watch => {
             return handlers::watch::handle_scan_watch_command(opts, &parsed_cmd.global);
         }
@@ -518,22 +600,25 @@ pub fn dispatch_command(parsed_cmd: &ParsedCommand) -> DispatchResult {
 /// - `--fresh`: Force rescan even if snapshot exists
 /// - `--no-scan`: Fail if no snapshot exists (don't auto-scan)
 /// - `--fail-stale`: Fail if snapshot git_head differs from current HEAD
-pub(crate) fn load_or_create_snapshot(
-    root: &std::path::Path,
+pub(crate) fn load_or_create_snapshot_for_roots(
+    roots: &[std::path::PathBuf],
     global: &GlobalOptions,
 ) -> std::io::Result<crate::snapshot::Snapshot> {
     use crate::args::ParsedArgs;
     use crate::snapshot::Snapshot;
+    use crate::snapshot::resolve_snapshot_root;
+
+    let snapshot_root = resolve_snapshot_root(roots);
 
     // If --fresh, skip loading and go straight to scan
     if !global.fresh {
-        match Snapshot::load(root) {
+        match Snapshot::load(&snapshot_root) {
             Ok(s) => {
                 // Check for stale snapshot if --fail-stale is set
                 if global.fail_stale
                     && let Some(snapshot_commit) = &s.metadata.git_commit
                 {
-                    let current_commit = get_current_git_head(root);
+                    let current_commit = get_current_git_head(&snapshot_root);
                     if let Some(ref current) = current_commit {
                         // Compare using prefix match (snapshot may have short hash)
                         let is_same = current.starts_with(snapshot_commit)
@@ -569,19 +654,31 @@ pub(crate) fn load_or_create_snapshot(
         }
     }
 
-    // Create minimal ParsedArgs for scan
+    // Create minimal ParsedArgs for scan, propagating output mode
     let parsed = ParsedArgs {
         verbose: global.verbose,
         use_gitignore: true,
+        output: if global.json {
+            OutputMode::Json
+        } else {
+            OutputMode::Human
+        },
         ..Default::default()
     };
 
-    // Run scan
-    let root_list = vec![root.to_path_buf()];
-    crate::snapshot::run_init(&root_list, &parsed)?;
+    // Run scan (suppress summary in json/quiet mode to keep stdout clean)
+    crate::snapshot::run_init_with_options(roots, &parsed, global.json || global.quiet)?;
 
     // Now load the freshly created snapshot
-    Snapshot::load(root)
+    Snapshot::load(&snapshot_root)
+}
+
+pub(crate) fn load_or_create_snapshot(
+    root: &std::path::Path,
+    global: &GlobalOptions,
+) -> std::io::Result<crate::snapshot::Snapshot> {
+    let root_list = vec![root.to_path_buf()];
+    load_or_create_snapshot_for_roots(&root_list, global)
 }
 
 /// Get current git HEAD commit hash
@@ -733,6 +830,70 @@ mod tests {
         assert_eq!(parsed.slice_target, Some("src/main.rs".into()));
         assert!(parsed.slice_consumers);
         assert!(matches!(parsed.output, OutputMode::Json));
+    }
+
+    #[test]
+    fn test_find_multi_arg_defaults_to_split_mode() {
+        let cmd = Command::Find(FindOptions {
+            queries: vec!["Props".into(), "Options".into(), "ViewModel".into()],
+            ..Default::default()
+        });
+        let global = GlobalOptions::default();
+        let parsed = command_to_parsed_args(&cmd, &global);
+
+        assert!(matches!(parsed.mode, Mode::Search));
+        assert!(matches!(parsed.search_query_mode, SearchQueryMode::Split));
+        assert_eq!(parsed.search_queries, vec!["Props", "Options", "ViewModel"]);
+        assert!(parsed.search_query.is_none());
+    }
+
+    #[test]
+    fn test_find_single_arg_with_spaces_defaults_to_and_mode() {
+        let cmd = Command::Find(FindOptions {
+            queries: vec!["Props Options ViewModel".into()],
+            ..Default::default()
+        });
+        let global = GlobalOptions::default();
+        let parsed = command_to_parsed_args(&cmd, &global);
+
+        assert!(matches!(parsed.mode, Mode::Search));
+        assert!(matches!(parsed.search_query_mode, SearchQueryMode::And));
+        assert_eq!(parsed.search_queries, vec!["Props", "Options", "ViewModel"]);
+        assert!(parsed.search_query.is_none());
+    }
+
+    #[test]
+    fn test_find_multi_arg_can_force_legacy_or_mode() {
+        let cmd = Command::Find(FindOptions {
+            queries: vec!["Props".into(), "Options".into()],
+            or_mode: true,
+            ..Default::default()
+        });
+        let global = GlobalOptions::default();
+        let parsed = command_to_parsed_args(&cmd, &global);
+
+        assert!(matches!(parsed.mode, Mode::Search));
+        assert!(matches!(parsed.search_query_mode, SearchQueryMode::Single));
+        assert_eq!(parsed.search_query.as_deref(), Some("Props|Options"));
+        assert!(parsed.search_queries.is_empty());
+    }
+
+    #[test]
+    fn test_find_single_arg_with_pipe_stays_single_mode() {
+        let cmd = Command::Find(FindOptions {
+            queries: vec!["Props|Options|ViewModel".into()],
+            ..Default::default()
+        });
+        let global = GlobalOptions::default();
+        let parsed = command_to_parsed_args(&cmd, &global);
+
+        assert!(matches!(parsed.mode, Mode::Search));
+        assert!(matches!(parsed.search_query_mode, SearchQueryMode::Single));
+        assert_eq!(
+            parsed.search_query.as_deref(),
+            Some("Props|Options|ViewModel")
+        );
+        assert!(parsed.search_queries.is_empty());
     }
 
     #[test]

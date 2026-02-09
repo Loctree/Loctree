@@ -136,6 +136,9 @@ mod tests {
             lazy_circular_imports: vec![],
             dynamic: vec![("dyn.ts".into(), vec!["./lazy".into()])],
             analyze_limit: 5,
+            generated_at: None,
+            schema_name: None,
+            schema_version: None,
             missing_handlers: Vec::new(),
             unregistered_handlers: Vec::new(),
             unused_handlers: Vec::new(),
@@ -152,11 +155,14 @@ mod tests {
             }],
             git_branch: None,
             git_commit: None,
+            priority_tasks: Vec::new(),
+            hub_files: Vec::new(),
             crowds: Vec::new(),
             dead_exports: Vec::new(),
             twins_data: None,
             coverage_gaps: Vec::new(),
             health_score: None,
+            refactor_plan: None,
         };
 
         render_html_report(&out_path, &[section]).expect("render html");
@@ -189,6 +195,9 @@ mod tests {
             lazy_circular_imports: Vec::new(),
             dynamic: Vec::new(),
             analyze_limit: 1,
+            generated_at: None,
+            schema_name: None,
+            schema_version: None,
             missing_handlers: Vec::new(),
             unregistered_handlers: Vec::new(),
             unused_handlers: Vec::new(),
@@ -201,11 +210,14 @@ mod tests {
             insights: Vec::new(),
             git_branch: None,
             git_commit: None,
+            priority_tasks: Vec::new(),
+            hub_files: Vec::new(),
             crowds: Vec::new(),
             dead_exports: Vec::new(),
             twins_data: None,
             coverage_gaps: Vec::new(),
             health_score: None,
+            refactor_plan: None,
         };
 
         render_html_report(&out_path, &[section]).expect("render html");

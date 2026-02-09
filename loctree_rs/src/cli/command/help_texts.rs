@@ -2,7 +2,7 @@
 //!
 //! Each constant provides detailed usage documentation for a specific command.
 //!
-//! Created by M&K (c)2025 The LibraxisAI Team
+//! Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team
 //! Co-Authored-By: Maciej <void@div0.space> & Klaudiusz <the1st@whoai.am>
 
 pub(super) const AUTO_HELP: &str =
@@ -152,11 +152,23 @@ RELATED COMMANDS:
 pub(super) const FIND_HELP: &str = "loct find - Semantic search for symbols and parameters
 
 USAGE:
-    loct find [QUERY] [OPTIONS]
+    loct find [QUERY...] [OPTIONS]
 
 DESCRIPTION:
     Semantic search for symbols (functions, classes, types) AND function parameters.
     Uses regex patterns to match names in your codebase.
+
+    Query modes:
+    - Split-mode (multiple args): `loct find Foo Bar Baz`
+        Runs separate searches per term and prints a cross-match summary of files
+        that match 2+ queries.
+    - AND-mode (single arg with spaces): `loct find \"Foo Bar Baz\"`
+        Treats whitespace as AND and prints only the intersection (files matching
+        all terms). This avoids the legacy \"auto-OR\" behavior.
+    - Regex OR (explicit `|`): `loct find \"Foo|Bar|Baz\"`
+        Preserves regex OR and enables built-in cross-match output.
+    - Legacy OR: `loct find --or Foo Bar Baz`
+        Forces old behavior (combines terms with `|`).
 
     Returns three types of matches:
     - Symbol Matches: exported functions, classes, types
@@ -167,6 +179,7 @@ DESCRIPTION:
     NOT dead code detection - use 'loct dead' or 'loct twins'.
 
 OPTIONS:
+    --or                Force legacy OR for multi-arg queries (Foo|Bar|Baz)
     --symbol <PATTERN>   Search for symbols matching regex
     --file <PATTERN>     Search for files matching regex
     --similar <SYMBOL>   Find symbols with similar names (fuzzy)
@@ -177,10 +190,14 @@ OPTIONS:
     --help, -h           Show this help message
 
 EXAMPLES:
-    loct find request              # Find 'request' in symbols AND params
-    loct find --symbol \".*Config$\" # Regex: symbols ending with Config
-    loct find --file \"utils\"       # Files containing \"utils\" in path
-    loct find --dead --exported    # Dead exported symbols
+    loct find request                   # Find 'request' in symbols AND params
+    loct find Props Options ViewModel   # Split-mode + cross-match summary
+    loct find \"Props Options\"          # AND-mode (intersection)
+    loct find \"Props|Options|ViewModel\" # Regex OR (explicit)
+    loct find --or Props Options        # Legacy OR (Props|Options)
+    loct find --symbol \".*Config$\"      # Regex: symbols ending with Config
+    loct find --file \"utils\"            # Files containing \"utils\" in path
+    loct find --dead --exported         # Dead exported symbols
 
 OUTPUT:
     === Symbol Matches (10) ===
@@ -397,13 +414,64 @@ OPTIONS:
     --sarif              Emit SARIF
     --tauri              Apply Tauri presets
     --fail               Exit non-zero on findings
+    --deep               Include ts/react/memory lint checks
+    --ts                 Include TypeScript lint checks
+    --react              Include React lint checks
+    --memory             Include memory leak lint checks
     --no-duplicates      Hide duplicate sections in CLI output
     --no-dynamic-imports Hide dynamic import sections in CLI output
     --help, -h           Show this help message
 
 EXAMPLES:
     loct lint
+    loct lint --deep
     loct lint --fail --sarif";
+
+pub(super) const PIPELINES_HELP: &str = "loct pipelines - Pipeline summary (events/commands/risks)
+
+USAGE:
+    loct pipelines [PATHS...]
+
+DESCRIPTION:
+    Prints a concise pipeline summary (events, commands, risk buckets)
+    using the current snapshot.
+
+OPTIONS:
+    --help, -h        Show this help message
+
+EXAMPLES:
+    loct pipelines
+    loct pipelines .";
+
+pub(super) const INSIGHTS_HELP: &str = "loct insights - AI insights summary
+
+USAGE:
+    loct insights [PATHS...]
+
+DESCRIPTION:
+    Emits the AI insight hints (huge files, cross-language stems, missing handlers).
+
+OPTIONS:
+    --help, -h        Show this help message
+
+EXAMPLES:
+    loct insights
+    loct insights .";
+
+pub(super) const MANIFESTS_HELP: &str = "loct manifests - Manifest summaries
+
+USAGE:
+    loct manifests [PATHS...]
+
+DESCRIPTION:
+    Prints manifest summaries from snapshot metadata (package.json, Cargo.toml, pyproject).
+
+OPTIONS:
+    --help, -h        Show this help message
+
+EXAMPLES:
+    loct manifests
+    loct manifests .";
 
 pub(super) const REPORT_HELP: &str = "loct report - Generate HTML/JSON reports
 
@@ -710,8 +778,10 @@ DESCRIPTION:
     This is semantic coverage - not 'how many lines' but 'what functionality'.
 
 OPTIONS:
-    --handlers-only       Only show handler gaps (skip events/exports)
-    --events-only         Only show event gaps (skip handlers/exports)
+    --handlers            Only show handler gaps (skip events/exports)
+    --events              Only show event gaps (skip handlers/exports)
+    --tests               Show structural test coverage report
+    --gaps                Show coverage gap analysis (default)
     --min-severity <LVL>  Filter by minimum severity: critical, high, medium, low
     --json                Output as JSON for programmatic use
     --help, -h            Show this help message
@@ -721,7 +791,8 @@ ARGUMENTS:
 
 EXAMPLES:
     loct coverage                          # Show all coverage gaps
-    loct coverage --handlers-only          # Focus on untested handlers
+    loct coverage --handlers              # Focus on untested handlers
+    loct coverage --tests                 # Structural test coverage
     loct coverage --min-severity high      # Only critical/high issues
     loct coverage --json                   # Machine-readable output
 
@@ -1223,3 +1294,80 @@ RELATED COMMANDS:
     loct audit     Full audit without categorization
     loct dead      Detailed dead export analysis
     loct cycles    Detailed cycle analysis";
+
+pub(super) const PLAN_HELP: &str = "loct plan - Generate architectural refactoring plan
+
+USAGE:
+    loct plan [OPTIONS] [PATHS...]
+    loct p [OPTIONS] [PATHS...]
+
+DESCRIPTION:
+    Analyzes module coupling and generates a safe refactoring plan.
+    Detects architectural layers (UI, App, Kernel, Infra) and suggests
+    file moves ordered by risk level (LOW first).
+
+    The plan includes:
+    - Layer detection via path heuristics
+    - Risk scoring based on consumer count and file size
+    - Cyclic dependency warnings
+    - Re-export shim generation for backward compatibility
+
+OPTIONS:
+    --target-layout <SPEC>   Custom layer mapping (e.g., \"core=src/kernel,ui=src/views\")
+    --markdown               Output as markdown (default)
+    --json                   Output as JSON
+    --script                 Output as executable shell script
+    --all                    Generate all formats (.md, .json, .sh)
+    --output, -o <PATH>      Output file path (without extension for --all)
+    --no-open                Don't auto-open the generated report
+    --include-tests          Include test files in analysis
+    --min-coupling <N>       Minimum coupling score to include (0.0-1.0)
+    --max-module-size <N>    Maximum module LOC before suggesting split
+    --help, -h               Show this help message
+
+ARGUMENTS:
+    [PATHS...]               Directory/directories to analyze (default: current directory)
+
+EXAMPLES:
+    loct plan                          # Analyze current directory
+    loct plan src/features             # Analyze specific directory
+    loct plan src app                  # Analyze multiple targets
+    loct plan --all -o refactor-2026   # Generate all formats
+    loct plan --json                   # Output JSON to stdout
+    loct plan --script > migrate.sh    # Generate executable script
+
+OUTPUT FORMATS:
+
+    Markdown (default):
+    - Summary with file counts and risk breakdown
+    - Layer distribution before/after
+    - Phased execution plan (LOW -> MEDIUM -> HIGH risk)
+    - Git commands for each phase
+    - Shim generation instructions
+
+    Shell Script (--script):
+    - Executable bash script with phases
+    - Dry-run support: ./migrate.sh --dry
+    - Phase selection: ./migrate.sh 1
+
+    JSON (--json):
+    - Full RefactorPlan structure
+    - Moves, shims, cyclic groups, stats
+
+LAYER DETECTION:
+    UI       components/, views/, pages/, ui/, widgets/
+    App      hooks/, services/, stores/, state/, providers/
+    Kernel   core/, domain/, models/, entities/, business/
+    Infra    utils/, helpers/, lib/, adapters/, api/
+    Test     tests/, __tests__/, .test., .spec.
+
+RISK LEVELS:
+    LOW      Few consumers (<5), small file (<200 LOC), not in cycle
+    MEDIUM   Moderate consumers (5-10), medium file (200-500 LOC)
+    HIGH     Many consumers (>10), large file (>500 LOC), or in cycle
+
+RELATED COMMANDS:
+    loct impact <file>   What breaks if you modify this file
+    loct focus <dir>     Holographic context for a directory
+    loct cycles          Detect circular imports
+    loct audit           Full codebase audit";

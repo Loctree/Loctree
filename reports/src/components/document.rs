@@ -3,13 +3,13 @@
 //! Implements the App Shell layout with Sidebar and Main Content areas.
 
 use super::{
-    Icon, ReportSectionView, ICON_ARROWS_CLOCKWISE, ICON_CLIPBOARD_LIST, ICON_COPY, ICON_FLASK,
-    ICON_GHOST, ICON_GRAPH, ICON_LIGHTNING, ICON_PLUG, ICON_SQUARES_FOUR, ICON_TREE_STRUCTURE,
-    ICON_TWINS, ICON_USERS,
+    ICON_ARROWS_CLOCKWISE, ICON_CLIPBOARD_LIST, ICON_COPY, ICON_FLASK, ICON_GHOST, ICON_GRAPH,
+    ICON_LIGHTNING, ICON_PLUG, ICON_SQUARES_FOUR, ICON_TREE_STRUCTURE, ICON_TWINS, ICON_USERS,
+    Icon, ReportSectionView,
 };
+use crate::JsAssets;
 use crate::styles::{CSP, REPORT_CSS};
 use crate::types::ReportSection;
-use crate::JsAssets;
 use leptos::prelude::*;
 
 // Inline data URI for the loctree logo (ensures logo renders offline in reports)
@@ -100,6 +100,10 @@ pub fn ReportDocument(
                                 <Icon path=ICON_TWINS class="icon-sm" />
                                 "Twins"
                             </button>
+                            <button class="nav-item" data-tab="refactor">
+                                <Icon path=ICON_TREE_STRUCTURE class="icon-sm" />
+                                "Refactor"
+                            </button>
                             <button class="nav-item" data-tab="coverage">
                                 <Icon path=ICON_FLASK class="icon-sm" />
                                 "Coverage"
@@ -120,7 +124,7 @@ pub fn ReportDocument(
                                 <span id="test-toggle-text">"Hide Tests"</span>
                             </button>
                             <div style="margin-top: 8px; font-size: 11px;">
-                                "loctree v0.8.4"
+                                "loctree v0.8.11"
                                 <br />
                                 <span style="color:var(--theme-text-tertiary)">"Snapshot"</span>
                             </div>
@@ -438,6 +442,16 @@ const APP_SCRIPT: &str = r#"
       if (document.querySelector('.split-panel-container')?.style.display !== 'none') {
           drawPipelineConnections();
       }
+  });
+
+  // 3g. Refactor Phase Toggle - collapse/expand phases
+  document.querySelectorAll('.phase-header[data-toggle="phase"]').forEach(header => {
+      header.addEventListener('click', () => {
+          const card = header.closest('.phase-card');
+          if (card) {
+              card.classList.toggle('collapsed');
+          }
+      });
   });
 
   // 4. Test Files Toggle - Hide/Show test file rows

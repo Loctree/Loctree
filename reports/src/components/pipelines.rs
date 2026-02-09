@@ -9,7 +9,7 @@
 //! Uses vanilla JS for interactivity (no WASM hydration needed)
 
 use crate::components::icons::{
-    Icon, ICON_CHECK_CIRCLE, ICON_GHOST, ICON_LIGHTNING, ICON_PLUG, ICON_WARNING_CIRCLE,
+    ICON_CHECK_CIRCLE, ICON_GHOST, ICON_LIGHTNING, ICON_PLUG, ICON_WARNING_CIRCLE, Icon,
 };
 use crate::types::CommandBridge;
 use leptos::prelude::*;

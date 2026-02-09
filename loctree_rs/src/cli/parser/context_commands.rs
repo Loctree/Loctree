@@ -207,6 +207,8 @@ USAGE:
 OPTIONS:
     --handlers       Show only handler coverage gaps
     --events         Show only event coverage gaps
+    --tests          Show structural test coverage report
+    --gaps           Show coverage gap analysis (default)
     --min-severity <LEVEL>
                      Filter by minimum severity (critical/high/medium/low)
     --json           Output as JSON
@@ -224,12 +226,20 @@ EXAMPLES:
     while i < args.len() {
         let arg = &args[i];
         match arg.as_str() {
-            "--handlers" => {
+            "--handlers" | "--handlers-only" => {
                 opts.handlers_only = true;
                 i += 1;
             }
-            "--events" => {
+            "--events" | "--events-only" => {
                 opts.events_only = true;
+                i += 1;
+            }
+            "--tests" => {
+                opts.tests = true;
+                i += 1;
+            }
+            "--gaps" => {
+                opts.gaps = true;
                 i += 1;
             }
             "--min-severity" => {

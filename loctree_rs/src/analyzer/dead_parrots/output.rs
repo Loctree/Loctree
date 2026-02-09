@@ -227,7 +227,7 @@ pub fn print_shadow_exports(shadows: &[ShadowExport], output: OutputMode) {
             } else {
                 shadow.used_file.clone()
             };
-            println!("    ✓ USED: {}", used_location);
+            println!("    [OK] USED: {}", used_location);
 
             // Show the DEAD files
             for dead_file in &shadow.dead_files {
@@ -236,7 +236,7 @@ pub fn print_shadow_exports(shadows: &[ShadowExport], output: OutputMode) {
                 } else {
                     dead_file.file.clone()
                 };
-                println!("    ✗ DEAD: {} ({} LOC)", dead_location, dead_file.loc);
+                println!("    [X] DEAD: {} ({} LOC)", dead_location, dead_file.loc);
             }
 
             if shadow.total_dead_loc > 0 {

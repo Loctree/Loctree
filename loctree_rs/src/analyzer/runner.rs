@@ -27,7 +27,7 @@ const DEFAULT_EXCLUDE_REPORT_PATTERNS: &[&str] =
     &["**/__tests__/**", "scripts/semgrep-fixtures/**"];
 
 const SCHEMA_NAME: &str = "loctree-json";
-const SCHEMA_VERSION: &str = "1.2.0";
+const SCHEMA_VERSION: &str = crate::snapshot::SNAPSHOT_SCHEMA_VERSION;
 
 pub fn default_analyzer_exts() -> HashSet<String> {
     [
@@ -336,16 +336,15 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         })?
     };
     if parsed.auto_outputs {
-        let snapshot_root = if root_list.len() == 1 {
-            root_list
-                .first()
-                .cloned()
-                .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
-        } else {
-            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-        };
+        let snapshot_root = crate::snapshot::resolve_snapshot_root(root_list);
 
-        match crate::snapshot::write_auto_artifacts(&snapshot_root, &scan_results, &parsed) {
+        match crate::snapshot::write_auto_artifacts(
+            &snapshot_root,
+            root_list,
+            &scan_results,
+            &parsed,
+            None,
+        ) {
             Ok(paths) => {
                 if !paths.is_empty() {
                     println!("Artifacts saved under ./.loctree:");
@@ -369,6 +368,14 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         global_analyses,
         ..
     } = scan_results;
+
+    let mut dead_ok_globs: Vec<String> = parsed
+        .root_list
+        .iter()
+        .flat_map(|root| crate::fs_utils::load_loctignore_dead_ok_globs(root))
+        .collect();
+    dead_ok_globs.sort();
+    dead_ok_globs.dedup();
 
     if let Some(sym) = &parsed.symbol {
         let result = search_symbol(sym, &global_analyses);
@@ -413,6 +420,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                 python_library_mode: parsed.python_library,
                 include_ambient: false,
                 include_dynamic: false,
+                dead_ok_globs: dead_ok_globs.clone(),
             },
         );
         // Apply --focus and --exclude-report filters to dead exports
@@ -554,6 +562,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                 python_library_mode: parsed.python_library,
                 include_ambient: false,
                 include_dynamic: false,
+                dead_ok_globs: dead_ok_globs.clone(),
             },
         );
 
@@ -749,6 +758,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
                 python_library_mode: parsed.python_library,
                 include_ambient: false,
                 include_dynamic: false,
+                dead_ok_globs,
             },
         );
         let dead_count = dead_exports.len();

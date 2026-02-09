@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
+use super::dist_vlq::decode_vlq_value;
 use crate::snapshot::Snapshot;
 use crate::types::FileAnalysis;
 
@@ -49,34 +50,6 @@ pub struct DeadBundleExport {
     pub line: usize,
     pub name: String,
     pub kind: String,
-}
-
-const VLQ_BASE64_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-fn decode_base64_char(c: char) -> Option<i32> {
-    VLQ_BASE64_CHARS
-        .iter()
-        .position(|&ch| ch == c as u8)
-        .map(|pos| pos as i32)
-}
-
-fn decode_vlq_value(chars: &mut impl Iterator<Item = char>) -> Option<i32> {
-    let first_char = chars.next()?;
-    let mut value = decode_base64_char(first_char)?;
-    let negative = (value & 1) != 0;
-    let mut result = (value >> 1) & 0xF;
-    let mut shift = 4;
-    let mut continuation = (value & 0x20) != 0;
-
-    while continuation {
-        let ch = chars.next()?;
-        value = decode_base64_char(ch)?;
-        result |= (value & 0x1F) << shift;
-        shift += 5;
-        continuation = (value & 0x20) != 0;
-    }
-
-    Some(if negative { -result } else { result })
 }
 
 fn parse_mappings(mappings: &str) -> Vec<SourceMapping> {
@@ -256,19 +229,20 @@ pub fn load_or_scan_src(src_dir: &Path) -> Result<Snapshot, String> {
             src_dir.display()
         ));
     }
-    match Snapshot::load(src_dir) {
+    let root_list = vec![src_dir.to_path_buf()];
+    let snapshot_root = crate::snapshot::resolve_snapshot_root(&root_list);
+    match Snapshot::load(&snapshot_root) {
         Ok(s) => Ok(s),
         Err(_) => {
             use crate::args::ParsedArgs;
-            use std::path::PathBuf;
             let parsed = ParsedArgs {
                 use_gitignore: true,
                 ..Default::default()
             };
             // Use quiet mode to suppress command bridge summary (not relevant for dist analysis)
-            crate::snapshot::run_init_with_options(&[PathBuf::from(src_dir)], &parsed, true)
+            crate::snapshot::run_init_with_options(&root_list, &parsed, true)
                 .map_err(|e| format!("Failed to scan source directory: {}", e))?;
-            Snapshot::load(src_dir)
+            Snapshot::load(&snapshot_root)
                 .map_err(|e| format!("Failed to load snapshot after scan: {}", e))
         }
     }

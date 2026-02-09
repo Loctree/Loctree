@@ -25,7 +25,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: pip install loctree-suite || cargo install loctree --locked
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo install loctree --locked
       - run: loct auto
       - run: |
           HEALTH=$(jq -r '.summary.health_score' .loctree/agent.json)
@@ -66,9 +67,6 @@ The `agent.json` contains a `health_score` (0-100):
 ```bash
 # Extract with jq
 HEALTH=$(jq -r '.summary.health_score' .loctree/agent.json)
-
-# Or with Python
-python3 -c "import json; print(json.load(open('.loctree/agent.json'))['summary']['health_score'])"
 ```
 
 ### Score Interpretation
@@ -102,4 +100,4 @@ Generate SARIF for GitHub Code Scanning:
 
 ---
 
-Created by M&K (c)2025 The LibraxisAI Team
+Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team

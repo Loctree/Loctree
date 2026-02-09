@@ -1,5 +1,9 @@
 #!/bin/bash
 export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+
+# Quick exit if jq unavailable (has grep fallback but jq preferred)
+command -v jq >/dev/null 2>&1 || exit 0
+
 # ============================================================================
 # loct-smart-suggest.sh - Context-aware loct suggestions for Claude Code
 # ============================================================================

@@ -6,7 +6,7 @@
 //! - Function calls
 //! - Bare class references (return statements, isinstance, issubclass, raise)
 //!
-//! Created by M&K (c)2025 The LibraxisAI Team
+//! Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team
 //! Co-Authored-By: Maciej <void@div0.space> & Klaudiusz <the1st@whoai.am>
 
 use super::helpers::{
@@ -244,7 +244,6 @@ pub(super) fn extract_python_function_calls(content: &str, local_uses: &mut Vec<
 /// - `issubclass(x, ClassName)` - class as function argument
 /// - `isinstance(obj, MyClass)` - class as function argument
 /// - `raise CustomError` - exception class names
-#[allow(dead_code)]
 pub(super) fn extract_bare_class_references(content: &str, local_uses: &mut Vec<String>) {
     let bytes = content.as_bytes();
     let len = bytes.len();

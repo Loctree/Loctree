@@ -3,8 +3,6 @@
 
 set -e
 
-VERSION="${VERSION:-0.8.4}"
-
 PLATFORMS=(
   "darwin-x64:macOS Intel (x64):darwin:x64"
   "linux-arm64-gnu:Linux ARM64 (glibc):linux:arm64"
@@ -24,7 +22,7 @@ for platform_spec in "${PLATFORMS[@]}"; do
   cat > "$dir/package.json" << PACKAGE_EOF
 {
   "name": "@loctree/$platform",
-  "version": "$VERSION",
+  "version": "0.6.14",
   "description": "loctree binary for $desc",
   "keywords": ["loctree", "$os", "$cpu"],
   "license": "MIT",

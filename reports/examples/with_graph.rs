@@ -3,9 +3,8 @@
 //! Run with: `cargo run --example with_graph`
 
 use report_leptos::{
-    render_report,
+    JsAssets, render_report,
     types::{AiInsight, GraphComponent, GraphData, GraphNode, RankedDup, ReportSection},
-    JsAssets,
 };
 
 fn main() {

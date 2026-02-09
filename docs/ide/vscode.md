@@ -14,6 +14,17 @@ npm run compile
 
 Then in VSCode: `F1` → "Developer: Install Extension from Location" → select `editors/vscode`
 
+### VSIX (Recommended for forks like Cursor/Windsurf)
+
+```bash
+cd editors/vscode
+LOCTREE_LSP_PATH=/path/to/loctree-lsp npm run package
+```
+
+This bundles the `loctree-lsp` binary into `editors/vscode/bin/`.
+If `LOCTREE_LSP_PATH` is not set, the packager looks for
+`../../target/release/loctree-lsp` or an existing `loctree-lsp` in PATH.
+
 ### From Marketplace (Coming Soon)
 
 ```
@@ -69,6 +80,9 @@ In VSCode settings (`Ctrl+,`):
 |---------|---------|-------------|
 | `serverPath` | auto-detect | Path to loctree-lsp binary |
 | `autoRefresh` | `false` | Re-scan on file save |
+| `autoDownload` | `true` | Download loctree-lsp if missing |
+| `downloadBaseUrl` | (empty) | Override repo URL for downloads |
+| `downloadTag` | `latest` | Release tag for downloads |
 | `trace.server` | `off` | LSP message logging |
 
 ## Status Bar
@@ -93,7 +107,7 @@ Open command palette (`F1`) and search for "Loctree":
 
 ## Requirements
 
-- Loctree CLI installed (`cargo install loctree`)
+- Loctree CLI installed (`cargo install loctree`) or bundled `loctree-lsp`
 - Project must have `.loctree/` folder (run `loct` first)
 
 ## Troubleshooting
@@ -120,4 +134,4 @@ Click status bar → "Loctree: Refresh" or run `loct` in terminal.
 
 ---
 
-*Created by M&K (c)2025 The LibraxisAI Team*
+*Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team*

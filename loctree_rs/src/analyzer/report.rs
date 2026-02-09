@@ -1,8 +1,11 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 use super::barrels::BarrelAnalysis;
 use super::crowd::types::Crowd;
 use super::dead_parrots::DeadExport;
+use crate::refactor_plan::{Move, PlanStats, RefactorPhase, RefactorPlan, Shim};
 
 /// Confidence level for dead export and handler detection.
 ///
@@ -157,6 +160,32 @@ pub struct CommandBridge {
     pub emits_events: Vec<String>,
 }
 
+/// High-priority task for a first-shot plan (action + verify).
+#[derive(Clone, Serialize)]
+pub struct PriorityTask {
+    pub priority: u8,
+    pub kind: String,
+    pub target: String,
+    pub location: String,
+    pub why: String,
+    /// Risk severity of leaving it unfixed: high|medium|low
+    pub risk: String,
+    pub fix_hint: String,
+    pub verify_cmd: String,
+}
+
+/// High-connectivity file that makes a good context anchor.
+#[derive(Clone, Serialize)]
+pub struct HubFile {
+    pub path: String,
+    pub loc: usize,
+    pub imports_count: usize,
+    pub exports_count: usize,
+    pub importers_count: usize,
+    pub commands_count: usize,
+    pub slice_cmd: String,
+}
+
 #[derive(Clone, Default, Serialize)]
 pub struct TreeNode {
     pub path: String,
@@ -182,6 +211,15 @@ pub struct ReportSection {
     pub lazy_circular_imports: Vec<Vec<String>>,
     pub dynamic: Vec<(String, Vec<String>)>,
     pub analyze_limit: usize,
+    /// Report generation time (RFC3339)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub generated_at: Option<String>,
+    /// Schema name for artifact payload
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schema_name: Option<String>,
+    /// Schema version for artifact payload
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schema_version: Option<String>,
     pub missing_handlers: Vec<CommandGap>,
     /// Backend handlers that exist (`#[tauri::command]`) but are never
     /// registered via `tauri::generate_handler![...]`.
@@ -198,6 +236,12 @@ pub struct ReportSection {
     pub insights: Vec<AiInsight>,
     pub git_branch: Option<String>,
     pub git_commit: Option<String>,
+    /// Top actionable tasks (why + fix + verify)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub priority_tasks: Vec<PriorityTask>,
+    /// High-connectivity context anchors
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hub_files: Vec<HubFile>,
     /// Crowd analysis results (naming collision detection)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub crowds: Vec<Crowd>,
@@ -213,6 +257,9 @@ pub struct ReportSection {
     /// Overall health score 0-100 (higher is better)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health_score: Option<u8>,
+    /// Refactor plan data (architectural reorganization suggestions)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refactor_plan: Option<RefactorPlanForReport>,
 }
 
 /// Twins analysis data for the HTML report
@@ -224,6 +271,163 @@ pub struct TwinsData {
     pub exact_twins: Vec<super::twins::ExactTwin>,
     /// Barrel analysis (missing barrels, deep chains, inconsistent paths)
     pub barrel_chaos: BarrelAnalysis,
+}
+
+// ============================================================================
+// Refactor Plan Report Types
+// Vibecrafted with AI Agents by VetCoders (c)2026 VetCoders
+// ============================================================================
+
+/// A single file move formatted for the HTML report.
+#[derive(Clone, Default, Serialize)]
+pub struct RefactorMoveForReport {
+    /// Source file path
+    pub source: String,
+    /// Target file path
+    pub target: String,
+    /// Current architectural layer
+    pub current_layer: String,
+    /// Target architectural layer
+    pub target_layer: String,
+    /// Risk level (low, medium, high)
+    pub risk: String,
+    /// Lines of code in file
+    pub loc: usize,
+    /// Number of direct consumers (importers)
+    pub direct_consumers: usize,
+    /// Reason for move suggestion
+    pub reason: String,
+    /// Verification command
+    pub verify_cmd: String,
+}
+
+/// A shim suggestion formatted for the HTML report.
+#[derive(Clone, Default, Serialize)]
+pub struct RefactorShimForReport {
+    /// Original file path (where shim will be created)
+    pub old_path: String,
+    /// New file path (where code was moved)
+    pub new_path: String,
+    /// Number of importers that would need updating
+    pub importer_count: usize,
+    /// Generated shim code (pub use statement)
+    pub code: String,
+}
+
+/// A phase in the refactor execution plan formatted for HTML report.
+#[derive(Clone, Default, Serialize)]
+pub struct RefactorPhaseForReport {
+    /// Phase name (e.g., "Phase 1: LOW Risk")
+    pub name: String,
+    /// Risk level for this phase
+    pub risk: String,
+    /// Moves in this phase
+    pub moves: Vec<RefactorMoveForReport>,
+    /// Git commands for this phase
+    pub git_script: String,
+}
+
+/// Statistics about the refactor plan formatted for HTML report.
+#[derive(Clone, Default, Serialize)]
+pub struct RefactorStatsForReport {
+    /// Total files analyzed
+    pub total_files: usize,
+    /// Files that need to move
+    pub files_to_move: usize,
+    /// Shims that should be created
+    pub shims_needed: usize,
+    /// Layer distribution before refactoring (layer -> count)
+    pub layer_before: HashMap<String, usize>,
+    /// Layer distribution after refactoring (layer -> count)
+    pub layer_after: HashMap<String, usize>,
+    /// Risk breakdown (risk level -> count)
+    pub by_risk: HashMap<String, usize>,
+}
+
+/// Complete refactor plan data formatted for the HTML report.
+#[derive(Clone, Default, Serialize)]
+pub struct RefactorPlanForReport {
+    /// Target directory analyzed
+    pub target: String,
+    /// Execution phases ordered by risk (LOW -> MEDIUM -> HIGH)
+    pub phases: Vec<RefactorPhaseForReport>,
+    /// Suggested shims for backward compatibility
+    pub shims: Vec<RefactorShimForReport>,
+    /// Groups of files with cyclic dependencies
+    pub cyclic_groups: Vec<Vec<String>>,
+    /// Statistics summary
+    pub stats: RefactorStatsForReport,
+}
+
+impl From<&RefactorPlan> for RefactorPlanForReport {
+    fn from(plan: &RefactorPlan) -> Self {
+        Self {
+            target: plan.target.clone(),
+            phases: plan
+                .phases
+                .iter()
+                .map(RefactorPhaseForReport::from)
+                .collect(),
+            shims: plan.shims.iter().map(RefactorShimForReport::from).collect(),
+            cyclic_groups: plan.cyclic_groups.clone(),
+            stats: RefactorStatsForReport::from(&plan.stats),
+        }
+    }
+}
+
+impl From<&RefactorPhase> for RefactorPhaseForReport {
+    fn from(phase: &RefactorPhase) -> Self {
+        Self {
+            name: phase.name.clone(),
+            risk: phase.risk.label().to_lowercase(),
+            moves: phase
+                .moves
+                .iter()
+                .map(RefactorMoveForReport::from)
+                .collect(),
+            git_script: phase.git_script.clone(),
+        }
+    }
+}
+
+impl From<&Move> for RefactorMoveForReport {
+    fn from(mv: &Move) -> Self {
+        Self {
+            source: mv.source.clone(),
+            target: mv.target.clone(),
+            current_layer: mv.current_layer.display_name().to_string(),
+            target_layer: mv.target_layer.display_name().to_string(),
+            risk: mv.risk.label().to_lowercase(),
+            loc: mv.loc,
+            direct_consumers: mv.direct_consumers,
+            reason: mv.reason.clone(),
+            verify_cmd: mv.verify_cmd.clone(),
+        }
+    }
+}
+
+impl From<&Shim> for RefactorShimForReport {
+    fn from(shim: &Shim) -> Self {
+        Self {
+            old_path: shim.old_path.clone(),
+            new_path: shim.new_path.clone(),
+            importer_count: shim.importer_count,
+            code: shim.code.clone(),
+        }
+    }
+}
+
+impl From<&PlanStats> for RefactorStatsForReport {
+    fn from(stats: &PlanStats) -> Self {
+        Self {
+            total_files: stats.total_files,
+            files_to_move: stats.files_to_move,
+            shims_needed: stats.shims_needed,
+            layer_before: stats.layer_before.clone(),
+            layer_after: stats.layer_after.clone(),
+            by_risk: stats.by_risk.clone(),
+        }
+    }
 }
 
 #[cfg(test)]

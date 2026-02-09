@@ -35,6 +35,7 @@ pub mod cycles;
 pub mod dart;
 pub mod dead_parrots;
 pub mod dist;
+pub mod dist_vlq;
 pub mod entrypoints;
 pub mod findings;
 pub mod for_ai;
@@ -44,12 +45,15 @@ mod graph;
 pub mod health_score;
 pub mod html;
 pub(crate) mod html_analyzer;
-mod insights;
+pub mod insights;
 pub mod js;
+pub mod manifests;
+pub mod memory_lint;
 pub mod open_server;
 pub mod output;
 pub mod pipelines;
 pub mod py;
+pub mod react_lint;
 pub mod regexes;
 pub mod report;
 pub mod resolvers;
@@ -61,11 +65,26 @@ pub mod scan;
 pub mod search;
 pub mod test_coverage;
 pub mod trace;
+pub mod ts_lint;
 mod tsconfig;
 pub mod twins;
 
 pub(super) fn offset_to_line(content: &str, offset: usize) -> usize {
     content[..offset].bytes().filter(|b| *b == b'\n').count() + 1
+}
+
+/// Check if a file path looks like a test file.
+/// Used by ts_lint and memory_lint to adjust severity.
+pub fn is_test_file(path: &str) -> bool {
+    let p = path.to_lowercase();
+    p.contains(".test.")
+        || p.contains(".spec.")
+        || p.contains("__tests__")
+        || p.contains("/test/")
+        || p.contains("/tests/")
+        || p.contains("test-utils")
+        || p.ends_with("setup.ts")
+        || p.ends_with("setup.tsx")
 }
 
 /// Build an open URL for IDE integration

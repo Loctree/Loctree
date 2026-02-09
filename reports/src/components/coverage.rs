@@ -1,6 +1,6 @@
 //! Coverage gaps panel component - shows test coverage gaps
 
-use crate::components::icons::{Icon, ICON_FLASK};
+use crate::components::icons::{ICON_FLASK, Icon};
 use crate::types::{CoverageGap, GapKind, Severity};
 use leptos::prelude::*;
 

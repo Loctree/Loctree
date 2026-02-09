@@ -8,7 +8,7 @@
 //! - Dynamic code generation detection (exec/eval/compile)
 //! - Package metadata (typed packages, namespace packages)
 //!
-//! Created by M&K (c)2025 The LibraxisAI Team
+//! Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team
 //! Co-Authored-By: Maciej <void@div0.space> & Klaudiusz <the1st@whoai.am>
 
 mod concurrency;
@@ -39,8 +39,8 @@ use usages::{
 // External imports
 use super::regexes::{regex_py_dynamic_dunder, regex_py_dynamic_importlib};
 use crate::types::{
-    ExportSymbol, FileAnalysis, ImportEntry, ImportKind, ImportSymbol, ParamInfo, ReexportEntry,
-    ReexportKind,
+    ExportSymbol, FileAnalysis, ImportEntry, ImportKind, ImportSymbol, LocalSymbol, ParamInfo,
+    ReexportEntry, ReexportKind, SymbolUsage,
 };
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -165,6 +165,79 @@ fn parse_single_param(param: &str) -> Option<ParamInfo> {
     })
 }
 
+fn collect_symbol_usages_from_lines(
+    lines: &[&str],
+    names: &HashSet<String>,
+    max: usize,
+) -> Vec<SymbolUsage> {
+    let mut usages = Vec::new();
+    let mut seen: HashSet<(String, usize)> = HashSet::new();
+
+    for (idx, line) in lines.iter().enumerate() {
+        if usages.len() >= max {
+            break;
+        }
+        let mut start: Option<usize> = None;
+        for (i, ch) in line.char_indices() {
+            let is_ident = ch.is_ascii_alphanumeric() || ch == '_';
+            if is_ident {
+                if start.is_none() {
+                    start = Some(i);
+                }
+                continue;
+            }
+            if let Some(begin) = start.take() {
+                let token = &line[begin..i];
+                let Some(first) = token.chars().next() else {
+                    continue;
+                };
+                if !(first.is_ascii_alphabetic() || first == '_') {
+                    continue;
+                }
+                if !names.contains(token) {
+                    continue;
+                }
+                let line_num = idx + 1;
+                if seen.insert((token.to_string(), line_num)) {
+                    usages.push(SymbolUsage {
+                        name: token.to_string(),
+                        line: line_num,
+                        context: line.trim().to_string(),
+                    });
+                    if usages.len() >= max {
+                        break;
+                    }
+                }
+            }
+        }
+        if usages.len() >= max {
+            break;
+        }
+        if let Some(begin) = start.take() {
+            let token = &line[begin..];
+            let Some(first) = token.chars().next() else {
+                continue;
+            };
+            if !(first.is_ascii_alphabetic() || first == '_') {
+                continue;
+            }
+            if !names.contains(token) {
+                continue;
+            }
+            let line_num = idx + 1;
+            if seen.insert((token.to_string(), line_num)) {
+                usages.push(SymbolUsage {
+                    name: token.to_string(),
+                    line: line_num,
+                    context: line.trim().to_string(),
+                });
+            }
+        }
+    }
+
+    usages
+}
+
 /// Process a `from X import Y, Z` statement and update analysis.
 ///
 /// This is extracted to handle both single-line and multiline imports uniformly.
@@ -190,6 +263,7 @@ fn process_from_import(
     }
 
     let mut entry = ImportEntry::new(module.to_string(), ImportKind::Static);
+    entry.line = Some(line_num);
     let (resolved, resolution) =
         resolve_python_import(module, path, root, py_roots, extensions, stdlib);
     entry.resolution = resolution;
@@ -295,6 +369,7 @@ pub(crate) fn analyze_py_file(
     stdlib: &HashSet<String>,
 ) -> FileAnalysis {
     let mut analysis = FileAnalysis::new(relative);
+    let mut local_symbols: Vec<LocalSymbol> = Vec::new();
     let mut type_check_stack: Vec<usize> = Vec::new();
     let mut pending_callback_decorator = false;
     let mut pending_framework_decorator = false;
@@ -445,6 +520,7 @@ pub(crate) fn analyze_py_file(
                 }
                 if !name.is_empty() {
                     let mut entry = ImportEntry::new(name.to_string(), ImportKind::Static);
+                    entry.line = Some(line_num);
                     let (resolved, resolution) =
                         resolve_python_import(name, path, root, py_roots, extensions, stdlib);
                     entry.resolution = resolution;
@@ -537,6 +613,16 @@ pub(crate) fn analyze_py_file(
                     (name_part.trim(), None)
                 };
 
+                if !name.is_empty() {
+                    local_symbols.push(LocalSymbol {
+                        name: name.to_string(),
+                        kind: "class".to_string(),
+                        line: Some(line_num),
+                        context: line.trim().to_string(),
+                        is_exported: false,
+                    });
+                }
+
                 if indent == 0 && !name.starts_with('_') && !name.is_empty() {
                     analysis.exports.push(ExportSymbol::new(
                         name.to_string(),
@@ -582,6 +668,16 @@ pub(crate) fn analyze_py_file(
                 } else {
                     (rest.trim().trim_matches(':'), "")
                 };
+
+                if !name.is_empty() {
+                    local_symbols.push(LocalSymbol {
+                        name: name.to_string(),
+                        kind: "function".to_string(),
+                        line: Some(line_num),
+                        context: line.trim().to_string(),
+                        is_exported: false,
+                    });
+                }
 
                 if indent == 0 && !name.starts_with('_') && !name.is_empty() {
                     let params = parse_python_params(params_text);
@@ -654,6 +750,15 @@ pub(crate) fn analyze_py_file(
         }
     }
 
+    if !local_symbols.is_empty() {
+        let export_names: HashSet<String> =
+            analysis.exports.iter().map(|e| e.name.clone()).collect();
+        for symbol in &mut local_symbols {
+            symbol.is_exported = export_names.contains(&symbol.name);
+        }
+        analysis.local_symbols = local_symbols;
+    }
+
     // Detect Python entry points
     // 1. __main__.py files are package entry points
     if analysis.path.ends_with("__main__.py") {
@@ -696,6 +801,16 @@ pub(crate) fn analyze_py_file(
 
     // Detect Python concurrency race indicators
     analysis.py_race_indicators = detect_py_race_indicators(content);
+
+    if !analysis.local_uses.is_empty() {
+        let usage_names: HashSet<String> = analysis.local_uses.iter().cloned().collect();
+        let lines: Vec<&str> = content.lines().collect();
+        const MAX_USAGES_PER_FILE: usize = 1500;
+        let usages = collect_symbol_usages_from_lines(&lines, &usage_names, MAX_USAGES_PER_FILE);
+        if !usages.is_empty() {
+            analysis.symbol_usages = usages;
+        }
+    }
 
     analysis
 }
@@ -750,6 +865,39 @@ import sys
         assert!(!sys.is_type_checking);
         assert_eq!(sys.resolution, ImportResolutionKind::Stdlib);
         assert!(sys.resolved_path.is_none());
+    }
+
+    #[test]
+    fn python_local_symbols_and_usages() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path();
+        let path = root.join("sample.py");
+        let content =
+            "class Foo:\n    def method(self):\n        pass\n\ndef helper():\n    return Foo()\n";
+        std::fs::write(&path, content).expect("write sample.py");
+
+        let analysis = analyze_py_file(
+            content,
+            &path,
+            root,
+            Some(&py_exts()),
+            "sample.py".to_string(),
+            &[],
+            python_stdlib_set(),
+        );
+
+        assert!(
+            analysis.local_symbols.iter().any(|s| s.name == "Foo"),
+            "Foo should be in local_symbols"
+        );
+        assert!(
+            analysis.local_symbols.iter().any(|s| s.name == "helper"),
+            "helper should be in local_symbols"
+        );
+        assert!(
+            analysis.symbol_usages.iter().any(|u| u.name == "Foo"),
+            "Foo should appear in symbol_usages"
+        );
     }
 
     #[test]

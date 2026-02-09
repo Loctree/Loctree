@@ -9,7 +9,7 @@ use serde_json::json;
 use toml::Value;
 
 use crate::args::ParsedArgs;
-use crate::fs_utils::{GitIgnoreChecker, gather_files, normalise_ignore_patterns};
+use crate::fs_utils::{GitIgnoreChecker, gather_files};
 use crate::snapshot::Snapshot;
 use crate::types::{
     ColorMode, ExportIndex, FileAnalysis, ImportKind, Options, OutputMode, PayloadMap,
@@ -318,7 +318,8 @@ fn scan_single_root(
     root_path: &std::path::Path,
     cfg: &ScanConfig<'_>,
 ) -> io::Result<SingleRootResult> {
-    let ignore_paths = normalise_ignore_patterns(&cfg.parsed.ignore_patterns, root_path);
+    let ignore_matchers =
+        crate::fs_utils::build_ignore_matchers(&cfg.parsed.ignore_patterns, root_path);
     let root_canon = root_path
         .canonicalize()
         .unwrap_or_else(|_| root_path.to_path_buf());
@@ -333,7 +334,8 @@ fn scan_single_root(
 
     let options = Options {
         extensions,
-        ignore_paths,
+        ignore_paths: ignore_matchers.ignore_paths,
+        ignore_globs: ignore_matchers.ignore_globs,
         // --scan-all should ignore gitignore and include everything
         use_gitignore: cfg.parsed.use_gitignore && !cfg.parsed.scan_all,
         max_depth: cfg.parsed.max_depth,
@@ -689,6 +691,10 @@ fn scan_single_root(
         let is_test_fixture = super::classify::should_exclude_from_reports(&analysis.path);
         if !is_excluded_for_commands && !is_test_fixture {
             for call in &analysis.command_calls {
+                if call.name.contains('.') {
+                    // VSCode-style command IDs (e.g. "loctree.analyzeImpact") are not Tauri invokes.
+                    continue;
+                }
                 let mut key = call.name.clone();
                 if let Some(stripped) = key.strip_suffix("_command") {
                     key = stripped.to_string();
@@ -1268,6 +1274,7 @@ pub fn scan_results_from_snapshot(snapshot: &Snapshot) -> ScanResults {
             options: Options {
                 extensions: None,
                 ignore_paths: vec![],
+                ignore_globs: None,
                 use_gitignore: false,
                 max_depth: None,
                 color: ColorMode::Auto,

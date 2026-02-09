@@ -79,7 +79,7 @@ pub fn generate_markdown_report(findings: &AuditFindings, limit: usize) -> Strin
         .collect();
 
     if !breaking_cycles.is_empty() || !high_confidence_dead.is_empty() {
-        writeln!(out, "## 🔴 Critical (Action Required)\n").unwrap();
+        writeln!(out, "## [CRITICAL] Action Required\n").unwrap();
 
         if !breaking_cycles.is_empty() {
             writeln!(out, "### Breaking Cycles ({})\n", breaking_cycles.len()).unwrap();
@@ -139,7 +139,7 @@ pub fn generate_markdown_report(findings: &AuditFindings, limit: usize) -> Strin
         || !findings.twins.is_empty()
         || !findings.shadow_exports.is_empty()
     {
-        writeln!(out, "## 🟡 Warnings\n").unwrap();
+        writeln!(out, "## [WARNING] Review Recommended\n").unwrap();
 
         if !structural_cycles.is_empty() {
             writeln!(out, "### Structural Cycles ({})\n", structural_cycles.len()).unwrap();
@@ -228,7 +228,7 @@ pub fn generate_markdown_report(findings: &AuditFindings, limit: usize) -> Strin
 
     // Info section
     if !findings.orphan_files.is_empty() || !findings.crowds.is_empty() {
-        writeln!(out, "## 🔵 Info\n").unwrap();
+        writeln!(out, "## [INFO] For Reference\n").unwrap();
 
         if !findings.orphan_files.is_empty() {
             let total_orphan_loc: usize = findings.orphan_files.iter().map(|f| f.loc).sum();
@@ -270,7 +270,7 @@ pub fn generate_markdown_report(findings: &AuditFindings, limit: usize) -> Strin
     // Quick wins
     let quick_wins = calculate_quick_wins(findings);
     if !quick_wins.is_empty() {
-        writeln!(out, "## 🟢 Quick Wins\n").unwrap();
+        writeln!(out, "## [QUICK WIN] Easy Improvements\n").unwrap();
         for (i, win) in quick_wins.iter().enumerate().take(5) {
             writeln!(out, "{}. {}", i + 1, win).unwrap();
         }

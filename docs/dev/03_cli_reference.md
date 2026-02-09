@@ -470,4 +470,4 @@ make mux-tui
 
 ---
 
-Created by M&K (c)2025 The LibraxisAI Team
+Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team

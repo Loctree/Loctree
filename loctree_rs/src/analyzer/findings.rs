@@ -19,9 +19,15 @@ use crate::analyzer::dead_parrots::{
     DeadExport, DeadFilterConfig, ShadowExport, find_dead_exports,
 };
 use crate::analyzer::health_score::{HealthMetrics, calculate_health_score};
+use crate::analyzer::memory_lint::{MemoryLintIssue, MemoryLintSummary, lint_memory_file};
+use crate::analyzer::react_lint::{ReactLintIssue, ReactLintSummary, analyze_react_file};
 use crate::analyzer::report::RankedDup;
 use crate::analyzer::root_scan::ScanResults;
-use crate::snapshot::Snapshot;
+use crate::analyzer::ts_lint::{TsLintIssue, TsLintSummary, lint_ts_file};
+use crate::analyzer::twins::{
+    TwinCategory, categorize_twin, detect_exact_twins, find_dead_parrots,
+};
+use crate::snapshot::{EntrypointDriftSummary, Snapshot};
 use crate::types::FileAnalysis;
 
 /// Complete findings artifact for `.loctree/findings.json`
@@ -56,8 +62,24 @@ pub struct Findings {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub barrel_chaos: Vec<BarrelChaosEntry>,
 
+    /// React-specific lint issues (race conditions, memory leaks)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub react_lint: Vec<ReactLintIssue>,
+
+    /// TypeScript lint issues (any types, ts-ignore)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ts_lint: Vec<TsLintIssue>,
+
+    /// Memory leak issues (outside React hooks)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub memory_lint: Vec<MemoryLintIssue>,
+
     /// Quick wins: actionable suggestions with highest impact
     pub quick_wins: Vec<QuickWin>,
+
+    /// Drift between declared manifest roots and code entrypoints
+    #[serde(default, skip_serializing_if = "EntrypointDriftSummary::is_empty")]
+    pub entrypoint_drift: EntrypointDriftSummary,
 }
 
 /// Summary of all findings for quick health check
@@ -79,6 +101,15 @@ pub struct FindingsSummary {
     pub cycles: CycleCounts,
     /// Number of barrel chaos issues
     pub barrel_chaos: usize,
+    /// React lint issues summary
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub react_lint: Option<ReactLintSummary>,
+    /// TypeScript lint issues summary
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ts_lint: Option<TsLintSummary>,
+    /// Memory lint issues summary
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_lint: Option<MemoryLintSummary>,
 }
 
 /// Cycle counts by classification
@@ -191,6 +222,16 @@ impl Findings {
         let analyses: Vec<&FileAnalysis> = scan_results.global_analyses.iter().collect();
 
         // Dead exports
+        let mut dead_ok_globs: Vec<String> = snapshot
+            .metadata
+            .roots
+            .iter()
+            .flat_map(|root| {
+                crate::fs_utils::load_loctignore_dead_ok_globs(std::path::Path::new(root))
+            })
+            .collect();
+        dead_ok_globs.sort();
+        dead_ok_globs.dedup();
         let dead_filter = DeadFilterConfig {
             include_tests: false,
             include_helpers: false,
@@ -199,6 +240,7 @@ impl Findings {
             python_library_mode: config.python_library,
             include_ambient: false,
             include_dynamic: false,
+            dead_ok_globs,
         };
         let dead_parrots = find_dead_exports(
             &analyses.iter().cloned().cloned().collect::<Vec<_>>(),
@@ -232,8 +274,123 @@ impl Findings {
         // Shadow exports (TODO: implement proper shadow detection)
         let shadow_exports: Vec<ShadowExport> = Vec::new();
 
+        // React lint - analyze React/JSX files for race conditions
+        // We need to read file content from disk since FileAnalysis doesn't store content
+        let root_path = snapshot
+            .metadata
+            .roots
+            .first()
+            .map(std::path::PathBuf::from);
+
+        let react_lint: Vec<ReactLintIssue> = if let Some(root) = &root_path {
+            snapshot
+                .files
+                .iter()
+                .filter(|f| {
+                    matches!(
+                        std::path::Path::new(&f.path)
+                            .extension()
+                            .and_then(std::ffi::OsStr::to_str),
+                        Some("tsx") | Some("jsx") | Some("ts") | Some("js")
+                    )
+                })
+                .flat_map(|f| {
+                    let full_path = root.join(&f.path);
+                    if let Ok(content) = std::fs::read_to_string(&full_path) {
+                        analyze_react_file(&content, &full_path, f.path.clone())
+                    } else {
+                        Vec::new()
+                    }
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        // TypeScript lint - analyze TS/TSX files for type safety issues
+        let ts_lint: Vec<TsLintIssue> = if let Some(root) = &root_path {
+            snapshot
+                .files
+                .iter()
+                .filter(|f| {
+                    matches!(
+                        std::path::Path::new(&f.path)
+                            .extension()
+                            .and_then(std::ffi::OsStr::to_str),
+                        Some("ts") | Some("tsx")
+                    )
+                })
+                .flat_map(|f| {
+                    let full_path = root.join(&f.path);
+                    if let Ok(content) = std::fs::read_to_string(&full_path) {
+                        lint_ts_file(&full_path, &content)
+                    } else {
+                        Vec::new()
+                    }
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        // Memory lint - analyze JS/TS files for memory leak patterns (outside React hooks)
+        let memory_lint: Vec<MemoryLintIssue> = if let Some(root) = &root_path {
+            snapshot
+                .files
+                .iter()
+                .filter(|f| {
+                    matches!(
+                        std::path::Path::new(&f.path)
+                            .extension()
+                            .and_then(std::ffi::OsStr::to_str),
+                        Some("ts") | Some("tsx") | Some("js") | Some("jsx")
+                    )
+                })
+                .flat_map(|f| {
+                    let full_path = root.join(&f.path);
+                    if let Ok(content) = std::fs::read_to_string(&full_path) {
+                        lint_memory_file(&full_path, &content)
+                    } else {
+                        Vec::new()
+                    }
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+
         // Quick wins
-        let quick_wins = generate_quick_wins(&dead_parrots, &cycles, &duplicates, &barrel_chaos);
+        let quick_wins = generate_quick_wins(
+            &dead_parrots,
+            &cycles,
+            &duplicates,
+            &barrel_chaos,
+            &react_lint,
+            &ts_lint,
+            &memory_lint,
+        );
+
+        // Detect exact twins for health score consistency with for_ai.rs
+        let analyses_vec: Vec<_> = analyses.iter().cloned().cloned().collect();
+        let exact_twins = detect_exact_twins(&analyses_vec, false);
+
+        // Categorize twins: same-language vs cross-language
+        let (twins_same_language, _twins_cross_language): (Vec<_>, Vec<_>) = exact_twins
+            .iter()
+            .partition(|twin| matches!(categorize_twin(twin), TwinCategory::SameLanguage(_)));
+
+        // Use twins module's find_dead_parrots for consistency with for_ai.rs
+        // (this is different from DeadExport dead_parrots - twins dead_parrots are symbols with 0 imports)
+        let twins_result = find_dead_parrots(&analyses_vec, false, false);
+        let twins_dead_parrots = twins_result.dead_parrots.len();
+        let twins_same_lang_count = twins_same_language.len();
+
+        // Count cascade imports for health score consistency with for_ai.rs
+        let cascade_imports: usize = scan_results
+            .contexts
+            .iter()
+            .map(|ctx| ctx.cascades.len())
+            .sum();
 
         // Calculate summary
         let summary = calculate_summary(
@@ -243,6 +400,12 @@ impl Findings {
             &duplicates,
             &cycles,
             &barrel_chaos,
+            &react_lint,
+            &ts_lint,
+            &memory_lint,
+            twins_dead_parrots,
+            twins_same_lang_count,
+            cascade_imports,
         );
 
         Findings {
@@ -255,7 +418,11 @@ impl Findings {
             cycles,
             duplicates,
             barrel_chaos,
+            react_lint,
+            ts_lint,
+            memory_lint,
             quick_wins,
+            entrypoint_drift: snapshot.metadata.entrypoint_drift.clone(),
         }
     }
 
@@ -422,6 +589,9 @@ fn generate_quick_wins(
     cycles: &[CycleEntry],
     duplicates: &[DuplicateGroup],
     barrel_chaos: &[BarrelChaosEntry],
+    react_lint: &[ReactLintIssue],
+    ts_lint: &[TsLintIssue],
+    memory_lint: &[MemoryLintIssue],
 ) -> Vec<QuickWin> {
     let mut wins = Vec::new();
 
@@ -441,8 +611,9 @@ fn generate_quick_wins(
 
     // Breaking cycles
     for cycle in cycles {
-        if cycle.cycle_type == "breaking" && cycle.suggestion.is_some() {
-            let suggestion = cycle.suggestion.as_ref().unwrap();
+        if cycle.cycle_type == "breaking"
+            && let Some(suggestion) = &cycle.suggestion
+        {
             wins.push(QuickWin {
                 action: "break_cycle".to_string(),
                 file: cycle.files.first().cloned().unwrap_or_default(),
@@ -481,12 +652,55 @@ fn generate_quick_wins(
         }
     }
 
+    // React lint issues (high severity = race conditions)
+    let mut react_seen: HashSet<String> = HashSet::new();
+    for issue in react_lint {
+        if issue.severity == "high" && !react_seen.contains(&issue.file) {
+            react_seen.insert(issue.file.clone());
+            wins.push(QuickWin {
+                action: "fix_race_condition".to_string(),
+                file: issue.file.clone(),
+                reason: format!("{} (line {})", issue.message, issue.line),
+                saves_loc: None,
+            });
+        }
+    }
+
+    // TypeScript lint issues (high severity in prod = any types, ts-ignore)
+    let mut ts_seen: HashSet<String> = HashSet::new();
+    for issue in ts_lint {
+        if issue.severity == "high" && !ts_seen.contains(&issue.file) {
+            ts_seen.insert(issue.file.clone());
+            wins.push(QuickWin {
+                action: "fix_type_safety".to_string(),
+                file: issue.file.clone(),
+                reason: format!("{} (line {})", issue.message, issue.line),
+                saves_loc: None,
+            });
+        }
+    }
+
+    // Memory lint issues (high severity = subscription leaks, global intervals)
+    let mut mem_seen: HashSet<String> = HashSet::new();
+    for issue in memory_lint {
+        if issue.severity == "high" && !mem_seen.contains(&issue.file) {
+            mem_seen.insert(issue.file.clone());
+            wins.push(QuickWin {
+                action: "fix_memory_leak".to_string(),
+                file: issue.file.clone(),
+                reason: format!("{} (line {})", issue.message, issue.line),
+                saves_loc: None,
+            });
+        }
+    }
+
     // Limit to top 10 quick wins
     wins.truncate(10);
     wins
 }
 
 /// Calculate summary statistics
+#[allow(clippy::too_many_arguments)]
 fn calculate_summary(
     analyses: &[&FileAnalysis],
     dead_parrots: &[DeadExport],
@@ -494,6 +708,12 @@ fn calculate_summary(
     duplicates: &[DuplicateGroup],
     cycles: &[CycleEntry],
     barrel_chaos: &[BarrelChaosEntry],
+    react_lint: &[ReactLintIssue],
+    ts_lint: &[TsLintIssue],
+    memory_lint: &[MemoryLintIssue],
+    twins_dead_parrots: usize,
+    twins_same_language: usize,
+    cascade_imports: usize,
 ) -> FindingsSummary {
     let files = analyses.len();
     let loc: usize = analyses.iter().map(|a| a.loc).sum();
@@ -511,15 +731,19 @@ fn calculate_summary(
     }
 
     // Vector-based health score with log-normalization (unified with for_ai.rs)
+    // Now includes twins metrics for consistency with for_ai.rs health score
     let health_metrics = HealthMetrics {
         // CERTAIN: breaking cycles are critical
         breaking_cycles: cycle_counts.breaking,
-        // HIGH: dead exports
+        // HIGH: dead exports, twins_dead_parrots
         dead_exports: dead_parrots.len(),
-        // SMELL: barrel chaos, structural cycles, duplicates
+        twins_dead_parrots,
+        // SMELL: barrel chaos, structural cycles, duplicates, twins_same_language, cascades
         barrel_chaos_count: barrel_chaos.len(),
         structural_cycles: cycle_counts.structural,
         duplicate_exports: duplicates.len(),
+        twins_same_language,
+        cascade_imports,
         // Context
         files,
         loc,
@@ -528,6 +752,27 @@ fn calculate_summary(
 
     let health = calculate_health_score(&health_metrics);
     let health_score = health.health;
+
+    // React lint summary
+    let react_lint_summary = if react_lint.is_empty() {
+        None
+    } else {
+        Some(ReactLintSummary::from_issues(react_lint))
+    };
+
+    // TypeScript lint summary
+    let ts_lint_summary = if ts_lint.is_empty() {
+        None
+    } else {
+        Some(TsLintSummary::from_issues(ts_lint))
+    };
+
+    // Memory lint summary
+    let memory_lint_summary = if memory_lint.is_empty() {
+        None
+    } else {
+        Some(crate::analyzer::memory_lint::calculate_summary(memory_lint))
+    };
 
     FindingsSummary {
         files,
@@ -538,6 +783,9 @@ fn calculate_summary(
         duplicate_groups: duplicates.len(),
         cycles: cycle_counts,
         barrel_chaos: barrel_chaos.len(),
+        react_lint: react_lint_summary,
+        ts_lint: ts_lint_summary,
+        memory_lint: memory_lint_summary,
     }
 }
 
@@ -755,6 +1003,9 @@ mod tests {
                 lazy: 3,
             },
             barrel_chaos: 3,
+            react_lint: None,
+            ts_lint: None,
+            memory_lint: None,
         };
         let json = serde_json::to_string_pretty(&summary).unwrap();
         assert!(json.contains("\"health_score\": 85"));

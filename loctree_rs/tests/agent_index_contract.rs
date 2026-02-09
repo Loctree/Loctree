@@ -60,13 +60,7 @@ fn help_args_for_agent_cmd(cmd: &str) -> Vec<String> {
 #[test]
 fn agent_index_commands_have_help() {
     let path = agent_index_path();
-    // Skip test if landing is not present (public repo excludes landing)
-    let Ok(text) = std::fs::read_to_string(&path) else {
-        eprintln!(
-            "Skipping test: landing/api/agent/index.json not found (expected in loctree-suite only)"
-        );
-        return;
-    };
+    let text = std::fs::read_to_string(&path).expect("read landing/api/agent/index.json");
     let json: serde_json::Value =
         serde_json::from_str(&text).expect("parse landing/api/agent/index.json");
 

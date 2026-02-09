@@ -297,4 +297,4 @@ Claude Code's Grep tool is automatically augmented with loctree context via Post
 
 ---
 
-*Created by M&K (c)2026 VetCoders*
+*Vibecrafted with AI Agents by VetCoders (c)2026 VetCoders*

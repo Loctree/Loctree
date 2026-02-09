@@ -61,7 +61,6 @@ fn strip_excluded_paths(
 
 /// Regex for finding string literals in frontend code.
 /// Reserved for future content-based scanning.
-#[allow(dead_code)]
 fn regex_string_literal() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r#"['"]([a-z][a-z0-9_]*)['"]"#).expect("valid regex"))
@@ -156,7 +155,6 @@ pub fn find_string_literal_matches(
 /// Scan raw file content for string literal occurrences of handler name.
 /// This is a more thorough scan that finds any string literal matching.
 /// Reserved for future content-based scanning beyond analysis data.
-#[allow(dead_code)]
 pub fn scan_content_for_handler_literals(
     handler_name: &str,
     content: &str,

@@ -243,12 +243,14 @@ pub fn handle_tagmap_command(opts: &TagmapOptions, global: &GlobalOptions) -> Di
     let crowd = detect_crowd_with_edges(&files, &opts.keyword, &snapshot.edges);
 
     // 3. Find dead exports related to keyword
+    let dead_ok_globs = crate::fs_utils::load_loctignore_dead_ok_globs(root);
     let all_dead = find_dead_exports(
         &files,
         false,
         None,
         DeadFilterConfig {
             include_tests: opts.include_tests,
+            dead_ok_globs,
             ..Default::default()
         },
     );

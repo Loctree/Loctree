@@ -20,7 +20,7 @@
 //! loctree-mcp
 //! ```
 //!
-//! Created by M&K (c)2025 The LibraxisAI Team
+//! Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team
 
 use std::collections::HashMap;
 use std::panic;
@@ -38,13 +38,11 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tracing::{debug, info};
 
-use loctree::analyzer::barrels::analyze_barrel_chaos;
-use loctree::analyzer::crowd::detect_all_crowds_with_edges;
-use loctree::analyzer::cycles::{find_cycles, find_cycles_classified};
+use loctree::analyzer::cycles::find_cycles;
 use loctree::analyzer::dead_parrots::{DeadFilterConfig, find_dead_exports};
+use loctree::analyzer::search::run_search;
 use loctree::analyzer::twins::detect_exact_twins;
-use loctree::query;
-use loctree::snapshot::{GraphEdge, Snapshot};
+use loctree::snapshot::Snapshot;
 
 // ============================================================================
 // CLI Arguments (minimal - server is project-agnostic)
@@ -65,17 +63,10 @@ struct Args {
 // ============================================================================
 
 fn default_project() -> String {
-    ".".to_string()
-}
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-struct ScanParams {
-    /// Project directory to scan (default: current directory)
-    #[serde(default = "default_project")]
-    project: String,
-    /// Force rescan even if snapshot exists
-    #[serde(default)]
-    force: bool,
+    // Normalize "." to absolute path - MCP server cwd may differ from agent cwd
+    std::env::current_dir()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| ".".to_string())
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -118,103 +109,12 @@ struct ImpactParams {
     file: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-struct HealthParams {
-    /// Project directory (default: current directory)
-    #[serde(default = "default_project")]
-    project: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-struct QueryParams {
-    /// Project directory (default: current directory)
-    #[serde(default = "default_project")]
-    project: String,
-    /// Query kind: 'who-imports', 'where-symbol'
-    kind: String,
-    /// Query target (file path or symbol name)
-    target: String,
-}
-
 fn default_true() -> bool {
     true
 }
 
 fn default_limit() -> usize {
     50
-}
-
-fn default_limit_20() -> usize {
-    20
-}
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-struct DeadParams {
-    /// Project directory (default: current directory)
-    #[serde(default = "default_project")]
-    project: String,
-    /// Confidence level: "normal" or "high" (default: normal)
-    #[serde(default)]
-    confidence: Option<String>,
-    /// Maximum results (default: 20)
-    #[serde(default = "default_limit_20")]
-    limit: usize,
-}
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-struct CyclesParams {
-    /// Project directory (default: current directory)
-    #[serde(default = "default_project")]
-    project: String,
-    /// Include classification (lazy, structural, etc.)
-    #[serde(default)]
-    classify: bool,
-}
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-struct TwinsParams {
-    /// Project directory (default: current directory)
-    #[serde(default = "default_project")]
-    project: String,
-    /// Include test files
-    #[serde(default)]
-    include_tests: bool,
-    /// Maximum results (default: 20)
-    #[serde(default = "default_limit_20")]
-    limit: usize,
-}
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-struct CrowdsParams {
-    /// Project directory (default: current directory)
-    #[serde(default = "default_project")]
-    project: String,
-    /// Maximum results (default: 10)
-    #[serde(default = "default_limit_10")]
-    limit: usize,
-}
-
-fn default_limit_10() -> usize {
-    10
-}
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-struct TraceParams {
-    /// Project directory (default: current directory)
-    #[serde(default = "default_project")]
-    project: String,
-    /// Handler/command name to trace (e.g., "get_user", "save_settings")
-    handler: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-struct DuplicatesParams {
-    /// Project directory (default: current directory)
-    #[serde(default = "default_project")]
-    project: String,
-    /// Maximum groups to return (default: 10)
-    #[serde(default = "default_limit_10")]
-    limit: usize,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -230,19 +130,21 @@ struct TreeParams {
     loc_threshold: usize,
 }
 
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+struct FocusParams {
+    /// Project directory (default: current directory)
+    #[serde(default = "default_project")]
+    project: String,
+    /// Directory to focus on (e.g., 'src/components')
+    directory: String,
+}
+
 fn default_depth() -> usize {
     3
 }
 
 fn default_loc_threshold() -> usize {
     500
-}
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-struct FindingsParams {
-    /// Project directory (default: current directory)
-    #[serde(default = "default_project")]
-    project: String,
 }
 
 // ============================================================================
@@ -267,6 +169,7 @@ impl LoctreeServer {
     }
 
     /// Resolve project path to absolute, canonicalized path.
+    /// Searches upward for .loctree directory (like git finds .git/).
     /// Note: Path traversal is intentional - MCP server runs locally with same privileges as client.
     fn resolve_project(project: &str) -> Result<PathBuf> {
         // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path
@@ -276,9 +179,13 @@ impl LoctreeServer {
         } else {
             std::env::current_dir()?.join(path)
         };
-        absolute
+        let canonical = absolute
             .canonicalize()
-            .with_context(|| format!("Project directory not found: {}", project))
+            .with_context(|| format!("Project directory not found: {}", project))?;
+
+        // Search upward for .loctree directory (like git finds .git/)
+        // This allows MCP to work when called from subdirectories or with absolute paths
+        Ok(Snapshot::find_loctree_root(&canonical).unwrap_or(canonical))
     }
 
     /// Get or load snapshot for a project. Auto-scans if needed.
@@ -387,12 +294,6 @@ impl LoctreeServer {
             })
     }
 
-    /// Invalidate cache for a project (force reload on next access)
-    async fn invalidate_cache(&self, project: &Path) {
-        let mut cache = self.cache.write().await;
-        cache.remove(project);
-    }
-
     /// Validate file path: check if within project, return matched path from snapshot or error.
     fn resolve_file_in_snapshot(
         snapshot: &Snapshot,
@@ -422,47 +323,12 @@ impl LoctreeServer {
 
 #[tool_router]
 impl LoctreeServer {
-    /// Scan a project and create/update snapshot
+    /// Get repository overview for AI agents
     #[tool(
-        name = "scan",
-        description = "Scan a project directory and create dependency snapshot. Run this first on any new project, or after major changes. Creates .loctree/ with all analysis artifacts."
+        name = "repo-view",
+        description = "Get repository overview: file count, LOC, languages, health summary, top hubs. USE THIS FIRST at the start of any AI session to understand the codebase."
     )]
-    async fn scan(&self, Parameters(params): Parameters<ScanParams>) -> String {
-        let project = match Self::resolve_project(&params.project) {
-            Ok(p) => p,
-            Err(e) => return format!("Error: {}", e),
-        };
-
-        if params.force {
-            self.invalidate_cache(&project).await;
-        }
-
-        match Self::run_scan(&project) {
-            Ok(()) => {
-                self.invalidate_cache(&project).await;
-                // Load to get stats
-                match self.get_snapshot(&project).await {
-                    Ok(s) => serde_json::json!({
-                        "status": "ok",
-                        "project": project.display().to_string(),
-                        "files": s.files.len(),
-                        "edges": s.edges.len(),
-                        "message": "Scan complete. Use for_ai() for overview."
-                    })
-                    .to_string(),
-                    Err(e) => format!("Scan completed but failed to load: {}", e),
-                }
-            }
-            Err(e) => format!("Scan failed: {}", e),
-        }
-    }
-
-    /// Get AI-optimized project overview
-    #[tool(
-        name = "for_ai",
-        description = "Get AI-optimized overview of the project. Shows: file count, LOC, health issues (dead code, cycles, twins), top hubs, quick wins. USE THIS FIRST at the start of any AI session."
-    )]
-    async fn for_ai(&self, Parameters(params): Parameters<ForAiParams>) -> String {
+    async fn repo_view(&self, Parameters(params): Parameters<ForAiParams>) -> String {
         let project = match Self::resolve_project(&params.project) {
             Ok(p) => p,
             Err(e) => return format!("Error: {}", e),
@@ -645,54 +511,132 @@ impl LoctreeServer {
             Err(e) => return format!("Error loading project: {}", e),
         };
 
-        // Case-insensitive regex (like CLI)
-        let regex = match regex::RegexBuilder::new(&params.name)
-            .case_insensitive(true)
-            .build()
-        {
-            Ok(r) => r,
-            Err(e) => return format!("Invalid pattern: {}", e),
+        // Normalize query: split by whitespace and join with | for OR matching (like CLI)
+        let query = if params.name.contains('|') {
+            // Already has pipe - use as-is
+            params.name.clone()
+        } else {
+            // Split by whitespace, filter short tokens, join with |
+            let tokens: Vec<&str> = params
+                .name
+                .split_whitespace()
+                .filter(|t| t.len() >= 2)
+                .collect();
+            if tokens.is_empty() {
+                params.name.clone()
+            } else {
+                tokens.join("|")
+            }
         };
 
-        let mut symbol_matches = Vec::new();
-        let mut param_matches = Vec::new();
+        // Use the same search infrastructure as CLI
+        let search_results = run_search(&query, &snapshot.files);
 
-        for file in &snapshot.files {
-            for export in &file.exports {
-                // Symbol name match
-                if regex.is_match(&export.name) {
-                    symbol_matches.push(serde_json::json!({
-                        "file": file.path,
-                        "symbol": export.name,
-                        "kind": export.kind,
-                        "line": export.line
-                    }));
-                }
+        // Convert symbol matches to JSON format (with limit)
+        let symbol_matches: Vec<_> = search_results
+            .symbol_matches
+            .files
+            .iter()
+            .flat_map(|f| {
+                f.matches.iter().map(move |m| {
+                    serde_json::json!({
+                        "file": f.file,
+                        "symbol": m.context.split_whitespace().last().unwrap_or(&m.context),
+                        "kind": if m.is_definition { "definition" } else { "usage" },
+                        "line": m.line,
+                        "context": m.context
+                    })
+                })
+            })
+            .take(params.limit)
+            .collect();
 
-                // Parameter match (NEW in 0.8.4)
-                for param in &export.params {
-                    if regex.is_match(&param.name) {
-                        param_matches.push(serde_json::json!({
-                            "file": file.path,
-                            "function": export.name,
-                            "param": param.name,
-                            "type": param.type_annotation,
-                            "line": export.line
-                        }));
-                    }
-                }
+        // Convert param matches to JSON format
+        let param_matches: Vec<_> = search_results
+            .param_matches
+            .iter()
+            .take(params.limit.saturating_sub(symbol_matches.len()))
+            .map(|pm| {
+                serde_json::json!({
+                    "file": pm.file,
+                    "function": pm.function,
+                    "param": pm.param_name,
+                    "type": pm.param_type,
+                    "line": pm.line
+                })
+            })
+            .collect();
 
-                if symbol_matches.len() + param_matches.len() >= params.limit {
-                    break;
-                }
-            }
-            if symbol_matches.len() + param_matches.len() >= params.limit {
-                break;
-            }
-        }
+        // Convert semantic matches to JSON format
+        let semantic_matches: Vec<_> = search_results
+            .semantic_matches
+            .iter()
+            .take(20)
+            .map(|sm| {
+                serde_json::json!({
+                    "symbol": sm.symbol,
+                    "file": sm.file,
+                    "score": sm.score
+                })
+            })
+            .collect();
+
+        // Convert cross-match files to JSON format (files with 2+ query terms)
+        let cross_matches: Vec<_> = search_results
+            .cross_matches
+            .iter()
+            .take(20)
+            .map(|cm| {
+                let terms: Vec<_> = cm
+                    .matched_terms
+                    .iter()
+                    .map(|t| {
+                        let type_tag = match &t.match_type {
+                            loctree::analyzer::search::MatchType::Export { kind } => {
+                                format!("EXPORT:{}", kind)
+                            }
+                            loctree::analyzer::search::MatchType::Import { source } => {
+                                format!("IMPORT:{}", source)
+                            }
+                            loctree::analyzer::search::MatchType::Parameter {
+                                function, ..
+                            } => {
+                                format!("PARAM:{}", function)
+                            }
+                        };
+                        serde_json::json!({
+                            "term": t.term,
+                            "line": t.line,
+                            "type": type_tag,
+                            "context": t.context
+                        })
+                    })
+                    .collect();
+                serde_json::json!({
+                    "file": cm.file,
+                    "matched_terms": terms
+                })
+            })
+            .collect();
+
+        // Convert suppression matches to JSON format
+        let suppression_matches: Vec<_> = search_results
+            .suppression_matches
+            .iter()
+            .take(20)
+            .map(|sm| {
+                serde_json::json!({
+                    "file": sm.file,
+                    "line": sm.line,
+                    "type": sm.suppression_type,
+                    "lint": sm.lint_name,
+                    "context": sm.context
+                })
+            })
+            .collect();
 
         let result = serde_json::json!({
-            "query": params.name,
+            "query": query,
             "project": project.display().to_string(),
             "symbol_matches": {
                 "count": symbol_matches.len(),
@@ -701,6 +645,22 @@ impl LoctreeServer {
             "param_matches": {
                 "count": param_matches.len(),
                 "matches": param_matches
+            },
+            "semantic_matches": {
+                "count": semantic_matches.len(),
+                "matches": semantic_matches
+            },
+            "cross_matches": {
+                "count": cross_matches.len(),
+                "matches": cross_matches
+            },
+            "suppression_matches": {
+                "count": suppression_matches.len(),
+                "matches": suppression_matches
+            },
+            "dead_status": {
+                "is_exported": search_results.dead_status.is_exported,
+                "is_dead": search_results.dead_status.is_dead
             }
         });
 
@@ -782,530 +742,6 @@ impl LoctreeServer {
             .unwrap_or_else(|e| format!("Serialization error: {}", e))
     }
 
-    /// Quick health check
-    #[tool(
-        name = "health",
-        description = "Quick health summary: cycles + dead code + twins. USE THIS as sanity check before commits."
-    )]
-    async fn health(&self, Parameters(params): Parameters<HealthParams>) -> String {
-        let project = match Self::resolve_project(&params.project) {
-            Ok(p) => p,
-            Err(e) => return format!("Error: {}", e),
-        };
-
-        let snapshot = match self.get_snapshot(&project).await {
-            Ok(s) => s,
-            Err(e) => return format!("Error loading project: {}", e),
-        };
-
-        // Dead code
-        let config = DeadFilterConfig::default();
-        let dead = find_dead_exports(&snapshot.files, true, None, config);
-        let dead_high = dead.iter().filter(|d| d.confidence == "high").count();
-
-        // Cycles
-        let edges: Vec<_> = snapshot
-            .edges
-            .iter()
-            .map(|e| (e.from.clone(), e.to.clone(), e.label.clone()))
-            .collect();
-        let cycles = find_cycles(&edges);
-
-        // Twins
-        let twins = detect_exact_twins(&snapshot.files, false);
-
-        let status = if cycles.is_empty() && dead_high == 0 && twins.is_empty() {
-            "healthy"
-        } else if !cycles.is_empty() || dead_high > 10 {
-            "needs_attention"
-        } else {
-            "minor_issues"
-        };
-
-        let result = serde_json::json!({
-            "project": project.display().to_string(),
-            "status": status,
-            "cycles": {
-                "count": cycles.len(),
-                "details": cycles.iter().take(3).collect::<Vec<_>>()
-            },
-            "dead_exports": {
-                "total": dead.len(),
-                "high_confidence": dead_high
-            },
-            "twins": {
-                "count": twins.len(),
-                "examples": twins.iter().take(3).map(|t| &t.name).collect::<Vec<_>>()
-            }
-        });
-
-        serde_json::to_string_pretty(&result)
-            .unwrap_or_else(|e| format!("Serialization error: {}", e))
-    }
-
-    /// Fast graph queries
-    #[tool(
-        name = "query",
-        description = "Fast graph queries: who-imports (files importing target), where-symbol (where is symbol defined). Use for quick lookups without full analysis."
-    )]
-    async fn query(&self, Parameters(params): Parameters<QueryParams>) -> String {
-        let project = match Self::resolve_project(&params.project) {
-            Ok(p) => p,
-            Err(e) => return format!("Error: {}", e),
-        };
-
-        let snapshot = match self.get_snapshot(&project).await {
-            Ok(s) => s,
-            Err(e) => return format!("Error loading project: {}", e),
-        };
-
-        match params.kind.as_str() {
-            "who-imports" => {
-                // Validate file path for who-imports (it's a file query)
-                if let Err(e) = Self::resolve_file_in_snapshot(&snapshot, &project, &params.target)
-                {
-                    return format!("Error: {}", e);
-                }
-                let result = query::query_who_imports(&snapshot, &params.target);
-                serde_json::json!({
-                    "query": "who-imports",
-                    "target": params.target,
-                    "count": result.results.len(),
-                    "importers": result.results.iter().map(|m| serde_json::json!({
-                        "file": m.file,
-                        "line": m.line
-                    })).collect::<Vec<_>>()
-                })
-                .to_string()
-            }
-            "where-symbol" => {
-                let mut matches = Vec::new();
-                for file in &snapshot.files {
-                    for export in &file.exports {
-                        if export.name == params.target {
-                            matches.push(serde_json::json!({
-                                "file": file.path,
-                                "kind": export.kind,
-                                "line": export.line
-                            }));
-                        }
-                    }
-                }
-                serde_json::json!({
-                    "query": "where-symbol",
-                    "target": params.target,
-                    "count": matches.len(),
-                    "locations": matches
-                })
-                .to_string()
-            }
-            _ => format!(
-                "Unknown query kind: {}. Use: who-imports, where-symbol",
-                params.kind
-            ),
-        }
-    }
-
-    // ========================================================================
-    // NEW TOOLS - Full analyzer capabilities
-    // ========================================================================
-
-    /// Get all findings (dead code, cycles, twins, duplicates)
-    #[tool(
-        name = "findings",
-        description = "Get ALL codebase issues in one call: dead exports, circular imports, duplicate files (twins), barrel chaos, etc. Use this for comprehensive health check or CI integration."
-    )]
-    async fn findings(&self, Parameters(params): Parameters<FindingsParams>) -> String {
-        let project = match Self::resolve_project(&params.project) {
-            Ok(p) => p,
-            Err(e) => return format!("Error: {}", e),
-        };
-
-        let snapshot = match self.get_snapshot(&project).await {
-            Ok(s) => s,
-            Err(e) => return format!("Error loading project: {}", e),
-        };
-
-        // Dead exports
-        let config = DeadFilterConfig::default();
-        let dead = find_dead_exports(&snapshot.files, true, None, config);
-        let dead_high: Vec<_> = dead.iter().filter(|d| d.confidence == "high").collect();
-
-        // Cycles
-        let edges: Vec<_> = snapshot
-            .edges
-            .iter()
-            .map(|e| (e.from.clone(), e.to.clone(), e.label.clone()))
-            .collect();
-        let cycles = find_cycles(&edges);
-
-        // Twins
-        let twins = detect_exact_twins(&snapshot.files, false);
-
-        // Barrel chaos
-        let barrels = analyze_barrel_chaos(&snapshot);
-
-        // Crowds
-        let graph_edges: Vec<GraphEdge> = snapshot.edges.clone();
-        let crowds = detect_all_crowds_with_edges(&snapshot.files, &graph_edges);
-        let problem_crowds: Vec<_> = crowds.iter().filter(|c| c.members.len() > 5).collect();
-
-        let result = serde_json::json!({
-            "project": project.display().to_string(),
-            "summary": {
-                "files": snapshot.files.len(),
-                "total_issues": dead_high.len() + cycles.len() + twins.len() + barrels.missing_barrels.len(),
-            },
-            "dead_exports": {
-                "total": dead.len(),
-                "high_confidence": dead_high.len(),
-                "top_issues": dead_high.iter().take(10).map(|d| serde_json::json!({
-                    "file": d.file,
-                    "symbol": d.symbol,
-                    "confidence": d.confidence,
-                    "line": d.line
-                })).collect::<Vec<_>>()
-            },
-            "cycles": {
-                "count": cycles.len(),
-                "cycles": cycles.iter().take(5).collect::<Vec<_>>()
-            },
-            "twins": {
-                "count": twins.len(),
-                "duplicates": twins.iter().take(5).map(|t| serde_json::json!({
-                    "name": t.name,
-                    "location_count": t.locations.len(),
-                    "locations": t.locations.iter().map(|l| &l.file_path).collect::<Vec<_>>()
-                })).collect::<Vec<_>>()
-            },
-            "barrel_chaos": {
-                "missing_barrels": barrels.missing_barrels.len(),
-                "reexport_chains": barrels.deep_chains.len(),
-                "inconsistent_imports": barrels.inconsistent_paths.len()
-            },
-            "crowds": {
-                "problem_files": problem_crowds.len(),
-                "top": problem_crowds.iter().take(3).map(|c| serde_json::json!({
-                    "pattern": c.pattern,
-                    "members": c.members.len()
-                })).collect::<Vec<_>>()
-            }
-        });
-
-        serde_json::to_string_pretty(&result)
-            .unwrap_or_else(|e| format!("Serialization error: {}", e))
-    }
-
-    /// Find dead/unused exports
-    #[tool(
-        name = "dead",
-        description = "Find unused exports (dead code). Shows exports that are defined but never imported anywhere. Great for cleanup tasks."
-    )]
-    async fn dead(&self, Parameters(params): Parameters<DeadParams>) -> String {
-        let project = match Self::resolve_project(&params.project) {
-            Ok(p) => p,
-            Err(e) => return format!("Error: {}", e),
-        };
-
-        let snapshot = match self.get_snapshot(&project).await {
-            Ok(s) => s,
-            Err(e) => return format!("Error loading project: {}", e),
-        };
-
-        let config = DeadFilterConfig::default();
-        let dead = find_dead_exports(&snapshot.files, true, None, config);
-
-        let filtered: Vec<_> = if params.confidence.as_deref() == Some("high") {
-            dead.iter().filter(|d| d.confidence == "high").collect()
-        } else {
-            dead.iter().collect()
-        };
-
-        let result = serde_json::json!({
-            "project": project.display().to_string(),
-            "total": dead.len(),
-            "shown": filtered.len().min(params.limit),
-            "confidence_filter": params.confidence,
-            "dead_exports": filtered.iter().take(params.limit).map(|d| serde_json::json!({
-                "file": d.file,
-                "symbol": d.symbol,
-                "line": d.line,
-                "confidence": d.confidence,
-                "reason": d.reason
-            })).collect::<Vec<_>>()
-        });
-
-        serde_json::to_string_pretty(&result)
-            .unwrap_or_else(|e| format!("Serialization error: {}", e))
-    }
-
-    /// Find circular imports
-    #[tool(
-        name = "cycles",
-        description = "Find circular import chains. These can cause runtime issues and make code hard to reason about. Shows the full cycle path."
-    )]
-    async fn cycles(&self, Parameters(params): Parameters<CyclesParams>) -> String {
-        let project = match Self::resolve_project(&params.project) {
-            Ok(p) => p,
-            Err(e) => return format!("Error: {}", e),
-        };
-
-        let snapshot = match self.get_snapshot(&project).await {
-            Ok(s) => s,
-            Err(e) => return format!("Error loading project: {}", e),
-        };
-
-        let edges: Vec<_> = snapshot
-            .edges
-            .iter()
-            .map(|e| (e.from.clone(), e.to.clone(), e.label.clone()))
-            .collect();
-
-        if params.classify {
-            let classified = find_cycles_classified(&edges);
-            let result = serde_json::json!({
-                "project": project.display().to_string(),
-                "count": classified.len(),
-                "cycles": classified.iter().map(|c| serde_json::json!({
-                    "classification": format!("{:?}", c.classification),
-                    "risk": c.risk,
-                    "pattern": c.pattern,
-                    "nodes": c.nodes,
-                    "length": c.nodes.len(),
-                    "suggestion": c.suggestion
-                })).collect::<Vec<_>>()
-            });
-            serde_json::to_string_pretty(&result)
-                .unwrap_or_else(|e| format!("Serialization error: {}", e))
-        } else {
-            let cycles = find_cycles(&edges);
-            let result = serde_json::json!({
-                "project": project.display().to_string(),
-                "count": cycles.len(),
-                "cycles": cycles.iter().map(|c| serde_json::json!({
-                    "path": c,
-                    "length": c.len()
-                })).collect::<Vec<_>>()
-            });
-            serde_json::to_string_pretty(&result)
-                .unwrap_or_else(|e| format!("Serialization error: {}", e))
-        }
-    }
-
-    /// Find exact duplicate files (twins)
-    #[tool(
-        name = "twins",
-        description = "Find files with identical content (exact duplicates). These are candidates for refactoring into shared modules."
-    )]
-    async fn twins(&self, Parameters(params): Parameters<TwinsParams>) -> String {
-        let project = match Self::resolve_project(&params.project) {
-            Ok(p) => p,
-            Err(e) => return format!("Error: {}", e),
-        };
-
-        let snapshot = match self.get_snapshot(&project).await {
-            Ok(s) => s,
-            Err(e) => return format!("Error loading project: {}", e),
-        };
-
-        let twins = detect_exact_twins(&snapshot.files, params.include_tests);
-
-        let result = serde_json::json!({
-            "project": project.display().to_string(),
-            "count": twins.len(),
-            "include_tests": params.include_tests,
-            "twins": twins.iter().take(params.limit).map(|t| serde_json::json!({
-                "name": t.name,
-                "location_count": t.locations.len(),
-                "category": format!("{:?}", loctree::analyzer::twins::categorize_twin(t)),
-                "signature_similarity": t.signature_similarity,
-                "locations": t.locations.iter().map(|l| serde_json::json!({
-                    "file": l.file_path,
-                    "line": l.line,
-                    "kind": l.kind,
-                    "is_canonical": l.is_canonical
-                })).collect::<Vec<_>>()
-            })).collect::<Vec<_>>()
-        });
-
-        serde_json::to_string_pretty(&result)
-            .unwrap_or_else(|e| format!("Serialization error: {}", e))
-    }
-
-    /// Find crowded files (too many imports/exports)
-    #[tool(
-        name = "crowds",
-        description = "Find 'crowd' patterns - files that are imported by many others (hubs) or import too much (god objects). These are refactoring hotspots."
-    )]
-    async fn crowds(&self, Parameters(params): Parameters<CrowdsParams>) -> String {
-        let project = match Self::resolve_project(&params.project) {
-            Ok(p) => p,
-            Err(e) => return format!("Error: {}", e),
-        };
-
-        let snapshot = match self.get_snapshot(&project).await {
-            Ok(s) => s,
-            Err(e) => return format!("Error loading project: {}", e),
-        };
-
-        let graph_edges: Vec<GraphEdge> = snapshot.edges.clone();
-        let crowds = detect_all_crowds_with_edges(&snapshot.files, &graph_edges);
-
-        // Sort by member count (largest first)
-        let mut sorted_crowds = crowds;
-        sorted_crowds.sort_by(|a, b| b.members.len().cmp(&a.members.len()));
-
-        let result = serde_json::json!({
-            "project": project.display().to_string(),
-            "count": sorted_crowds.len(),
-            "crowds": sorted_crowds.iter().take(params.limit).map(|c| serde_json::json!({
-                "pattern": c.pattern,
-                "member_count": c.members.len(),
-                "score": c.score,
-                "issues": c.issues.len(),
-                "members": c.members.iter().take(5).map(|m| serde_json::json!({
-                    "file": m.file,
-                    "match_reason": format!("{:?}", m.match_reason),
-                    "importer_count": m.importer_count
-                })).collect::<Vec<_>>()
-            })).collect::<Vec<_>>()
-        });
-
-        serde_json::to_string_pretty(&result)
-            .unwrap_or_else(|e| format!("Serialization error: {}", e))
-    }
-
-    /// Trace a Tauri handler through the pipeline
-    #[tool(
-        name = "trace",
-        description = "Trace a Tauri command/handler from frontend invoke() to backend handler. Shows the complete pipeline: FE calls → BE definition → events. Essential for Tauri projects."
-    )]
-    async fn trace(&self, Parameters(params): Parameters<TraceParams>) -> String {
-        let project = match Self::resolve_project(&params.project) {
-            Ok(p) => p,
-            Err(e) => return format!("Error: {}", e),
-        };
-
-        let snapshot = match self.get_snapshot(&project).await {
-            Ok(s) => s,
-            Err(e) => return format!("Error loading project: {}", e),
-        };
-
-        // Search for handler in command_bridges (case-insensitive, supports snake_case/camelCase)
-        let handler_lower = params.handler.to_lowercase();
-        let handler_snake = params.handler.replace('-', "_").to_lowercase();
-
-        let matching_bridges: Vec<_> = snapshot
-            .command_bridges
-            .iter()
-            .filter(|b| {
-                let name_lower = b.name.to_lowercase();
-                name_lower == handler_lower
-                    || name_lower == handler_snake
-                    || name_lower.contains(&handler_lower)
-            })
-            .collect();
-
-        if matching_bridges.is_empty() {
-            return serde_json::json!({
-                "handler": params.handler,
-                "project": project.display().to_string(),
-                "verdict": "not_found",
-                "message": "No command bridge found. This project may not be a Tauri project or the handler doesn't exist.",
-                "available_commands": snapshot.command_bridges.iter().take(10).map(|b| &b.name).collect::<Vec<_>>()
-            }).to_string();
-        }
-
-        let results: Vec<_> = matching_bridges.iter().map(|bridge| {
-            let verdict = if bridge.has_handler && bridge.is_called {
-                "connected"
-            } else if bridge.has_handler {
-                "backend_only"
-            } else if bridge.is_called {
-                "frontend_only"
-            } else {
-                "orphaned"
-            };
-
-            serde_json::json!({
-                "name": bridge.name,
-                "verdict": verdict,
-                "has_handler": bridge.has_handler,
-                "is_called": bridge.is_called,
-                "backend": bridge.backend_handler.as_ref().map(|(file, line)| serde_json::json!({
-                    "file": file,
-                    "line": line
-                })),
-                "frontend_calls": bridge.frontend_calls.iter().map(|(file, line)| serde_json::json!({
-                    "file": file,
-                    "line": line
-                })).collect::<Vec<_>>(),
-                "call_count": bridge.frontend_calls.len()
-            })
-        }).collect();
-
-        let output = serde_json::json!({
-            "handler": params.handler,
-            "project": project.display().to_string(),
-            "matches": results.len(),
-            "bridges": results
-        });
-
-        serde_json::to_string_pretty(&output)
-            .unwrap_or_else(|e| format!("Serialization error: {}", e))
-    }
-
-    /// Find duplicate exports (same symbol exported from multiple files)
-    #[tool(
-        name = "duplicates",
-        description = "Find symbols exported from multiple files. This can cause confusion about which import to use and may indicate code that should be consolidated."
-    )]
-    async fn duplicates(&self, Parameters(params): Parameters<DuplicatesParams>) -> String {
-        let project = match Self::resolve_project(&params.project) {
-            Ok(p) => p,
-            Err(e) => return format!("Error: {}", e),
-        };
-
-        let snapshot = match self.get_snapshot(&project).await {
-            Ok(s) => s,
-            Err(e) => return format!("Error loading project: {}", e),
-        };
-
-        // Build symbol -> files map
-        let mut symbol_files: HashMap<String, Vec<(String, Option<usize>)>> = HashMap::new();
-        for file in &snapshot.files {
-            for export in &file.exports {
-                symbol_files
-                    .entry(export.name.clone())
-                    .or_default()
-                    .push((file.path.clone(), export.line));
-            }
-        }
-
-        // Filter to duplicates only
-        let mut duplicates: Vec<_> = symbol_files
-            .into_iter()
-            .filter(|(_, files)| files.len() > 1)
-            .collect();
-        duplicates.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
-
-        let result = serde_json::json!({
-            "project": project.display().to_string(),
-            "count": duplicates.len(),
-            "duplicates": duplicates.iter().take(params.limit).map(|(name, files)| serde_json::json!({
-                "symbol": name,
-                "occurrences": files.len(),
-                "locations": files.iter().map(|(f, l)| serde_json::json!({
-                    "file": f,
-                    "line": l
-                })).collect::<Vec<_>>()
-            })).collect::<Vec<_>>()
-        });
-
-        serde_json::to_string_pretty(&result)
-            .unwrap_or_else(|e| format!("Serialization error: {}", e))
-    }
-
     /// Get directory tree with LOC counts
     #[tool(
         name = "tree",
@@ -1372,6 +808,112 @@ impl LoctreeServer {
         serde_json::to_string_pretty(&result)
             .unwrap_or_else(|e| format!("Serialization error: {}", e))
     }
+
+    /// Focus on a specific directory
+    #[tool(
+        name = "focus",
+        description = "Focus on a specific directory: list files, their LOC, exports, and dependencies within that directory. Great for understanding a module or subsystem."
+    )]
+    async fn focus(&self, Parameters(params): Parameters<FocusParams>) -> String {
+        let project = match Self::resolve_project(&params.project) {
+            Ok(p) => p,
+            Err(e) => return format!("Error: {}", e),
+        };
+
+        let snapshot = match self.get_snapshot(&project).await {
+            Ok(s) => s,
+            Err(e) => return format!("Error loading project: {}", e),
+        };
+
+        // Filter files in the target directory
+        let dir_prefix = if params.directory.ends_with('/') {
+            params.directory.clone()
+        } else {
+            format!("{}/", params.directory)
+        };
+
+        let files_in_dir: Vec<_> = snapshot
+            .files
+            .iter()
+            .filter(|f| {
+                f.path.starts_with(&dir_prefix) || f.path == params.directory.trim_end_matches('/')
+            })
+            .collect();
+
+        if files_in_dir.is_empty() {
+            return serde_json::json!({
+                "directory": params.directory,
+                "project": project.display().to_string(),
+                "error": "No files found in this directory. Check the path."
+            })
+            .to_string();
+        }
+
+        let total_loc: usize = files_in_dir.iter().map(|f| f.loc).sum();
+        let total_exports: usize = files_in_dir.iter().map(|f| f.exports.len()).sum();
+
+        // Find internal edges (within this directory)
+        let internal_edges: Vec<_> = snapshot
+            .edges
+            .iter()
+            .filter(|e| {
+                (e.from.starts_with(&dir_prefix)
+                    || e.from == params.directory.trim_end_matches('/'))
+                    && (e.to.starts_with(&dir_prefix)
+                        || e.to == params.directory.trim_end_matches('/'))
+            })
+            .collect();
+
+        // Find external dependencies (imports from outside)
+        let external_deps: Vec<_> = snapshot
+            .edges
+            .iter()
+            .filter(|e| {
+                (e.from.starts_with(&dir_prefix)
+                    || e.from == params.directory.trim_end_matches('/'))
+                    && !e.to.starts_with(&dir_prefix)
+            })
+            .map(|e| e.to.clone())
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect();
+
+        // Find external consumers (files outside that import from this dir)
+        let external_consumers: Vec<_> = snapshot
+            .edges
+            .iter()
+            .filter(|e| {
+                !e.from.starts_with(&dir_prefix)
+                    && (e.to.starts_with(&dir_prefix)
+                        || e.to == params.directory.trim_end_matches('/'))
+            })
+            .map(|e| e.from.clone())
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect();
+
+        let result = serde_json::json!({
+            "directory": params.directory,
+            "project": project.display().to_string(),
+            "summary": {
+                "files": files_in_dir.len(),
+                "total_loc": total_loc,
+                "total_exports": total_exports,
+                "internal_edges": internal_edges.len(),
+            },
+            "files": files_in_dir.iter().map(|f| serde_json::json!({
+                "path": f.path,
+                "loc": f.loc,
+                "language": f.language,
+                "exports": f.exports.len()
+            })).collect::<Vec<_>>(),
+            "external_dependencies": external_deps.iter().take(20).collect::<Vec<_>>(),
+            "external_consumers": external_consumers.iter().take(20).collect::<Vec<_>>()
+        });
+
+        serde_json::to_string_pretty(&result)
+            .unwrap_or_else(|e| format!("Serialization error: {}", e))
+    }
 }
 
 // ============================================================================
@@ -1395,27 +937,16 @@ impl ServerHandler for LoctreeServer {
                 website_url: Some("https://github.com/Loctree/Loctree".to_string()),
             },
             instructions: Some(
-                "Delegate the tasks to background agent as the first choice method when you work \
-                 with this repository. Prioritize using the loctree 'loct [subcommand] --flag' tool \
-                 for the best possible codebase awareness, that is impossible to achieve using 'grep'.\n\n\
-                 CORE TOOLS:\n\
-                 - for_ai(project) - Start here. Full overview with health + insights.\n\
-                 - slice(file) - Before modifying. See deps + consumers + context.\n\
-                 - find(name) - Before creating. Avoid duplicates.\n\
-                 - impact(file) - Before deleting. Know blast radius.\n\
-                 - health() - Before commits. Sanity check.\n\n\
-                 ANALYSIS TOOLS:\n\
-                 - findings(project) - All issues: dead exports, cycles, crowds, duplicates.\n\
-                 - dead(project) - Dead exports only (unused public symbols).\n\
-                 - cycles(project) - Circular imports (simple or classified).\n\
-                 - twins(project) - Duplicate code detection.\n\
-                 - crowds(project) - Over-connected files (architectural hotspots).\n\
-                 - duplicates(project) - Duplicate file names.\n\n\
-                 STRUCTURE TOOLS:\n\
-                 - tree(project) - Directory structure visualization.\n\
-                 - trace(project, handler) - Tauri command coverage (requires Tauri project).\n\n\
+                "Loctree MCP provides structural code intelligence. Use these tools for codebase awareness.\n\n\
+                 BASELINE TOOLS:\n\
+                 - repo-view(project) - Start here. Overview: files, LOC, languages, health, top hubs.\n\
+                 - slice(file) - Before modifying. File + dependencies + consumers in one call.\n\
+                 - find(name) - Before creating. Symbol search with regex support.\n\
+                 - impact(file) - Before deleting. Direct + transitive consumers (blast radius).\n\
+                 - focus(directory) - Understand a module. Files, internal edges, external deps.\n\
+                 - tree(project) - Directory structure with LOC counts.\n\n\
                  All tools accept 'project' parameter (default: current dir).\n\
-                 First use auto-creates dependency snapshot."
+                 First use auto-scans if no snapshot exists."
                     .into(),
             ),
         }

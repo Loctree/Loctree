@@ -10,7 +10,7 @@
 //! - Events emitted but no test coverage (MEDIUM RISK)
 //! - Tested code that's not used in production (potential dead code)
 //!
-//! Developed with 💀 by The Loctree Team (c)2025
+//! Vibecrafted with AI Agents by VetCoders (c)2025 VetCoders
 
 use super::classify::is_test_path;
 use crate::snapshot::{CommandBridge, EventBridge, Snapshot};

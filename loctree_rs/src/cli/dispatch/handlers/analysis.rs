@@ -1,11 +1,11 @@
 //! Analysis-related command handlers
 //!
-//! Handles: dead, cycles, commands, events, routes, zombie
+//! Handles: dead, cycles, commands, events, pipelines, insights, manifests, routes, zombie
 
 use super::super::super::command::{
     AuditOptions, CommandsOptions, CyclesOptions, DeadOptions, DoctorOptions, EventsOptions,
-    FocusOptions, HealthOptions, HotspotsOptions, LayoutmapOptions, RoutesOptions, TraceOptions,
-    ZombieOptions,
+    FocusOptions, HealthOptions, HotspotsOptions, InsightsOptions, LayoutmapOptions,
+    ManifestsOptions, PipelinesOptions, PlanOptions, RoutesOptions, TraceOptions, ZombieOptions,
 };
 use super::super::{DispatchResult, GlobalOptions, load_or_create_snapshot};
 use super::deprecation::warn_deprecated;
@@ -44,6 +44,7 @@ pub fn handle_dead_command(opts: &DeadOptions, global: &GlobalOptions) -> Dispat
 
     // Determine confidence level
     let high_confidence = opts.confidence.as_deref() == Some("high");
+    let dead_ok_globs = crate::fs_utils::load_loctignore_dead_ok_globs(root);
 
     // Find dead exports
     let dead_exports = find_dead_exports(
@@ -58,6 +59,7 @@ pub fn handle_dead_command(opts: &DeadOptions, global: &GlobalOptions) -> Dispat
             python_library_mode: global.python_library,
             include_ambient: opts.with_ambient,
             include_dynamic: opts.with_dynamic,
+            dead_ok_globs,
         },
     );
 
@@ -82,6 +84,263 @@ pub fn handle_dead_command(opts: &DeadOptions, global: &GlobalOptions) -> Dispat
             opts.top.unwrap_or(20)
         },
     );
+
+    DispatchResult::Exit(0)
+}
+
+/// Handle the pipelines command - pipeline summary (events/commands/risks)
+pub fn handle_pipelines_command(opts: &PipelinesOptions, global: &GlobalOptions) -> DispatchResult {
+    use crate::analyzer::pipelines::build_pipeline_summary;
+    use crate::analyzer::root_scan::scan_results_from_snapshot;
+    use std::path::Path;
+
+    let spinner = if !global.quiet && !global.json {
+        Some(Spinner::new("Building pipeline summary..."))
+    } else {
+        None
+    };
+
+    let root = opts
+        .roots
+        .first()
+        .map(|p| p.as_path())
+        .unwrap_or(Path::new("."));
+
+    let snapshot = match load_or_create_snapshot(root, global) {
+        Ok(s) => s,
+        Err(e) => {
+            if let Some(s) = spinner {
+                s.finish_error(&format!("Failed to load snapshot: {}", e));
+            } else {
+                eprintln!("[loct][error] {}", e);
+            }
+            return DispatchResult::Exit(1);
+        }
+    };
+
+    let scan_results = scan_results_from_snapshot(&snapshot);
+    let focus = None;
+    let exclude = None;
+    let pipeline_summary = build_pipeline_summary(
+        &scan_results.global_analyses,
+        &focus,
+        &exclude,
+        &scan_results.global_fe_commands,
+        &scan_results.global_be_commands,
+        &scan_results.global_fe_payloads,
+        &scan_results.global_be_payloads,
+    );
+
+    if let Some(s) = spinner {
+        s.finish_success("Pipeline summary ready");
+    }
+
+    if global.json {
+        match serde_json::to_string_pretty(&pipeline_summary) {
+            Ok(json) => println!("{}", json),
+            Err(e) => {
+                eprintln!("[loct][error] Failed to serialize pipeline summary: {}", e);
+                return DispatchResult::Exit(1);
+            }
+        }
+    } else {
+        let events = &pipeline_summary["events"];
+        let stats = &events["stats"];
+        let ghost = stats["ghostCount"].as_u64().unwrap_or(0);
+        let orphan = stats["orphanCount"].as_u64().unwrap_or(0);
+        let matched = stats["matched"].as_u64().unwrap_or(0);
+        let emitted = stats["distinctEmitted"].as_u64().unwrap_or(0);
+        let listened = stats["distinctListened"].as_u64().unwrap_or(0);
+
+        let cmd_stats = &pipeline_summary["commands"]["stats"];
+        let total_cmds = cmd_stats["total"].as_u64().unwrap_or(0);
+        let calls = cmd_stats["withCalls"].as_u64().unwrap_or(0);
+        let handlers = cmd_stats["withHandlers"].as_u64().unwrap_or(0);
+
+        let risks = pipeline_summary["risks"]
+            .as_array()
+            .map(|v| v.len())
+            .unwrap_or(0);
+
+        println!("Pipeline Summary:");
+        println!(
+            "  Events: {} emitted, {} listened, {} matched",
+            emitted, listened, matched
+        );
+        println!("  Ghost emits: {}", ghost);
+        println!("  Orphan listeners: {}", orphan);
+        println!(
+            "  Commands: {} total ({} FE calls, {} handlers)",
+            total_cmds, calls, handlers
+        );
+        println!("  Risks: {}", risks);
+    }
+
+    DispatchResult::Exit(0)
+}
+
+/// Handle the insights command - AI insights summary
+pub fn handle_insights_command(opts: &InsightsOptions, global: &GlobalOptions) -> DispatchResult {
+    use crate::analyzer::coverage::compute_command_gaps_with_confidence;
+    use crate::analyzer::insights::collect_ai_insights;
+    use crate::analyzer::root_scan::scan_results_from_snapshot;
+    use std::path::Path;
+
+    let spinner = if !global.quiet && !global.json {
+        Some(Spinner::new("Collecting insights..."))
+    } else {
+        None
+    };
+
+    let root = opts
+        .roots
+        .first()
+        .map(|p| p.as_path())
+        .unwrap_or(Path::new("."));
+
+    let snapshot = match load_or_create_snapshot(root, global) {
+        Ok(s) => s,
+        Err(e) => {
+            if let Some(s) = spinner {
+                s.finish_error(&format!("Failed to load snapshot: {}", e));
+            } else {
+                eprintln!("[loct][error] {}", e);
+            }
+            return DispatchResult::Exit(1);
+        }
+    };
+
+    let scan_results = scan_results_from_snapshot(&snapshot);
+    let mut dups = Vec::new();
+    let mut cascades = Vec::new();
+    for ctx in &scan_results.contexts {
+        dups.extend(ctx.filtered_ranked.clone());
+        cascades.extend(ctx.cascades.clone());
+    }
+
+    let focus = None;
+    let exclude = None;
+    let (missing_handlers, unused_handlers) = compute_command_gaps_with_confidence(
+        &scan_results.global_fe_commands,
+        &scan_results.global_be_commands,
+        &focus,
+        &exclude,
+        &scan_results.global_analyses,
+    );
+
+    let insights = collect_ai_insights(
+        &scan_results.global_analyses,
+        &dups,
+        &cascades,
+        &missing_handlers,
+        &unused_handlers,
+    );
+
+    if let Some(s) = spinner {
+        s.finish_success(&format!("Found {} insight(s)", insights.len()));
+    }
+
+    if global.json {
+        match serde_json::to_string_pretty(&insights) {
+            Ok(json) => println!("{}", json),
+            Err(e) => {
+                eprintln!("[loct][error] Failed to serialize insights: {}", e);
+                return DispatchResult::Exit(1);
+            }
+        }
+    } else if insights.is_empty() {
+        println!("[loct][insights] No insights found");
+    } else {
+        println!("Insights:");
+        for insight in &insights {
+            println!(
+                "  - [{}] {}: {}",
+                insight.severity.to_uppercase(),
+                insight.title,
+                insight.message
+            );
+        }
+    }
+
+    DispatchResult::Exit(0)
+}
+
+/// Handle the manifests command - show manifest summaries
+pub fn handle_manifests_command(opts: &ManifestsOptions, global: &GlobalOptions) -> DispatchResult {
+    use std::path::Path;
+
+    let spinner = if !global.quiet && !global.json {
+        Some(Spinner::new("Loading manifest summaries..."))
+    } else {
+        None
+    };
+
+    let root = opts
+        .roots
+        .first()
+        .map(|p| p.as_path())
+        .unwrap_or(Path::new("."));
+
+    let snapshot = match load_or_create_snapshot(root, global) {
+        Ok(s) => s,
+        Err(e) => {
+            if let Some(s) = spinner {
+                s.finish_error(&format!("Failed to load snapshot: {}", e));
+            } else {
+                eprintln!("[loct][error] {}", e);
+            }
+            return DispatchResult::Exit(1);
+        }
+    };
+
+    if let Some(s) = spinner {
+        s.finish_success("Manifest summaries ready");
+    }
+
+    let manifests = &snapshot.metadata.manifest_summary;
+
+    if global.json {
+        match serde_json::to_string_pretty(&manifests) {
+            Ok(json) => println!("{}", json),
+            Err(e) => {
+                eprintln!(
+                    "[loct][error] Failed to serialize manifest summaries: {}",
+                    e
+                );
+                return DispatchResult::Exit(1);
+            }
+        }
+    } else if manifests.is_empty() {
+        println!("[loct][manifests] No manifest summaries found");
+    } else {
+        println!("Manifest summaries:");
+        for manifest in manifests {
+            println!("  Root: {}", manifest.root);
+            if let Some(pkg) = &manifest.package_json {
+                println!(
+                    "    package.json: {}",
+                    pkg.name.clone().unwrap_or_else(|| "<unnamed>".to_string())
+                );
+            }
+            if let Some(cargo) = &manifest.cargo_toml {
+                println!(
+                    "    Cargo.toml: {}",
+                    cargo
+                        .package_name
+                        .clone()
+                        .unwrap_or_else(|| "<unnamed>".to_string())
+                );
+            }
+            if let Some(py) = &manifest.pyproject_toml {
+                let name = py
+                    .project_name
+                    .clone()
+                    .or_else(|| py.poetry_name.clone())
+                    .unwrap_or_else(|| "<unnamed>".to_string());
+                println!("    pyproject.toml: {}", name);
+            }
+        }
+    }
 
     DispatchResult::Exit(0)
 }
@@ -1256,6 +1515,7 @@ pub fn handle_zombie_command(opts: &ZombieOptions, global: &GlobalOptions) -> Di
     };
 
     // 1. Find dead exports
+    let dead_ok_globs = crate::fs_utils::load_loctignore_dead_ok_globs(root);
     let dead_exports = find_dead_exports(
         &snapshot.files,
         false,
@@ -1268,6 +1528,7 @@ pub fn handle_zombie_command(opts: &ZombieOptions, global: &GlobalOptions) -> Di
             python_library_mode: global.python_library,
             include_ambient: false,
             include_dynamic: false,
+            dead_ok_globs,
         },
     );
 
@@ -1393,7 +1654,7 @@ pub fn handle_zombie_command(opts: &ZombieOptions, global: &GlobalOptions) -> Di
     } else {
         // Human-readable output
         println!();
-        println!("🧟 Zombie Code Report");
+        println!("=== Zombie Code Report ===");
         println!();
 
         // Dead Exports section
@@ -1506,7 +1767,10 @@ pub fn handle_health_command(opts: &HealthOptions, global: &GlobalOptions) -> Di
     use crate::analyzer::cycles::{CycleCompilability, find_cycles_classified_with_lazy};
     use crate::analyzer::dead_parrots::{DeadFilterConfig, find_dead_exports};
     use crate::analyzer::twins::detect_exact_twins;
+    use crate::colors::Painter;
     use std::path::Path;
+
+    let p = Painter::new(global.color);
 
     // Show spinner unless in quiet/json mode
     let spinner = if !global.quiet && !global.json {
@@ -1554,6 +1818,7 @@ pub fn handle_health_command(opts: &HealthOptions, global: &GlobalOptions) -> Di
     let total_cycles = classified_cycles.len();
 
     // 2. Dead exports analysis
+    let dead_ok_globs = crate::fs_utils::load_loctignore_dead_ok_globs(root);
     let dead_exports = find_dead_exports(
         &snapshot.files,
         false,
@@ -1566,6 +1831,7 @@ pub fn handle_health_command(opts: &HealthOptions, global: &GlobalOptions) -> Di
             python_library_mode: global.python_library,
             include_ambient: false,
             include_dynamic: false,
+            dead_ok_globs,
         },
     );
 
@@ -1603,37 +1869,53 @@ pub fn handle_health_command(opts: &HealthOptions, global: &GlobalOptions) -> Di
         });
         println!("{}", serde_json::to_string_pretty(&json).unwrap());
     } else {
-        println!("\nHealth Check Summary\n");
+        println!("\n{}\n", p.header("Health Check Summary"));
 
         // Cycles
         if total_cycles == 0 {
-            println!("Cycles:      OK (none detected)");
+            println!("Cycles:      {} (none detected)", p.ok("[OK]"));
         } else {
+            let status = if high_risk_cycles > 0 {
+                p.error(&format!("{} total", total_cycles))
+            } else {
+                p.warn(&format!("{} total", total_cycles))
+            };
             println!(
-                "Cycles:      {} total ({} high-risk, {} structural)",
-                total_cycles, high_risk_cycles, structural_cycles
+                "Cycles:      {} ({} high-risk, {} structural)",
+                status,
+                p.error(&high_risk_cycles.to_string()),
+                p.warn(&structural_cycles.to_string())
             );
         }
 
         // Dead exports
         if dead_exports.is_empty() {
-            println!("Dead:        OK (none detected)");
+            println!("Dead:        {} (none detected)", p.ok("[OK]"));
         } else {
             println!(
                 "Dead:        {} high confidence, {} low",
-                high_confidence, low_confidence
+                p.ok(&high_confidence.to_string()),
+                p.warn(&low_confidence.to_string())
             );
         }
 
         // Twins
         if twin_count == 0 {
-            println!("Twins:       OK (none detected)");
+            println!("Twins:       {} (none detected)", p.ok("[OK]"));
         } else {
-            println!("Twins:       {} duplicate symbol groups", twin_count);
+            println!(
+                "Twins:       {} duplicate symbol groups",
+                p.warn(&twin_count.to_string())
+            );
         }
 
         println!();
-        println!("Run `loct cycles`, `loct dead`, `loct twins` for details.");
+        println!(
+            "Run {}, {}, {} for details.",
+            p.dim("`loct cycles`"),
+            p.dim("`loct dead`"),
+            p.dim("`loct twins`")
+        );
         println!();
     }
 
@@ -1698,6 +1980,7 @@ pub fn handle_audit_command(opts: &AuditOptions, global: &GlobalOptions) -> Disp
     let _total_cycles = classified_cycles.len();
 
     // 2. Dead exports analysis
+    let dead_ok_globs = crate::fs_utils::load_loctignore_dead_ok_globs(root);
     let dead_exports = find_dead_exports(
         &snapshot.files,
         false,
@@ -1710,6 +1993,7 @@ pub fn handle_audit_command(opts: &AuditOptions, global: &GlobalOptions) -> Disp
             python_library_mode: global.python_library,
             include_ambient: false,
             include_dynamic: false,
+            dead_ok_globs,
         },
     );
 
@@ -1816,27 +2100,31 @@ pub fn handle_audit_command(opts: &AuditOptions, global: &GlobalOptions) -> Disp
         total_loc,
     };
 
+    // Calculate summary stats for terminal output
+    use crate::colors::Painter;
+    let p = Painter::new(global.color);
+
+    let high_confidence = findings
+        .dead_exports
+        .iter()
+        .filter(|d| d.confidence == "high")
+        .count();
+    let low_confidence = findings.dead_exports.len() - high_confidence;
+    let high_risk_cycles = findings
+        .cycles
+        .iter()
+        .filter(|c| c.compilability == CycleCompilability::Breaking)
+        .count();
+    let structural_cycles = findings
+        .cycles
+        .iter()
+        .filter(|c| c.compilability == CycleCompilability::Structural)
+        .count();
+    let orphan_loc: usize = findings.orphan_files.iter().map(|f| f.loc).sum();
+
     // Output results
     if global.json {
         // Keep JSON output for --json flag (existing behavior)
-        let high_confidence = findings
-            .dead_exports
-            .iter()
-            .filter(|d| d.confidence == "high")
-            .count();
-        let low_confidence = findings.dead_exports.len() - high_confidence;
-        let high_risk_cycles = findings
-            .cycles
-            .iter()
-            .filter(|c| c.compilability == CycleCompilability::Breaking)
-            .count();
-        let structural_cycles = findings
-            .cycles
-            .iter()
-            .filter(|c| c.compilability == CycleCompilability::Structural)
-            .count();
-        let orphan_loc: usize = findings.orphan_files.iter().map(|f| f.loc).sum();
-
         let json = serde_json::json!({
             "cycles": {
                 "total": findings.cycles.len(),
@@ -1892,14 +2180,108 @@ pub fn handle_audit_command(opts: &AuditOptions, global: &GlobalOptions) -> Disp
             }
         });
         println!("{}", serde_json::to_string_pretty(&json).unwrap());
-    } else if opts.todos {
-        // --todos flag: output actionable checklist only
-        let output = generate_todos(&findings, opts.limit);
+    } else if opts.stdout {
+        // --stdout: output to terminal (legacy behavior)
+        let output = if opts.todos {
+            generate_todos(&findings, opts.limit)
+        } else {
+            generate_markdown_report(&findings, opts.limit)
+        };
         print!("{}", output);
     } else {
-        // Default: full markdown report
-        let output = generate_markdown_report(&findings, opts.limit);
-        print!("{}", output);
+        // Default: write to file and open
+        let loctree_dir = root.join(".loctree");
+        if !loctree_dir.exists() {
+            std::fs::create_dir_all(&loctree_dir).ok();
+        }
+
+        let (filename, output) = if opts.todos {
+            ("audit_todos.md", generate_todos(&findings, opts.limit))
+        } else {
+            (
+                "audit_report.md",
+                generate_markdown_report(&findings, opts.limit),
+            )
+        };
+
+        let report_path = loctree_dir.join(filename);
+
+        // Write report to file
+        if let Err(e) = std::fs::write(&report_path, &output) {
+            eprintln!("{}", p.error(&format!("Failed to write report: {}", e)));
+            return DispatchResult::Exit(1);
+        }
+
+        // Print colored summary to terminal
+        let total_issues = findings.cycles.len()
+            + findings.dead_exports.len()
+            + findings.twins.len()
+            + findings.shadow_exports.len();
+
+        println!("\n{}\n", p.header("Audit Summary"));
+        println!(
+            "  Files: {}  |  LOC: {}  |  Issues: {}",
+            p.number(findings.total_files),
+            p.number(findings.total_loc),
+            if total_issues > 0 {
+                p.warn(&total_issues.to_string())
+            } else {
+                p.ok(&total_issues.to_string())
+            }
+        );
+
+        if high_risk_cycles > 0 {
+            println!(
+                "  {} {} breaking cycles",
+                p.error("[!]"),
+                p.error(&high_risk_cycles.to_string())
+            );
+        }
+        if high_confidence > 0 {
+            println!(
+                "  {} {} high-confidence dead exports",
+                p.warn("[~]"),
+                p.warn(&high_confidence.to_string())
+            );
+        }
+        if !findings.twins.is_empty() {
+            println!(
+                "  {} {} duplicate symbol groups",
+                p.info("[i]"),
+                p.info(&findings.twins.len().to_string())
+            );
+        }
+
+        println!(
+            "\n{} {}\n",
+            p.ok("Report saved:"),
+            p.path(&report_path.display().to_string())
+        );
+
+        // Open the file (unless --no-open)
+        if !opts.no_open {
+            #[cfg(target_os = "macos")]
+            {
+                std::process::Command::new("open")
+                    .arg(&report_path)
+                    .spawn()
+                    .ok();
+            }
+            #[cfg(target_os = "linux")]
+            {
+                std::process::Command::new("xdg-open")
+                    .arg(&report_path)
+                    .spawn()
+                    .ok();
+            }
+            #[cfg(target_os = "windows")]
+            {
+                std::process::Command::new("cmd")
+                    .args(["/C", "start", &report_path.display().to_string()])
+                    .spawn()
+                    .ok();
+            }
+        }
     }
 
     DispatchResult::Exit(0)
@@ -1910,7 +2292,10 @@ pub fn handle_doctor_command(opts: &DoctorOptions, global: &GlobalOptions) -> Di
     use crate::analyzer::cycles::{CycleCompilability, find_cycles_classified_with_lazy};
     use crate::analyzer::dead_parrots::{DeadFilterConfig, find_dead_exports};
     use crate::analyzer::twins::detect_exact_twins;
+    use crate::colors::Painter;
     use std::path::Path;
+
+    let p = Painter::new(global.color);
 
     let spinner = if !global.quiet && !global.json {
         Some(Spinner::new("Running diagnostics..."))
@@ -1955,6 +2340,7 @@ pub fn handle_doctor_command(opts: &DoctorOptions, global: &GlobalOptions) -> Di
         .collect();
 
     // 2. Dead exports analysis
+    let dead_ok_globs = crate::fs_utils::load_loctignore_dead_ok_globs(root);
     let dead_exports = find_dead_exports(
         &snapshot.files,
         false,
@@ -1967,6 +2353,7 @@ pub fn handle_doctor_command(opts: &DoctorOptions, global: &GlobalOptions) -> Di
             python_library_mode: global.python_library,
             include_ambient: false,
             include_dynamic: false,
+            dead_ok_globs,
         },
     );
 
@@ -2037,43 +2424,64 @@ pub fn handle_doctor_command(opts: &DoctorOptions, global: &GlobalOptions) -> Di
         });
         println!("{}", serde_json::to_string_pretty(&json).unwrap());
     } else {
-        println!("\n=== Doctor Diagnostics ===\n");
+        println!("\n{}\n", p.header("=== Doctor Diagnostics ==="));
         println!(
             "Found {} issues: {} auto-fixable, {} need review\n",
-            auto_fixable + needs_review,
-            auto_fixable,
-            needs_review
+            p.number(auto_fixable + needs_review),
+            p.ok(&auto_fixable.to_string()),
+            p.warn(&needs_review.to_string())
         );
 
         // Cycles
         if !classified_cycles.is_empty() {
-            println!("Circular Imports ({} total):", classified_cycles.len());
+            println!(
+                "{} ({} total):",
+                p.header("Circular Imports"),
+                p.number(classified_cycles.len())
+            );
             if !high_risk_cycles.is_empty() {
-                println!("  {} high-risk cycles (breaking)", high_risk_cycles.len());
+                println!(
+                    "  {} {} (breaking)",
+                    p.error(&high_risk_cycles.len().to_string()),
+                    p.error("high-risk cycles")
+                );
                 for (i, cycle) in high_risk_cycles.iter().take(3).enumerate() {
                     println!(
                         "    {}. {} -> {} files",
                         i + 1,
-                        cycle.nodes[0],
+                        p.path(&cycle.nodes[0]),
                         cycle.nodes.len()
                     );
                 }
                 if high_risk_cycles.len() > 3 {
-                    println!("    ... and {} more", high_risk_cycles.len() - 3);
+                    println!(
+                        "    {} {} more",
+                        p.dim("...and"),
+                        high_risk_cycles.len() - 3
+                    );
                 }
             }
             if !structural_cycles.is_empty() {
-                println!("  {} structural cycles (warnings)", structural_cycles.len());
+                println!(
+                    "  {} {} (warnings)",
+                    p.warn(&structural_cycles.len().to_string()),
+                    p.warn("structural cycles")
+                );
             }
-            println!("  Run `loct cycles` for details\n");
+            println!("  Run {} for details\n", p.dim("`loct cycles`"));
         }
 
         // Dead exports
         if !dead_exports.is_empty() {
-            println!("Dead Exports ({} total):", dead_exports.len());
             println!(
-                "  {} high confidence (safe to remove)",
-                high_confidence_dead.len()
+                "{} ({} total):",
+                p.header("Dead Exports"),
+                p.number(dead_exports.len())
+            );
+            println!(
+                "  {} {} (safe to remove)",
+                p.ok(&high_confidence_dead.len().to_string()),
+                p.ok("high confidence")
             );
             for (i, dead) in high_confidence_dead.iter().take(5).enumerate() {
                 let line_str = dead
@@ -2083,49 +2491,61 @@ pub fn handle_doctor_command(opts: &DoctorOptions, global: &GlobalOptions) -> Di
                 println!(
                     "    {}. {}:{} - {}",
                     i + 1,
-                    dead.file,
+                    p.path(&dead.file),
                     line_str,
-                    dead.symbol
+                    p.symbol(&dead.symbol)
                 );
             }
             if high_confidence_dead.len() > 5 {
-                println!("    ... and {} more", high_confidence_dead.len() - 5);
+                println!(
+                    "    {} {} more",
+                    p.dim("...and"),
+                    high_confidence_dead.len() - 5
+                );
             }
             if !low_confidence_dead.is_empty() {
                 println!(
-                    "  {} low confidence (needs review)",
-                    low_confidence_dead.len()
+                    "  {} {} (needs review)",
+                    p.warn(&low_confidence_dead.len().to_string()),
+                    p.warn("low confidence")
                 );
             }
-            println!("  Run `loct dead` for full list\n");
+            println!("  Run {} for full list\n", p.dim("`loct dead`"));
         }
 
         // Twins
         if !twins.is_empty() {
-            println!("Duplicate Symbols ({} groups):", twins.len());
+            println!(
+                "{} ({} groups):",
+                p.header("Duplicate Symbols"),
+                p.number(twins.len())
+            );
             for (i, twin) in twins.iter().take(3).enumerate() {
                 println!(
-                    "    {}. '{}' appears in {} files",
+                    "    {}. {} appears in {} files",
                     i + 1,
-                    twin.name,
-                    twin.locations.len()
+                    p.symbol(&format!("'{}'", twin.name)),
+                    p.number(twin.locations.len())
                 );
             }
             if twins.len() > 3 {
-                println!("    ... and {} more groups", twins.len() - 3);
+                println!("    {} {} more groups", p.dim("...and"), twins.len() - 3);
             }
-            println!("  Run `loct twins` for details\n");
+            println!("  Run {} for details\n", p.dim("`loct twins`"));
         }
 
         // Suppressions
         if !false_positive_patterns.is_empty() {
-            println!("Suggested .loctignore entries for false positives:");
+            println!(
+                "{} for false positives:",
+                p.header("Suggested .loctignore entries")
+            );
             for pattern in &false_positive_patterns {
-                println!("  {}", pattern);
+                println!("  {}", p.path(pattern));
             }
 
             if opts.apply_suppressions {
-                println!("\nApplying suppressions to .loctignore...");
+                println!("\n{}...", p.info("Applying suppressions to .loctignore"));
                 let loctignore_path = root.join(".loctignore");
                 if let Ok(mut file) = std::fs::OpenOptions::new()
                     .append(true)
@@ -2137,29 +2557,247 @@ pub fn handle_doctor_command(opts: &DoctorOptions, global: &GlobalOptions) -> Di
                     for pattern in &false_positive_patterns {
                         writeln!(file, "{}", pattern).ok();
                     }
-                    println!("Suppressions written to {}", loctignore_path.display());
+                    println!(
+                        "{} {}",
+                        p.ok("Suppressions written to"),
+                        p.path(&loctignore_path.display().to_string())
+                    );
                 } else {
-                    eprintln!("Failed to write .loctignore");
+                    eprintln!("{}", p.error("Failed to write .loctignore"));
                 }
             } else {
-                println!("\nRun with --apply-suppressions to automatically add these");
+                println!(
+                    "\nRun with {} to automatically add these",
+                    p.info("--apply-suppressions")
+                );
             }
             println!();
         }
 
         // Next steps
-        println!("Next steps:");
+        println!("{}:", p.header("Next steps"));
         if auto_fixable > 0 {
-            println!("  1. Review high-confidence dead exports and remove if safe");
+            println!(
+                "  1. Review {} dead exports and remove if safe",
+                p.ok("high-confidence")
+            );
             println!("  2. Run tests after each removal to ensure nothing breaks");
         }
         if needs_review > 0 {
-            println!("  3. Investigate low-confidence findings manually");
+            println!(
+                "  3. Investigate {} findings manually",
+                p.warn("low-confidence")
+            );
         }
         if !high_risk_cycles.is_empty() {
-            println!("  4. Break circular imports using dependency injection or interfaces");
+            println!(
+                "  4. Break {} using dependency injection or interfaces",
+                p.error("circular imports")
+            );
         }
         println!();
+    }
+
+    DispatchResult::Exit(0)
+}
+
+/// Handle the plan command - generate refactoring plan
+pub fn handle_plan_command(opts: &PlanOptions, global: &GlobalOptions) -> DispatchResult {
+    use crate::refactor_plan::{generate_refactor_plan, output, parse_target_layout_spec};
+    use crate::snapshot::resolve_snapshot_root;
+    use std::path::PathBuf;
+
+    // Show spinner unless in quiet/json mode
+    let spinner = if !global.quiet && !global.json {
+        Some(Spinner::new("Generating refactor plan..."))
+    } else {
+        None
+    };
+
+    let roots: Vec<PathBuf> = if opts.roots.is_empty() {
+        vec![PathBuf::from(".")]
+    } else {
+        opts.roots.clone()
+    };
+
+    let snapshot_root = resolve_snapshot_root(&roots);
+    let snapshot = match load_or_create_snapshot(&snapshot_root, global) {
+        Ok(s) => s,
+        Err(e) => {
+            if let Some(s) = spinner {
+                s.finish_error(&format!("Failed to load snapshot: {}", e));
+            } else {
+                eprintln!("[loct][error] {}", e);
+            }
+            return DispatchResult::Exit(1);
+        }
+    };
+
+    let layout = match opts.target_layout.as_deref() {
+        Some(spec) => match parse_target_layout_spec(spec) {
+            Ok(map) => Some(map),
+            Err(e) => {
+                if let Some(s) = spinner {
+                    s.finish_error(&e);
+                } else {
+                    eprintln!("[loct][error] {}", e);
+                }
+                return DispatchResult::Exit(2);
+            }
+        },
+        None => None,
+    };
+
+    // Generate one plan per root (multi-target output)
+    let mut plans = Vec::new();
+    let mut skipped = Vec::new();
+    for root in &roots {
+        let target_dir = root.as_path();
+        let target_str = target_dir.to_str().unwrap_or(".");
+        match generate_refactor_plan(&snapshot, target_str, layout.as_ref()) {
+            Some(plan) => plans.push(plan),
+            None => skipped.push(target_str.to_string()),
+        }
+    }
+
+    if plans.is_empty() {
+        if let Some(s) = spinner {
+            s.finish_success("No files need reorganization");
+        } else if !global.quiet {
+            if skipped.len() == 1 {
+                println!("No files need reorganization in {}", skipped[0]);
+            } else {
+                println!("No files need reorganization in any target");
+            }
+        }
+        return DispatchResult::Exit(0);
+    }
+
+    if let Some(s) = spinner {
+        let total_moves: usize = plans.iter().map(|p| p.stats.files_to_move).sum();
+        let total_shims: usize = plans.iter().map(|p| p.stats.shims_needed).sum();
+        s.finish_success(&format!(
+            "Generated plan(s): {} target(s), {} moves, {} shims",
+            plans.len(),
+            total_moves,
+            total_shims
+        ));
+    }
+
+    // Handle output based on flags
+    if opts.all {
+        // Generate all formats
+        let base_path = opts
+            .output
+            .clone()
+            .unwrap_or_else(|| std::path::PathBuf::from("refactor-plan"));
+
+        let md_path = base_path.with_extension("md");
+        let json_path = base_path.with_extension("json");
+        let script_path = base_path.with_extension("sh");
+
+        if plans.len() == 1 {
+            if let Err(e) = output::output_as_markdown(&plans[0], &md_path) {
+                eprintln!("[loct][error] Failed to write markdown: {}", e);
+                return DispatchResult::Exit(1);
+            }
+        } else if let Err(e) = output::output_bundle_as_markdown(&plans, &md_path) {
+            eprintln!("[loct][error] Failed to write markdown: {}", e);
+            return DispatchResult::Exit(1);
+        }
+
+        if plans.len() == 1 {
+            if let Err(e) = output::output_as_json(&plans[0], &json_path) {
+                eprintln!("[loct][error] Failed to write JSON: {}", e);
+                return DispatchResult::Exit(1);
+            }
+        } else if let Err(e) = output::output_bundle_as_json(&plans, &json_path) {
+            eprintln!("[loct][error] Failed to write JSON: {}", e);
+            return DispatchResult::Exit(1);
+        }
+
+        if plans.len() == 1 {
+            if let Err(e) = output::output_as_script(&plans[0], &script_path) {
+                eprintln!("[loct][error] Failed to write script: {}", e);
+                return DispatchResult::Exit(1);
+            }
+        } else if let Err(e) = output::output_bundle_as_script(&plans, &script_path) {
+            eprintln!("[loct][error] Failed to write script: {}", e);
+            return DispatchResult::Exit(1);
+        }
+
+        if !global.quiet {
+            println!("Generated:");
+            println!("  {} (markdown)", md_path.display());
+            println!("  {} (json)", json_path.display());
+            println!("  {} (script)", script_path.display());
+        }
+
+        // Auto-open markdown if not suppressed
+        if !opts.no_open {
+            #[cfg(target_os = "macos")]
+            {
+                let _ = std::process::Command::new("open").arg(&md_path).spawn();
+            }
+        }
+    } else if opts.json || global.json {
+        // Output JSON to stdout
+        if plans.len() == 1 {
+            println!("{}", output::format_as_json(&plans[0]));
+        } else {
+            println!("{}", output::format_bundle_as_json(&plans));
+        }
+    } else if opts.script {
+        // Output script to stdout (or file)
+        if let Some(ref path) = opts.output {
+            let result = if plans.len() == 1 {
+                output::output_as_script(&plans[0], path)
+            } else {
+                output::output_bundle_as_script(&plans, path)
+            };
+            if let Err(e) = result {
+                eprintln!("[loct][error] Failed to write script: {}", e);
+                return DispatchResult::Exit(1);
+            }
+            if !global.quiet {
+                println!("Script written to: {}", path.display());
+            }
+        } else if plans.len() == 1 {
+            print!("{}", output::format_as_script(&plans[0]));
+        } else {
+            print!("{}", output::format_bundle_as_script(&plans));
+        }
+    } else {
+        // Default: markdown
+        if let Some(ref path) = opts.output {
+            let result = if plans.len() == 1 {
+                output::output_as_markdown(&plans[0], path)
+            } else {
+                output::output_bundle_as_markdown(&plans, path)
+            };
+            if let Err(e) = result {
+                eprintln!("[loct][error] Failed to write markdown: {}", e);
+                return DispatchResult::Exit(1);
+            }
+            if !global.quiet {
+                println!("Report written to: {}", path.display());
+            }
+
+            // Auto-open if not suppressed
+            if !opts.no_open {
+                #[cfg(target_os = "macos")]
+                {
+                    let _ = std::process::Command::new("open").arg(path).spawn();
+                }
+            }
+        } else {
+            // Print to stdout
+            if plans.len() == 1 {
+                println!("{}", output::format_as_markdown(&plans[0]));
+            } else {
+                println!("{}", output::format_bundle_as_markdown(&plans));
+            }
+        }
     }
 
     DispatchResult::Exit(0)

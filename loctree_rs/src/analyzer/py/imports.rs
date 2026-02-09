@@ -3,7 +3,7 @@
 //! Handles resolution of Python imports (absolute and relative) to their
 //! source files, with stdlib detection.
 //!
-//! Created by M&K (c)2025 The LibraxisAI Team
+//! Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team
 //! Co-Authored-By: Maciej <void@div0.space> & Klaudiusz <the1st@whoai.am>
 
 use std::collections::HashSet;

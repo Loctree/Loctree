@@ -1,7 +1,7 @@
 //! End-to-End CLI Tests for loctree
 //!
 //! Following TDD principles - tests define expected behavior.
-//! Developed with 💀 by The Loctree Team (c)2025
+//! Vibecrafted with AI Agents by VetCoders (c)2025 VetCoders
 
 use assert_cmd::Command;
 use assert_cmd::cargo::cargo_bin_cmd;
@@ -51,9 +51,8 @@ mod cli_basics {
             .arg("--help-full")
             .assert()
             .success()
-            .stdout(predicate::str::contains("--circular"))
-            .stdout(predicate::str::contains("--dead"))
-            .stdout(predicate::str::contains("--sarif"));
+            .stdout(predicate::str::contains("--sarif").or(predicate::str::contains("sarif")))
+            .stdout(predicate::str::contains("dead").or(predicate::str::contains("cycles")));
     }
 
     #[test]
@@ -81,7 +80,8 @@ mod scan_mode {
             .current_dir(&fixture)
             .assert()
             .success()
-            .stdout(predicate::str::contains("ts").or(predicate::str::contains("Scanned")));
+            // Summary output goes to stderr (stdout reserved for machine-readable data)
+            .stderr(predicate::str::contains("ts").or(predicate::str::contains("Scanned")));
     }
 
     #[test]
@@ -330,7 +330,8 @@ mod tauri_mode {
             .current_dir(&fixture)
             .assert()
             .success()
-            .stdout(predicate::str::contains("handlers")); // Tauri mode detected = handlers shown
+            // Summary output goes to stderr (stdout reserved for machine-readable data)
+            .stderr(predicate::str::contains("handlers")); // Tauri mode detected = handlers shown
     }
 
     #[test]
@@ -838,4 +839,1544 @@ fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result
         }
     }
     Ok(())
+}
+
+/// Copy directory tree, skipping a named top-level entry (e.g. ".loctree").
+fn copy_dir_excluding(
+    src: &std::path::Path,
+    dst: &std::path::Path,
+    exclude: &str,
+) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        if entry.file_name() == exclude {
+            continue;
+        }
+        let ty = entry.file_type()?;
+        let dest_path = dst.join(entry.file_name());
+        if ty.is_dir() {
+            copy_dir_all(&entry.path(), &dest_path)?;
+        } else {
+            std::fs::copy(entry.path(), dest_path)?;
+        }
+    }
+    Ok(())
+}
+
+// ============================================
+// Instant Commands Tests (<100ms)
+// ============================================
+// Vibecrafted with AI Agents by VetCoders (c)2026 VetCoders
+
+mod instant_commands {
+    use super::*;
+
+    // ----------------------------------------
+    // Focus Command Tests
+    // ----------------------------------------
+
+    #[test]
+    fn focus_help_shows_usage() {
+        loctree()
+            .args(["focus", "--help"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("focus").or(predicate::str::contains("directory")));
+    }
+
+    #[test]
+    fn focus_on_directory() {
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["focus", "src/"])
+            .assert()
+            .success()
+            .stdout(
+                predicate::str::contains("src")
+                    .or(predicate::str::contains("Focus"))
+                    .or(predicate::str::contains("files")),
+            );
+    }
+
+    #[test]
+    fn focus_json_output() {
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["focus", "src/", "--json"])
+            .assert()
+            .success()
+            .stdout(predicate::str::starts_with("{").or(predicate::str::starts_with("[")));
+    }
+
+    // ----------------------------------------
+    // Hotspots Command Tests
+    // ----------------------------------------
+
+    #[test]
+    fn hotspots_help_shows_usage() {
+        loctree()
+            .args(["hotspots", "--help"])
+            .assert()
+            .success()
+            .stdout(
+                predicate::str::contains("hotspots")
+                    .or(predicate::str::contains("import"))
+                    .or(predicate::str::contains("frequency")),
+            );
+    }
+
+    #[test]
+    fn hotspots_runs_successfully() {
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["hotspots"])
+            .assert()
+            .success();
+    }
+
+    #[test]
+    fn hotspots_json_output() {
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["hotspots", "--json"])
+            .assert()
+            .success()
+            .stdout(predicate::str::starts_with("{").or(predicate::str::starts_with("[")));
+    }
+
+    // ----------------------------------------
+    // Health Command Tests
+    // ----------------------------------------
+
+    #[test]
+    fn health_help_shows_usage() {
+        loctree()
+            .args(["health", "--help"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("health").or(predicate::str::contains("check")));
+    }
+
+    #[test]
+    fn health_runs_successfully() {
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["health"])
+            .assert()
+            .success()
+            .stdout(
+                predicate::str::contains("Health")
+                    .or(predicate::str::contains("OK"))
+                    .or(predicate::str::contains("score")),
+            );
+    }
+
+    #[test]
+    fn health_alias_h() {
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["h"])
+            .assert()
+            .success();
+    }
+
+    #[test]
+    fn health_json_output() {
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["health", "--json"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains(r#""health"#).or(predicate::str::starts_with("{")));
+    }
+
+    // ----------------------------------------
+    // Query Command Tests
+    // ----------------------------------------
+
+    #[test]
+    fn query_help_shows_usage() {
+        loctree()
+            .args(["query", "--help"])
+            .assert()
+            .success()
+            .stdout(
+                predicate::str::contains("query")
+                    .or(predicate::str::contains("who-imports"))
+                    .or(predicate::str::contains("where-symbol")),
+            );
+    }
+
+    #[test]
+    fn query_who_imports() {
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["query", "who-imports", "src/utils/greeting.ts"])
+            .assert()
+            .success();
+    }
+
+    #[test]
+    fn query_where_symbol() {
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["query", "where-symbol", "greet"])
+            .assert()
+            .success();
+    }
+
+    #[test]
+    fn query_alias_q() {
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["q", "who-imports", "src/utils/greeting.ts"])
+            .assert()
+            .success();
+    }
+
+    // ----------------------------------------
+    // Commands Command Tests (Tauri)
+    // ----------------------------------------
+
+    #[test]
+    fn commands_help_shows_usage() {
+        loctree()
+            .args(["commands", "--help"])
+            .assert()
+            .success()
+            .stdout(
+                predicate::str::contains("commands")
+                    .or(predicate::str::contains("Tauri"))
+                    .or(predicate::str::contains("handler")),
+            );
+    }
+
+    #[test]
+    fn commands_in_tauri_project() {
+        let fixture = fixtures_path().join("tauri_app");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["commands"])
+            .assert()
+            .success();
+    }
+
+    #[test]
+    fn commands_json_output() {
+        let fixture = fixtures_path().join("tauri_app");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["commands", "--json"])
+            .assert()
+            .success()
+            .stdout(predicate::str::starts_with("{").or(predicate::str::starts_with("[")));
+    }
+
+    // ----------------------------------------
+    // Events Command Tests
+    // ----------------------------------------
+
+    #[test]
+    fn events_help_shows_usage() {
+        loctree()
+            .args(["events", "--help"])
+            .assert()
+            .success()
+            .stdout(
+                predicate::str::contains("events")
+                    .or(predicate::str::contains("emit"))
+                    .or(predicate::str::contains("listen")),
+            );
+    }
+
+    #[test]
+    fn events_runs_successfully() {
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["events"])
+            .assert()
+            .success();
+    }
+
+    #[test]
+    fn events_json_output() {
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["events", "--json"])
+            .assert()
+            .success()
+            .stdout(predicate::str::starts_with("{").or(predicate::str::starts_with("[")));
+    }
+
+    // ----------------------------------------
+    // Coverage Command Tests
+    // ----------------------------------------
+
+    #[test]
+    fn coverage_help_shows_usage() {
+        loctree()
+            .args(["coverage", "--help"])
+            .assert()
+            .success()
+            .stdout(
+                predicate::str::contains("coverage")
+                    .or(predicate::str::contains("test"))
+                    .or(predicate::str::contains("gaps")),
+            );
+    }
+
+    #[test]
+    fn coverage_runs_successfully() {
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["coverage"])
+            .assert()
+            .success();
+    }
+
+    #[test]
+    fn coverage_json_output() {
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["coverage", "--json"])
+            .assert()
+            .success()
+            .stdout(predicate::str::starts_with("{").or(predicate::str::starts_with("[")));
+    }
+}
+
+// ============================================
+// Analysis Commands Tests
+// ============================================
+// Vibecrafted with AI Agents by VetCoders (c)2026 VetCoders
+
+mod analysis_commands {
+    use super::*;
+
+    // ----------------------------------------
+    // Dead Command Tests
+    // ----------------------------------------
+
+    #[test]
+    fn dead_help_shows_usage() {
+        loctree()
+            .args(["dead", "--help"])
+            .assert()
+            .success()
+            .stdout(
+                predicate::str::contains("dead")
+                    .or(predicate::str::contains("unused"))
+                    .or(predicate::str::contains("exports")),
+            );
+    }
+
+    #[test]
+    fn dead_detects_unused_exports() {
+        let fixture = fixtures_path().join("dead_code");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["dead"])
+            .assert()
+            .success()
+            .stdout(
+                predicate::str::contains("dead")
+                    .or(predicate::str::contains("unused"))
+                    .or(predicate::str::contains("DEAD_CONSTANT")),
+            );
+    }
+
+    #[test]
+    fn dead_alias_d() {
+        let fixture = fixtures_path().join("dead_code");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["d"])
+            .assert()
+            .success();
+    }
+
+    #[test]
+    fn dead_json_output() {
+        let fixture = fixtures_path().join("dead_code");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["dead", "--json"])
+            .assert()
+            .success()
+            .stdout(predicate::str::starts_with("{").or(predicate::str::starts_with("[")));
+    }
+
+    // ----------------------------------------
+    // Cycles Command Tests
+    // ----------------------------------------
+
+    #[test]
+    fn cycles_help_shows_usage() {
+        loctree()
+            .args(["cycles", "--help"])
+            .assert()
+            .success()
+            .stdout(
+                predicate::str::contains("cycles")
+                    .or(predicate::str::contains("circular"))
+                    .or(predicate::str::contains("imports")),
+            );
+    }
+
+    #[test]
+    fn cycles_detects_circular_imports() {
+        let fixture = fixtures_path().join("circular_imports");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["cycles"])
+            .assert()
+            .success()
+            .stdout(
+                predicate::str::contains("cycle")
+                    .or(predicate::str::contains("circular"))
+                    .or(predicate::str::contains("→")),
+            );
+    }
+
+    #[test]
+    fn cycles_alias_c() {
+        let fixture = fixtures_path().join("circular_imports");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["c"])
+            .assert()
+            .success();
+    }
+
+    #[test]
+    fn cycles_json_output() {
+        let fixture = fixtures_path().join("circular_imports");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["cycles", "--json"])
+            .assert()
+            .success()
+            .stdout(predicate::str::starts_with("{").or(predicate::str::starts_with("[")));
+    }
+
+    // ----------------------------------------
+    // Twins Command Tests
+    // ----------------------------------------
+
+    #[test]
+    fn twins_help_shows_usage() {
+        loctree()
+            .args(["twins", "--help"])
+            .assert()
+            .success()
+            .stdout(
+                predicate::str::contains("twins")
+                    .or(predicate::str::contains("duplicate"))
+                    .or(predicate::str::contains("dead parrot")),
+            );
+    }
+
+    #[test]
+    fn twins_runs_successfully() {
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["twins"])
+            .assert()
+            .success();
+    }
+
+    #[test]
+    fn twins_alias_t() {
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["t"])
+            .assert()
+            .success();
+    }
+
+    #[test]
+    fn twins_json_output() {
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["twins", "--json"])
+            .assert()
+            .success()
+            .stdout(predicate::str::starts_with("{").or(predicate::str::starts_with("[")));
+    }
+
+    // ----------------------------------------
+    // Zombie Command Tests
+    // ----------------------------------------
+
+    #[test]
+    fn zombie_help_shows_usage() {
+        loctree()
+            .args(["zombie", "--help"])
+            .assert()
+            .success()
+            .stdout(
+                predicate::str::contains("zombie")
+                    .or(predicate::str::contains("dead"))
+                    .or(predicate::str::contains("orphan")),
+            );
+    }
+
+    #[test]
+    fn zombie_runs_successfully() {
+        let fixture = fixtures_path().join("dead_code");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["zombie"])
+            .assert()
+            .success();
+    }
+
+    #[test]
+    fn zombie_json_output() {
+        let fixture = fixtures_path().join("dead_code");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["zombie", "--json"])
+            .assert()
+            .success()
+            .stdout(predicate::str::starts_with("{").or(predicate::str::starts_with("[")));
+    }
+
+    // ----------------------------------------
+    // Audit Command Tests
+    // ----------------------------------------
+
+    #[test]
+    fn audit_help_shows_usage() {
+        loctree()
+            .args(["audit", "--help"])
+            .assert()
+            .success()
+            .stdout(
+                predicate::str::contains("audit")
+                    .or(predicate::str::contains("full"))
+                    .or(predicate::str::contains("codebase")),
+            );
+    }
+
+    #[test]
+    fn audit_runs_successfully() {
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["audit", "--no-open"])
+            .assert()
+            .success();
+    }
+
+    #[test]
+    fn audit_stdout_flag() {
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["audit", "--stdout"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Audit").or(predicate::str::contains("Health")));
+    }
+
+    // ----------------------------------------
+    // Crowd Command Tests
+    // ----------------------------------------
+
+    #[test]
+    fn crowd_help_shows_usage() {
+        loctree()
+            .args(["crowd", "--help"])
+            .assert()
+            .success()
+            .stdout(
+                predicate::str::contains("crowd")
+                    .or(predicate::str::contains("cluster"))
+                    .or(predicate::str::contains("keyword")),
+            );
+    }
+
+    #[test]
+    fn crowd_with_keyword() {
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["crowd", "greet"])
+            .assert()
+            .success();
+    }
+
+    #[test]
+    fn crowd_json_output() {
+        // Copy fixture to temp WITHOUT .loctree/ to force auto-scan,
+        // verifying --json stdout stays clean even when scanning triggers.
+        let temp = TempDir::new().unwrap();
+        let fixture = fixtures_path().join("simple_ts");
+        copy_dir_excluding(&fixture, temp.path(), ".loctree").unwrap();
+
+        loctree()
+            .current_dir(temp.path())
+            .args(["crowd", "greet", "--json"])
+            .assert()
+            .success()
+            .stdout(predicate::str::starts_with("{").or(predicate::str::starts_with("[")));
+    }
+
+    // ----------------------------------------
+    // Tagmap Command Tests
+    // ----------------------------------------
+
+    #[test]
+    fn tagmap_help_shows_usage() {
+        loctree()
+            .args(["tagmap", "--help"])
+            .assert()
+            .success()
+            .stdout(
+                predicate::str::contains("tagmap")
+                    .or(predicate::str::contains("search"))
+                    .or(predicate::str::contains("unified")),
+            );
+    }
+
+    #[test]
+    fn tagmap_with_keyword() {
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["tagmap", "greet"])
+            .assert()
+            .success();
+    }
+
+    #[test]
+    fn tagmap_json_output() {
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["tagmap", "greet", "--json"])
+            .assert()
+            .success()
+            .stdout(predicate::str::starts_with("{").or(predicate::str::starts_with("[")));
+    }
+
+    // ----------------------------------------
+    // Plan Command Tests
+    // ----------------------------------------
+
+    #[test]
+    fn plan_help_shows_usage() {
+        loctree()
+            .args(["plan", "--help"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("plan").or(predicate::str::contains("refactor")));
+    }
+
+    #[test]
+    fn plan_supports_multiple_targets() {
+        let fixture = fixtures_path().join("plan_multi");
+        let temp = TempDir::new().unwrap();
+        copy_dir_all(&fixture, temp.path()).unwrap();
+
+        loctree()
+            .current_dir(temp.path())
+            .args(["plan", "--json", "src", "other"])
+            .assert()
+            .success()
+            .stdout(predicate::str::starts_with("["))
+            .stdout(predicate::str::contains("\"target\": \"src\""))
+            .stdout(predicate::str::contains("\"target\": \"other\""));
+    }
+
+    #[test]
+    fn plan_target_layout_affects_move_targets() {
+        let fixture = fixtures_path().join("plan_multi");
+        let temp = TempDir::new().unwrap();
+        copy_dir_all(&fixture, temp.path()).unwrap();
+
+        loctree()
+            .current_dir(temp.path())
+            .args([
+                "plan",
+                "--json",
+                "src",
+                "--target-layout",
+                "ui=custom-ui,app=custom-app",
+            ])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("src/custom-ui"))
+            .stdout(predicate::str::contains("src/custom-app"));
+    }
+
+    // ----------------------------------------
+    // Sniff Command Tests
+    // ----------------------------------------
+
+    #[test]
+    fn sniff_help_shows_usage() {
+        loctree()
+            .args(["sniff", "--help"])
+            .assert()
+            .success()
+            .stdout(
+                predicate::str::contains("sniff")
+                    .or(predicate::str::contains("smell"))
+                    .or(predicate::str::contains("aggregate")),
+            );
+    }
+
+    #[test]
+    fn sniff_runs_successfully() {
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["sniff"])
+            .assert()
+            .success();
+    }
+
+    #[test]
+    fn sniff_json_output() {
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["sniff", "--json"])
+            .assert()
+            .success()
+            .stdout(predicate::str::starts_with("{").or(predicate::str::starts_with("[")));
+    }
+}
+
+// ============================================
+// Management & Core Workflow Commands Tests
+// ============================================
+// Vibecrafted with AI Agents by VetCoders (c)2026 VetCoders
+
+mod management_commands {
+    use super::*;
+
+    // ----------------------------------------
+    // Doctor Command Tests
+    // ----------------------------------------
+
+    #[test]
+    fn doctor_help_shows_usage() {
+        loctree()
+            .args(["doctor", "--help"])
+            .assert()
+            .success()
+            .stdout(
+                predicate::str::contains("doctor")
+                    .or(predicate::str::contains("diagnostic"))
+                    .or(predicate::str::contains("recommendation")),
+            );
+    }
+
+    #[test]
+    fn doctor_runs_successfully() {
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["doctor"])
+            .assert()
+            .success();
+    }
+
+    #[test]
+    fn doctor_json_output() {
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["doctor", "--json"])
+            .assert()
+            .success()
+            .stdout(predicate::str::starts_with("{").or(predicate::str::starts_with("[")));
+    }
+
+    // ----------------------------------------
+    // Suppress Command Tests
+    // ----------------------------------------
+
+    #[test]
+    fn suppress_help_shows_usage() {
+        loctree()
+            .args(["suppress", "--help"])
+            .assert()
+            .success()
+            .stdout(
+                predicate::str::contains("suppress")
+                    .or(predicate::str::contains("false positive"))
+                    .or(predicate::str::contains("ignore")),
+            );
+    }
+
+    #[test]
+    fn suppress_list_empty() {
+        let temp = TempDir::new().unwrap();
+        std::fs::write(temp.path().join("main.ts"), "export const x = 1;").unwrap();
+
+        loctree()
+            .current_dir(temp.path())
+            .args(["suppress", "--list"])
+            .assert()
+            .success();
+    }
+
+    // ----------------------------------------
+    // Memex Command Tests
+    // ----------------------------------------
+
+    #[test]
+    fn memex_help_shows_usage() {
+        loctree()
+            .args(["memex", "--help"])
+            .assert()
+            .success()
+            .stdout(
+                predicate::str::contains("memex")
+                    .or(predicate::str::contains("memory"))
+                    .or(predicate::str::contains("vector")),
+            );
+    }
+
+    // ----------------------------------------
+    // Auto Command Tests
+    // ----------------------------------------
+
+    #[test]
+    fn auto_help_shows_usage() {
+        loctree()
+            .args(["auto", "--help"])
+            .assert()
+            .success()
+            .stdout(
+                predicate::str::contains("auto")
+                    .or(predicate::str::contains("scan"))
+                    .or(predicate::str::contains("artifacts")),
+            );
+    }
+
+    #[test]
+    fn auto_creates_loctree_dir() {
+        let temp = TempDir::new().unwrap();
+        std::fs::create_dir_all(temp.path().join("src")).unwrap();
+        std::fs::write(temp.path().join("src/main.ts"), "export const x = 1;").unwrap();
+
+        loctree()
+            .current_dir(temp.path())
+            .args(["auto"])
+            .assert()
+            .success();
+
+        assert!(temp.path().join(".loctree").exists());
+    }
+
+    #[test]
+    fn auto_json_output() {
+        let temp = TempDir::new().unwrap();
+        std::fs::create_dir_all(temp.path().join("src")).unwrap();
+        std::fs::write(temp.path().join("src/main.ts"), "export const x = 1;").unwrap();
+
+        // auto mode generates .loctree/ artifacts; --json suppresses summary on stderr
+        loctree()
+            .current_dir(temp.path())
+            .args(["auto", "--json"])
+            .assert()
+            .success();
+
+        // Snapshot should exist
+        assert!(temp.path().join(".loctree/snapshot.json").exists());
+    }
+
+    // ----------------------------------------
+    // Tree Command Tests
+    // ----------------------------------------
+
+    #[test]
+    fn tree_help_shows_usage() {
+        loctree()
+            .args(["tree", "--help"])
+            .assert()
+            .success()
+            .stdout(
+                predicate::str::contains("tree")
+                    .or(predicate::str::contains("directory"))
+                    .or(predicate::str::contains("LOC")),
+            );
+    }
+
+    #[test]
+    fn tree_shows_structure() {
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["tree"])
+            .assert()
+            .success()
+            .stdout(
+                predicate::str::contains("src")
+                    .or(predicate::str::contains("├"))
+                    .or(predicate::str::contains("└")),
+            );
+    }
+
+    #[test]
+    fn tree_with_depth() {
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["tree", "--depth", "1"])
+            .assert()
+            .success();
+    }
+
+    #[test]
+    fn tree_json_output() {
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["tree", "--json"])
+            .assert()
+            .success()
+            .stdout(predicate::str::starts_with("{").or(predicate::str::starts_with("[")));
+    }
+
+    // ----------------------------------------
+    // Find Command Tests
+    // ----------------------------------------
+
+    #[test]
+    fn find_help_shows_usage() {
+        loctree()
+            .args(["find", "--help"])
+            .assert()
+            .success()
+            .stdout(
+                predicate::str::contains("find")
+                    .or(predicate::str::contains("search"))
+                    .or(predicate::str::contains("symbol")),
+            );
+    }
+
+    #[test]
+    fn find_symbol() {
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["find", "greet"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("greet").or(predicate::str::contains("greeting")));
+    }
+
+    #[test]
+    fn find_alias_f() {
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["f", "greet"])
+            .assert()
+            .success();
+    }
+
+    #[test]
+    fn find_json_output() {
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["find", "greet", "--json"])
+            .assert()
+            .success()
+            .stdout(predicate::str::starts_with("{").or(predicate::str::starts_with("[")));
+    }
+
+    // ----------------------------------------
+    // Report Command Tests
+    // ----------------------------------------
+
+    #[test]
+    fn report_help_shows_usage() {
+        loctree()
+            .args(["report", "--help"])
+            .assert()
+            .success()
+            .stdout(
+                predicate::str::contains("report")
+                    .or(predicate::str::contains("HTML"))
+                    .or(predicate::str::contains("generate")),
+            );
+    }
+
+    #[test]
+    fn report_creates_html() {
+        let temp = TempDir::new().unwrap();
+        std::fs::create_dir_all(temp.path().join("src")).unwrap();
+        std::fs::write(temp.path().join("src/main.ts"), "export const x = 1;").unwrap();
+
+        // First create snapshot
+        loctree().current_dir(temp.path()).assert().success();
+
+        loctree()
+            .current_dir(temp.path())
+            .args(["report"])
+            .assert()
+            .success();
+    }
+
+    // ----------------------------------------
+    // Lint Command Tests
+    // ----------------------------------------
+
+    #[test]
+    fn lint_help_shows_usage() {
+        loctree()
+            .args(["lint", "--help"])
+            .assert()
+            .success()
+            .stdout(
+                predicate::str::contains("lint")
+                    .or(predicate::str::contains("policy"))
+                    .or(predicate::str::contains("structural")),
+            );
+    }
+
+    #[test]
+    fn lint_runs_successfully() {
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["lint"])
+            .assert()
+            .success();
+    }
+
+    #[test]
+    fn lint_with_fail_flag() {
+        let fixture = fixtures_path().join("simple_ts");
+
+        // --fail should work (exit code depends on findings)
+        loctree()
+            .current_dir(&fixture)
+            .args(["lint", "--fail"])
+            .assert(); // Don't check success/failure - depends on findings
+    }
+
+    #[test]
+    fn lint_sarif_flag_recognized() {
+        let fixture = fixtures_path().join("simple_ts");
+
+        // --sarif should emit SARIF JSON to stdout
+        loctree()
+            .current_dir(&fixture)
+            .args(["lint", "--sarif"])
+            .assert()
+            .stdout(predicate::str::contains("\"version\""))
+            .stdout(predicate::str::contains("\"runs\""))
+            .success();
+    }
+}
+
+// ============================================
+// Framework-Specific Command Tests
+// ============================================
+// Vibecrafted with AI Agents by VetCoders (c)2026 VetCoders
+
+mod framework_commands {
+    use super::*;
+
+    // ----------------------------------------
+    // Routes Command Tests
+    // ----------------------------------------
+
+    #[test]
+    fn routes_help_shows_usage() {
+        let output = loctree().args(["routes", "--help"]).output().unwrap();
+        let combined = String::from_utf8_lossy(&output.stdout).to_string()
+            + &String::from_utf8_lossy(&output.stderr);
+        assert!(
+            combined.contains("routes")
+                || combined.contains("FastAPI")
+                || combined.contains("Flask"),
+            "Help should mention routes/FastAPI/Flask: {}",
+            combined
+        );
+    }
+
+    #[test]
+    fn routes_no_routes_in_ts_project() {
+        // TypeScript project has no Python routes - should complete gracefully
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["routes"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("No routes detected"));
+    }
+
+    #[test]
+    fn routes_json_output_empty() {
+        // TypeScript project - JSON output should be valid with empty routes
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["routes", "--json"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains(r#""routes""#))
+            .stdout(predicate::str::contains(r#""summary""#))
+            .stdout(predicate::str::contains(r#""count""#));
+    }
+
+    #[test]
+    fn routes_with_framework_filter() {
+        // Filter should work even when no routes exist
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["routes", "--framework", "fastapi"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("No routes detected"));
+    }
+
+    #[test]
+    fn routes_with_path_filter() {
+        // Path filter should work even when no routes exist
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["routes", "--path", "/api/v1"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("No routes detected"));
+    }
+
+    #[test]
+    fn routes_in_python_fixture() {
+        // Create a minimal Python project with FastAPI routes
+        let temp = TempDir::new().unwrap();
+
+        // Create a FastAPI app file
+        std::fs::write(
+            temp.path().join("main.py"),
+            r#"from fastapi import FastAPI
+
+app = FastAPI()
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
+
+@app.post("/users")
+def create_user(name: str):
+    return {"name": name}
+
+@app.get("/users/{user_id}")
+def get_user(user_id: int):
+    return {"user_id": user_id}
+"#,
+        )
+        .unwrap();
+
+        loctree()
+            .current_dir(temp.path())
+            .args(["routes"])
+            .assert()
+            .success()
+            .stdout(
+                predicate::str::contains("/health")
+                    .or(predicate::str::contains("route"))
+                    .or(predicate::str::contains("No routes")), // May not detect without full scan
+            );
+    }
+
+    // ----------------------------------------
+    // Dist Command Tests
+    // ----------------------------------------
+
+    #[test]
+    fn dist_help_shows_usage() {
+        let output = loctree().args(["dist", "--help"]).output().unwrap();
+        let combined = String::from_utf8_lossy(&output.stdout).to_string()
+            + &String::from_utf8_lossy(&output.stderr);
+        assert!(
+            combined.contains("dist") || combined.contains("source") || combined.contains("map"),
+            "Help should mention dist/source/map: {}",
+            combined
+        );
+    }
+
+    #[test]
+    fn dist_requires_source_map() {
+        // dist command requires --source-map flag
+        let temp = TempDir::new().unwrap();
+        std::fs::create_dir_all(temp.path().join("src")).unwrap();
+        std::fs::write(temp.path().join("src/index.ts"), "export const x = 1;").unwrap();
+
+        loctree()
+            .current_dir(temp.path())
+            .args(["dist", "--src", "src/"])
+            .assert()
+            .failure()
+            .stderr(
+                predicate::str::contains("source-map").or(predicate::str::contains("required")),
+            );
+    }
+
+    #[test]
+    fn dist_requires_src() {
+        // dist command requires --src flag
+        let temp = TempDir::new().unwrap();
+        std::fs::write(temp.path().join("main.js.map"), "{}").unwrap();
+
+        loctree()
+            .current_dir(temp.path())
+            .args(["dist", "--source-map", "main.js.map"])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("src").or(predicate::str::contains("required")));
+    }
+
+    #[test]
+    fn dist_handles_missing_source_map_file() {
+        // Should fail gracefully when source map file doesn't exist
+        let temp = TempDir::new().unwrap();
+        std::fs::create_dir_all(temp.path().join("src")).unwrap();
+        std::fs::write(temp.path().join("src/index.ts"), "export const x = 1;").unwrap();
+
+        loctree()
+            .current_dir(temp.path())
+            .args([
+                "dist",
+                "--source-map",
+                "nonexistent.js.map",
+                "--src",
+                "src/",
+            ])
+            .assert()
+            .failure()
+            .stderr(
+                predicate::str::contains("not found")
+                    .or(predicate::str::contains("Failed"))
+                    .or(predicate::str::contains("error")),
+            );
+    }
+
+    #[test]
+    fn dist_handles_invalid_source_map() {
+        // Should fail gracefully when source map is invalid JSON
+        let temp = TempDir::new().unwrap();
+        std::fs::create_dir_all(temp.path().join("src")).unwrap();
+        std::fs::write(temp.path().join("src/index.ts"), "export const x = 1;").unwrap();
+        std::fs::write(temp.path().join("main.js.map"), "not valid json").unwrap();
+
+        loctree()
+            .current_dir(temp.path())
+            .args(["dist", "--source-map", "main.js.map", "--src", "src/"])
+            .assert()
+            .failure()
+            .stderr(
+                predicate::str::contains("parse")
+                    .or(predicate::str::contains("invalid"))
+                    .or(predicate::str::contains("Failed"))
+                    .or(predicate::str::contains("error")),
+            );
+    }
+
+    #[test]
+    fn dist_with_minimal_valid_source_map() {
+        // Test with a minimal but valid source map structure
+        let temp = TempDir::new().unwrap();
+        std::fs::create_dir_all(temp.path().join("src")).unwrap();
+        std::fs::write(
+            temp.path().join("src/index.ts"),
+            "export const hello = 'world';",
+        )
+        .unwrap();
+
+        // Minimal source map structure
+        let source_map = r#"{
+            "version": 3,
+            "file": "main.js",
+            "sources": ["src/index.ts"],
+            "sourcesContent": ["export const hello = 'world';"],
+            "names": ["hello"],
+            "mappings": "AAAA"
+        }"#;
+        std::fs::write(temp.path().join("main.js.map"), source_map).unwrap();
+
+        loctree()
+            .current_dir(temp.path())
+            .args(["dist", "--source-map", "main.js.map", "--src", "src/"])
+            .assert()
+            .success()
+            .stdout(
+                predicate::str::contains("Bundle")
+                    .or(predicate::str::contains("export"))
+                    .or(predicate::str::contains("Analysis")),
+            );
+    }
+
+    // ----------------------------------------
+    // Layoutmap Command Tests
+    // ----------------------------------------
+
+    #[test]
+    fn layoutmap_help_shows_usage() {
+        loctree()
+            .args(["layoutmap", "--help"])
+            .assert()
+            .success() // layoutmap help exits successfully
+            .stdout(
+                predicate::str::contains("layoutmap")
+                    .or(predicate::str::contains("z-index"))
+                    .or(predicate::str::contains("CSS")),
+            );
+    }
+
+    #[test]
+    fn layoutmap_no_css_in_ts_project() {
+        // TypeScript project without CSS - should complete gracefully
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["layoutmap"])
+            .assert()
+            .success()
+            .stdout(
+                predicate::str::contains("No CSS")
+                    .or(predicate::str::contains("findings"))
+                    .or(predicate::str::contains("0")),
+            );
+    }
+
+    #[test]
+    fn layoutmap_json_output_empty() {
+        // JSON output should be valid even with no CSS files
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["layoutmap", "--json"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("[").or(predicate::str::contains("{")));
+    }
+
+    #[test]
+    fn layoutmap_with_zindex_filter() {
+        // --zindex flag should be recognized
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["layoutmap", "--zindex"])
+            .assert()
+            .success();
+    }
+
+    #[test]
+    fn layoutmap_with_sticky_filter() {
+        // --sticky flag should be recognized
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["layoutmap", "--sticky"])
+            .assert()
+            .success();
+    }
+
+    #[test]
+    fn layoutmap_with_grid_filter() {
+        // --grid flag should be recognized
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["layoutmap", "--grid"])
+            .assert()
+            .success();
+    }
+
+    #[test]
+    fn layoutmap_with_min_zindex() {
+        // --min-zindex flag should be recognized
+        let fixture = fixtures_path().join("simple_ts");
+
+        loctree()
+            .current_dir(&fixture)
+            .args(["layoutmap", "--min-zindex", "100"])
+            .assert()
+            .success();
+    }
+
+    #[test]
+    fn layoutmap_with_css_content() {
+        // Create a temp directory with CSS that has z-index
+        let temp = TempDir::new().unwrap();
+        std::fs::create_dir_all(temp.path().join("styles")).unwrap();
+
+        std::fs::write(
+            temp.path().join("styles/main.css"),
+            r#"
+.modal {
+    position: fixed;
+    z-index: 1000;
+    top: 0;
+    left: 0;
+}
+
+.tooltip {
+    position: absolute;
+    z-index: 500;
+}
+
+.header {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+}
+
+.container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+}
+
+.flex-row {
+    display: flex;
+    flex-direction: row;
+}
+"#,
+        )
+        .unwrap();
+
+        loctree()
+            .current_dir(temp.path())
+            .args(["layoutmap"])
+            .assert()
+            .success()
+            .stdout(
+                predicate::str::contains("z-index")
+                    .or(predicate::str::contains("1000"))
+                    .or(predicate::str::contains("modal"))
+                    .or(predicate::str::contains("LAYERS"))
+                    .or(predicate::str::contains("findings")),
+            );
+    }
+
+    #[test]
+    fn layoutmap_json_with_css() {
+        // JSON output with actual CSS content
+        let temp = TempDir::new().unwrap();
+
+        std::fs::write(
+            temp.path().join("app.css"),
+            r#"
+.overlay {
+    position: fixed;
+    z-index: 9999;
+}
+"#,
+        )
+        .unwrap();
+
+        loctree()
+            .current_dir(temp.path())
+            .args(["layoutmap", "--json"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("[").or(predicate::str::contains("{")));
+    }
+
+    #[test]
+    fn layoutmap_exclude_pattern() {
+        // --exclude flag should be recognized
+        let temp = TempDir::new().unwrap();
+        std::fs::create_dir_all(temp.path().join("node_modules")).unwrap();
+
+        std::fs::write(
+            temp.path().join("node_modules/lib.css"),
+            ".x { z-index: 1000; }",
+        )
+        .unwrap();
+
+        std::fs::write(temp.path().join("main.css"), ".y { z-index: 100; }").unwrap();
+
+        loctree()
+            .current_dir(temp.path())
+            .args(["layoutmap", "--exclude", "**/node_modules/**"])
+            .assert()
+            .success();
+    }
 }

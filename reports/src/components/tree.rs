@@ -1,6 +1,6 @@
 use crate::components::icons::{
-    Icon, ICON_ARROWS_IN, ICON_ARROWS_OUT, ICON_CARET_RIGHT, ICON_FILE, ICON_FILE_CODE,
-    ICON_FOLDER, ICON_FOLDER_OPEN,
+    ICON_ARROWS_IN, ICON_ARROWS_OUT, ICON_CARET_RIGHT, ICON_FILE, ICON_FILE_CODE, ICON_FOLDER,
+    ICON_FOLDER_OPEN, Icon,
 };
 use crate::types::TreeNode;
 use leptos::prelude::*;

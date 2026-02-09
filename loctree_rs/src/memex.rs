@@ -6,7 +6,7 @@
 
 use anyhow::{Context, Result};
 use chrono::Utc;
-use rmcp_memex::embeddings::FastEmbedder;
+use rmcp_memex::embeddings::{EmbeddingClient, EmbeddingConfig};
 use rmcp_memex::storage::{ChromaDocument, StorageManager};
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -60,7 +60,6 @@ struct DeadSymbol {
 
 /// Summary of code duplication metrics.
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct CiSummary {
     /// Total number of duplication clusters found.
     #[serde(rename = "duplicateClustersCount")]
@@ -140,7 +139,9 @@ async fn run_memex_inner(opts: &MemexOptions, _json_output: bool, verbose: bool)
     if verbose {
         eprintln!("[memex] Initializing embedding model...");
     }
-    let embedder = FastEmbedder::new().context("Failed to initialize FastEmbedder")?;
+    let mut embedder = EmbeddingClient::new(&EmbeddingConfig::default())
+        .await
+        .context("Failed to initialize embedding client")?;
 
     let db_path = opts
         .db_path
@@ -177,13 +178,13 @@ async fn run_memex_inner(opts: &MemexOptions, _json_output: bool, verbose: bool)
         // Convert our internal metadata string back to JSON
         let meta_json = parse_metadata_string(&metadata_str);
 
-        chroma_docs.push(ChromaDocument {
-            id: Uuid::new_v4().to_string(),
-            namespace: opts.namespace.clone(),
+        chroma_docs.push(ChromaDocument::new_flat(
+            Uuid::new_v4().to_string(),
+            opts.namespace.clone(),
             embedding,
-            metadata: Value::Object(meta_json),
-            document: text,
-        });
+            Value::Object(meta_json),
+            text,
+        ));
     }
 
     let doc_count = chroma_docs.len();
@@ -246,20 +247,27 @@ fn prepare_documents(report: &AnalysisReport, project_id: &str) -> Vec<(String, 
         }
 
         // --- Process Duplicates ---
-        if let Some(summary) = &run.ai_views.ci_summary
-            && let Some(clusters) = &summary.top_clusters
-        {
-            for cluster in clusters {
-                let context = format!(
-                    "Code Duplication: Symbol '{}' appears {} times. Severity: {}.",
-                    cluster.symbol_name, cluster.size, cluster.severity
-                );
+        if let Some(summary) = &run.ai_views.ci_summary {
+            let summary_context = format!(
+                "Code Duplication Summary: {} duplicate clusters detected.",
+                summary.duplicate_count
+            );
+            let summary_meta = format!("type:duplication_summary|project:{}", project_id);
+            docs.push((summary_meta, summary_context));
 
-                let metadata = format!(
-                    "type:duplication|project:{}|symbol:{}",
-                    project_id, cluster.symbol_name
-                );
-                docs.push((metadata, context));
+            if let Some(clusters) = &summary.top_clusters {
+                for cluster in clusters {
+                    let context = format!(
+                        "Code Duplication: Symbol '{}' appears {} times. Severity: {}.",
+                        cluster.symbol_name, cluster.size, cluster.severity
+                    );
+
+                    let metadata = format!(
+                        "type:duplication|project:{}|symbol:{}",
+                        project_id, cluster.symbol_name
+                    );
+                    docs.push((metadata, context));
+                }
             }
         }
     }

@@ -4,7 +4,7 @@
 //! for path resolution, line number calculation, string literal tracking,
 //! and type signature recording.
 //!
-//! Created by M&K (c)2025 The LibraxisAI Team
+//! Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -25,6 +25,7 @@ pub(super) struct JsVisitor<'a> {
     pub extensions: Option<&'a HashSet<String>>,
     pub ts_resolver: Option<&'a TsPathResolver>,
     pub source_text: &'a str,
+    pub source_lines: Vec<&'a str>,
     pub command_cfg: &'a CommandDetectionConfig,
     /// Map of namespace import aliases to their resolved paths: alias -> (source, resolved_path)
     pub namespace_imports: HashMap<String, (String, Option<String>)>,
@@ -76,6 +77,17 @@ impl<'a> JsVisitor<'a> {
             .filter(|b| *b == b'\n')
             .count()
             + 1
+    }
+
+    /// Get trimmed source line for a 1-based line number.
+    pub(super) fn line_context(&self, line: usize) -> String {
+        if line == 0 {
+            return String::new();
+        }
+        self.source_lines
+            .get(line.saturating_sub(1))
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default()
     }
 
     /// Record a string literal in the analysis.
@@ -138,7 +150,7 @@ impl<'a> JsVisitor<'a> {
     /// Record parameter types from function parameters.
     pub(super) fn record_param_types(&mut self, fn_name: &str, params: &FormalParameters<'a>) {
         for param in params.items.iter() {
-            if let Some(ann) = &param.pattern.type_annotation {
+            if let Some(ann) = &param.type_annotation {
                 self.record_type_use(
                     fn_name,
                     SignatureUseKind::Parameter,
@@ -147,8 +159,9 @@ impl<'a> JsVisitor<'a> {
                 );
             }
         }
-        if let Some(rest) = &params.rest
-            && let Some(ann) = &rest.argument.type_annotation
+        // NOTE: OXC wraps rest params as `FormalParameterRest { rest: BindingRestElement { ... } }`.
+        if let Some(rest_param) = &params.rest
+            && let Some(ann) = &rest_param.type_annotation
         {
             self.record_type_use(
                 fn_name,
@@ -193,24 +206,20 @@ impl<'a> JsVisitor<'a> {
     pub(super) fn extract_params(&self, params: &FormalParameters<'a>) -> Vec<ParamInfo> {
         let mut result = Vec::new();
         for param in params.items.iter() {
-            let name = match &param.pattern.kind {
-                BindingPatternKind::BindingIdentifier(id) => id.name.to_string(),
-                BindingPatternKind::ObjectPattern(_) => "{...}".to_string(),
-                BindingPatternKind::ArrayPattern(_) => "[...]".to_string(),
-                BindingPatternKind::AssignmentPattern(ap) => match &ap.left.kind {
-                    BindingPatternKind::BindingIdentifier(id) => id.name.to_string(),
+            let name = match &param.pattern {
+                BindingPattern::BindingIdentifier(id) => id.name.to_string(),
+                BindingPattern::ObjectPattern(_) => "{...}".to_string(),
+                BindingPattern::ArrayPattern(_) => "[...]".to_string(),
+                BindingPattern::AssignmentPattern(ap) => match &ap.left {
+                    BindingPattern::BindingIdentifier(id) => id.name.to_string(),
                     _ => "_".to_string(),
                 },
             };
             let type_annotation = param
-                .pattern
                 .type_annotation
                 .as_ref()
                 .map(|ann| JsVisitor::type_to_string(&ann.type_annotation));
-            let has_default = matches!(
-                &param.pattern.kind,
-                BindingPatternKind::AssignmentPattern(_)
-            );
+            let has_default = matches!(&param.pattern, BindingPattern::AssignmentPattern(_));
             result.push(ParamInfo {
                 name,
                 type_annotation,
@@ -218,13 +227,12 @@ impl<'a> JsVisitor<'a> {
             });
         }
         // Handle rest parameter
-        if let Some(rest) = &params.rest {
-            let name = match &rest.argument.kind {
-                BindingPatternKind::BindingIdentifier(id) => format!("...{}", id.name),
+        if let Some(rest_param) = &params.rest {
+            let name = match &rest_param.rest.argument {
+                BindingPattern::BindingIdentifier(id) => format!("...{}", id.name),
                 _ => "...rest".to_string(),
             };
-            let type_annotation = rest
-                .argument
+            let type_annotation = rest_param
                 .type_annotation
                 .as_ref()
                 .map(|ann| JsVisitor::type_to_string(&ann.type_annotation));

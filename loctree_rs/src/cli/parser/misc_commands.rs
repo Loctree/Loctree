@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use super::super::command::{
     AuditOptions, Command, CrowdOptions, DistOptions, DoctorOptions, HealthOptions, HelpOptions,
-    LayoutmapOptions, SuppressOptions, TagmapOptions, ZombieOptions,
+    LayoutmapOptions, PlanOptions, SuppressOptions, TagmapOptions, ZombieOptions,
 };
 
 /// Parse `loct crowd [pattern] [options]` command - detect functional crowds.
@@ -484,6 +484,14 @@ pub(super) fn parse_audit_command(args: &[String]) -> Result<Command, String> {
                     return Err("--limit requires a numeric value".to_string());
                 }
             }
+            "--no-open" => {
+                opts.no_open = true;
+                i += 1;
+            }
+            "--stdout" => {
+                opts.stdout = true;
+                i += 1;
+            }
             _ => {
                 // Treat as root path
                 if arg.starts_with("--") {
@@ -552,6 +560,101 @@ pub(super) fn parse_help_command(args: &[String]) -> Result<Command, String> {
     }
 
     Ok(Command::Help(opts))
+}
+
+/// Parse `loct plan [options] [path]` command - generate refactoring plan.
+pub(super) fn parse_plan_command(args: &[String]) -> Result<Command, String> {
+    // Check for --help first
+    if args.iter().any(|a| a == "--help" || a == "-h")
+        && let Some(help) = Command::format_command_help("plan")
+    {
+        println!("{}", help);
+        std::process::exit(0);
+    }
+
+    let mut opts = PlanOptions::default();
+    let mut i = 0;
+
+    while i < args.len() {
+        let arg = &args[i];
+        match arg.as_str() {
+            "--target-layout" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--target-layout requires a value".to_string())?;
+                opts.target_layout = Some(value.clone());
+                i += 2;
+            }
+            "--markdown" | "--md" => {
+                opts.markdown = true;
+                i += 1;
+            }
+            "--json" => {
+                opts.json = true;
+                i += 1;
+            }
+            "--script" | "--sh" => {
+                opts.script = true;
+                i += 1;
+            }
+            "--all" => {
+                opts.all = true;
+                i += 1;
+            }
+            "--output" | "-o" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--output requires a path".to_string())?;
+                opts.output = Some(PathBuf::from(value));
+                i += 2;
+            }
+            "--no-open" => {
+                opts.no_open = true;
+                i += 1;
+            }
+            "--include-tests" => {
+                opts.include_tests = true;
+                i += 1;
+            }
+            "--min-coupling" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--min-coupling requires a number".to_string())?;
+                opts.min_coupling = Some(
+                    value
+                        .parse()
+                        .map_err(|_| "--min-coupling requires a number (0.0-1.0)")?,
+                );
+                i += 2;
+            }
+            "--max-module-size" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--max-module-size requires a number".to_string())?;
+                opts.max_module_size = Some(
+                    value
+                        .parse()
+                        .map_err(|_| "--max-module-size requires a number")?,
+                );
+                i += 2;
+            }
+            _ => {
+                // Treat as root path
+                if arg.starts_with("--") {
+                    return Err(format!("Unknown option '{}' for 'plan' command.", arg));
+                }
+                opts.roots.push(PathBuf::from(arg));
+                i += 1;
+            }
+        }
+    }
+
+    // Default to markdown if no format specified
+    if !opts.markdown && !opts.json && !opts.script && !opts.all {
+        opts.markdown = true;
+    }
+
+    Ok(Command::Plan(opts))
 }
 
 // ============================================================================

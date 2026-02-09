@@ -20,3 +20,11 @@ reports/src/graph_bootstrap.js
 loctree_rs/src/bin/loct.rs
 loctree_rs/src/bin/loctree.rs
 loctree_rs/src/args.rs
+
+# ============================================================================
+# TEST FILES
+# Test code uses controlled fixture paths, not user input.
+# Path traversal rules don't apply to test infrastructure.
+# ============================================================================
+
+loctree_rs/tests/

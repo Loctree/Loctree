@@ -17,12 +17,13 @@ use super::context_commands::{
 use super::helpers::{SUBCOMMANDS, is_jq_filter, parse_color_mode, suggest_similar_command};
 use super::misc_commands::{
     parse_audit_command, parse_crowd_command, parse_dist_command, parse_doctor_command,
-    parse_health_command, parse_help_command, parse_layoutmap_command, parse_suppress_command,
-    parse_tagmap_command, parse_zombie_command,
+    parse_health_command, parse_help_command, parse_layoutmap_command, parse_plan_command,
+    parse_suppress_command, parse_tagmap_command, parse_zombie_command,
 };
 use super::output_commands::{
-    parse_diff_command, parse_info_command, parse_jq_query_command, parse_lint_command,
-    parse_memex_command, parse_report_command,
+    parse_diff_command, parse_info_command, parse_insights_command, parse_jq_query_command,
+    parse_lint_command, parse_manifests_command, parse_memex_command, parse_pipelines_command,
+    parse_report_command,
 };
 use super::scan_commands::{parse_auto_command, parse_scan_command, parse_tree_command};
 use super::tauri_commands::{parse_commands_command, parse_events_command, parse_routes_command};
@@ -275,6 +276,9 @@ pub fn parse_command(args: &[String]) -> Result<Option<ParsedCommand>, String> {
         Some("trace") => parse_trace_command(&remaining_args)?,
         Some("commands") => parse_commands_command(&remaining_args)?,
         Some("events") => parse_events_command(&remaining_args)?,
+        Some("pipelines") => parse_pipelines_command(&remaining_args)?,
+        Some("insights") => parse_insights_command(&remaining_args)?,
+        Some("manifests") => parse_manifests_command(&remaining_args)?,
         Some("routes") => parse_routes_command(&remaining_args)?,
         Some("info") => parse_info_command(&remaining_args)?,
         Some("lint") => parse_lint_command(&remaining_args)?,
@@ -298,6 +302,7 @@ pub fn parse_command(args: &[String]) -> Result<Option<ParsedCommand>, String> {
         Some("health") | Some("h") => parse_health_command(&remaining_args)?,
         Some("audit") => parse_audit_command(&remaining_args)?,
         Some("doctor") => parse_doctor_command(&remaining_args)?,
+        Some("plan") | Some("p") => parse_plan_command(&remaining_args)?,
         Some(unknown) => {
             // Try to find a similar command using fuzzy matching
             let suggestion = suggest_similar_command(unknown);

@@ -62,7 +62,7 @@ Include runtime-invoked exports in dead code detection.
 Useful for auditing whether your loader hooks/middleware are actually being used.
 
 ```bash
-loctree dead --include-runtime
+loct dead --include-runtime
 ```
 
 Without this flag (default), runtime APIs are automatically excluded from dead detection.
@@ -71,7 +71,7 @@ Without this flag (default), runtime APIs are automatically excluded from dead d
 
 ### Before P1-03 (False Positives)
 ```bash
-$ loctree dead --path lib/internal/modules/esm
+$ loct dead --path lib/internal/modules/esm
 
 Dead exports (7 false positives):
   hooks.js:15 - resolve (never imported)
@@ -82,7 +82,7 @@ Dead exports (7 false positives):
 
 ### After P1-03 (Zero False Positives)
 ```bash
-$ loctree dead --path lib/internal/modules/esm
+$ loct dead --path lib/internal/modules/esm
 
 No dead exports found.
 
@@ -114,5 +114,5 @@ See `tools/fixtures/nodejs-loader/` for working examples:
 
 ---
 
-Created by M&K (c)2025 The LibraxisAI Team
+Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team
 Co-Authored-By: [Maciej](void@div0.space) & [Klaudiusz](the1st@whoai.am)

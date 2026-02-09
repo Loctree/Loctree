@@ -75,7 +75,7 @@ Don't submit too early - Homebrew maintainers prefer stable releases.
    - Helper script to calculate SHA256 and update formula
    - Run before manual submission
 
-4. **`docs/01_homebrew_release.md`**
+4. **`docs/HOMEBREW_RELEASE.md`**
    - Complete documentation of the process
    - Troubleshooting guide
    - Integration details
@@ -142,4 +142,4 @@ git push origin v0.7.0
 
 ## Full Documentation
 
-See: [docs/01_homebrew_release.md](../docs/01_homebrew_release.md)
+See: [docs/HOMEBREW_RELEASE.md](../docs/HOMEBREW_RELEASE.md)

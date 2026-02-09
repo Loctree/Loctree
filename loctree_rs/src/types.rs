@@ -112,6 +112,12 @@ pub struct Options {
     pub extensions: Option<HashSet<String>>,
     /// Paths to exclude from analysis.
     pub ignore_paths: Vec<std::path::PathBuf>,
+    /// Optional glob-based ignore rules (compiled from ignore patterns).
+    ///
+    /// This complements `ignore_paths`:
+    /// - `ignore_paths` is fast prefix matching (best for literal directories)
+    /// - `ignore_globs` enables patterns like `**/index.*` or `*.log`
+    pub ignore_globs: Option<std::sync::Arc<globset::GlobSet>>,
     /// Respect .gitignore rules.
     pub use_gitignore: bool,
     /// Maximum directory depth for tree view.
@@ -138,7 +144,6 @@ pub struct Options {
     pub report_path: Option<std::path::PathBuf>,
     /// Start local server for HTML report.
     pub serve: bool,
-    #[allow(dead_code)]
     /// Editor command for click-to-open (e.g., "code -g").
     pub editor_cmd: Option<String>,
     /// Max nodes in dependency graph.
@@ -162,6 +167,7 @@ impl Default for Options {
         Self {
             extensions: None,
             ignore_paths: Vec::new(),
+            ignore_globs: None,
             use_gitignore: true,
             max_depth: None,
             color: ColorMode::Auto,
@@ -210,6 +216,36 @@ pub struct SymbolMatch {
     pub context: String,
 }
 
+/// A locally-defined symbol (non-exported or imported).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LocalSymbol {
+    /// Symbol name as defined in the file.
+    pub name: String,
+    /// Symbol kind (function, class, variable, type, import, etc.).
+    pub kind: String,
+    /// 1-based line number of definition (if known).
+    #[serde(default)]
+    pub line: Option<usize>,
+    /// Source line context for the definition (trimmed).
+    #[serde(default)]
+    pub context: String,
+    /// True if this symbol is exported.
+    #[serde(default)]
+    pub is_exported: bool,
+}
+
+/// A usage site for a symbol within a file.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SymbolUsage {
+    /// Symbol name as referenced in code.
+    pub name: String,
+    /// 1-based line number of usage.
+    pub line: usize,
+    /// Source line context for the usage (trimmed).
+    #[serde(default)]
+    pub context: String,
+}
+
 /// A file exceeding the LOC threshold.
 pub struct LargeEntry {
     /// Relative path to file.
@@ -244,6 +280,9 @@ pub struct Collectors<'a> {
 /// An import statement (JS/TS/Python).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ImportEntry {
+    /// 1-based line number of the import declaration (if known).
+    #[serde(default)]
+    pub line: Option<usize>,
     /// Resolved/normalized source path.
     pub source: String,
     /// Original source as written in code.
@@ -294,7 +333,6 @@ pub enum ImportKind {
 }
 
 /// How an import source was resolved.
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ImportResolutionKind {
     /// Local file (relative or absolute path).
@@ -525,6 +563,12 @@ pub struct FileAnalysis {
     /// Exported symbols (functions, classes, consts, types).
     #[serde(default)]
     pub exports: Vec<ExportSymbol>,
+    /// Locally-defined symbols (non-exported or imported).
+    #[serde(default)]
+    pub local_symbols: Vec<LocalSymbol>,
+    /// Local usage sites for symbols in this file.
+    #[serde(default)]
+    pub symbol_usages: Vec<SymbolUsage>,
     /// Tauri command invocations (frontend `invoke()`).
     #[serde(default)]
     pub command_calls: Vec<CommandRef>,
@@ -603,6 +647,7 @@ impl ImportEntry {
     pub fn new(source: String, kind: ImportKind) -> Self {
         let is_bare = !source.starts_with('.') && !source.starts_with('/');
         Self {
+            line: None,
             source_raw: source.clone(),
             source,
             kind,
@@ -665,6 +710,8 @@ impl FileAnalysis {
             reexports: Vec::new(),
             dynamic_imports: Vec::new(),
             exports: Vec::new(),
+            local_symbols: Vec::new(),
+            symbol_usages: Vec::new(),
             command_calls: Vec::new(),
             command_handlers: Vec::new(),
             command_payload_casing: Vec::new(),

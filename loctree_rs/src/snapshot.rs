@@ -16,8 +16,21 @@ use std::time::Instant;
 use crate::args::ParsedArgs;
 use crate::types::{FileAnalysis, OutputMode};
 
-/// Current schema version for snapshot format
-pub const SNAPSHOT_SCHEMA_VERSION: &str = "0.8.0";
+/// Current schema version for snapshot format (synced to crate version)
+pub const SNAPSHOT_SCHEMA_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Extract major.minor from a semver string (e.g. "0.8.10" -> "0.8")
+/// Patch bumps don't change the snapshot schema, so we only compare major.minor.
+fn schema_major_minor(version: &str) -> &str {
+    // Find second dot (end of minor)
+    match version
+        .find('.')
+        .and_then(|i| version[i + 1..].find('.').map(|j| i + 1 + j))
+    {
+        Some(pos) => &version[..pos],
+        None => version, // no patch component, return as-is
+    }
+}
 
 /// Default snapshot directory name
 pub const SNAPSHOT_DIR: &str = ".loctree";
@@ -36,6 +49,388 @@ fn write_atomic(path: &Path, contents: impl AsRef<[u8]>) -> io::Result<()> {
     tmp.flush()?;
     tmp.persist(path).map_err(|e| e.error)?;
     Ok(())
+}
+
+fn find_git_root(start: &Path) -> Option<PathBuf> {
+    let mut current = start.canonicalize().ok()?;
+    loop {
+        let git_dir = current.join(".git");
+        if git_dir.is_dir() || git_dir.is_file() {
+            return Some(current);
+        }
+        match current.parent() {
+            Some(parent) if parent != current => current = parent.to_path_buf(),
+            _ => return None,
+        }
+    }
+}
+
+fn normalize_root_dir(root: &Path) -> PathBuf {
+    if root.is_file() {
+        return root.parent().unwrap_or(root).to_path_buf();
+    }
+    root.to_path_buf()
+}
+
+fn has_project_marker(root: &Path) -> bool {
+    const MARKERS: [&str; 11] = [
+        "Cargo.toml",
+        "package.json",
+        "pyproject.toml",
+        "tsconfig.json",
+        "deno.json",
+        "deno.jsonc",
+        "go.mod",
+        "pom.xml",
+        "build.gradle",
+        "build.gradle.kts",
+        "composer.json",
+    ];
+    MARKERS.iter().any(|marker| root.join(marker).is_file())
+}
+
+pub(crate) fn resolve_snapshot_root(root_list: &[PathBuf]) -> PathBuf {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let roots: Vec<PathBuf> = if root_list.is_empty() {
+        vec![cwd.clone()]
+    } else {
+        root_list
+            .iter()
+            .map(|root| normalize_root_dir(root))
+            .collect()
+    };
+
+    let mut loctree_roots: Vec<PathBuf> = roots
+        .iter()
+        .filter_map(|root| Snapshot::find_loctree_root(root))
+        .collect();
+    if let Some(first) = loctree_roots.pop()
+        && loctree_roots.iter().all(|root| root == &first)
+    {
+        return first;
+    }
+
+    if roots.len() == 1 && has_project_marker(&roots[0]) {
+        return roots[0].clone();
+    }
+
+    if let Some(first_git) = roots.first().and_then(|root| find_git_root(root))
+        && roots
+            .iter()
+            .all(|root| find_git_root(root).as_ref() == Some(&first_git))
+    {
+        return first_git;
+    }
+
+    find_git_root(&cwd).unwrap_or(cwd)
+}
+
+#[derive(Clone, Debug)]
+struct DeclaredEntrypoint {
+    source: String,
+    path: String,
+    exists: bool,
+    resolved: bool,
+    note: Option<String>,
+}
+
+fn normalize_snapshot_path(path: &str) -> String {
+    path.replace('\\', "/")
+}
+
+fn resolve_declared_path(root: &Path, raw: &str) -> Option<(String, bool)> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.contains('*') || trimmed.contains('?') {
+        return None;
+    }
+    if trimmed.starts_with("node:") {
+        return None;
+    }
+    let cleaned = trimmed.trim_start_matches("./");
+    let base = Path::new(cleaned);
+    let full = if base.is_absolute() {
+        base.to_path_buf()
+    } else {
+        root.join(cleaned)
+    };
+    let exists = full.exists();
+    let rel = full.strip_prefix(root).unwrap_or(&full);
+    Some((normalize_snapshot_path(&rel.to_string_lossy()), exists))
+}
+
+fn note_for_declared_path(path: &str, source: &str) -> Option<String> {
+    let lowered = path.to_lowercase();
+    if source.contains("types") || lowered.ends_with(".d.ts") {
+        return Some("types entry (non-runtime)".to_string());
+    }
+    let ext = Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    match ext {
+        "js" | "jsx" | "ts" | "tsx" | "mjs" | "cjs" => {
+            Some("js/ts entrypoint markers not detected".to_string())
+        }
+        _ => None,
+    }
+}
+
+fn collect_declared_entrypoints(summary: &ManifestSummary) -> Vec<DeclaredEntrypoint> {
+    let mut declared = Vec::new();
+    let root = PathBuf::from(&summary.root);
+
+    if let Some(pkg) = &summary.package_json {
+        for (label, value) in [
+            ("package.json:main", pkg.main.as_ref()),
+            ("package.json:module", pkg.module.as_ref()),
+            ("package.json:types", pkg.types.as_ref()),
+        ] {
+            if let Some(raw) = value {
+                if let Some((path, exists)) = resolve_declared_path(&root, raw) {
+                    declared.push(DeclaredEntrypoint {
+                        source: label.to_string(),
+                        path,
+                        exists,
+                        resolved: true,
+                        note: note_for_declared_path(raw, label),
+                    });
+                } else {
+                    declared.push(DeclaredEntrypoint {
+                        source: label.to_string(),
+                        path: raw.to_string(),
+                        exists: false,
+                        resolved: false,
+                        note: Some("unresolved manifest path".to_string()),
+                    });
+                }
+            }
+        }
+        for entry in &pkg.exports {
+            let source = format!("package.json:exports:{}", entry.key);
+            if let Some((path, exists)) = resolve_declared_path(&root, &entry.path) {
+                declared.push(DeclaredEntrypoint {
+                    source,
+                    path,
+                    exists,
+                    resolved: true,
+                    note: note_for_declared_path(&entry.path, "package.json:exports"),
+                });
+            } else {
+                declared.push(DeclaredEntrypoint {
+                    source,
+                    path: entry.path.clone(),
+                    exists: false,
+                    resolved: false,
+                    note: Some("unresolved manifest path".to_string()),
+                });
+            }
+        }
+        for entry in &pkg.bin {
+            let source = format!("package.json:bin:{}", entry.key);
+            if let Some((path, exists)) = resolve_declared_path(&root, &entry.path) {
+                declared.push(DeclaredEntrypoint {
+                    source,
+                    path,
+                    exists,
+                    resolved: true,
+                    note: note_for_declared_path(&entry.path, "package.json:bin"),
+                });
+            } else {
+                declared.push(DeclaredEntrypoint {
+                    source,
+                    path: entry.path.clone(),
+                    exists: false,
+                    resolved: false,
+                    note: Some("unresolved manifest path".to_string()),
+                });
+            }
+        }
+    }
+
+    if let Some(cargo) = &summary.cargo_toml {
+        if let Some(lib_path) = &cargo.lib_path {
+            if let Some((path, exists)) = resolve_declared_path(&root, lib_path) {
+                declared.push(DeclaredEntrypoint {
+                    source: "Cargo.toml:lib".to_string(),
+                    path,
+                    exists,
+                    resolved: true,
+                    note: None,
+                });
+            }
+        } else {
+            let lib_default = root.join("src/lib.rs");
+            let rel = normalize_snapshot_path(
+                &lib_default
+                    .strip_prefix(&root)
+                    .unwrap_or(&lib_default)
+                    .to_string_lossy(),
+            );
+            if lib_default.exists() {
+                declared.push(DeclaredEntrypoint {
+                    source: "Cargo.toml:lib:default".to_string(),
+                    path: rel,
+                    exists: true,
+                    resolved: true,
+                    note: None,
+                });
+            }
+        }
+
+        if cargo.bins.is_empty() {
+            let main_default = root.join("src/main.rs");
+            let rel = normalize_snapshot_path(
+                &main_default
+                    .strip_prefix(&root)
+                    .unwrap_or(&main_default)
+                    .to_string_lossy(),
+            );
+            if main_default.exists() {
+                declared.push(DeclaredEntrypoint {
+                    source: "Cargo.toml:bin:default".to_string(),
+                    path: rel,
+                    exists: true,
+                    resolved: true,
+                    note: None,
+                });
+            }
+        } else {
+            for bin in &cargo.bins {
+                let source = format!("Cargo.toml:bin:{}", bin.name);
+                let path_value = bin
+                    .path
+                    .clone()
+                    .unwrap_or_else(|| format!("src/bin/{}.rs", bin.name));
+                if let Some((path, exists)) = resolve_declared_path(&root, &path_value) {
+                    declared.push(DeclaredEntrypoint {
+                        source,
+                        path,
+                        exists,
+                        resolved: true,
+                        note: None,
+                    });
+                }
+            }
+        }
+
+        for member in &cargo.workspace_members {
+            let member_root = root.join(member);
+            if !member_root.join("Cargo.toml").exists() {
+                continue;
+            }
+            let member_lib = member_root.join("src/lib.rs");
+            if member_lib.exists() {
+                let rel = normalize_snapshot_path(
+                    &member_lib
+                        .strip_prefix(&root)
+                        .unwrap_or(&member_lib)
+                        .to_string_lossy(),
+                );
+                declared.push(DeclaredEntrypoint {
+                    source: format!("Cargo.toml:member:{}:lib", member),
+                    path: rel,
+                    exists: true,
+                    resolved: true,
+                    note: None,
+                });
+            }
+            let member_main = member_root.join("src/main.rs");
+            if member_main.exists() {
+                let rel = normalize_snapshot_path(
+                    &member_main
+                        .strip_prefix(&root)
+                        .unwrap_or(&member_main)
+                        .to_string_lossy(),
+                );
+                declared.push(DeclaredEntrypoint {
+                    source: format!("Cargo.toml:member:{}:bin", member),
+                    path: rel,
+                    exists: true,
+                    resolved: true,
+                    note: None,
+                });
+            }
+        }
+    }
+
+    if let Some(py) = &summary.pyproject_toml {
+        for script in &py.scripts {
+            declared.push(DeclaredEntrypoint {
+                source: "pyproject.toml:scripts".to_string(),
+                path: script.clone(),
+                exists: false,
+                resolved: false,
+                note: Some("script entry (no path mapping)".to_string()),
+            });
+        }
+        for entry in &py.entry_points {
+            declared.push(DeclaredEntrypoint {
+                source: "pyproject.toml:entry-points".to_string(),
+                path: entry.clone(),
+                exists: false,
+                resolved: false,
+                note: Some("entry-point group (no path mapping)".to_string()),
+            });
+        }
+    }
+
+    declared
+}
+
+fn compute_entrypoint_drift(
+    manifest_summary: &[ManifestSummary],
+    entrypoints: &[EntrypointSummary],
+) -> EntrypointDriftSummary {
+    let mut drift = EntrypointDriftSummary::default();
+
+    let mut declared_paths: HashSet<String> = HashSet::new();
+    let entrypoint_paths: HashSet<String> = entrypoints
+        .iter()
+        .map(|e| normalize_snapshot_path(&e.path))
+        .collect();
+
+    for summary in manifest_summary {
+        for declared in collect_declared_entrypoints(summary) {
+            if !declared.resolved {
+                drift.declared_unresolved.push(EntrypointDriftItem {
+                    source: declared.source,
+                    path: declared.path,
+                    note: declared.note,
+                });
+                continue;
+            }
+            let path = normalize_snapshot_path(&declared.path);
+            declared_paths.insert(path.clone());
+            if !declared.exists {
+                drift.declared_missing.push(EntrypointDriftItem {
+                    source: declared.source,
+                    path,
+                    note: declared.note,
+                });
+            } else if !entrypoint_paths.contains(&path) {
+                drift.declared_without_marker.push(EntrypointDriftItem {
+                    source: declared.source,
+                    path,
+                    note: declared.note,
+                });
+            }
+        }
+    }
+
+    for entry in entrypoints {
+        let path = normalize_snapshot_path(&entry.path);
+        if !declared_paths.contains(&path) {
+            drift.code_only_entrypoints.push(EntrypointSummary {
+                path,
+                kinds: entry.kinds.clone(),
+            });
+        }
+    }
+
+    drift
 }
 
 /// Git workspace context for artifact isolation.
@@ -80,6 +475,15 @@ pub struct SnapshotMetadata {
     /// Resolver configuration (tsconfig paths, etc.)
     #[serde(default)]
     pub resolver_config: Option<ResolverConfig>,
+    /// Manifest summaries (package.json, Cargo.toml, pyproject.toml)
+    #[serde(default)]
+    pub manifest_summary: Vec<ManifestSummary>,
+    /// Detected entrypoints across files
+    #[serde(default)]
+    pub entrypoints: Vec<EntrypointSummary>,
+    /// Drift between declared manifest roots and code entrypoints
+    #[serde(default)]
+    pub entrypoint_drift: EntrypointDriftSummary,
     /// Git repository name (extracted from remote origin)
     #[serde(default)]
     pub git_repo: Option<String>,
@@ -105,6 +509,126 @@ pub struct ResolverConfig {
     pub py_roots: Vec<String>,
     /// Rust crate roots
     pub rust_crate_roots: Vec<String>,
+}
+
+/// Single manifest entry (key -> path).
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct ManifestEntry {
+    pub key: String,
+    pub path: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct PackageJsonSummary {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub package_type: Option<String>,
+    #[serde(default)]
+    pub main: Option<String>,
+    #[serde(default)]
+    pub module: Option<String>,
+    #[serde(default)]
+    pub types: Option<String>,
+    #[serde(default)]
+    pub exports: Vec<ManifestEntry>,
+    #[serde(default)]
+    pub bin: Vec<ManifestEntry>,
+    #[serde(default)]
+    pub workspaces: Vec<String>,
+    #[serde(default)]
+    pub scripts: Vec<String>,
+    #[serde(default)]
+    pub package_manager: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct CargoBinSummary {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct CargoTomlSummary {
+    #[serde(default)]
+    pub package_name: Option<String>,
+    #[serde(default)]
+    pub workspace_members: Vec<String>,
+    #[serde(default)]
+    pub workspace_default_members: Vec<String>,
+    #[serde(default)]
+    pub lib_path: Option<String>,
+    #[serde(default)]
+    pub bins: Vec<CargoBinSummary>,
+    #[serde(default)]
+    pub features: Vec<String>,
+    #[serde(default)]
+    pub crate_roots: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct PyProjectSummary {
+    #[serde(default)]
+    pub project_name: Option<String>,
+    #[serde(default)]
+    pub poetry_name: Option<String>,
+    #[serde(default)]
+    pub scripts: Vec<String>,
+    #[serde(default)]
+    pub entry_points: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct ManifestSummary {
+    #[serde(default)]
+    pub root: String,
+    #[serde(default)]
+    pub package_json: Option<PackageJsonSummary>,
+    #[serde(default)]
+    pub cargo_toml: Option<CargoTomlSummary>,
+    #[serde(default)]
+    pub pyproject_toml: Option<PyProjectSummary>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct EntrypointSummary {
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    pub kinds: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct EntrypointDriftItem {
+    #[serde(default)]
+    pub source: String,
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct EntrypointDriftSummary {
+    #[serde(default)]
+    pub declared_missing: Vec<EntrypointDriftItem>,
+    #[serde(default)]
+    pub declared_without_marker: Vec<EntrypointDriftItem>,
+    #[serde(default)]
+    pub code_only_entrypoints: Vec<EntrypointSummary>,
+    #[serde(default)]
+    pub declared_unresolved: Vec<EntrypointDriftItem>,
+}
+
+impl EntrypointDriftSummary {
+    pub fn is_empty(&self) -> bool {
+        self.declared_missing.is_empty()
+            && self.declared_without_marker.is_empty()
+            && self.code_only_entrypoints.is_empty()
+            && self.declared_unresolved.is_empty()
+    }
 }
 
 /// Graph edge representing an import relationship
@@ -151,7 +675,6 @@ pub struct EventBridge {
 }
 
 /// Export index entry (used by VS2 slice module)
-#[allow(dead_code)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ExportEntry {
     /// Symbol name
@@ -219,6 +742,9 @@ impl Snapshot {
                 total_loc: 0,
                 scan_duration_ms: 0,
                 resolver_config: None,
+                manifest_summary: Vec::new(),
+                entrypoints: Vec::new(),
+                entrypoint_drift: EntrypointDriftSummary::default(),
                 git_repo: git_info.repo,
                 git_branch: git_info.branch,
                 git_commit: git_info.commit,
@@ -233,12 +759,23 @@ impl Snapshot {
         }
     }
 
-    /// Get git repository info (repo name, branch, commit) for given root
+    /// Get git repository info (repo name, branch, commit) for given root.
+    ///
+    /// Uses libgit2's repository discovery to properly find the git root,
+    /// even when called from a deeply nested subdirectory. This fixes issues
+    /// where git commands would fail if `root` wasn't directly inside a git repo.
     fn get_git_info(root: &Path) -> (Option<String>, Option<String>, Option<String>) {
         use std::process::{Command, Stdio};
+
+        // Find the actual git root (searches upward from root)
+        let git_root = match crate::git::find_git_root(root) {
+            Some(r) => r,
+            None => return (None, None, None), // Not a git repository
+        };
+
         let repo = Command::new("git")
             .args(["remote", "get-url", "origin"])
-            .current_dir(root)
+            .current_dir(&git_root)
             .stderr(Stdio::null())
             .output()
             .ok()
@@ -258,7 +795,7 @@ impl Snapshot {
             });
         let branch = Command::new("git")
             .args(["rev-parse", "--abbrev-ref", "HEAD"])
-            .current_dir(root)
+            .current_dir(&git_root)
             .stderr(Stdio::null())
             .output()
             .ok()
@@ -273,7 +810,7 @@ impl Snapshot {
             });
         let commit = Command::new("git")
             .args(["rev-parse", "--short", "HEAD"])
-            .current_dir(root)
+            .current_dir(&git_root)
             .stderr(Stdio::null())
             .output()
             .ok()
@@ -343,7 +880,6 @@ impl Snapshot {
     }
 
     /// Check if a snapshot exists for the given root (used by VS2 slice module)
-    #[allow(dead_code)]
     pub fn exists(root: &Path) -> bool {
         Self::candidate_snapshot_paths(root)
             .iter()
@@ -363,6 +899,37 @@ impl Snapshot {
                 _ => return None,
             }
         }
+    }
+
+    /// Normalize a path to be relative to snapshot roots
+    ///
+    /// Handles:
+    /// - Absolute paths: strips snapshot root prefix
+    /// - Relative paths with ./: removes the prefix
+    /// - Windows paths: normalizes backslashes to forward slashes
+    ///
+    /// # Examples
+    /// ```ignore
+    /// // Given snapshot with root "/Users/foo/project"
+    /// snapshot.normalize_path("/Users/foo/project/src/main.rs") // => "src/main.rs"
+    /// snapshot.normalize_path("./src/main.rs") // => "src/main.rs"
+    /// snapshot.normalize_path("src\\main.rs") // => "src/main.rs"
+    /// ```
+    pub fn normalize_path(&self, path: &str) -> String {
+        let path = path.trim_start_matches("./").replace('\\', "/");
+
+        // If path is absolute, try to strip snapshot root prefixes
+        if path.starts_with('/') {
+            for root in &self.metadata.roots {
+                let root_normalized = root.trim_end_matches('/');
+                if let Some(relative) = path.strip_prefix(root_normalized) {
+                    // Remove leading slash from relative path
+                    return relative.trim_start_matches('/').to_string();
+                }
+            }
+        }
+
+        path
     }
 
     /// Find the most recent snapshot in .loctree/*/snapshot.json
@@ -473,8 +1040,13 @@ impl Snapshot {
         ) && existing.metadata.git_commit.as_ref() == Some(commit)
             && existing.metadata.git_branch.as_ref() == Some(branch)
         {
+            let mut existing_roots = existing.metadata.roots.clone();
+            let mut current_roots = self.metadata.roots.clone();
+            existing_roots.sort();
+            current_roots.sort();
+            let same_roots = existing_roots == current_roots;
             let dirty = is_git_dirty(root).unwrap_or(false);
-            if !dirty {
+            if !dirty && same_roots {
                 // Clean worktree + same commit = skip (nothing changed)
                 crate::progress::info(&format!(
                     "Snapshot {}@{} up-to-date, skipping",
@@ -499,7 +1071,6 @@ impl Snapshot {
     }
 
     /// Load snapshot from disk (used by VS2 slice module)
-    #[allow(dead_code)]
     pub fn load(root: &Path) -> io::Result<Self> {
         let mut snapshot_path = None;
         for candidate in Self::candidate_snapshot_paths(root) {
@@ -528,8 +1099,10 @@ impl Snapshot {
         let snapshot: Self = serde_json::from_str(&content)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
-        // Check schema version compatibility
-        if snapshot.metadata.schema_version != SNAPSHOT_SCHEMA_VERSION {
+        // Check schema version compatibility (major.minor only - patch bumps don't change schema)
+        if schema_major_minor(&snapshot.metadata.schema_version)
+            != schema_major_minor(SNAPSHOT_SCHEMA_VERSION)
+        {
             eprintln!(
                 "[loctree][warn] Snapshot schema version mismatch: found {}, expected {}. Consider re-running `loctree`.",
                 snapshot.metadata.schema_version, SNAPSHOT_SCHEMA_VERSION
@@ -572,7 +1145,7 @@ impl Snapshot {
 
         let languages: Vec<_> = self.metadata.languages.iter().collect();
         if !languages.is_empty() {
-            println!(
+            eprintln!(
                 "Languages: {}",
                 languages
                     .iter()
@@ -599,25 +1172,25 @@ impl Snapshot {
             .count();
 
         if handler_count > 0 || missing_handlers > 0 {
-            print!("Commands: {} handlers", handler_count);
+            eprint!("Commands: {} handlers", handler_count);
             if missing_handlers > 0 {
-                print!(", {} missing", missing_handlers);
+                eprint!(", {} missing", missing_handlers);
             }
             if unused_handlers > 0 {
-                print!(", {} unused", unused_handlers);
+                eprint!(", {} unused", unused_handlers);
             }
-            println!();
+            eprintln!();
         }
 
         let event_count = self.event_bridges.len();
         if event_count > 0 {
-            println!("Events: {} tracked", event_count);
+            eprintln!("Events: {} tracked", event_count);
         }
 
         // Check for cycles or issues
         let barrel_count = self.barrels.len();
         if barrel_count > 0 {
-            println!("Barrels: {} detected", barrel_count);
+            eprintln!("Barrels: {} detected", barrel_count);
         }
 
         // Count duplicate exports (symbols exported from multiple files)
@@ -627,7 +1200,7 @@ impl Snapshot {
             .filter(|files| files.len() > 1)
             .count();
         if duplicate_count > 0 {
-            println!("Duplicates: {} export groups", duplicate_count);
+            eprintln!("Duplicates: {} export groups", duplicate_count);
         }
 
         // Count indexed parameters (NEW in 0.8.4)
@@ -644,20 +1217,20 @@ impl Snapshot {
                 .flat_map(|f| f.exports.iter())
                 .filter(|e| !e.params.is_empty())
                 .count();
-            println!(
+            eprintln!(
                 "Params: {} indexed ({} functions)",
                 param_count, func_with_params
             );
         }
 
-        println!("Status: OK");
-        println!();
-        println!("Next steps:");
-        println!("  loct --for-ai                # Project overview for AI agents");
-        println!("  loct slice <file> --json     # Extract context with dependencies");
-        println!("  loct twins                   # Dead parrots + duplicates + barrel chaos");
-        println!("  loct '.files | length'       # jq-style queries on snapshot");
-        println!("  loct query who-imports <f>   # Quick graph queries");
+        eprintln!("Status: OK");
+        eprintln!();
+        eprintln!("Next steps:");
+        eprintln!("  loct --for-ai                # Project overview for AI agents");
+        eprintln!("  loct slice <file> --json     # Extract context with dependencies");
+        eprintln!("  loct twins                   # Dead parrots + duplicates + barrel chaos");
+        eprintln!("  loct '.files | length'       # jq-style queries on snapshot");
+        eprintln!("  loct query who-imports <f>   # Quick graph queries");
     }
 }
 
@@ -694,14 +1267,7 @@ pub fn run_init_with_options(
 
     // Snapshot root defaults to the first provided root (common UX: keep artifacts near target),
     // falling back to CWD if multiple roots are provided.
-    let snapshot_root = if root_list.len() == 1 {
-        root_list
-            .first()
-            .cloned()
-            .unwrap_or_else(|| std::env::current_dir().expect("current dir"))
-    } else {
-        std::env::current_dir()?
-    };
+    let snapshot_root = resolve_snapshot_root(root_list);
 
     // Validate at least one root was specified
     if root_list.is_empty() {
@@ -845,6 +1411,31 @@ pub fn run_init_with_options(
             snapshot.metadata.languages.insert(lang.clone());
         }
     }
+
+    // Summarize manifests and derive crate roots (ScanOnce -> SliceMany)
+    let mut manifest_summary = Vec::new();
+    let mut rust_crate_roots = Vec::new();
+    for root in root_list {
+        let summary = crate::analyzer::manifests::summarize_manifests(root);
+        if let Some(cargo) = &summary.cargo_toml {
+            rust_crate_roots.extend(cargo.crate_roots.clone());
+        }
+        manifest_summary.push(summary);
+    }
+    rust_crate_roots.sort();
+    rust_crate_roots.dedup();
+    snapshot.metadata.manifest_summary = manifest_summary;
+
+    // Aggregate detected entrypoints for fast lookup
+    let entrypoints = crate::analyzer::entrypoints::find_entrypoints(&snapshot.files)
+        .into_iter()
+        .map(|(path, kinds)| EntrypointSummary { path, kinds })
+        .collect();
+    snapshot.metadata.entrypoints = entrypoints;
+    snapshot.metadata.entrypoint_drift = compute_entrypoint_drift(
+        &snapshot.metadata.manifest_summary,
+        &snapshot.metadata.entrypoints,
+    );
 
     // Build registered handlers set to filter BE commands (same as in loct.rs/loctree.rs)
     let registered_impls: HashSet<String> = scan_results
@@ -1028,7 +1619,10 @@ pub fn run_init_with_options(
     }
 
     // Store resolver configuration from scan results for caching
-    if scan_results.ts_resolver_config.is_some() || !scan_results.py_roots.is_empty() {
+    if scan_results.ts_resolver_config.is_some()
+        || !scan_results.py_roots.is_empty()
+        || !rust_crate_roots.is_empty()
+    {
         snapshot.metadata.resolver_config = Some(ResolverConfig {
             ts_paths: scan_results
                 .ts_resolver_config
@@ -1040,7 +1634,7 @@ pub fn run_init_with_options(
                 .as_ref()
                 .and_then(|c| c.ts_base_url.clone()),
             py_roots: scan_results.py_roots.clone(),
-            rust_crate_roots: vec![], // TODO: populate from Cargo.toml scanning
+            rust_crate_roots,
         });
     }
 
@@ -1062,13 +1656,19 @@ pub fn run_init_with_options(
     // Auto mode: emit full artifact set into ./.loctree to avoid extra commands
     if parsed.auto_outputs {
         let artifacts_spinner = crate::progress::Spinner::new("Generating artifacts...");
-        match write_auto_artifacts(&snapshot_root, &scan_results, &parsed) {
+        match write_auto_artifacts(
+            &snapshot_root,
+            root_list,
+            &scan_results,
+            &parsed,
+            Some(&snapshot.metadata),
+        ) {
             Ok(paths) => {
                 artifacts_spinner.finish_clear();
                 if !paths.is_empty() {
-                    println!("Artifacts saved under ./.loctree:");
+                    eprintln!("Artifacts saved under ./.loctree:");
                     for p in paths {
-                        println!("  - {}", p);
+                        eprintln!("  - {}", p);
                     }
                 }
             }
@@ -1093,8 +1693,10 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
 /// In auto mode, generate the full set of analysis artifacts inside ./.loctree
 pub(crate) fn write_auto_artifacts(
     snapshot_root: &Path,
+    roots: &[PathBuf],
     scan_results: &crate::analyzer::root_scan::ScanResults,
     parsed: &ParsedArgs,
+    metadata_override: Option<&SnapshotMetadata>,
 ) -> io::Result<Vec<String>> {
     use crate::analyzer::coverage::{
         CommandUsage, compute_command_gaps_with_confidence, compute_unregistered_handlers,
@@ -1110,7 +1712,7 @@ pub(crate) fn write_auto_artifacts(
     const DEFAULT_EXCLUDE_REPORT_PATTERNS: &[&str] =
         &["**/__tests__/**", "scripts/semgrep-fixtures/**"];
     const SCHEMA_NAME: &str = "loctree-json";
-    const SCHEMA_VERSION: &str = "1.2.0";
+    const SCHEMA_VERSION: &str = SNAPSHOT_SCHEMA_VERSION;
 
     let mut created = Vec::new();
 
@@ -1290,6 +1892,21 @@ pub(crate) fn write_auto_artifacts(
     let total_loc: usize = scan_results.global_analyses.iter().map(|a| a.loc).sum();
     let file_count = scan_results.global_analyses.len();
 
+    let entrypoint_drift = if let Some(meta) = metadata_override {
+        meta.entrypoint_drift.clone()
+    } else {
+        let manifest_summary: Vec<ManifestSummary> = roots
+            .iter()
+            .map(|root| crate::analyzer::manifests::summarize_manifests(root))
+            .collect();
+        let entrypoints =
+            crate::analyzer::entrypoints::find_entrypoints(&scan_results.global_analyses)
+                .into_iter()
+                .map(|(path, kinds)| EntrypointSummary { path, kinds })
+                .collect::<Vec<_>>();
+        compute_entrypoint_drift(&manifest_summary, &entrypoints)
+    };
+
     let bundle = json!({
         "schema": { "name": SCHEMA_NAME, "version": SCHEMA_VERSION },
         "generatedAt": time::OffsetDateTime::now_utc()
@@ -1310,6 +1927,7 @@ pub(crate) fn write_auto_artifacts(
         "pipelineSummary": pipeline_summary,
         "circularImports": cycles,
         "pyRaceIndicators": race_items,
+        "entrypointDrift": entrypoint_drift,
     });
     write_atomic(
         &analysis_json_path,
@@ -1330,6 +1948,9 @@ pub(crate) fn write_auto_artifacts(
         .flat_map(|ctx| ctx.filtered_ranked.clone())
         .collect();
     let high_confidence = parsed.dead_confidence.as_deref() == Some("high");
+    let mut dead_ok_globs = crate::fs_utils::load_loctignore_dead_ok_globs(snapshot_root);
+    dead_ok_globs.sort();
+    dead_ok_globs.dedup();
     let dead_exports = find_dead_exports(
         &scan_results.global_analyses,
         high_confidence,
@@ -1342,13 +1963,20 @@ pub(crate) fn write_auto_artifacts(
             python_library_mode: parsed.python_library,
             include_ambient: false,
             include_dynamic: false,
+            dead_ok_globs,
         },
     );
 
-    // Build minimal snapshot for SARIF enrichment (blast radius, consumer count)
+    // Build minimal snapshot for SARIF enrichment and findings analysis
     let minimal_snapshot = Snapshot {
-        metadata: SnapshotMetadata::default(),
-        files: vec![],
+        metadata: metadata_override
+            .cloned()
+            .unwrap_or_else(|| SnapshotMetadata {
+                roots: vec![snapshot_root.to_string_lossy().to_string()],
+                entrypoint_drift: entrypoint_drift.clone(),
+                ..Default::default()
+            }),
+        files: scan_results.global_analyses.clone(),
         edges: all_graph_edges
             .iter()
             .map(|(from, to, label)| GraphEdge {
@@ -1742,7 +2370,7 @@ mod tests {
     #[test]
     fn test_snapshot_metadata_serde() {
         let metadata = SnapshotMetadata {
-            schema_version: "1.0".to_string(),
+            schema_version: SNAPSHOT_SCHEMA_VERSION.to_string(),
             generated_at: "2025-01-01T00:00:00Z".to_string(),
             roots: vec!["src".to_string()],
             languages: HashSet::from(["ts".to_string()]),
@@ -1755,6 +2383,9 @@ mod tests {
                 py_roots: vec![],
                 rust_crate_roots: vec![],
             }),
+            manifest_summary: Vec::new(),
+            entrypoints: Vec::new(),
+            entrypoint_drift: EntrypointDriftSummary::default(),
             git_repo: None,
             git_branch: None,
             git_commit: None,

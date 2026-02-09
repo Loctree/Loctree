@@ -21,7 +21,7 @@ The main package lists all platform packages as `optionalDependencies`, so npm/p
 
 ### Step 1: Verify GitHub Releases
 
-Ensure the loctree Rust project has published release binaries for version `0.8.4` (or your target version) with these exact filenames:
+Ensure the loctree Rust project has published release binaries for version `0.6.14` (or your target version) with these exact filenames:
 
 ```
 loctree-aarch64-apple-darwin           (macOS ARM64)
@@ -34,7 +34,7 @@ loctree-aarch64-pc-windows-msvc.exe    (Windows ARM64)
 loctree-x86_64-pc-windows-msvc.exe     (Windows x64)
 ```
 
-Check: https://github.com/Loctree/Loctree/releases/tag/v0.8.4
+Check: https://github.com/Loctree/Loctree/releases/tag/v0.6.14
 
 ### Step 2: Create Platform-Specific Packages
 
@@ -158,9 +158,9 @@ When releasing a new version (e.g., `0.6.15`):
 
 ### Binary download failures
 
-- Verify GitHub release exists with correct tag: `v0.8.4` (note the `v` prefix)
+- Verify GitHub release exists with correct tag: `v0.6.14` (note the `v` prefix)
 - Check binary filenames match the `BINARY_MAPPINGS` in `postinstall.js`
-- Test download URL manually: `curl -L https://github.com/Loctree/Loctree/releases/download/v0.8.4/loctree-x86_64-apple-darwin -o test`
+- Test download URL manually: `curl -L https://github.com/Loctree/Loctree/releases/download/v0.6.14/loctree-x86_64-apple-darwin -o test`
 
 ### optionalDependencies not installing
 
@@ -195,7 +195,7 @@ When a new version is released:
 ### Deprecating old versions
 
 ```bash
-npm deprecate loctree@0.6.13 "Please upgrade to 0.8.4"
+npm deprecate loctree@0.6.13 "Please upgrade to 0.6.14"
 ```
 
 ## Resources

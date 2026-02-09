@@ -109,4 +109,4 @@ Working prototype at: `~/.claude/hooks/loct-smart-suggest.sh`
 
 ---
 
-Created by M&K (c)2025 The LibraxisAI Team
+Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team

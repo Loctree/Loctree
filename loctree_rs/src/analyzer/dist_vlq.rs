@@ -25,8 +25,8 @@ fn decode_base64_char(c: char) -> Option<i32> {
 /// Example: "C" = 2 (binary: 000010, no continuation, value = 1, positive)
 ///          "D" = 3 (binary: 000011, no continuation, value = 1, negative = -1)
 pub fn decode_vlq_value(chars: &mut impl Iterator<Item = char>) -> Option<i32> {
-    let mut result = 0;
-    let mut shift = 0;
+    let mut result;
+    let mut shift;
     let mut continuation;
 
     // Read the first character to get the sign bit
@@ -57,11 +57,7 @@ pub fn decode_vlq_value(chars: &mut impl Iterator<Item = char>) -> Option<i32> {
     }
 
     // Apply sign
-    Some(if negative {
-        -(result as i32)
-    } else {
-        result as i32
-    })
+    Some(if negative { -result } else { result })
 }
 
 #[cfg(test)]
@@ -85,12 +81,12 @@ mod tests {
 
     #[test]
     fn test_decode_vlq_multi_char() {
-        // "gB" = 32 (multi-byte VLQ)
-        let mut chars = "gB".chars();
+        // "gC" = 32 (multi-byte VLQ)
+        let mut chars = "gC".chars();
         assert_eq!(decode_vlq_value(&mut chars), Some(32));
 
-        // "hB" = -32 (multi-byte VLQ, negative)
-        let mut chars = "hB".chars();
+        // "hC" = -32 (multi-byte VLQ, negative)
+        let mut chars = "hC".chars();
         assert_eq!(decode_vlq_value(&mut chars), Some(-32));
     }
 
@@ -150,12 +146,12 @@ mod vlq_tests {
 
     #[test]
     fn test_decode_vlq_multi_char_values() {
-        // "gB" = 32 (multi-byte VLQ)
-        let mut chars = "gB".chars();
+        // "gC" = 32 (multi-byte VLQ)
+        let mut chars = "gC".chars();
         assert_eq!(decode_vlq_value(&mut chars), Some(32));
 
-        // "hB" = -32 (multi-byte VLQ, negative)
-        let mut chars = "hB".chars();
+        // "hC" = -32 (multi-byte VLQ, negative)
+        let mut chars = "hC".chars();
         assert_eq!(decode_vlq_value(&mut chars), Some(-32));
     }
 }

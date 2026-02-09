@@ -3,11 +3,9 @@ resolver = "2"
 members = [
     "loctree_rs",
     "loctree-mcp",
-    "loctree_lsp",
     "rmcp-common",
     "reports",
     "reports/wasm",
-    # landing - excluded from public repo (development only in loctree-suite)
 ]
 
 # Removed from workspace:
@@ -16,9 +14,10 @@ members = [
 # - rmcp-config-ui: moved to ~/Libraxis/rmcp-config-ui
 
 [workspace.package]
+version = "0.8.11"
 edition = "2024"
 license = "MIT OR Apache-2.0"
-authors = ["Loctree <loct@loctree.io>"]
+authors = ["Loctree <loct@loct.io>"]
 
 [workspace.dependencies]
 # Core
@@ -42,7 +41,8 @@ rmcp = { version = "0.12", features = ["server"] }
 futures = "0.3"
 
 # The local crates (for inter-crate dependencies)
-loctree = { path = "loctree_rs" }
+loctree = { path = "loctree_rs", version = "0.8.11" }
+report-leptos = { path = "reports", version = "0.8.11" }
 
 # Release profile - good defaults for all crates
 [profile.release]

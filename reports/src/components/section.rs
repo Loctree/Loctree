@@ -3,9 +3,10 @@
 //! Implements the "Section View" layout with a sticky header and scrollable content.
 
 use super::{
-    AiInsightsPanel, AiSummaryPanel, AnalysisSummary, AuditPanel, CascadesList, Coverage, Crowds,
-    Cycles, DeadCode, DuplicateExportsTable, DynamicImportsTable, GraphContainer, HealthScoreGauge,
-    Pipelines, QuickCommandsPanel, TabContent, TauriCommandCoverage, TreeView, Twins,
+    ActionPlanPanel, AiInsightsPanel, AiSummaryPanel, AnalysisSummary, AuditPanel, CascadesList,
+    Coverage, Crowds, Cycles, DeadCode, DuplicateExportsTable, DynamicImportsTable, GraphContainer,
+    HealthScoreGauge, HubFilesPanel, Pipelines, QuickCommandsPanel, RefactorPlan, TabContent,
+    TauriCommandCoverage, TreeView, Twins,
 };
 use crate::types::ReportSection;
 use leptos::prelude::*;
@@ -50,6 +51,7 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
     let root_id_cycles = root_id_value.clone();
     let root_id_dead = root_id_value.clone();
     let root_id_twins = root_id_value.clone();
+    let root_id_refactor = root_id_value.clone();
     let root_id_coverage = root_id_value.clone();
     let root_id_graph = root_id_value.clone();
     let root_id_graph_tab = root_id_graph.clone();
@@ -83,6 +85,12 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
         (Some(b), None) => b,
         _ => String::new(),
     };
+    let generated_label = section.generated_at.clone().unwrap_or_default();
+    let schema_label = match (section.schema_name.clone(), section.schema_version.clone()) {
+        (Some(name), Some(version)) => format!("{}@{}", name, version),
+        (Some(name), None) => name,
+        _ => String::new(),
+    };
 
     view! {
         <div id=view_id class=view_class>
@@ -93,6 +101,16 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
                     {(!git_label.is_empty()).then(|| view! {
                         <p class="header-path" style="margin-top:4px;color:var(--theme-text-tertiary)" title="git branch @ commit">
                             {git_label.clone()}
+                        </p>
+                    })}
+                    {(!generated_label.is_empty()).then(|| view! {
+                        <p class="header-path" style="margin-top:4px;color:var(--theme-text-tertiary)" title="report generated at">
+                            {format!("Generated {}", generated_label)}
+                        </p>
+                    })}
+                    {(!schema_label.is_empty()).then(|| view! {
+                        <p class="header-path" style="color:var(--theme-text-tertiary)" title="schema">
+                            {format!("Schema {}", schema_label)}
                         </p>
                     })}
                 </div>
@@ -121,24 +139,26 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
                     <div class="content-container">
                         <div class="overview-hero">
                             <HealthScoreGauge score=section.health_score.unwrap_or(0) />
-                            <div class="overview-summary-wrapper">
-                                <AnalysisSummary
-                                    files_analyzed=file_count
-                                    total_loc=total_loc
-                                    duplicate_exports=duplicate_exports_count
-                                    reexport_files=reexport_files_count
-                                    dynamic_imports=dynamic_imports_count
-                                />
-                            </div>
+                        <div class="overview-summary-wrapper">
+                            <AnalysisSummary
+                                files_analyzed=file_count
+                                total_loc=total_loc
+                                duplicate_exports=duplicate_exports_count
+                                reexport_files=reexport_files_count
+                                dynamic_imports=dynamic_imports_count
+                            />
                         </div>
-                        <AiSummaryPanel sections=vec![section_for_ai_summary] />
-                        <AiInsightsPanel insights=section.insights.clone() />
-                        <QuickCommandsPanel
-                            root=section.root.clone()
-                            has_duplicates=has_duplicates
-                            has_command_issues=has_command_issues
-                        />
                     </div>
+                    <ActionPlanPanel tasks=section.priority_tasks.clone() />
+                    <AiSummaryPanel sections=vec![section_for_ai_summary] />
+                    <AiInsightsPanel insights=section.insights.clone() />
+                    <QuickCommandsPanel
+                        root=section.root.clone()
+                        has_duplicates=has_duplicates
+                        has_command_issues=has_command_issues
+                    />
+                    <HubFilesPanel hubs=section.hub_files.clone() />
+                </div>
                 </TabContent>
 
                 <TabContent
@@ -240,6 +260,16 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
                 >
                     <div class="content-container">
                         <Twins twins=section.twins.clone() />
+                    </div>
+                </TabContent>
+
+                <TabContent
+                    root_id=root_id_refactor
+                    tab_name="refactor"
+                    active=false
+                >
+                    <div class="content-container">
+                        <RefactorPlan plan=section.refactor_plan.clone() />
                     </div>
                 </TabContent>
 

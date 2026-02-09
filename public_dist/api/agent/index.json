@@ -1,0 +1,173 @@
+{
+  "name": "loctree",
+  "version": "0.8.4",
+  "tagline": "Scan once, query everything.",
+  "description": "AI-oriented codebase analyzer. Use BEFORE reading files manually.",
+
+  "cli_design": {
+    "philosophy": "Human-friendly commands for people, jq-style for machines",
+    "human_tier": ["dead", "cycles", "twins", "health", "doctor", "audit"],
+    "machine_tier": [".dead_parrots", ".cycles", "--findings", "--json"],
+    "deprecated_0.9": ["zombie", "sniff"]
+  },
+
+  "install": {
+    "check": "which loct || loct --version",
+    "cargo": "cargo install loctree",
+    "homebrew": "brew install loctree/loctree/loctree",
+    "verify": "loct --version"
+  },
+
+  "start_here": {
+    "cmd": "loct",
+    "then": "loct doctor",
+    "why": "Scan produces all artifacts in .loctree/. Doctor gives categorized diagnostics."
+  },
+
+  "aliases": {
+    "h": "health",
+    "d": "dead",
+    "t": "twins",
+    "c": "cycles",
+    "s": "slice",
+    "f": "find",
+    "i": "impact",
+    "q": "query"
+  },
+
+  "artifacts": {
+    "location": ".loctree/",
+    "files": {
+      "snapshot.json": "Full dependency graph (files, imports, exports)",
+      "findings.json": "All issues: dead_parrots, cycles, twins, shadows, orphans",
+      "manifest.json": "Index for tooling integration",
+      "agent.json": "AI-ready bundle (same as --for-ai output)"
+    }
+  },
+
+  "commands": {
+    "doctor": {
+      "cmd": "loct doctor",
+      "desc": "Interactive diagnostics with categorized findings",
+      "flags": ["--apply-suppressions"],
+      "categories": ["auto-fixable", "needs-review", "suggested-suppressions"],
+      "when": "Primary command for understanding codebase health"
+    },
+    "scan": {
+      "cmd": "loct",
+      "desc": "Scan project, produce all artifacts in .loctree/",
+      "when": "First run or after major changes"
+    },
+    "for_ai": {
+      "cmd": "loct --for-ai",
+      "desc": "AI-optimized JSON overview (health, hubs, quick wins)",
+      "when": "Start of any AI session"
+    },
+    "slice": {
+      "cmd": "loct slice <file> --consumers --json",
+      "alias": "loct s <file> --consumers",
+      "desc": "File context with dependencies and consumers",
+      "when": "Before modifying any file"
+    },
+    "find": {
+      "cmd": "loct find <name>",
+      "alias": "loct f <name>",
+      "desc": "Find symbol definitions and similar names",
+      "when": "Before creating anything new"
+    },
+    "impact": {
+      "cmd": "loct impact <file>",
+      "alias": "loct i <file>",
+      "desc": "What breaks if you modify/remove this file",
+      "when": "Before deleting or major refactor"
+    },
+    "health": {
+      "cmd": "loct health",
+      "alias": "loct h",
+      "desc": "Quick summary: cycles + dead + twins",
+      "when": "Sanity check before commits"
+    },
+    "dead": {
+      "cmd": "loct dead --confidence high",
+      "alias": "loct d",
+      "desc": "Find unused exports (human-readable)",
+      "tip": "Use '.dead_parrots' for JSON/scripting"
+    },
+    "cycles": {
+      "cmd": "loct cycles",
+      "alias": "loct c",
+      "desc": "Detect circular imports (human-readable)",
+      "tip": "Use '.cycles' for JSON/scripting"
+    },
+    "twins": {
+      "cmd": "loct twins",
+      "alias": "loct t",
+      "desc": "Dead parrots + exact twins + barrel chaos",
+      "tip": "Use --findings for JSON/scripting"
+    },
+    "audit": {
+      "cmd": "loct audit",
+      "desc": "Full markdown report with all findings + quick wins",
+      "flags": ["--todos", "--limit <n>"],
+      "when": "Comprehensive codebase review",
+      "output": "Markdown with actionable checklist items"
+    },
+    "query": {
+      "cmd": "loct query <kind> <target>",
+      "alias": "loct q <kind> <target>",
+      "kinds": ["who-imports", "where-symbol", "component-of"],
+      "desc": "Fast graph queries without full rescan"
+    }
+  },
+
+  "jq_queries": {
+    "findings": {
+      "dead_parrots": "loct '.dead_parrots'",
+      "cycles": "loct '.cycles'",
+      "twins": "loct '.twins[:5]'",
+      "orphans": "loct '.orphans | length'",
+      "shadows": "loct '.shadows'"
+    },
+    "snapshot": {
+      "metadata": "loct '.metadata'",
+      "file_count": "loct '.files | length'",
+      "large_files": "loct '.files[] | select(.loc > 500)' -c",
+      "api_edges": "loct '.edges[] | select(.from | contains(\"api\"))'"
+    },
+    "flags": ["-r (raw)", "-c (compact)", "-e (exit status)", "--arg", "--argjson"]
+  },
+
+  "workflows": {
+    "new_session": ["loct", "loct doctor"],
+    "before_creating": ["loct f <name>", "loct t"],
+    "before_deleting": ["loct i <file>", "loct q who-imports <file>"],
+    "before_refactor": ["loct s <file> --consumers", "loct i <file>", "loct c"],
+    "cleanup": ["loct doctor", "loct d --confidence high"],
+    "ci_check": ["loct --findings | jq '.dead_parrots | length'", "loct doctor"]
+  },
+
+  "avoid": {
+    "dont_grep_imports": "Use loct q who-imports instead",
+    "dont_guess_structure": "Use loct --for-ai first",
+    "dont_create_duplicates": "Use loct f <name> before creating",
+    "dont_delete_blindly": "Use loct i <file> before removing"
+  },
+
+  "tauri": {
+    "missing_handlers": "loct commands --missing",
+    "unused_handlers": "loct commands --unused",
+    "trace_handler": "loct trace <handler>"
+  },
+
+  "ci": {
+    "sarif": "loct lint --fail --sarif > results.sarif",
+    "findings_check": "loct --findings | jq '.dead_parrots | length'",
+    "doctor_check": "loct doctor && echo 'Clean'"
+  },
+
+  "links": {
+    "docs": "https://docs.rs/loctree",
+    "github": "https://github.com/Loctree/Loctree",
+    "crates": "https://crates.io/crates/loctree"
+  }
+}

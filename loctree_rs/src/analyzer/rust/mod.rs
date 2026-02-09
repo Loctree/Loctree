@@ -30,9 +30,12 @@ use super::regexes::{
     rust_pub_const_regexes, rust_pub_decl_regexes,
 };
 use crate::types::{
-    CommandRef, EventRef, ExportSymbol, FileAnalysis, ImportEntry, ImportKind, ParamInfo,
-    ReexportEntry, ReexportKind,
+    CommandRef, EventRef, ExportSymbol, FileAnalysis, ImportEntry, ImportKind, LocalSymbol,
+    ParamInfo, ReexportEntry, ReexportKind, SymbolUsage,
 };
+use regex::Regex;
+use std::collections::HashSet;
+use std::sync::OnceLock;
 
 /// Extract params from content starting at a given position after function name.
 /// Looks for `(...)` and parses the params inside.
@@ -142,6 +145,182 @@ fn parse_single_rust_param(param: &str) -> Option<ParamInfo> {
     }
 }
 
+fn rust_local_decl_regexes() -> &'static Vec<(&'static str, Regex)> {
+    static RE: OnceLock<Vec<(&'static str, Regex)>> = OnceLock::new();
+    RE.get_or_init(|| {
+        vec![
+            (
+                "function",
+                Regex::new(
+                    r#"(?m)^\s*(?:pub\s*(?:\([^)]*\)\s*)?)?(?:async|const|unsafe\s+)*fn\s+([A-Za-z_][A-Za-z0-9_]*)"#,
+                )
+                .expect("valid rust fn regex"),
+            ),
+            (
+                "struct",
+                Regex::new(
+                    r#"(?m)^\s*(?:pub\s*(?:\([^)]*\)\s*)?)?struct\s+([A-Za-z_][A-Za-z0-9_]*)"#,
+                )
+                .expect("valid rust struct regex"),
+            ),
+            (
+                "enum",
+                Regex::new(
+                    r#"(?m)^\s*(?:pub\s*(?:\([^)]*\)\s*)?)?enum\s+([A-Za-z_][A-Za-z0-9_]*)"#,
+                )
+                .expect("valid rust enum regex"),
+            ),
+            (
+                "trait",
+                Regex::new(
+                    r#"(?m)^\s*(?:pub\s*(?:\([^)]*\)\s*)?)?trait\s+([A-Za-z_][A-Za-z0-9_]*)"#,
+                )
+                .expect("valid rust trait regex"),
+            ),
+            (
+                "type",
+                Regex::new(
+                    r#"(?m)^\s*(?:pub\s*(?:\([^)]*\)\s*)?)?type\s+([A-Za-z_][A-Za-z0-9_]*)"#,
+                )
+                .expect("valid rust type regex"),
+            ),
+            (
+                "union",
+                Regex::new(
+                    r#"(?m)^\s*(?:pub\s*(?:\([^)]*\)\s*)?)?union\s+([A-Za-z_][A-Za-z0-9_]*)"#,
+                )
+                .expect("valid rust union regex"),
+            ),
+            (
+                "const",
+                Regex::new(
+                    r#"(?m)^\s*(?:pub\s*(?:\([^)]*\)\s*)?)?const\s+([A-Za-z_][A-Za-z0-9_]*)"#,
+                )
+                .expect("valid rust const regex"),
+            ),
+            (
+                "static",
+                Regex::new(
+                    r#"(?m)^\s*(?:pub\s*(?:\([^)]*\)\s*)?)?static\s+(?:mut\s+)?(?:ref\s+)?([A-Za-z_][A-Za-z0-9_]*)"#,
+                )
+                .expect("valid rust static regex"),
+            ),
+        ]
+    })
+}
+
+fn rust_line_context(lines: &[&str], line: usize) -> String {
+    if line == 0 {
+        return String::new();
+    }
+    lines
+        .get(line.saturating_sub(1))
+        .map(|l| l.trim().to_string())
+        .unwrap_or_default()
+}
+
+fn collect_rust_local_symbols(content: &str, exported_names: &HashSet<String>) -> Vec<LocalSymbol> {
+    let lines: Vec<&str> = content.lines().collect();
+    let mut locals = Vec::new();
+    const SKIP_NAMES: &[&str] = &["fn"];
+
+    for (kind, re) in rust_local_decl_regexes() {
+        for caps in re.captures_iter(content) {
+            let Some(name) = caps.get(1) else { continue };
+            let name_str = name.as_str().to_string();
+            if exported_names.contains(&name_str) {
+                continue;
+            }
+            if SKIP_NAMES.contains(&name_str.as_str()) {
+                continue;
+            }
+            let line = offset_to_line(content, name.start());
+            locals.push(LocalSymbol {
+                name: name_str,
+                kind: (*kind).to_string(),
+                line: Some(line),
+                context: rust_line_context(&lines, line),
+                is_exported: false,
+            });
+        }
+    }
+
+    locals
+}
+
+fn collect_symbol_usages_from_lines(
+    lines: &[&str],
+    names: &HashSet<String>,
+    max: usize,
+) -> Vec<SymbolUsage> {
+    let mut usages = Vec::new();
+    let mut seen: HashSet<(String, usize)> = HashSet::new();
+
+    for (idx, line) in lines.iter().enumerate() {
+        if usages.len() >= max {
+            break;
+        }
+        let mut start: Option<usize> = None;
+        for (i, ch) in line.char_indices() {
+            let is_ident = ch.is_ascii_alphanumeric() || ch == '_';
+            if is_ident {
+                if start.is_none() {
+                    start = Some(i);
+                }
+                continue;
+            }
+            if let Some(begin) = start.take() {
+                let token = &line[begin..i];
+                let Some(first) = token.chars().next() else {
+                    continue;
+                };
+                if !(first.is_ascii_alphabetic() || first == '_') {
+                    continue;
+                }
+                if !names.contains(token) {
+                    continue;
+                }
+                let line_num = idx + 1;
+                if seen.insert((token.to_string(), line_num)) {
+                    usages.push(SymbolUsage {
+                        name: token.to_string(),
+                        line: line_num,
+                        context: line.trim().to_string(),
+                    });
+                    if usages.len() >= max {
+                        break;
+                    }
+                }
+            }
+        }
+        if usages.len() >= max {
+            break;
+        }
+        if let Some(begin) = start.take() {
+            let token = &line[begin..];
+            let Some(first) = token.chars().next() else {
+                continue;
+            };
+            if !(first.is_ascii_alphabetic() || first == '_') {
+                continue;
+            }
+            if !names.contains(token) {
+                continue;
+            }
+            let line_num = idx + 1;
+            if seen.insert((token.to_string(), line_num)) {
+                usages.push(SymbolUsage {
+                    name: token.to_string(),
+                    line: line_num,
+                    context: line.trim().to_string(),
+                });
+            }
+        }
+    }
+
+    usages
+}
+
 pub(crate) fn analyze_rust_file(
     content: &str,
     relative: String,
@@ -167,6 +346,10 @@ pub(crate) fn analyze_rust_file(
         }
 
         let mut imp = ImportEntry::new(source.to_string(), ImportKind::Static);
+        imp.line = Some(offset_to_line(
+            &production_content,
+            caps.get(0).map(|m| m.start()).unwrap_or(0),
+        ));
 
         // Track crate-internal import patterns for dead code detection
         imp.raw_path = source.to_string();
@@ -355,6 +538,12 @@ pub(crate) fn analyze_rust_file(
                 ));
             }
         }
+    }
+
+    let exported_names: HashSet<String> = analysis.exports.iter().map(|e| e.name.clone()).collect();
+    let locals = collect_rust_local_symbols(content, &exported_names);
+    if !locals.is_empty() {
+        analysis.local_symbols = locals;
     }
 
     collect_rust_signature_uses(&production_content, &mut analysis);
@@ -707,5 +896,56 @@ pub(crate) fn analyze_rust_file(
         .local_uses
         .retain(|u| !SKIP_STD_TYPES.contains(&u.as_str()));
 
+    if !analysis.local_uses.is_empty() {
+        let usage_names: HashSet<String> = analysis.local_uses.iter().cloned().collect();
+        let lines: Vec<&str> = content.lines().collect();
+        const MAX_USAGES_PER_FILE: usize = 1500;
+        let usages = collect_symbol_usages_from_lines(&lines, &usage_names, MAX_USAGES_PER_FILE);
+        if !usages.is_empty() {
+            analysis.symbol_usages = usages;
+        }
+    }
+
     analysis
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rust_local_symbols_and_usages() {
+        let content = r#"
+fn helper() {}
+
+struct LocalType;
+
+pub fn public_fn() {
+    helper();
+}
+
+fn call_local() {
+    helper();
+    let _x = LocalType;
+}
+"#;
+
+        let analysis = analyze_rust_file(content, "sample.rs".to_string(), &[]);
+        assert!(
+            analysis.local_symbols.iter().any(|s| s.name == "helper"),
+            "helper should be in local_symbols"
+        );
+        assert!(
+            analysis.local_symbols.iter().any(|s| s.name == "LocalType"),
+            "LocalType should be in local_symbols"
+        );
+        assert!(
+            !analysis.local_symbols.iter().any(|s| s.name == "public_fn"),
+            "public_fn should be exported, not local"
+        );
+        assert!(
+            analysis.symbol_usages.iter().any(|u| u.name == "helper"),
+            "helper should appear in symbol_usages"
+        );
+    }
 }

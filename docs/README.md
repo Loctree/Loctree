@@ -304,5 +304,5 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for:
 
 ---
 
-Created by M&K (c)2025 The LibraxisAI Team
+Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team
 Co-Authored-By: [Maciej](mailto:void@div0.space) & [Klaudiusz](mailto:the1st@whoai.am)

@@ -1,6 +1,6 @@
 //! Help text generation for CLI commands.
 //!
-//! Created by M&K (c)2025 The LibraxisAI Team
+//! Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team
 //! Co-Authored-By: Maciej <void@div0.space> & Klaudiusz <the1st@whoai.am>
 
 use super::help_texts::*;
@@ -21,6 +21,9 @@ impl Command {
             Command::Commands(_) => "commands",
             Command::Routes(_) => "routes",
             Command::Events(_) => "events",
+            Command::Pipelines(_) => "pipelines",
+            Command::Insights(_) => "insights",
+            Command::Manifests(_) => "manifests",
             Command::Info(_) => "info",
             Command::Lint(_) => "lint",
             Command::Report(_) => "report",
@@ -45,6 +48,7 @@ impl Command {
             Command::Health(_) => "health",
             Command::Audit(_) => "audit",
             Command::Doctor(_) => "doctor",
+            Command::Plan(_) => "plan",
         }
     }
 
@@ -61,6 +65,9 @@ impl Command {
             Command::Trace(_) => "Trace a Tauri/IPC handler end-to-end",
             Command::Commands(_) => "Show Tauri command bridges (FE <-> BE)",
             Command::Events(_) => "Show event flow and issues",
+            Command::Pipelines(_) => "Show pipeline summary (events/commands/risks)",
+            Command::Insights(_) => "Show AI insights summary",
+            Command::Manifests(_) => "Show manifest summaries (package.json/Cargo.toml)",
             Command::Info(_) => "Show snapshot metadata and project info",
             Command::Lint(_) => "Structural lint/policy checks",
             Command::Report(_) => "Generate HTML/JSON reports",
@@ -86,6 +93,7 @@ impl Command {
             Command::Health(_) => "Quick health check (cycles + dead + twins summary)",
             Command::Audit(_) => "Full audit (cycles + dead + twins + zombie + crowds)",
             Command::Doctor(_) => "Interactive diagnostics with actionable recommendations",
+            Command::Plan(_) => "Generate architectural refactoring plan",
         }
     }
 
@@ -160,6 +168,9 @@ impl Command {
         help.push_str("  loct focus <dir>      Directory context\n");
         help.push_str("  loct hotspots         Import frequency heatmap\n");
         help.push_str("  loct commands         Tauri FE↔BE bridges\n");
+        help.push_str("  loct pipelines        Pipeline summary (events/commands)\n");
+        help.push_str("  loct insights         AI insights summary\n");
+        help.push_str("  loct manifests        Manifest summaries\n");
         help.push_str("  loct coverage         Test coverage gaps\n");
         help.push_str("  loct impact <file>    What breaks if changed\n\n");
 
@@ -185,6 +196,9 @@ impl Command {
             "trace" => Some(TRACE_HELP),
             "commands" => Some(COMMANDS_HELP),
             "events" => Some(EVENTS_HELP),
+            "pipelines" => Some(PIPELINES_HELP),
+            "insights" => Some(INSIGHTS_HELP),
+            "manifests" => Some(MANIFESTS_HELP),
             "info" => Some(INFO_HELP),
             "lint" => Some(LINT_HELP),
             "report" => Some(REPORT_HELP),
@@ -208,6 +222,7 @@ impl Command {
             "audit" => Some(AUDIT_HELP),
             "doctor" => Some(DOCTOR_HELP),
             "jq" => Some(JQ_HELP),
+            "plan" | "p" => Some(PLAN_HELP),
             _ => None,
         }
     }
@@ -233,6 +248,9 @@ impl Command {
             ("hotspots", "Import frequency heatmap (core vs peripheral)"),
             ("commands", "Tauri FE↔BE handler bridges"),
             ("events", "Event emit/listen flow analysis"),
+            ("pipelines", "Pipeline summary (events/commands/risks)"),
+            ("insights", "AI insights summary"),
+            ("manifests", "Manifest summaries (package.json/Cargo.toml)"),
             ("coverage", "Test coverage gaps (structural)"),
             ("health", "Quick health check (cycles + dead + twins)"),
             ("slice <file>", "Context for a file (deps + consumers)"),

@@ -1,7 +1,7 @@
 # Loctree CI for Python Projects
 # Compatible with loctree 0.8.0+ (artifact-first architecture)
 #
-# Created by M&K (c)2025 The LibraxisAI Team
+# Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team
 # Co-Authored-By: Maciej <void@div0.space> & Klaudiusz <the1st@whoai.am>
 
 name: Loctree Code Quality
@@ -27,19 +27,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Install Loctree
         run: |
-          pip install loctree-suite || {
-            echo "::warning::loctree-suite not available, trying cargo"
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-            source ~/.cargo/env
-            cargo install loctree --locked
-          }
+          cargo install loctree --locked
 
           # Verify
           loct --version && echo "✓ loct installed"

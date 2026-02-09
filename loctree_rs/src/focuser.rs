@@ -460,7 +460,7 @@ mod tests {
     fn create_test_snapshot() -> Snapshot {
         Snapshot {
             metadata: SnapshotMetadata {
-                schema_version: "0.5.0-test".to_string(),
+                schema_version: crate::snapshot::SNAPSHOT_SCHEMA_VERSION.to_string(),
                 generated_at: "2025-01-01T00:00:00Z".to_string(),
                 roots: vec!["/test".to_string()],
                 languages: ["typescript".to_string()].into_iter().collect(),
@@ -468,6 +468,9 @@ mod tests {
                 total_loc: 600,
                 scan_duration_ms: 100,
                 resolver_config: None,
+                manifest_summary: Vec::new(),
+                entrypoints: Vec::new(),
+                entrypoint_drift: crate::snapshot::EntrypointDriftSummary::default(),
                 git_repo: None,
                 git_branch: None,
                 git_commit: None,

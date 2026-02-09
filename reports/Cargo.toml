@@ -1,17 +1,17 @@
 [package]
 name = "report-leptos"
-version = "0.1.22"
-edition = "2021"
-authors = ["Loctree <loct@loctree.io>"]
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
 description = "Leptos SSR renderer for generating static HTML reports - beautiful, interactive, type-safe"
-license = "MIT OR Apache-2.0"
+license.workspace = true
 repository = "https://github.com/Loctree/Loctree"
 homepage = "https://github.com/Loctree/Loctree"
 documentation = "https://docs.rs/report-leptos"
 readme = "README.md"
 keywords = ["leptos", "ssr", "html", "report", "static-site"]
 categories = ["web-programming", "template-engine", "visualization"]
-rust-version = "1.75"
+rust-version = "1.85.0"
 
 [package.metadata.docs.rs]
 all-features = true

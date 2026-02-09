@@ -37,6 +37,17 @@ Real-world validation of loctree on major open-source repositories.
 | Vista Tauri Contract | Full Tauri app analysis case study | [→](07_vista_tauri_contract.md) |
 | ripgrep + loct Synergy | Combining tools effectively | [→](08_rg_loct_synergy.md) |
 
+## Agentic Use Cases
+
+How AI agents use loctree as an operational tool in real workflows.
+
+| Use Case | What It Shows | Details |
+|----------|---------------|---------|
+| Agent Recon Loop | 3-phase workflow: map → context → validate | [→](30_agent_recon_loop.md) |
+| Safe Agent Refactor | Dependency-informed removal of UI component | [→](31_agent_refactor_safety.md) |
+| Auditable "Done" | Snapshot as proof that agent work is verifiable | [→](32_auditable_done.md) |
+| 60-Second Onboarding | Agent bootstraps codebase understanding in <1 min | [→](33_agent_context_bootstrap.md) |
+
 ## Performance Benchmarks
 
 | Repository | Files | Time | Rate |
@@ -64,4 +75,4 @@ loct cycles                       # Circular imports
 
 ---
 
-*Tested by M&K (c)2025 The LibraxisAI Team*
+*Tested by M&K (c)2025 The Loctree Team*

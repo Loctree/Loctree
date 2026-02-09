@@ -530,7 +530,7 @@ mod tests {
 
     fn mock_metadata() -> crate::snapshot::SnapshotMetadata {
         crate::snapshot::SnapshotMetadata {
-            schema_version: "1".to_string(),
+            schema_version: crate::snapshot::SNAPSHOT_SCHEMA_VERSION.to_string(),
             generated_at: "2025-01-01T00:00:00Z".to_string(),
             roots: vec![".".to_string()],
             languages: std::collections::HashSet::new(),
@@ -538,6 +538,9 @@ mod tests {
             total_loc: 0,
             scan_duration_ms: 0,
             resolver_config: None,
+            manifest_summary: Vec::new(),
+            entrypoints: Vec::new(),
+            entrypoint_drift: crate::snapshot::EntrypointDriftSummary::default(),
             git_repo: None,
             git_branch: None,
             git_commit: None,
