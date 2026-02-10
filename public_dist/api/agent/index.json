@@ -1,6 +1,6 @@
 {
   "name": "loctree",
-  "version": "0.8.4",
+  "version": "0.8.11",
   "tagline": "Scan once, query everything.",
   "description": "AI-oriented codebase analyzer. Use BEFORE reading files manually.",
 
@@ -21,7 +21,7 @@
   "start_here": {
     "cmd": "loct",
     "then": "loct doctor",
-    "why": "Scan produces all artifacts in .loctree/. Doctor gives categorized diagnostics."
+    "why": "Scan produces cached artifacts (cache dir by default; override via LOCT_CACHE_DIR). Doctor gives categorized diagnostics."
   },
 
   "aliases": {
@@ -36,7 +36,7 @@
   },
 
   "artifacts": {
-    "location": ".loctree/",
+    "location": "cache dir by default (override via LOCT_CACHE_DIR). Project config lives in .loctree/.",
     "files": {
       "snapshot.json": "Full dependency graph (files, imports, exports)",
       "findings.json": "All issues: dead_parrots, cycles, twins, shadows, orphans",
@@ -55,7 +55,7 @@
     },
     "scan": {
       "cmd": "loct",
-      "desc": "Scan project, produce all artifacts in .loctree/",
+      "desc": "Scan project, produce cached artifacts (see LOCT_CACHE_DIR)",
       "when": "First run or after major changes"
     },
     "for_ai": {

@@ -55,7 +55,7 @@ Migration Guide:\n  \
   loctree slice file         ->  loct slice file\n  \
   loctree --for-ai           ->  loct --for-ai\n\n\
 New Features in `loct`:\n  \
-  loct auto              Full scan + findings (.loctree/)\n  \
+  loct auto              Full scan + findings (cached artifacts; set LOCT_CACHE_DIR to override)\n  \
   loct doctor            Interactive diagnostics\n  \
   loct dead              Find unused exports\n  \
   loct cycles            Find circular imports\n  \

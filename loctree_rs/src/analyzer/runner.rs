@@ -347,7 +347,10 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
         ) {
             Ok(paths) => {
                 if !paths.is_empty() {
-                    println!("Artifacts saved under ./.loctree:");
+                    println!(
+                        "Artifacts saved under {}:",
+                        crate::snapshot::Snapshot::artifacts_dir(&snapshot_root).display()
+                    );
                     for p in paths {
                         println!("  - {}", p);
                     }

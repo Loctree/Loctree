@@ -107,12 +107,14 @@ else
     [[ -n "$SESSION_CWD" ]] && [[ -d "$SESSION_CWD" ]] && cd "$SESSION_CWD"
 fi
 
-# Find repo root (where .loctree exists)
-REPO_ROOT=$(pwd)
-while [[ "$REPO_ROOT" != "/" ]] && [[ ! -d "$REPO_ROOT/.loctree" ]]; do
-    REPO_ROOT=$(dirname "$REPO_ROOT")
-done
-[[ -d "$REPO_ROOT/.loctree" ]] && cd "$REPO_ROOT"
+# Find repo root (prefer git root; fall back to current dir).
+# We no longer require a project-local `.loctree/` for cached artifacts.
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || true)
+if [[ -n "$REPO_ROOT" ]] && [[ -d "$REPO_ROOT" ]]; then
+    cd "$REPO_ROOT"
+else
+    REPO_ROOT=$(pwd)
+fi
 
 # Validation
 [[ -z "$PATTERN" ]] && exit 0

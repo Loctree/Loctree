@@ -4,7 +4,7 @@ Complete reference for all loctree commands. For global options and environment 
 
 ## Philosophy
 
-**Scan once, query everything.** Run `loct` to create artifacts in `.loctree/`, then use subcommands to query them.
+**Scan once, query everything.** Run `loct` to create cached artifacts (cache dir by default; override via `LOCT_CACHE_DIR`), then use subcommands to query them.
 
 ---
 
@@ -1021,7 +1021,7 @@ Quick shortcuts for common commands:
 
 ## Artifacts
 
-loctree creates these artifacts in `.loctree/` directory:
+loctree creates these artifacts in the artifacts dir (cache dir by default; override via `LOCT_CACHE_DIR`):
 
 | Artifact | Description | Use Case |
 |----------|-------------|----------|
@@ -1032,8 +1032,8 @@ loctree creates these artifacts in `.loctree/` directory:
 
 **Query artifacts:**
 ```bash
-cat .loctree/manifest.json              # View manifest
-jq '.metadata' .loctree/snapshot.json   # Extract metadata
+loct manifests --json                   # View manifest (stdout)
+loct '.metadata'                        # Extract metadata from latest snapshot
 loct '.files | length'                  # Count files using jq mode
 ```
 

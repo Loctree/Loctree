@@ -9,6 +9,11 @@ use predicates::prelude::*;
 use std::path::PathBuf;
 use tempfile::TempDir;
 
+/// Check that a snapshot exists for the given project root (in global cache or legacy .loctree)
+fn snapshot_exists(root: &std::path::Path) -> bool {
+    loctree::snapshot::Snapshot::exists(root)
+}
+
 /// Get path to test fixtures
 fn fixtures_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
@@ -94,8 +99,8 @@ mod scan_mode {
 
         loctree().current_dir(temp.path()).assert().success();
 
-        // Snapshot should exist
-        assert!(temp.path().join(".loctree/snapshot.json").exists());
+        // Snapshot should exist (in global cache)
+        assert!(snapshot_exists(temp.path()));
     }
 
     #[test]
@@ -1725,7 +1730,8 @@ mod management_commands {
             .assert()
             .success();
 
-        assert!(temp.path().join(".loctree").exists());
+        // Artifacts should exist in global cache (not in project .loctree/)
+        assert!(snapshot_exists(temp.path()));
     }
 
     #[test]
@@ -1741,8 +1747,8 @@ mod management_commands {
             .assert()
             .success();
 
-        // Snapshot should exist
-        assert!(temp.path().join(".loctree/snapshot.json").exists());
+        // Snapshot should exist (in global cache)
+        assert!(snapshot_exists(temp.path()));
     }
 
     // ----------------------------------------

@@ -30,7 +30,7 @@ use crate::analyzer::twins::{
 use crate::snapshot::{EntrypointDriftSummary, Snapshot};
 use crate::types::FileAnalysis;
 
-/// Complete findings artifact for `.loctree/findings.json`
+/// Complete findings artifact (`findings.json` in the artifacts dir).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Findings {
     /// Loctree version that generated this
@@ -793,7 +793,7 @@ fn calculate_summary(
 // Manifest Producer - Index of all artifacts
 // =============================================================================
 
-/// Manifest artifact for `.loctree/manifest.json`
+/// Manifest artifact (`manifest.json` in the artifacts dir).
 /// AI agents and tooling should read this FIRST to understand what's available.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {

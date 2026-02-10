@@ -74,7 +74,7 @@
 | `loct commands` | Tauri FE↔BE handlers | ❌ | Frontend-backend bridges |
 | `loct events` | Event emit/listen flow | ❌ | Event analysis |
 
-### JQ Queries (on .loctree/snapshot.json)
+### JQ Queries (on snapshot.json; artifacts cached by default)
 
 ```bash
 loct '.metadata'              # Scan metadata

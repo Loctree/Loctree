@@ -23,7 +23,7 @@ loct '.files | map(.exports | map(select(.dead == true))) | flatten | length'
 
 | Feature | jq | loct query |
 |---------|-----|------------|
-| Snapshot discovery | Manual path | Auto-discovers `.loctree/*/snapshot.json` |
+| Snapshot discovery | Manual path | Auto-discovers the latest snapshot from cache (see `LOCT_CACHE_DIR`) |
 | Schema awareness | None | Validates against snapshot schema |
 | Preset queries | None | `@imports`, `@exports`, `@dead`, etc. |
 | Error messages | Generic JSON errors | Codebase-specific hints |
@@ -165,7 +165,7 @@ loct --argjson threshold 500 '.files[] | select(.loc > $threshold)'
 
 ```bash
 # Use specific snapshot
-loct --snapshot .loctree/main@abc123/snapshot.json '.metadata'
+loct --snapshot /path/to/snapshot.json '.metadata'
 
 # Compare two snapshots
 diff <(loct --snapshot old.json '.files | length') \
@@ -614,8 +614,8 @@ loct @dead --json | claude "Review these dead exports"
 ```bash
 # Use --snapshot for repeated queries (avoids re-discovery)
 SNAP=$(loct '.metadata.git_scan_id' -r)
-loct --snapshot ".loctree/$SNAP/snapshot.json" '.files | length'
-loct --snapshot ".loctree/$SNAP/snapshot.json" '@dead'
+loct --snapshot "/path/to/snapshot.json" '.files | length'
+loct --snapshot "/path/to/snapshot.json" '@dead'
 ```
 
 ### Debugging

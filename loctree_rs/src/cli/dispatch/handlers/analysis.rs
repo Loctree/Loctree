@@ -2190,7 +2190,7 @@ pub fn handle_audit_command(opts: &AuditOptions, global: &GlobalOptions) -> Disp
         print!("{}", output);
     } else {
         // Default: write to file and open
-        let loctree_dir = root.join(".loctree");
+        let loctree_dir = crate::snapshot::Snapshot::artifacts_dir(root);
         if !loctree_dir.exists() {
             std::fs::create_dir_all(&loctree_dir).ok();
         }

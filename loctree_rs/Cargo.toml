@@ -67,6 +67,10 @@ jaq-json = "1.1"
 # Fuzzy string matching for command suggestions
 strsim = "0.11"
 
+# Cache directory resolution
+sha2 = "0.10"
+dirs = "6"
+
 # Watch mode for live snapshot refresh
 notify = "8.0"
 notify-debouncer-full = "0.6"

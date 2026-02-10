@@ -77,7 +77,7 @@ pub struct Suppressions {
 impl Suppressions {
     /// Load suppressions from `.loctree/suppressions.toml`
     pub fn load(root: &Path) -> Self {
-        let path = root.join(".loctree").join("suppressions.toml");
+        let path = crate::snapshot::project_config_dir(root).join("suppressions.toml");
         Self::load_from_path(&path)
     }
 
@@ -104,7 +104,7 @@ impl Suppressions {
 
     /// Save suppressions to `.loctree/suppressions.toml`
     pub fn save(&self, root: &Path) -> std::io::Result<()> {
-        let dir = root.join(".loctree");
+        let dir = crate::snapshot::project_config_dir(root);
         std::fs::create_dir_all(&dir)?;
 
         let path = dir.join("suppressions.toml");

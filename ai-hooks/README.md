@@ -195,7 +195,7 @@ If automatic settings.json update fails, add hooks manually:
 
 ### Loctree not finding anything
 1. Run initial scan: `loct scan` in project root
-2. Check snapshot: `ls .loctree/`
+2. Check snapshot: `loct '.metadata'` (artifacts are cached by default; set `LOCT_CACHE_DIR=.loctree` for repo-local artifacts)
 
 ### No augmentation for a pattern
 - Pattern must be ≥3 chars and alphanumeric

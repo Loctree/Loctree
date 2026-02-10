@@ -121,7 +121,7 @@ Check if loctree is listed and running.
 
 ### No diagnostics
 
-Ensure `.loctree/snapshot.json` exists:
+Ensure a snapshot exists (run `loct` once):
 
 ```bash
 loct  # Generate snapshot

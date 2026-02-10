@@ -106,9 +106,7 @@ impl Command {
         ));
 
         help.push_str("SCAN (produces artifacts):\n");
-        help.push_str(
-            "  loct                  Analyze -> .loctree/{snapshot,findings,agent,manifest}.json\n",
-        );
+        help.push_str("  loct                  Analyze -> cached artifacts (see LOCT_CACHE_DIR)\n");
         help.push_str("  loct --fresh          Ignore cache, full rescan\n");
         help.push_str("  loct --watch          Continuous scan on file changes\n\n");
 
@@ -135,13 +133,15 @@ impl Command {
         help.push_str("  loct i <file>         = impact (what breaks?)\n");
         help.push_str("  loct q <kind> <tgt>   = query (graph queries)\n\n");
 
-        help.push_str("ARTIFACTS:\n");
-        help.push_str("  .loctree/snapshot.json   Graph data (jq-able)\n");
-        help.push_str("  .loctree/findings.json   All issues (dead, cycles, twins...)\n");
-        help.push_str("  .loctree/agent.json      AI bundle\n");
-        help.push_str("  .loctree/manifest.json   Index for tooling\n\n");
+        help.push_str("ARTIFACTS (default: user cache dir; override via LOCT_CACHE_DIR):\n");
+        help.push_str("  snapshot.json            Graph data (jq-able)\n");
+        help.push_str("  findings.json            All issues (dead, cycles, twins...)\n");
+        help.push_str("  agent.json               AI bundle\n");
+        help.push_str("  manifest.json            Index for tooling\n\n");
 
-        help.push_str("Start: cat .loctree/manifest.json\n\n");
+        help.push_str("PROJECT CONFIG (repo-local, optional):\n");
+        help.push_str("  .loctree/config.toml       Custom rules/macros\n");
+        help.push_str("  .loctree/suppressions.toml Suppress findings\n\n");
 
         help.push_str("GLOBAL OPTIONS:\n");
         help.push_str("    --json           Output as JSON (stdout only)\n");
@@ -308,7 +308,7 @@ impl Command {
         // === CORE WORKFLOW ===
         help.push_str("=== CORE WORKFLOW ===\n\n");
         let core_cmds = [
-            ("auto", "Full scan → .loctree/ artifacts (default)"),
+            ("auto", "Full scan → cached artifacts (see LOCT_CACHE_DIR)"),
             ("scan", "Build/update snapshot (supports --watch)"),
             ("tree", "Directory tree with LOC counts"),
             ("find <pattern>", "Search symbols/files with regex"),
@@ -336,11 +336,16 @@ impl Command {
         help.push_str("  --sarif            SARIF 2.1.0 output for CI\n\n");
 
         // === ARTIFACTS ===
-        help.push_str("=== ARTIFACTS (.loctree/) ===\n\n");
+        help.push_str("=== ARTIFACTS ===\n\n");
+        help.push_str("  (default: user cache dir; override via LOCT_CACHE_DIR)\n\n");
         help.push_str("  snapshot.json      Full dependency graph (jq-queryable)\n");
         help.push_str("  findings.json      All issues (dead, cycles, twins...)\n");
         help.push_str("  agent.json         AI-optimized bundle with health_score\n");
         help.push_str("  manifest.json      Index for tooling integration\n\n");
+
+        help.push_str("PROJECT CONFIG (repo-local, optional):\n");
+        help.push_str("  .loctree/config.toml       Custom rules/macros\n");
+        help.push_str("  .loctree/suppressions.toml Suppress findings\n\n");
 
         // === PER-COMMAND HELP ===
         help.push_str("=== PER-COMMAND HELP ===\n\n");

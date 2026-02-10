@@ -38,7 +38,7 @@ cargo install --path .
 
 ```bash
 cd your-project
-loct                          # Auto-detects stack, creates .loctree/
+loct                          # Auto-detects stack, writes cached artifacts (see LOCT_CACHE_DIR)
 loct report --serve           # Interactive HTML report
 loct --for-ai                 # AI-optimized hierarchical output
 ```
@@ -59,7 +59,7 @@ loct twins                    # Semantic duplicates analysis
 
 ### Snapshot-Based Analysis
 
-loctree operates on snapshots stored in `.loctree/`:
+loctree operates on snapshots stored in the artifacts dir (cache dir by default; override via `LOCT_CACHE_DIR`):
 
 - **snapshot.json** - Complete graph data (imports, exports, LOC per file)
 - **findings.json** - All detected issues (dead code, cycles, duplicates)
@@ -81,7 +81,7 @@ Scan once with `loct`, then query multiple times without re-parsing.
 
 ### Artifacts
 
-All outputs are stored as artifacts in `.loctree/`:
+All outputs are stored as artifacts in the artifacts dir (cache dir by default; override via `LOCT_CACHE_DIR`):
 
 ```bash
 loct                          # Creates snapshot + findings

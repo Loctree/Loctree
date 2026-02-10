@@ -148,7 +148,6 @@ Executable via `workspace/executeCommand`:
 {
   "initializationOptions": {
     "workspaceRoot": "/path/to/project",
-    "snapshotPath": ".loctree/snapshot.json",
     "autoRefresh": false
   }
 }

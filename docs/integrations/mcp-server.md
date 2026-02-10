@@ -418,7 +418,7 @@ query({ project: ".", kind: "who-imports", target: "src/utils/api.ts" })
 
 Scan a project directory and create/update snapshot.
 
-Run this first on any new project, or after major changes. Creates `.loctree/` with all analysis artifacts.
+Run this first on any new project, or after major changes. Creates cached artifacts (cache dir by default; override via `LOCT_CACHE_DIR`).
 
 **Parameters:**
 - `project` (optional): Project directory
@@ -542,7 +542,7 @@ The `project` parameter must be:
 
 ### "Failed to load snapshot" error
 
-**Cause**: No `.loctree/snapshot.json` exists yet.
+**Cause**: No snapshot exists yet (artifacts are cached by default).
 
 **Fix**: The server will auto-create it on first use. If it fails:
 ```bash

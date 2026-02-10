@@ -498,7 +498,7 @@ impl HolographicSlice {
 
 /// Auto-create snapshot if it doesn't exist, or prompt in interactive mode
 fn ensure_snapshot(root: &Path, parsed: &ParsedArgs) -> io::Result<bool> {
-    let snapshot_path = root.join(".loctree").join("snapshot.json");
+    let snapshot_path = crate::snapshot::Snapshot::snapshot_path(root);
 
     if !std::io::stdin().is_terminal() {
         // Non-interactive: auto-create snapshot silently

@@ -6,7 +6,9 @@ fn loct() -> assert_cmd::Command {
 }
 
 fn agent_index_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../landing/api/agent/index.json")
+    // The agent index is shipped as part of the published landing bundle (`public_dist/`).
+    // Keep this test aligned with the artifact we actually distribute.
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../public_dist/api/agent/index.json")
 }
 
 fn help_args_for_agent_cmd(cmd: &str) -> Vec<String> {

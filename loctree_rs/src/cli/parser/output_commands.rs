@@ -434,8 +434,8 @@ USAGE:
 OPTIONS:
     --report-path, -r <PATH>   Path to analysis report (JSON format)
     --project-id <ID>          Project identifier for multi-project databases
-    --namespace, -n <NAME>     Namespace for embeddings (default: default)
-    --db-path <PATH>           Custom vector DB path (default: ~/.loctree/memex.db)
+    --namespace, -n <NAME>     Namespace for embeddings (default: loctree)
+    --db-path <PATH>           Custom vector DB path (default: ~/.rmcp_servers/rmcp_memex/lancedb)
     --help, -h                 Show this help message
 
 EXAMPLES:

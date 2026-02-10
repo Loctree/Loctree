@@ -108,14 +108,14 @@ Open command palette (`F1`) and search for "Loctree":
 ## Requirements
 
 - Loctree CLI installed (`cargo install loctree`) or bundled `loctree-lsp`
-- Project must have `.loctree/` folder (run `loct` first)
+- Run `loct` once in the project root (writes snapshot to cache; set `LOCT_CACHE_DIR=.loctree` for repo-local artifacts)
 
 ## Troubleshooting
 
 ### No diagnostics appearing
 
 1. Check Output panel → "Loctree" for errors
-2. Ensure `.loctree/snapshot.json` exists
+2. Ensure a snapshot exists (run `loct` once)
 3. Run `loct` in project root
 
 ### Server not starting

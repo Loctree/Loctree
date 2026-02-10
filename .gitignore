@@ -8,7 +8,10 @@ tarpaulin-report.html
 loctree_rs/tarpaulin-report.json
 /.ai-agents
 /.ai-suite
-/.loctree
+# loctree: keep repo-local config files, ignore cache artifacts
+/.loctree/*
+!/.loctree/config.toml
+!/.loctree/suppressions.toml
 /.benchmarks
 /agents
 /loctree_rs/logs

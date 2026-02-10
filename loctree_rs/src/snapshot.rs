@@ -5,6 +5,7 @@
 //! - Subsequent queries load the snapshot for instant context slicing
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
@@ -37,6 +38,65 @@ pub const SNAPSHOT_DIR: &str = ".loctree";
 
 /// Default snapshot file name
 pub const SNAPSHOT_FILE: &str = "snapshot.json";
+
+/// Environment variable to override the cache base directory.
+const LOCT_CACHE_DIR_ENV: &str = "LOCT_CACHE_DIR";
+
+/// Returns the global cache base directory for loctree artifacts.
+///
+/// Priority:
+/// 1. `LOCT_CACHE_DIR` environment variable
+/// 2. Platform default: `~/Library/Caches/loctree` (macOS) or `$XDG_CACHE_HOME/loctree` (Linux)
+/// 3. Fallback: OS temp dir (for environments without a home/cache directory)
+pub fn cache_base_dir() -> PathBuf {
+    if let Ok(custom) = std::env::var(LOCT_CACHE_DIR_ENV) {
+        let custom = custom.trim();
+        if !custom.is_empty() {
+            return PathBuf::from(custom);
+        }
+    }
+    if let Some(cache_dir) = dirs::cache_dir() {
+        return cache_dir.join("loctree");
+    }
+    // Last resort: temp dir (avoid dirtying repos in minimal/container envs)
+    std::env::temp_dir().join("loctree")
+}
+
+/// Returns the cache directory for a specific project.
+///
+/// Layout: `<cache_base>/projects/<project_id>/`
+/// where `project_id` is the first 16 hex chars of SHA-256(canonical_project_root).
+pub fn project_cache_dir(root: &Path) -> PathBuf {
+    let canonical = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let mut hasher = Sha256::new();
+    hasher.update(canonical.to_string_lossy().as_bytes());
+    let hash = hasher.finalize();
+    let project_id = format!("{:x}", hash).chars().take(16).collect::<String>();
+
+    // If LOCT_CACHE_DIR is set:
+    // - Relative path => interpret relative to the project root (so scans from subdirs still write to root/.loctree)
+    // - Absolute path => treat as a multi-project cache base (we still namespace by project_id)
+    if let Ok(custom) = std::env::var(LOCT_CACHE_DIR_ENV) {
+        let custom = custom.trim();
+        if !custom.is_empty() {
+            let custom_path = PathBuf::from(custom);
+            if custom_path.is_relative() {
+                return canonical.join(custom_path);
+            }
+            return custom_path.join("projects").join(project_id);
+        }
+    }
+
+    cache_base_dir().join("projects").join(project_id)
+}
+
+/// Returns the project-local config directory (for user-editable files).
+///
+/// Config files (config.toml, suppressions.toml) stay in the project — they are
+/// user-editable and may be version-controlled. Only cache artifacts move to global cache.
+pub fn project_config_dir(root: &Path) -> PathBuf {
+    root.join(SNAPSHOT_DIR)
+}
 
 fn write_atomic(path: &Path, contents: impl AsRef<[u8]>) -> io::Result<()> {
     let dir = path
@@ -853,45 +913,142 @@ impl Snapshot {
     }
 
     fn candidate_snapshot_paths(root: &Path) -> Vec<PathBuf> {
+        let cache_dir = project_cache_dir(root);
         let mut paths = Vec::new();
         if let Some(seg) = Self::git_context_for(root).scan_id {
+            // Primary: global cache with branch@sha
+            paths.push(cache_dir.join(&seg).join(SNAPSHOT_FILE));
+            // Legacy: project-local with branch@sha
             paths.push(root.join(SNAPSHOT_DIR).join(seg).join(SNAPSHOT_FILE));
         }
+        // Legacy: project-local flat
         paths.push(root.join(SNAPSHOT_DIR).join(SNAPSHOT_FILE));
+        // Global cache flat (no git context)
+        paths.push(cache_dir.join(SNAPSHOT_FILE));
         paths
     }
 
-    /// Get the snapshot file path for a given root
+    /// Get the snapshot file path for a given root (writes go here).
+    ///
+    /// Returns a path under the global cache directory.
     pub fn snapshot_path(root: &Path) -> PathBuf {
-        // Prefer the branch@sha path; fall back to legacy path
-        let paths = Self::candidate_snapshot_paths(root);
-        paths
-            .first()
-            .cloned()
-            .unwrap_or_else(|| root.join(SNAPSHOT_DIR).join(SNAPSHOT_FILE))
+        let cache_dir = project_cache_dir(root);
+        if let Some(seg) = Self::git_context_for(root).scan_id {
+            cache_dir.join(seg).join(SNAPSHOT_FILE)
+        } else {
+            cache_dir.join(SNAPSHOT_FILE)
+        }
     }
 
-    /// Directory where snapshot and artifacts should be stored for the current scan
+    /// Directory where snapshot and artifacts should be stored for the current scan.
+    ///
+    /// Returns a path under the global cache directory.
     pub fn artifacts_dir(root: &Path) -> PathBuf {
         let path = Self::snapshot_path(root);
         path.parent()
             .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| root.join(SNAPSHOT_DIR))
+            .unwrap_or_else(|| project_cache_dir(root))
     }
 
-    /// Check if a snapshot exists for the given root (used by VS2 slice module)
+    fn remove_any_path(path: &Path) {
+        let meta = fs::symlink_metadata(path);
+        let Ok(meta) = meta else {
+            return;
+        };
+        if meta.is_dir() {
+            let _ = fs::remove_dir_all(path);
+        } else {
+            let _ = fs::remove_file(path);
+        }
+    }
+
+    fn refresh_latest_artifacts(root: &Path) -> io::Result<()> {
+        let Some(scan_id) = Self::git_context_for(root).scan_id else {
+            return Ok(());
+        };
+
+        let base_dir = project_cache_dir(root);
+        let scan_dir = base_dir.join(&scan_id);
+        if !scan_dir.exists() {
+            return Ok(());
+        }
+
+        // Validate scan_dir is contained within base_dir (prevent path traversal via crafted git refs)
+        let canon_base = base_dir.canonicalize().unwrap_or_else(|_| base_dir.clone());
+        let canon_scan = scan_dir.canonicalize().unwrap_or_else(|_| scan_dir.clone());
+        if !canon_scan.starts_with(&canon_base) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "scan directory escapes cache base: {}",
+                    canon_scan.display()
+                ),
+            ));
+        }
+
+        let latest_dir = base_dir.join("latest");
+        Self::remove_any_path(&latest_dir);
+        fs::create_dir_all(&latest_dir)?;
+
+        // Keep this list small and stable; these are the key artifacts CI and tooling depend on.
+        // Other ad-hoc outputs (e.g. report.html, circular.json) can still be found in the scan_id dir.
+        const POINTER_FILES: &[&str] = &[
+            "snapshot.json",
+            "analysis.json",
+            "findings.json",
+            "agent.json",
+            "manifest.json",
+            "report.sarif",
+            "dead.json",
+            "handlers.json",
+            "circular.json",
+            "py_races.json",
+            "report.html",
+        ];
+
+        for name in POINTER_FILES {
+            let src = canon_scan.join(name);
+            if !src.exists() {
+                continue;
+            }
+            // nosemgrep:rust.actix.path-traversal.tainted-path.tainted-path - SAFETY: canon_scan is canonicalized and bounded to canon_base via starts_with guard above; name is from hardcoded POINTER_FILES const
+            let bytes = fs::read(&src)?;
+
+            // Stable pointers at base dir: `.loctree/agent.json`, `.loctree/findings.json`, ...
+            // These are ignored by default gitignore (config.toml/suppressions.toml are explicitly unignored).
+            let dst_flat = base_dir.join(name);
+            write_atomic(&dst_flat, &bytes)?;
+
+            // Mirror into `.loctree/latest/` for snapshot-as-proof workflows.
+            let dst_latest = latest_dir.join(name);
+            write_atomic(&dst_latest, &bytes)?;
+        }
+
+        Ok(())
+    }
+
+    /// Check if a snapshot exists for the given root (checks both cache and legacy paths).
     pub fn exists(root: &Path) -> bool {
         Self::candidate_snapshot_paths(root)
             .iter()
             .any(|p| p.exists())
     }
 
-    /// Search upward for .loctree directory (like git finds .git/)
-    /// Returns the directory containing .loctree/, or None if not found.
+    /// Walk upward from `start` looking for a loctree project root.
+    ///
+    /// A directory is considered a root if it has a `.loctree/` config dir
+    /// (user-editable files like config.toml, suppressions.toml) OR if its
+    /// global cache directory contains at least one snapshot.
     pub fn find_loctree_root(start: &Path) -> Option<PathBuf> {
         let mut current = start.canonicalize().ok()?;
         loop {
+            // Check for .loctree config dir (config.toml, suppressions.toml, .loctreeignore)
             if current.join(SNAPSHOT_DIR).exists() {
+                return Some(current);
+            }
+            // Check global cache — require an actual snapshot, not just an empty dir
+            let cache = project_cache_dir(&current);
+            if cache.is_dir() && Self::cache_has_snapshot(&cache) {
                 return Some(current);
             }
             match current.parent() {
@@ -899,6 +1056,21 @@ impl Snapshot {
                 _ => return None,
             }
         }
+    }
+
+    /// Returns true if a cache directory contains at least one snapshot.json.
+    fn cache_has_snapshot(cache_dir: &Path) -> bool {
+        if cache_dir.join(SNAPSHOT_FILE).exists() {
+            return true;
+        }
+        if let Ok(entries) = std::fs::read_dir(cache_dir) {
+            for entry in entries.flatten() {
+                if entry.path().join(SNAPSHOT_FILE).exists() {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     /// Normalize a path to be relative to snapshot roots
@@ -973,40 +1145,49 @@ impl Snapshot {
     }
 
     /// Find latest snapshot starting from a given root directory.
-    /// This is the core implementation used by `find_latest_snapshot` and tests.
+    /// Searches both global cache and legacy project-local `.loctree/` directory.
     pub fn find_latest_snapshot_in(root: &Path) -> Result<PathBuf, String> {
-        let loctree_root = match Self::find_loctree_root(root) {
-            Some(root) => root,
-            None => {
-                return Err(
-                    "No .loctree directory found. Run `loct scan` first to create a snapshot."
-                        .to_string(),
-                );
-            }
-        };
-
-        let loctree_dir = loctree_root.join(SNAPSHOT_DIR);
-
-        // Collect all snapshot.json files in .loctree/*/snapshot.json
         let mut snapshots: Vec<(PathBuf, std::time::SystemTime)> = Vec::new();
 
-        // Check for legacy snapshot at .loctree/snapshot.json
-        let legacy_path = loctree_dir.join(SNAPSHOT_FILE);
-        if legacy_path.exists()
-            && let Ok(meta) = fs::metadata(&legacy_path)
-            && let Ok(mtime) = meta.modified()
-        {
-            snapshots.push((legacy_path, mtime));
+        let effective_root =
+            Self::find_loctree_root(root).unwrap_or_else(|| normalize_root_dir(root));
+
+        // Search global cache directory for this project (effective root, not CWD)
+        let cache_dir = project_cache_dir(&effective_root);
+        Self::collect_snapshots_from_dir(&cache_dir, &mut snapshots);
+
+        // Search legacy project-local .loctree/ directory
+        let legacy_dir = effective_root.join(SNAPSHOT_DIR);
+        Self::collect_snapshots_from_dir(&legacy_dir, &mut snapshots);
+
+        if snapshots.is_empty() {
+            return Err("No snapshot found. Run `loct scan` first to create one.".to_string());
         }
 
-        // Check for branch@sha subdirectories: .loctree/*/snapshot.json
-        if let Ok(entries) = fs::read_dir(&loctree_dir) {
+        // Sort by mtime (newest first) and return the most recent
+        snapshots.sort_by(|a, b| b.1.cmp(&a.1));
+        Ok(snapshots.into_iter().next().unwrap().0)
+    }
+
+    /// Collect all snapshot.json files from a directory (flat + subdirs).
+    fn collect_snapshots_from_dir(
+        dir: &Path,
+        snapshots: &mut Vec<(PathBuf, std::time::SystemTime)>,
+    ) {
+        // Check flat: dir/snapshot.json
+        let flat_path = dir.join(SNAPSHOT_FILE);
+        if let Ok(meta) = fs::metadata(&flat_path)
+            && let Ok(mtime) = meta.modified()
+        {
+            snapshots.push((flat_path, mtime));
+        }
+        // Check subdirs: dir/*/snapshot.json
+        if let Ok(entries) = fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.is_dir() {
                     let snapshot_path = path.join(SNAPSHOT_FILE);
-                    if snapshot_path.exists()
-                        && let Ok(meta) = fs::metadata(&snapshot_path)
+                    if let Ok(meta) = fs::metadata(&snapshot_path)
                         && let Ok(mtime) = meta.modified()
                     {
                         snapshots.push((snapshot_path, mtime));
@@ -1014,18 +1195,6 @@ impl Snapshot {
                 }
             }
         }
-
-        if snapshots.is_empty() {
-            return Err(format!(
-                "No snapshots found in '{}'. Run `loct scan` first.",
-                loctree_dir.display()
-            ));
-        }
-
-        // Sort by mtime (newest first) and return the most recent
-        snapshots.sort_by(|a, b| b.1.cmp(&a.1));
-
-        Ok(snapshots.into_iter().next().unwrap().0)
     }
 
     /// Save snapshot to disk
@@ -1066,6 +1235,10 @@ impl Snapshot {
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
         write_atomic(&snapshot_path, json)?;
+
+        // Refresh stable pointers (base_dir/*.json + base_dir/latest/) for CI and human workflows.
+        // This is a no-op for non-git dirs (no scan_id).
+        let _ = Self::refresh_latest_artifacts(root);
 
         Ok(())
     }
@@ -1653,7 +1826,7 @@ pub fn run_init_with_options(
         snapshot.print_summary(&snapshot_root);
     }
 
-    // Auto mode: emit full artifact set into ./.loctree to avoid extra commands
+    // Auto mode: emit full artifact set into the artifact directory (global cache by default)
     if parsed.auto_outputs {
         let artifacts_spinner = crate::progress::Spinner::new("Generating artifacts...");
         match write_auto_artifacts(
@@ -1666,7 +1839,10 @@ pub fn run_init_with_options(
             Ok(paths) => {
                 artifacts_spinner.finish_clear();
                 if !paths.is_empty() {
-                    eprintln!("Artifacts saved under ./.loctree:");
+                    eprintln!(
+                        "Artifacts saved under {}:",
+                        Snapshot::artifacts_dir(&snapshot_root).display()
+                    );
                     for p in paths {
                         eprintln!("  - {}", p);
                     }
@@ -1690,7 +1866,7 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
     run_init_with_options(root_list, parsed, false)
 }
 
-/// In auto mode, generate the full set of analysis artifacts inside ./.loctree
+/// In auto mode, generate the full set of analysis artifacts in the artifact directory.
 pub(crate) fn write_auto_artifacts(
     snapshot_root: &Path,
     roots: &[PathBuf],
@@ -2116,10 +2292,28 @@ pub(crate) fn write_auto_artifacts(
             .display()
     ));
 
+    // Save agent.json - AI-optimized bundle (used by CI and agent tooling)
+    let agent_json_path = loctree_dir.join("agent.json");
+    let agent_report = crate::analyzer::for_ai::generate_for_ai_report(
+        &snapshot_root.to_string_lossy(),
+        &report_sections,
+        &scan_results.global_analyses,
+        Some(&minimal_snapshot),
+    );
+    let agent_json = serde_json::to_vec_pretty(&agent_report).map_err(io::Error::other)?;
+    write_atomic(&agent_json_path, &agent_json)?;
+    created.push(format!(
+        "./{}",
+        agent_json_path
+            .strip_prefix(snapshot_root)
+            .unwrap_or(&agent_json_path)
+            .display()
+    ));
+
     // Save manifest.json - index of artifacts for AI agents
     let manifest_json_path = loctree_dir.join("manifest.json");
     let findings_size_kb = findings_json.len() / 1024;
-    let agent_size_kb = 0; // Will be updated when agent.json is written
+    let agent_size_kb = agent_json.len() / 1024;
     let manifest = crate::analyzer::findings::Manifest::produce(
         &minimal_snapshot,
         findings_size_kb,
@@ -2135,6 +2329,12 @@ pub(crate) fn write_auto_artifacts(
             .display()
     ));
 
+    // Now that the full artifact set exists, refresh stable pointers (base_dir/*.json + base_dir/latest/).
+    // Snapshot::save() runs this before auto artifacts are generated, so we do it again here.
+    if let Err(e) = Snapshot::refresh_latest_artifacts(snapshot_root) {
+        eprintln!("[loctree][warn] failed to refresh latest pointers: {}", e);
+    }
+
     Ok(created)
 }
 
@@ -2142,6 +2342,22 @@ pub(crate) fn write_auto_artifacts(
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    struct DirGuard {
+        path: PathBuf,
+    }
+
+    impl DirGuard {
+        fn new(path: PathBuf) -> Self {
+            Self { path }
+        }
+    }
+
+    impl Drop for DirGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
 
     #[test]
     fn test_snapshot_save_load_roundtrip() {
@@ -2188,9 +2404,13 @@ mod tests {
     #[test]
     fn test_snapshot_path() {
         let path = Snapshot::snapshot_path(Path::new("/some/project"));
-        // Accept branch@sha subdir if present, but require .loctree and snapshot.json
-        assert!(path.starts_with("/some/project/.loctree"));
+        // Snapshot path should be under the global cache, not project-local
         assert!(path.ends_with("snapshot.json"));
+        // Should NOT be under the project directory anymore
+        assert!(
+            !path.starts_with("/some/project/.loctree"),
+            "snapshot should go to global cache, not project-local .loctree"
+        );
     }
 
     #[test]
@@ -2215,11 +2435,11 @@ mod tests {
 
     #[test]
     fn test_artifacts_dir_uses_root_git_context() {
-        // Non-git directory should use legacy path
+        // Non-git directory should use global cache
         let dir = Snapshot::artifacts_dir(Path::new("/tmp/loctree"));
         assert!(
-            dir.ends_with(Path::new(".loctree")),
-            "non-git should use .loctree"
+            !dir.starts_with("/tmp/loctree/.loctree"),
+            "artifacts should go to global cache, not project-local"
         );
         // Git directory should include scan_id
         let cwd = std::env::current_dir().unwrap();
@@ -2510,15 +2730,18 @@ mod tests {
     #[test]
     fn test_find_latest_snapshot_no_loctree_dir() {
         let tmp = TempDir::new().expect("create temp dir");
-        // No .loctree directory
+        // No .loctree directory and no cache entry
 
         // Use find_latest_snapshot_in to avoid changing global cwd (thread-safe)
         let result = Snapshot::find_latest_snapshot_in(tmp.path());
 
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(err.contains("No .loctree directory found"));
-        assert!(err.contains("Run `loct scan` first"));
+        assert!(
+            err.contains("No snapshot found"),
+            "Expected 'No snapshot found' in error: {}",
+            err
+        );
     }
 
     #[test]
@@ -2532,8 +2755,11 @@ mod tests {
 
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(err.contains("No snapshots found"));
-        assert!(err.contains("Run `loct scan` first"));
+        assert!(
+            err.contains("No snapshot found"),
+            "Expected 'No snapshot found' in error: {}",
+            err
+        );
     }
 
     #[test]
@@ -2556,6 +2782,29 @@ mod tests {
         // Compare canonicalized paths to handle /private/var vs /var on macOS
         let found = result.unwrap().canonicalize().unwrap_or_default();
         let expected = legacy_path.canonicalize().unwrap_or_default();
+        assert_eq!(found, expected);
+    }
+
+    #[test]
+    fn test_find_latest_snapshot_global_cache_from_subdir() {
+        let project = TempDir::new().expect("create temp project dir");
+        let nested = project.path().join("a/b/c");
+        std::fs::create_dir_all(&nested).expect("create nested dirs");
+
+        // Ensure we don't leave cache artifacts around after this test.
+        let _cleanup = DirGuard::new(project_cache_dir(project.path()));
+
+        // Save snapshot for project root -> goes to global cache (or temp dir fallback)
+        let snapshot = Snapshot::new(vec!["src".to_string()]);
+        snapshot.save(project.path()).expect("save snapshot");
+
+        // Discover from nested subdir: should resolve effective root via global cache
+        let found = Snapshot::find_latest_snapshot_in(&nested).expect("find snapshot");
+        let expected = Snapshot::snapshot_path(project.path());
+
+        // Compare canonicalized paths to handle /private/var vs /var on macOS
+        let found = found.canonicalize().unwrap_or(found);
+        let expected = expected.canonicalize().unwrap_or(expected);
         assert_eq!(found, expected);
     }
 }

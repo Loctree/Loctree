@@ -93,7 +93,7 @@ pub struct ParsedArgs {
     pub search_dead_only: bool,
     /// Filter search to semantic matches only
     pub search_semantic_only: bool,
-    /// Auto mode: eagerly emit HTML/JSON/cycle artifacts into .loctree
+    /// Auto mode: eagerly emit HTML/JSON/cycle artifacts into the artifacts dir (cache by default; set LOCT_CACHE_DIR to override).
     pub auto_outputs: bool,
     /// Filter search to exported symbols only
     pub search_exported_only: bool,

@@ -490,7 +490,7 @@ fn run_for_ai(root_list: &[PathBuf], parsed: &ParsedArgs) -> std::io::Result<()>
     if parsed.output == OutputMode::Json
         && let Some(root) = root_list.first()
     {
-        let agent_path = root.join(".loctree").join("agent.json");
+        let agent_path = crate::snapshot::Snapshot::artifacts_dir(root).join("agent.json");
         if let Some(dir) = agent_path.parent() {
             if let Err(e) = fs::create_dir_all(dir) {
                 eprintln!("[loct][agent] Failed to create {}: {}", dir.display(), e);

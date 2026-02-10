@@ -34,8 +34,10 @@ cargo install loctree-mcp    # MCP server for AI agents
 
 ## Quick Start
 
+Artifacts are stored in your OS cache dir by default (override via `LOCT_CACHE_DIR`).
+
 ```bash
-loct                              # Scan project, save snapshot to .loctree/
+loct                              # Scan project, write cached artifacts
 loct --for-ai                     # AI-optimized overview (health, hubs, quick wins)
 loct slice src/App.tsx --consumers # Context: file + deps + consumers
 loct find useAuth                  # Find symbol definitions

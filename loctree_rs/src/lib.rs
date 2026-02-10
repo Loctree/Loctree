@@ -185,7 +185,8 @@ pub mod layoutmap;
 
 /// Incremental snapshot persistence.
 ///
-/// Saves analysis results to `.loctree/snapshot.json` for faster subsequent runs.
+/// Saves analysis results to cached artifacts for faster subsequent runs.
+/// By default, artifacts live in the OS user cache dir (override via `LOCT_CACHE_DIR`).
 /// Uses file modification times to skip unchanged files.
 ///
 /// # Key Types

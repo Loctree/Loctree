@@ -48,7 +48,7 @@ USAGE:
 DESCRIPTION:
     Runs the auto scan and emits a single JSON tuned for AI agents:
     handlers, duplicates, dead exports, dynamic imports, cycles, and top files.
-    The bundle is also saved to ./.loctree/agent.json for reuse.
+    The bundle is also saved to the artifacts dir (cache by default; set LOCT_CACHE_DIR to override).
 
 OPTIONS:
     --full-scan          Force full rescan (ignore cache)
@@ -295,7 +295,7 @@ USAGE:
 
 DESCRIPTION:
     Execute jq-style filter expressions on the latest snapshot JSON.
-    Automatically finds the most recent snapshot in .loctree/ directory.
+    Automatically finds the most recent snapshot in the cache (override with LOCT_CACHE_DIR).
 
     The filter syntax follows jq conventions:
     - .metadata          Extract metadata field

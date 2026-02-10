@@ -50,7 +50,7 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
     // Convert command-specific options
     match cmd {
         Command::Auto(opts) => {
-            // Auto mode: full scan with stack detection, save to .loctree/
+            // Auto mode: full scan with stack detection, write cached artifacts (see LOCT_CACHE_DIR).
             // Maps to Mode::Init (which does scan + snapshot)
             // Unless --for-agent-feed is set, then use Mode::ForAi
             if opts.for_agent_feed {

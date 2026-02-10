@@ -34,13 +34,13 @@ fn main() -> std::io::Result<()> {
 
 const USAGE: &str = "loct - Static Analysis for AI Agents (v0.8.x)\n\n\
 PHILOSOPHY: Scan the WHOLE repo once with `loct auto`, then query with subcommands.\n\
-            Artifacts live in .loctree/ - use them for fast, context-aware analysis.\n\n\
+            Artifacts live in your cache dir by default (override with LOCT_CACHE_DIR).\n\n\
 Quick Start:\n  \
-  loct auto                      Full scan → .loctree/ artifacts\n  \
+  loct auto                      Full scan → cached artifacts\n  \
   loct slice src/foo.ts          Extract file context for AI agent\n  \
   loct report --html out.html    Generate visual HTML report\n\n\
 Core Commands:\n  \
-  auto              Full scan + findings (creates .loctree/)\n  \
+  auto              Full scan + findings (writes artifacts)\n  \
   doctor            Interactive diagnostics and quick-wins\n  \
   slice <file>      Extract file + dependencies + consumers\n  \
   find <name>       Find symbol definitions\n  \
