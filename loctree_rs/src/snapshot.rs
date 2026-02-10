@@ -160,6 +160,12 @@ pub(crate) fn resolve_snapshot_root(root_list: &[PathBuf]) -> PathBuf {
             .collect()
     };
 
+    // If the given root itself looks like a project (has tsconfig.json, package.json, etc.),
+    // use it directly — don't walk upward past an explicit project boundary.
+    if roots.len() == 1 && has_project_marker(&roots[0]) {
+        return roots[0].clone();
+    }
+
     let mut loctree_roots: Vec<PathBuf> = roots
         .iter()
         .filter_map(|root| Snapshot::find_loctree_root(root))
@@ -168,10 +174,6 @@ pub(crate) fn resolve_snapshot_root(root_list: &[PathBuf]) -> PathBuf {
         && loctree_roots.iter().all(|root| root == &first)
     {
         return first;
-    }
-
-    if roots.len() == 1 && has_project_marker(&roots[0]) {
-        return roots[0].clone();
     }
 
     if let Some(first_git) = roots.first().and_then(|root| find_git_root(root))
