@@ -1,13 +1,17 @@
 # VSCode Extension
 
+> **Part of [loctree-suite](https://github.com/Loctree/loctree-suite)**
+> The LSP server and editor integrations ship with loctree-suite.
+> Install the free CLI with `cargo install loctree`, then upgrade to suite for IDE features.
+
 The Loctree VSCode extension provides real-time dead code detection, circular import warnings, and code navigation powered by the `loctree-lsp` language server.
 
 ## Installation
 
-### From Source (Current)
+### From loctree-suite
 
 ```bash
-cd editors/vscode
+cd loctree-suite/editors/vscode
 npm install
 npm run compile
 ```
@@ -17,13 +21,9 @@ Then in VSCode: `F1` → "Developer: Install Extension from Location" → select
 ### VSIX (Recommended for forks like Cursor/Windsurf)
 
 ```bash
-cd editors/vscode
+cd loctree-suite/editors/vscode
 LOCTREE_LSP_PATH=/path/to/loctree-lsp npm run package
 ```
-
-This bundles the `loctree-lsp` binary into `editors/vscode/bin/`.
-If `LOCTREE_LSP_PATH` is not set, the packager looks for
-`../../target/release/loctree-lsp` or an existing `loctree-lsp` in PATH.
 
 ### From Marketplace (Coming Soon)
 
@@ -107,7 +107,8 @@ Open command palette (`F1`) and search for "Loctree":
 
 ## Requirements
 
-- Loctree CLI installed (`cargo install loctree`) or bundled `loctree-lsp`
+- [loctree-suite](https://github.com/Loctree/loctree-suite) with `loctree-lsp` binary
+- Loctree CLI installed (`cargo install loctree`)
 - Run `loct` once in the project root (writes snapshot to cache; set `LOCT_CACHE_DIR=.loctree` for repo-local artifacts)
 
 ## Troubleshooting
@@ -134,4 +135,4 @@ Click status bar → "Loctree: Refresh" or run `loct` in terminal.
 
 ---
 
-*Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team*
+*VibeCrafted with AI Agents (c)2024-2026 VetCoders*

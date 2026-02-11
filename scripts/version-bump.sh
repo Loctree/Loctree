@@ -12,7 +12,6 @@
 #   --all             All crates (default)
 #   --loctree         Only loctree crate
 #   --report          Only report-leptos crate
-#   --landing         Only landing page crate
 #   --mcp             Only loctree-mcp crate
 #
 # Suffix options:
@@ -39,7 +38,7 @@
 #   ./scripts/version-bump.sh --set 1.0.0 --all --tag
 #   ./scripts/version-bump.sh --show-deps
 #
-# Created by M&K (c)2025 The LibraxisAI Team
+# VibeCrafted with AI Agents (c)2024-2026 VetCoders
 
 set -euo pipefail
 
@@ -61,9 +60,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CRATE_LIST=(
   "loctree|loctree_rs|yes|"
   "report-leptos|reports|yes|loctree"
-  "landing-page|landing|no|loctree,report-leptos"
   "loctree-mcp|loctree-mcp|yes|loctree"
-  "loctree-lsp|loctree_lsp|no|loctree"
 )
 
 # Helper to get crate field
@@ -138,7 +135,7 @@ while [[ $# -gt 0 ]]; do
       bump_type="explicit"
       shift 2
       ;;
-    --all|--loctree|--report|--landing|--mcp|--lsp)
+    --all|--loctree|--report|--mcp)
       scope="${1#--}"
       shift
       ;;
@@ -171,9 +168,7 @@ done
 resolve_scope() {
   case "$1" in
     report) echo "report-leptos" ;;
-    landing) echo "landing-page" ;;
     mcp) echo "loctree-mcp" ;;
-    lsp) echo "loctree-lsp" ;;
     *) echo "$1" ;;
   esac
 }
@@ -380,7 +375,7 @@ printf "%-18s │ %-12s │ %-12s │ %-8s │ %s\n" "Crate" "Current" "New" "St
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # Print in dependency order
-for crate in loctree report-leptos loctree-mcp loctree-lsp landing-page; do
+for crate in loctree report-leptos loctree-mcp; do
   old=$(get_version "$crate" "$VERSIONS_FILE")
   new=$(get_version "$crate" "$NEW_VERSIONS_FILE")
   deps=$(get_crate_field "$crate" "deps")
@@ -639,12 +634,7 @@ if ! $skip_tests; then
     if is_in_scope "$crate"; then
       path=$(get_crate_field "$crate" "path")
       echo -e "  ${DIM}Testing $crate...${NC}"
-      # Some crates only build, don't have tests
-      if [[ "$crate" == "loctree-server" ]] || [[ "$crate" == "landing-page" ]]; then
-        cargo build --manifest-path "$ROOT_DIR/$path/Cargo.toml" --quiet
-      else
-        cargo test --manifest-path "$ROOT_DIR/$path/Cargo.toml" --quiet
-      fi
+      cargo test --manifest-path "$ROOT_DIR/$path/Cargo.toml" --quiet
     fi
   done
   log_success "Tests passed"
@@ -715,7 +705,7 @@ git -C "$ROOT_DIR" commit -m "chore(release): bump versions
 
 $commit_parts
 
-Created by M&K (c)2025 The LibraxisAI Team"
+VibeCrafted with AI Agents (c)2024-2026 VetCoders"
 
 log_success "Committed version bump"
 

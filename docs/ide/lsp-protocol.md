@@ -1,5 +1,8 @@
 # LSP Protocol Reference
 
+> **Part of [loctree-suite](https://github.com/Loctree/loctree-suite)**
+> The `loctree-lsp` language server ships with loctree-suite.
+
 Technical reference for the `loctree-lsp` Language Server Protocol implementation.
 
 ## Server Capabilities
@@ -163,4 +166,4 @@ Executable via `workspace/executeCommand`:
 
 ---
 
-*Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team*
+*VibeCrafted with AI Agents (c)2024-2026 VetCoders*
