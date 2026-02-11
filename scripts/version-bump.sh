@@ -95,6 +95,44 @@ get_all_crates() {
   done
 }
 
+# Read workspace version from root Cargo.toml ([workspace.package] version)
+read_workspace_version() {
+  local root_cargo="$ROOT_DIR/Cargo.toml"
+  local line
+  line=$(grep -E '^[[:space:]]*version[[:space:]]*=[[:space:]]*"' "$root_cargo" | head -1 || true)
+  if [[ -z "$line" ]]; then
+    echo ""
+    return
+  fi
+  echo "$line" | cut -d'"' -f2
+}
+
+# Read crate version from Cargo.toml, falling back to workspace version when using `version.workspace = true`.
+read_version() {
+  local cargo_toml="$1"
+  local line direct workspace_ver
+
+  line=$(grep -E '^[[:space:]]*version([[:space:]]*\.workspace)?[[:space:]]*=' "$cargo_toml" | head -1 || true)
+  if [[ -z "$line" ]]; then
+    echo "$(read_workspace_version)"
+    return
+  fi
+
+  direct=$(echo "$line" | grep -oE '"[^"]+"' | head -1 | tr -d '"' || true)
+  if [[ -n "$direct" ]]; then
+    echo "$direct"
+    return
+  fi
+
+  if echo "$line" | grep -qE 'version[[:space:]]*\.workspace[[:space:]]*=[[:space:]]*true'; then
+    workspace_ver=$(read_workspace_version)
+    echo "$workspace_ver"
+    return
+  fi
+
+  echo ""
+}
+
 # Default values
 bump_type="patch"
 bump_flag_set=false
@@ -200,7 +238,7 @@ show_dependency_graph() {
     # Get current version
     local version="?"
     if [[ -f "$cargo_toml" ]]; then
-      version=$(grep '^version = ' "$cargo_toml" | head -1 | cut -d'"' -f2)
+      version=$(read_version "$cargo_toml")
     fi
 
     # Format crate info
@@ -300,10 +338,6 @@ bump_version() {
     major) major=$((major + 1)); minor=0; patch=0 ;;
   esac
   echo "${major}.${minor}.${patch}"
-}
-
-read_version() {
-  grep '^version = ' "$1" | head -1 | cut -d'"' -f2
 }
 
 update_sed() {
