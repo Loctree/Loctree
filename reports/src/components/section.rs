@@ -98,32 +98,34 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
                 <div class="header-title">
                     <h1>{short_path}</h1>
                     <p class="header-path" title=section.root.clone()>{section.root.clone()}</p>
-                    {(!git_label.is_empty()).then(|| view! {
-                        <p class="header-path" style="margin-top:4px;color:var(--theme-text-tertiary)" title="git branch @ commit">
-                            {git_label.clone()}
-                        </p>
-                    })}
-                    {(!generated_label.is_empty()).then(|| view! {
-                        <p class="header-path" style="margin-top:4px;color:var(--theme-text-tertiary)" title="report generated at">
-                            {format!("Generated {}", generated_label)}
-                        </p>
-                    })}
-                    {(!schema_label.is_empty()).then(|| view! {
-                        <p class="header-path" style="color:var(--theme-text-tertiary)" title="schema">
-                            {format!("Schema {}", schema_label)}
-                        </p>
-                    })}
+                    <div class="header-meta">
+                        {(!git_label.is_empty()).then(|| view! {
+                            <p class="header-meta-line" title="git branch @ commit">
+                                {git_label.clone()}
+                            </p>
+                        })}
+                        {(!generated_label.is_empty()).then(|| view! {
+                            <p class="header-meta-line" title="report generated at">
+                                {format!("Generated {}", generated_label)}
+                            </p>
+                        })}
+                        {(!schema_label.is_empty()).then(|| view! {
+                            <p class="header-meta-line" title="schema">
+                                {format!("Schema {}", schema_label)}
+                            </p>
+                        })}
+                    </div>
                 </div>
                 <div class="header-stats">
-                    <span class="stat-badge">
+                    <span class="stat-badge stat-badge-files">
                         <span class="stat-badge-value">{file_count}</span>
                         <span class="stat-badge-label">"files"</span>
                     </span>
-                    <span class="stat-badge">
+                    <span class="stat-badge stat-badge-loc">
                         <span class="stat-badge-value">{total_loc}</span>
                         <span class="stat-badge-label">"LOC"</span>
                     </span>
-                    <span class="stat-badge">
+                    <span class="stat-badge stat-badge-dups">
                         <span class="stat-badge-value">{duplicate_exports_count}</span>
                         <span class="stat-badge-label">"dups"</span>
                     </span>

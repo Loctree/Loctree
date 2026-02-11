@@ -344,16 +344,22 @@ html.dark .theme-icon-dark { display: block; }
 
 /* Sticky Header */
 .app-header {
-    height: var(--header-height);
+    min-height: var(--header-height);
+    height: auto;
     flex-shrink: 0;
     background: var(--gradient-nav);
     border-bottom: 1px solid var(--theme-border);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 32px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 12px 24px;
+    padding: 12px 32px;
     backdrop-filter: blur(12px);
     z-index: 10;
+}
+
+.header-title {
+    min-width: 0;
 }
 
 .header-title h1 {
@@ -361,6 +367,10 @@ html.dark .theme-icon-dark { display: block; }
     font-size: 16px;
     font-weight: 600;
     color: var(--theme-text-primary);
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .header-title p,
@@ -369,7 +379,25 @@ html.dark .theme-icon-dark { display: block; }
     font-size: 11px;
     color: var(--theme-text-tertiary);
     font-family: var(--font-mono);
-    max-width: 300px;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.header-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+    margin-top: 4px;
+}
+
+.header-meta-line {
+    margin: 0;
+    font-size: 11px;
+    color: var(--theme-text-tertiary);
+    font-family: var(--font-mono);
+    max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -378,7 +406,11 @@ html.dark .theme-icon-dark { display: block; }
 /* Header Stats Badges */
 .header-stats {
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
+    justify-content: flex-end;
+    align-items: flex-start;
+    align-self: start;
 }
 
 .stat-badge {
@@ -3370,9 +3402,19 @@ input[type="range"]::-webkit-slider-thumb {
 
 /* Empty State */
 .refactor-empty {
-    text-align: center;
-    padding: 40px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+    text-align: left;
+    padding: 28px;
     color: var(--theme-text-tertiary);
+}
+
+.refactor-empty h3 {
+    margin: 0;
+    font-size: 16px;
+    color: var(--theme-text-primary);
 }
 
 .refactor-empty p {
@@ -3380,15 +3422,31 @@ input[type="range"]::-webkit-slider-thumb {
     font-size: 14px;
 }
 
+.refactor-empty-command {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.refactor-empty-label {
+    font-size: 12px;
+    color: var(--theme-text-tertiary);
+    letter-spacing: 0.02em;
+}
+
 .refactor-empty code {
     display: inline-block;
-    margin: 8px 0;
-    padding: 4px 8px;
+    margin: 0;
+    padding: 6px 10px;
     background: var(--theme-hover);
     border-radius: var(--radius-sm);
     font-family: var(--font-mono);
     font-size: 12px;
     color: var(--theme-accent);
+}
+
+.refactor-empty-note {
+    font-size: 12px;
 }
 
 /* ============================================
@@ -3424,6 +3482,29 @@ input[type="range"]::-webkit-slider-thumb {
     .header-tabs {
         flex-wrap: wrap;
     }
+
+    .app-header {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 10px;
+        padding: 12px 16px;
+    }
+
+    .header-stats {
+        justify-content: flex-start;
+    }
+
+    .stat-badge {
+        padding: 6px 10px;
+        min-width: 54px;
+    }
+
+    .stat-badge-value {
+        font-size: 14px;
+    }
+
+    .stat-badge-label {
+        font-size: 9px;
+    }
     
     .graph-toolbar {
         flex-direction: column;
@@ -3433,6 +3514,28 @@ input[type="range"]::-webkit-slider-thumb {
     .graph-controls {
         margin-left: 0;
         justify-content: center;
+    }
+}
+
+@media (max-width: 640px) {
+    .header-title h1 {
+        font-size: 15px;
+    }
+
+    .header-path,
+    .header-meta-line {
+        white-space: normal;
+        overflow: visible;
+        text-overflow: initial;
+        overflow-wrap: anywhere;
+    }
+
+    .stat-badge-dups {
+        display: none;
+    }
+
+    .refactor-empty {
+        padding: 20px;
     }
 }
 "#;

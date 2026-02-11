@@ -233,29 +233,34 @@ const APP_SCRIPT: &str = r#"
       themeToggle.addEventListener('click', toggleTheme);
   }
 
+  const activateTab = (tabName) => {
+      if (!tabName) return;
+
+      // Update Sidebar buttons
+      document.querySelectorAll('.sidebar-nav .nav-item').forEach(b => {
+          b.classList.toggle('active', b.dataset.tab === tabName);
+      });
+
+      // Update all tab panels across all sections
+      document.querySelectorAll('.tab-panel').forEach(p => {
+          const isActive = p.dataset.tabName === tabName;
+          p.classList.toggle('active', isActive);
+
+          if (isActive && tabName === 'graph') {
+              window.dispatchEvent(new Event('resize'));
+          }
+      });
+
+      // Also update header tab-bar buttons if present (for visual sync)
+      document.querySelectorAll('.tab-bar .tab-btn').forEach(b => {
+          b.classList.toggle('active', b.dataset.tab === tabName);
+      });
+  };
+
   // 1. Sidebar Navigation (Tab Switching)
   document.querySelectorAll('.sidebar-nav .nav-item[data-tab]').forEach(btn => {
       btn.addEventListener('click', () => {
-          const tabName = btn.dataset.tab;
-
-          // Update Sidebar buttons
-          document.querySelectorAll('.sidebar-nav .nav-item').forEach(b => b.classList.remove('active'));
-          btn.classList.add('active');
-
-          // Update all tab panels across all sections
-          document.querySelectorAll('.tab-panel').forEach(p => {
-              const isActive = p.dataset.tabName === tabName;
-              p.classList.toggle('active', isActive);
-
-              if (isActive && tabName === 'graph') {
-                  window.dispatchEvent(new Event('resize'));
-              }
-          });
-
-          // Also update header tab-bar buttons if present (for visual sync)
-          document.querySelectorAll('.tab-bar .tab-btn').forEach(b => {
-              b.classList.toggle('active', b.dataset.tab === tabName);
-          });
+          activateTab(btn.dataset.tab);
       });
   });
 
@@ -355,6 +360,38 @@ const APP_SCRIPT: &str = r#"
               card.style.display = show ? '' : 'none';
           });
       });
+  });
+
+  // 3d2. Coverage Filter Buttons - filter coverage rows by severity
+  document.querySelectorAll('.coverage-summary').forEach(summary => {
+      const buttons = summary.querySelectorAll('[data-coverage-filter]');
+      const panel = summary.closest('.panel');
+      const table = panel ? panel.querySelector('.coverage-table') : null;
+      const rows = table ? table.querySelectorAll('tbody tr[data-coverage-severity]') : [];
+
+      if (!buttons.length || !rows.length) return;
+
+      const applyFilter = (filter) => {
+          const current = filter || 'all';
+
+          rows.forEach(row => {
+              const sev = row.dataset.coverageSeverity || '';
+              const show = current === 'all' || sev === current;
+              row.style.display = show ? '' : 'none';
+          });
+
+          buttons.forEach(btn => {
+              btn.classList.toggle('active', (btn.dataset.coverageFilter || 'all') === current);
+          });
+      };
+
+      buttons.forEach(btn => {
+          btn.addEventListener('click', () => {
+              applyFilter(btn.dataset.coverageFilter || 'all');
+          });
+      });
+
+      applyFilter(summary.dataset.coverageDefaultFilter || 'all');
   });
 
   // 3e. Pipeline Search - filter cards by name
@@ -488,6 +525,17 @@ const APP_SCRIPT: &str = r#"
     toggleTestsBtn.addEventListener('click', () => {
       const currentlyHidden = localStorage.getItem('loctree-hide-tests') === 'true';
       updateTestsVisibility(!currentlyHidden);
+
+      // Open Coverage tab when user asks to show/hide tests
+      activateTab('coverage');
+
+      // Scroll to coverage section for quick access
+      const coverageSection = document.querySelector('.coverage-summary');
+      if (coverageSection) {
+        coverageSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } else {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
     });
   }
 })();
