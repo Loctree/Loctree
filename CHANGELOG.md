@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
+## [0.8.12] - 2026-02-11
+
+### Added
+- sync with loctree-suite v0.8.4
+- sync loctree_rs + loctree_server with loctree-suite
+- implement OXC-based AST parser for JS/TS
+- Add `loct` as short alias for `loctree` + clippy fixes (#39)
+
+### Fixed
+- support workspace-version crates in make version
+- exclude known false positives from Semgrep scan
+- inline nosemgrep annotations for Semgrep OSS
+- address PR #49 review feedback
+- Clippy warnings - needless borrows and useless vec
+
 ## [0.8.11] - 2026-02-07
 
 ### Added
