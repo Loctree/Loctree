@@ -3,7 +3,30 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+WORKSPACE_TOML="$ROOT_DIR/Cargo.toml"
+
+# Keep npm package version aligned with workspace.package.version
+VERSION="$(
+  awk '
+    /^\[workspace\.package\]/ { in_ws=1; next }
+    in_ws && /^\[/ { in_ws=0 }
+    in_ws && /^version[[:space:]]*=/ {
+      gsub(/"/, "", $3)
+      print $3
+      exit
+    }
+  ' "$WORKSPACE_TOML"
+)"
+
+if [ -z "$VERSION" ]; then
+  echo "Failed to resolve workspace version from $WORKSPACE_TOML" >&2
+  exit 1
+fi
+
 PLATFORMS=(
+  "darwin-arm64:macOS Apple Silicon (ARM64):darwin:arm64"
   "darwin-x64:macOS Intel (x64):darwin:x64"
   "linux-arm64-gnu:Linux ARM64 (glibc):linux:arm64"
   "linux-arm64-musl:Linux ARM64 (musl/Alpine):linux:arm64"
@@ -22,7 +45,7 @@ for platform_spec in "${PLATFORMS[@]}"; do
   cat > "$dir/package.json" << PACKAGE_EOF
 {
   "name": "@loctree/$platform",
-  "version": "0.8.11",
+  "version": "$VERSION",
   "description": "loctree binary for $desc",
   "keywords": ["loctree", "$os", "$cpu"],
   "license": "(MIT OR Apache-2.0)",

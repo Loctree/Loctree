@@ -15,7 +15,7 @@ class Loctree < Formula
   url "https://crates.io/api/v1/crates/loctree/0.8.11/download"
   sha256 "UPDATE_SHA256_BEFORE_RELEASE"
   license any_of: ["MIT", "Apache-2.0"]
-  head "https://github.com/Loctree/Loctree-suite.git", branch: "main"
+  head "https://github.com/Loctree/Loctree.git", branch: "main"
 
   # Binary name is 'loctree' and 'loct' (alias)
   # Installed from: loctree_rs/src/bin/

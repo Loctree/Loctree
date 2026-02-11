@@ -41,14 +41,14 @@ install: setup-protoc
 		rm -f "$(LOCKFILE)"; \
 	fi
 	@echo $$$$ > "$(LOCKFILE)"
-	@trap 'rm -f $(LOCKFILE)' EXIT; \
+	@trap 'rm -f "$(LOCKFILE)"' EXIT; \
 	set -e; \
 	cargo install --path loctree_rs --force; \
 	cargo install --path loctree-mcp --force; \
 	echo "Installed: loct, loctree, loctree-mcp → $(CARGO_BIN)"; \
 	$(MAKE) git-hooks
 
-# Install all CLI binaries (loct/loctree, loctree-mcp, loctree-lsp)
+# Install all available CLI binaries in this repo (loct/loctree + loctree-mcp)
 install-all: setup-protoc
 	@if [ -f "$(LOCKFILE)" ]; then \
 		old_pid=$$(cat "$(LOCKFILE)" 2>/dev/null); \
@@ -60,12 +60,11 @@ install-all: setup-protoc
 		rm -f "$(LOCKFILE)"; \
 	fi
 	@echo $$$$ > "$(LOCKFILE)"
-	@trap 'rm -f $(LOCKFILE)' EXIT; \
+	@trap 'rm -f "$(LOCKFILE)"' EXIT; \
 	set -e; \
 	cargo install --path loctree_rs --force; \
 	cargo install --path loctree-mcp --force; \
-	cargo install --path loctree_lsp --force; \
-	echo "Installed: loct, loctree, loctree-mcp, loctree-lsp → $(CARGO_BIN)"; \
+	echo "Installed: loct, loctree, loctree-mcp → $(CARGO_BIN)"; \
 	$(MAKE) git-hooks
 
 # Setup protoc - check system or use Homebrew
@@ -116,7 +115,7 @@ help:
 	@echo "  make build        - Build all (installs protobuf if needed)"
 	@echo "  make build-core   - Build only loctree (no protobuf needed)"
 	@echo "  make install      - Install loct, loctree & loctree-mcp"
-	@echo "  make install-all  - Install loct, loctree, loctree-mcp & loctree-lsp"
+	@echo "  make install-all  - Install loct, loctree & loctree-mcp"
 	@echo "  make test         - Run all tests"
 	@echo "  make check        - Quick type check (no clippy)"
 	@echo "  make fmt          - Format all code"
@@ -158,7 +157,7 @@ help:
 	@echo ""
 	@echo "Quick start:"
 	@echo "  make install           - Install loct + loctree-mcp"
-	@echo "  make install-all       - Install loct + loctree-mcp + loctree-lsp"
+	@echo "  make install-all       - Install loct + loctree-mcp"
 
 # ============================================================================
 # Version Management
@@ -197,6 +196,7 @@ version:
 #        make publish BUMP=true VERSION=minor       - Bump minor, then publish
 # Requires: CARGO_REGISTRY_TOKEN env var
 BUMP ?= false
+VERSION ?= patch
 
 publish:
 	@if [ -z "$$CARGO_REGISTRY_TOKEN" ]; then \
@@ -204,9 +204,13 @@ publish:
 		echo "Usage: CARGO_REGISTRY_TOKEN=xxx make publish"; \
 		exit 1; \
 	fi
+	@if [ -n "$$(git status --porcelain)" ]; then \
+		echo "ERROR: Working tree is dirty. Commit or stash before publish."; \
+		exit 1; \
+	fi
 	@if [ "$(BUMP)" = "true" ]; then \
 		echo "=== Bumping version ($(VERSION)) ==="; \
-		$(VERSION_SCRIPT) --all --$(VERSION) --no-publish --force; \
+		$(VERSION_SCRIPT) --all --$(VERSION) --no-publish; \
 	fi
 	@VER=$$(grep '^version = ' Cargo.toml | head -1 | cut -d'"' -f2); \
 	echo "=== Publishing loctree workspace v$$VER to crates.io ==="; \
