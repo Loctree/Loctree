@@ -8,7 +8,10 @@ tarpaulin-report.html
 loctree_rs/tarpaulin-report.json
 /.ai-agents
 /.ai-suite
-/.loctree
+# loctree: keep repo-local config files, ignore cache artifacts
+/.loctree/*
+!/.loctree/config.toml
+!/.loctree/suppressions.toml
 /.benchmarks
 /agents
 /loctree_rs/logs
@@ -34,8 +37,8 @@ __pycache__/
 *.pyc
 /reports/target
 *.zip
-/loctree_rs/tests/fixtures/simple_ts/.loctree
-/loctree_rs/tests/fixtures/tauri_app/.loctree
+# Test fixtures - generated .loctree snapshots
+/loctree_rs/tests/fixtures/**/.loctree
 
 # Generated loctree output assets (JS libraries written alongside reports)
 loctree-*.js
@@ -47,7 +50,6 @@ loctree-*.min.js
 *.txt
 !tools/fixtures/**/*.txt
 /assets/Icon Exports
-/loctree_rs/tests/fixtures/tauri_app/src/.loctree
 .replit
 /.tools
 
@@ -73,5 +75,6 @@ reports/report.html
 **/.DS_Store
 /.idea
 SeniorDev/
-/public_dist
+reports/report.html
+/reports/.loctree
 reports/report.html

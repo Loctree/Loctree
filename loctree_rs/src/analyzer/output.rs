@@ -17,12 +17,16 @@ use super::coverage_gaps::find_coverage_gaps;
 use super::crowd::detect_all_crowds_with_edges;
 use super::cycles;
 use super::dead_parrots::{DeadFilterConfig, find_dead_exports};
+use super::for_ai::{
+    HubFile as AiHubFile, PriorityTask as AiPriorityTask, build_priority_tasks, extract_quick_wins,
+    find_hub_files,
+};
 use super::graph::{MAX_GRAPH_EDGES, MAX_GRAPH_NODES, build_graph_data};
 use super::health_score::{HealthMetrics, calculate_health_score};
 use super::html::render_html_report;
 use super::insights::collect_ai_insights;
 use super::open_server::current_open_base;
-use super::report::{CommandBridge, TreeNode, TwinsData};
+use super::report::{CommandBridge, HubFile, PriorityTask, TreeNode, TwinsData};
 use super::root_scan::{RootContext, normalize_module_id};
 use super::scan::resolve_event_constants_across_files;
 use super::twins::{detect_exact_twins, find_dead_parrots};
@@ -687,6 +691,13 @@ pub fn process_root_context(
     let mut dead_symbols = Vec::new();
     let dead_exports_for_report = if !parsed.skip_dead_symbols {
         let open_base = current_open_base();
+        let mut dead_ok_globs: Vec<String> = parsed
+            .root_list
+            .iter()
+            .flat_map(|root| crate::fs_utils::load_loctignore_dead_ok_globs(root))
+            .collect();
+        dead_ok_globs.sort();
+        dead_ok_globs.dedup();
         let dead_exports = find_dead_exports(
             global_analyses,
             true,
@@ -699,6 +710,7 @@ pub fn process_root_context(
                 python_library_mode: parsed.python_library,
                 include_ambient: false,
                 include_dynamic: false,
+                dead_ok_globs,
             },
         );
 
@@ -762,18 +774,11 @@ pub fn process_root_context(
 
         let snapshot = crate::snapshot::Snapshot {
             metadata: crate::snapshot::SnapshotMetadata {
-                schema_version: String::new(),
-                generated_at: String::new(),
                 roots: vec![root_path.display().to_string()],
                 languages: languages.clone(),
                 file_count: analyses.len(),
                 total_loc: analyses.iter().map(|a| a.loc).sum(),
-                scan_duration_ms: 0,
-                resolver_config: None,
-                git_repo: None,
-                git_branch: None,
-                git_commit: None,
-                git_scan_id: None,
+                ..Default::default()
             },
             files: analyses.clone(),
             edges: graph_edges
@@ -1443,7 +1448,7 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
             Some(score.health)
         };
 
-        report_section = Some(ReportSection {
+        let mut section = ReportSection {
             insights,
             root: root_path.display().to_string(),
             files_analyzed: analyses.len(),
@@ -1456,6 +1461,9 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
             lazy_circular_imports: lazy_circular_imports.clone(),
             dynamic: sorted_dyn,
             analyze_limit: parsed.analyze_limit,
+            generated_at: Some(generated_at.clone()),
+            schema_name: Some(schema_name.to_string()),
+            schema_version: Some(schema_version.to_string()),
             missing_handlers: missing_sorted,
             unregistered_handlers: unregistered_sorted,
             unused_handlers: unused_sorted,
@@ -1471,12 +1479,46 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
             graph_warning: graph_warning.clone(),
             git_branch: git.and_then(|g| g.branch.clone()),
             git_commit: git.and_then(|g| g.commit.clone()),
+            priority_tasks: Vec::new(),
+            hub_files: Vec::new(),
             crowds: crowds.clone(),
             dead_exports: dead_exports_for_report.clone(),
             twins_data: twins_data.clone(),
             coverage_gaps,
             health_score,
-        });
+            refactor_plan: None,
+        };
+
+        let quick_wins = extract_quick_wins(std::slice::from_ref(&section), &analyses);
+        let priority_tasks: Vec<PriorityTask> = build_priority_tasks(&quick_wins)
+            .into_iter()
+            .map(|task: AiPriorityTask| PriorityTask {
+                priority: task.priority,
+                kind: task.kind,
+                target: task.target,
+                location: task.location,
+                why: task.why,
+                risk: task.risk,
+                fix_hint: task.fix_hint,
+                verify_cmd: task.verify_cmd,
+            })
+            .collect();
+        let hub_files: Vec<HubFile> = find_hub_files(&analyses)
+            .into_iter()
+            .map(|hub: AiHubFile| HubFile {
+                path: hub.path,
+                loc: hub.loc,
+                imports_count: hub.imports_count,
+                exports_count: hub.exports_count,
+                importers_count: hub.importers_count,
+                commands_count: hub.commands_count,
+                slice_cmd: hub.slice_cmd,
+            })
+            .collect();
+
+        section.priority_tasks = priority_tasks;
+        section.hub_files = hub_files;
+        report_section = Some(section);
     }
 
     RootArtifacts {

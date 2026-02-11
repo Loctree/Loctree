@@ -5,8 +5,8 @@
 use std::path::PathBuf;
 
 use super::super::command::{
-    Command, DiffOptions, GlobalOptions, HelpOptions, InfoOptions, JqQueryOptions, LintOptions,
-    MemexOptions, ParsedCommand, ReportOptions,
+    Command, DiffOptions, GlobalOptions, HelpOptions, InfoOptions, InsightsOptions, JqQueryOptions,
+    LintOptions, ManifestsOptions, MemexOptions, ParsedCommand, PipelinesOptions, ReportOptions,
 };
 use super::helpers::is_jq_filter;
 
@@ -64,6 +64,10 @@ OPTIONS:
     --fail           Exit with code 1 if any violations found (CI mode)
     --sarif          Output in SARIF format (GitHub Code Scanning compatible)
     --tauri          Enable Tauri-specific contract checks (commands, events)
+    --deep           Include ts/react/memory lint checks
+    --ts             Include TypeScript lint checks
+    --react          Include React lint checks
+    --memory         Include memory leak lint checks
     --no-duplicates  Hide duplicate export sections in CLI output
     --no-dynamic-imports Hide dynamic import sections in CLI output
     --help, -h       Show this help message
@@ -96,6 +100,22 @@ EXAMPLES:
                 opts.tauri = true;
                 i += 1;
             }
+            "--deep" => {
+                opts.deep = true;
+                i += 1;
+            }
+            "--ts" => {
+                opts.ts = true;
+                i += 1;
+            }
+            "--react" => {
+                opts.react = true;
+                i += 1;
+            }
+            "--memory" => {
+                opts.memory = true;
+                i += 1;
+            }
             "--no-duplicates" => {
                 opts.suppress_duplicates = true;
                 i += 1;
@@ -119,6 +139,123 @@ EXAMPLES:
     }
 
     Ok(Command::Lint(opts))
+}
+
+/// Parse `loct pipelines [options]` command - pipeline summary.
+pub(super) fn parse_pipelines_command(args: &[String]) -> Result<Command, String> {
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        return Err("loct pipelines - Pipeline summary (events/commands/risks)
+
+USAGE:
+    loct pipelines [PATHS...]
+
+OPTIONS:
+    --help, -h   Show this help message
+
+EXAMPLES:
+    loct pipelines
+    loct pipelines ."
+            .to_string());
+    }
+
+    let mut opts = PipelinesOptions::default();
+    let mut i = 0;
+    while i < args.len() {
+        let arg = &args[i];
+        match arg.as_str() {
+            _ if !arg.starts_with('-') => {
+                opts.roots.push(PathBuf::from(arg));
+                i += 1;
+            }
+            _ => {
+                return Err(format!("Unknown option '{}' for 'pipelines' command.", arg));
+            }
+        }
+    }
+
+    if opts.roots.is_empty() {
+        opts.roots.push(PathBuf::from("."));
+    }
+
+    Ok(Command::Pipelines(opts))
+}
+
+/// Parse `loct insights [options]` command - AI insights.
+pub(super) fn parse_insights_command(args: &[String]) -> Result<Command, String> {
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        return Err("loct insights - AI insights summary
+
+USAGE:
+    loct insights [PATHS...]
+
+OPTIONS:
+    --help, -h   Show this help message
+
+EXAMPLES:
+    loct insights
+    loct insights ."
+            .to_string());
+    }
+
+    let mut opts = InsightsOptions::default();
+    let mut i = 0;
+    while i < args.len() {
+        let arg = &args[i];
+        match arg.as_str() {
+            _ if !arg.starts_with('-') => {
+                opts.roots.push(PathBuf::from(arg));
+                i += 1;
+            }
+            _ => {
+                return Err(format!("Unknown option '{}' for 'insights' command.", arg));
+            }
+        }
+    }
+
+    if opts.roots.is_empty() {
+        opts.roots.push(PathBuf::from("."));
+    }
+
+    Ok(Command::Insights(opts))
+}
+
+/// Parse `loct manifests [options]` command - manifest summaries.
+pub(super) fn parse_manifests_command(args: &[String]) -> Result<Command, String> {
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        return Err("loct manifests - Manifest summaries
+
+USAGE:
+    loct manifests [PATHS...]
+
+OPTIONS:
+    --help, -h   Show this help message
+
+EXAMPLES:
+    loct manifests
+    loct manifests ."
+            .to_string());
+    }
+
+    let mut opts = ManifestsOptions::default();
+    let mut i = 0;
+    while i < args.len() {
+        let arg = &args[i];
+        match arg.as_str() {
+            _ if !arg.starts_with('-') => {
+                opts.roots.push(PathBuf::from(arg));
+                i += 1;
+            }
+            _ => {
+                return Err(format!("Unknown option '{}' for 'manifests' command.", arg));
+            }
+        }
+    }
+
+    if opts.roots.is_empty() {
+        opts.roots.push(PathBuf::from("."));
+    }
+
+    Ok(Command::Manifests(opts))
 }
 
 /// Parse `loct report [options]` command - generate HTML/JSON reports.
@@ -297,8 +434,8 @@ USAGE:
 OPTIONS:
     --report-path, -r <PATH>   Path to analysis report (JSON format)
     --project-id <ID>          Project identifier for multi-project databases
-    --namespace, -n <NAME>     Namespace for embeddings (default: default)
-    --db-path <PATH>           Custom vector DB path (default: ~/.loctree/memex.db)
+    --namespace, -n <NAME>     Namespace for embeddings (default: loctree)
+    --db-path <PATH>           Custom vector DB path (default: ~/.rmcp_servers/rmcp_memex/lancedb)
     --help, -h                 Show this help message
 
 EXAMPLES:

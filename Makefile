@@ -1,12 +1,13 @@
 # Loctree Build System
 # Includes comprehensive MCP server management
 #
-# Created by M&K (c)2025 The LibraxisAI Team
+# Created by M&K (c)2025 The Loctree Team
 
 .PHONY: all build install clean test check precheck fmt help setup-protoc
-.PHONY: version version-show version-check
+.PHONY: version version-show version-check publish
 .PHONY: mcp-build mcp-install mcp-test
 .PHONY: ai-hooks ai-hooks-claude ai-hooks-codex ai-hooks-gemini git-hooks
+.PHONY: landing landing-dev landing-clean
 
 # Default target
 all: build
@@ -20,7 +21,7 @@ build: setup-protoc
 
 # Build only core loctree (no protobuf needed)
 build-core:
-	cargo build --release -p loctree -p loctree_server -p reports
+	cargo build --release -p loctree
 
 # Determine cargo bin dir
 CARGO_BIN ?= $(if $(CARGO_HOME),$(CARGO_HOME)/bin,$(HOME)/.cargo/bin)
@@ -40,15 +41,31 @@ install: setup-protoc
 		rm -f "$(LOCKFILE)"; \
 	fi
 	@echo $$$$ > "$(LOCKFILE)"
-	@trap 'rm -f $(LOCKFILE)' EXIT; \
+	@trap 'rm -f "$(LOCKFILE)"' EXIT; \
 	set -e; \
 	cargo install --path loctree_rs --force; \
 	cargo install --path loctree-mcp --force; \
 	echo "Installed: loct, loctree, loctree-mcp → $(CARGO_BIN)"; \
 	$(MAKE) git-hooks
 
-# Alias for backwards compatibility
-install-all: install
+# Install all available CLI binaries in this repo (loct/loctree + loctree-mcp)
+install-all: setup-protoc
+	@if [ -f "$(LOCKFILE)" ]; then \
+		old_pid=$$(cat "$(LOCKFILE)" 2>/dev/null); \
+		if [ -n "$$old_pid" ] && kill -0 "$$old_pid" 2>/dev/null; then \
+			echo "Another build running (PID $$old_pid). Aborting."; \
+			exit 1; \
+		fi; \
+		echo "Removing stale lock (PID $$old_pid dead)"; \
+		rm -f "$(LOCKFILE)"; \
+	fi
+	@echo $$$$ > "$(LOCKFILE)"
+	@trap 'rm -f "$(LOCKFILE)"' EXIT; \
+	set -e; \
+	cargo install --path loctree_rs --force; \
+	cargo install --path loctree-mcp --force; \
+	echo "Installed: loct, loctree, loctree-mcp → $(CARGO_BIN)"; \
+	$(MAKE) git-hooks
 
 # Setup protoc - check system or use Homebrew
 setup-protoc:
@@ -98,6 +115,7 @@ help:
 	@echo "  make build        - Build all (installs protobuf if needed)"
 	@echo "  make build-core   - Build only loctree (no protobuf needed)"
 	@echo "  make install      - Install loct, loctree & loctree-mcp"
+	@echo "  make install-all  - Install loct, loctree & loctree-mcp"
 	@echo "  make test         - Run all tests"
 	@echo "  make check        - Quick type check (no clippy)"
 	@echo "  make fmt          - Format all code"
@@ -115,10 +133,22 @@ help:
 	@echo "    make version SCOPE=loctree         - Bump loctree only"
 	@echo "    make version SCOPE=mcp TYPE=minor  - Minor bump loctree-mcp"
 	@echo ""
+	@echo "Publishing:"
+	@echo "  make publish                         - Publish current version to crates.io"
+	@echo "  make publish BUMP=true               - Bump patch + publish"
+	@echo "  make publish BUMP=true VERSION=minor - Bump minor + publish"
+	@echo "    Cascade: report-leptos -> loctree -> loctree-mcp"
+	@echo "    Requires: CARGO_REGISTRY_TOKEN env var"
+	@echo ""
 	@echo "MCP Build & Install:"
 	@echo "  make mcp-build         - Build loctree-mcp"
 	@echo "  make mcp-install       - Install loctree-mcp"
 	@echo "  make mcp-test          - Test loctree-mcp via stdio"
+	@echo ""
+	@echo "Landing Page:"
+	@echo "  make landing           - Build for production (→ public_dist/)"
+	@echo "  make landing-dev       - Dev server with hot reload"
+	@echo "  make landing-clean     - Clean build artifacts"
 	@echo ""
 	@echo "AI CLI Integration:"
 	@echo "  make git-hooks         - Install git pre-push validation hook"
@@ -127,6 +157,7 @@ help:
 	@echo ""
 	@echo "Quick start:"
 	@echo "  make install           - Install loct + loctree-mcp"
+	@echo "  make install-all       - Install loct + loctree-mcp"
 
 # ============================================================================
 # Version Management
@@ -159,6 +190,52 @@ version-check:
 version:
 	@$(VERSION_SCRIPT) --$(SCOPE) --$(TYPE) $(if $(TAG),--tag) $(if $(PUSH),--push) $(if $(FORCE),--force) $(if $(PUBLISH),,--no-publish)
 
+# Publish to crates.io (cascade: report-leptos → loctree → loctree-mcp)
+# Usage: make publish                              - Publish current version
+#        make publish BUMP=true                     - Bump patch, then publish
+#        make publish BUMP=true VERSION=minor       - Bump minor, then publish
+# Requires: CARGO_REGISTRY_TOKEN env var
+BUMP ?= false
+VERSION ?= patch
+
+publish:
+	@if [ -z "$$CARGO_REGISTRY_TOKEN" ]; then \
+		echo "ERROR: CARGO_REGISTRY_TOKEN not set"; \
+		echo "Usage: CARGO_REGISTRY_TOKEN=xxx make publish"; \
+		exit 1; \
+	fi
+	@if [ -n "$$(git status --porcelain)" ]; then \
+		echo "ERROR: Working tree is dirty. Commit or stash before publish."; \
+		exit 1; \
+	fi
+	@if [ "$(BUMP)" = "true" ]; then \
+		echo "=== Bumping version ($(VERSION)) ==="; \
+		$(VERSION_SCRIPT) --all --$(VERSION) --no-publish; \
+	fi
+	@VER=$$(grep '^version = ' Cargo.toml | head -1 | cut -d'"' -f2); \
+	echo "=== Publishing loctree workspace v$$VER to crates.io ==="; \
+	echo ""; \
+	echo "[1/5] Pre-publish validation (fmt + clippy + check)..."; \
+	$(MAKE) precheck || exit 1; \
+	echo ""; \
+	echo "[2/5] Running tests..."; \
+	cargo test --workspace || exit 1; \
+	echo ""; \
+	echo "[3/5] Publishing report-leptos v$$VER..."; \
+	cargo publish -p report-leptos || { echo "FATAL: report-leptos publish failed"; exit 1; }; \
+	echo "Waiting for crates.io index (15s)..."; \
+	sleep 15; \
+	echo ""; \
+	echo "[4/5] Publishing loctree v$$VER..."; \
+	cargo publish -p loctree || { echo "FATAL: loctree publish failed"; exit 1; }; \
+	echo "Waiting for crates.io index (15s)..."; \
+	sleep 15; \
+	echo ""; \
+	echo "[5/5] Publishing loctree-mcp v$$VER..."; \
+	cargo publish -p loctree-mcp || { echo "FATAL: loctree-mcp publish failed"; exit 1; }; \
+	echo ""; \
+	echo "=== All 3 crates published (v$$VER) ==="
+
 # ============================================================================
 # MCP Build & Install (loctree-mcp only)
 # ============================================================================
@@ -179,6 +256,28 @@ mcp-test:
 	@echo "Testing loctree-mcp..."
 	@echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"make-test","version":"1.0"}}}' \
 		| $(CARGO_BIN)/loctree-mcp 2>/dev/null | head -1 || echo "Test failed"
+
+# ============================================================================
+# Landing Page (Leptos/Trunk WASM)
+# ============================================================================
+
+# Build landing page for production (outputs to public_dist/)
+landing:
+	@echo "=== Building Loctree Landing Page ==="
+	@cd landing && trunk build --release
+	@rm -rf public_dist
+	@cp -r landing/dist public_dist
+	@echo "=== Build complete! Ready in public_dist/ ==="
+
+# Development server with hot reload
+landing-dev:
+	@echo "Starting landing page dev server..."
+	@cd landing && trunk serve --open
+
+# Clean landing build artifacts
+landing-clean:
+	@rm -rf landing/dist public_dist
+	@echo "Landing build artifacts cleaned"
 
 # ============================================================================
 # AI Hooks Installation (Claude, Codex, Gemini)

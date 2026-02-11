@@ -60,6 +60,7 @@
 
 pub mod command;
 pub mod dispatch;
+pub mod entrypoint;
 pub mod parser;
 
 // Re-export main types for convenience

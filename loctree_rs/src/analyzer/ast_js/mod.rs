@@ -19,7 +19,7 @@
 //! - `exports`: Export declaration handling
 //! - `calls`: Call expression and dynamic import handling
 //!
-//! Created by M&K (c)2025 The LibraxisAI Team
+//! Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team
 
 mod calls;
 mod config;
@@ -33,13 +33,14 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use oxc_allocator::Allocator;
-use oxc_ast::ast::*;
+use oxc_ast::{AstKind, ast::*};
 use oxc_ast_visit::{Visit, walk::walk_expression};
 use oxc_parser::Parser;
 use oxc_semantic::SemanticBuilder;
+use oxc_span::GetSpan;
 use oxc_span::SourceType;
 
-use crate::types::FileAnalysis;
+use crate::types::{FileAnalysis, LocalSymbol, SymbolUsage};
 
 use super::resolvers::TsPathResolver;
 
@@ -153,6 +154,7 @@ pub(crate) fn analyze_js_file_ast(
         extensions,
         ts_resolver,
         source_text: content_to_parse,
+        source_lines: content_to_parse.lines().collect(),
         command_cfg,
         namespace_imports: HashMap::new(),
     };
@@ -176,16 +178,85 @@ pub(crate) fn analyze_js_file_ast(
             .map(|e| e.name.as_str())
             .collect();
 
-        // Check each symbol - if it's exported AND has references, it's used locally
+        let mut local_symbols = Vec::new();
+        let mut symbol_usages = Vec::new();
+        let mut seen_defs: HashSet<(String, usize)> = HashSet::new();
+        let mut seen_uses: HashSet<(String, usize)> = HashSet::new();
+
+        const MAX_USAGES_PER_FILE: usize = 1500;
+
+        // Check each symbol - record local defs/usages and exported local uses
         for symbol_id in semantic.scoping().symbol_ids() {
             let name = semantic.scoping().symbol_name(symbol_id);
-            if exported_names.contains(name) {
-                // Check if this symbol has any references (beyond its declaration)
-                let ref_ids = semantic.scoping().get_resolved_reference_ids(symbol_id);
-                if !ref_ids.is_empty() {
-                    visitor.analysis.local_uses.push(name.to_string());
+            if name.is_empty() {
+                continue;
+            }
+
+            let decl = semantic.symbol_declaration(symbol_id);
+            let kind = match decl.kind() {
+                AstKind::Function(_) => "function",
+                AstKind::Class(_) => "class",
+                AstKind::VariableDeclarator(_) => "variable",
+                AstKind::TSTypeAliasDeclaration(_) => "type",
+                AstKind::TSInterfaceDeclaration(_) => "interface",
+                AstKind::TSEnumDeclaration(_) => "enum",
+                AstKind::ImportSpecifier(_)
+                | AstKind::ImportDefaultSpecifier(_)
+                | AstKind::ImportNamespaceSpecifier(_) => "import",
+                AstKind::FormalParameter(_) | AstKind::BindingIdentifier(_) => "binding",
+                _ => "symbol",
+            };
+
+            let span = decl.kind().span();
+            let line = visitor.get_line(span);
+            let is_exported = exported_names.contains(name);
+            let context = visitor.line_context(line);
+
+            // Track local definitions (non-exported; skip imports here)
+            if !is_exported && kind != "import" && seen_defs.insert((name.to_string(), line)) {
+                local_symbols.push(LocalSymbol {
+                    name: name.to_string(),
+                    kind: kind.to_string(),
+                    line: Some(line),
+                    context,
+                    is_exported,
+                });
+            }
+
+            // Exported symbol used locally?
+            let ref_ids = semantic.scoping().get_resolved_reference_ids(symbol_id);
+            if is_exported && !ref_ids.is_empty() {
+                visitor.analysis.local_uses.push(name.to_string());
+            }
+
+            // Record usage sites (identifier references)
+            if symbol_usages.len() < MAX_USAGES_PER_FILE {
+                for reference in semantic.symbol_references(symbol_id) {
+                    if symbol_usages.len() >= MAX_USAGES_PER_FILE {
+                        break;
+                    }
+                    let ref_span = semantic.reference_span(reference);
+                    let ref_line = visitor.get_line(ref_span);
+                    if ref_line == 0 {
+                        continue;
+                    }
+                    if seen_uses.insert((name.to_string(), ref_line)) {
+                        let ref_context = visitor.line_context(ref_line);
+                        symbol_usages.push(SymbolUsage {
+                            name: name.to_string(),
+                            line: ref_line,
+                            context: ref_context,
+                        });
+                    }
                 }
             }
+        }
+
+        if !local_symbols.is_empty() {
+            visitor.analysis.local_symbols = local_symbols;
+        }
+        if !symbol_usages.is_empty() {
+            visitor.analysis.symbol_usages = symbol_usages;
         }
     }
 
@@ -397,6 +468,29 @@ mod tests {
             .collect();
         assert!(commands.contains(&"my_command"));
         assert!(commands.contains(&"another_command"));
+    }
+
+    #[test]
+    fn test_register_command_not_tauri_invoke() {
+        let content = r#"
+            import * as vscode from "vscode";
+            vscode.commands.registerCommand("loctree.analyzeImpact", () => {});
+        "#;
+
+        let analysis = analyze_js_file_ast(
+            content,
+            Path::new("editors/vscode/src/commands.ts"),
+            Path::new("editors/vscode/src"),
+            None,
+            None,
+            "commands.ts".to_string(),
+            &CommandDetectionConfig::default(),
+        );
+
+        assert!(
+            analysis.command_calls.is_empty(),
+            "VSCode registerCommand should not be treated as a Tauri invoke"
+        );
     }
 
     #[test]
@@ -643,6 +737,59 @@ export default defineComponent({
         assert!(
             !analysis.has_weak_collections,
             "Should NOT flag regular Map as WeakMap"
+        );
+    }
+
+    #[test]
+    fn test_local_symbols_and_usages() {
+        let content = r#"
+            import { Component as MyComponent } from 'react';
+
+            const taskFilter = 'all';
+            function applyFilter() {
+                return taskFilter;
+            }
+            const onClick = () => MyComponent;
+            MyComponent();
+        "#;
+
+        let analysis = analyze_js_file_ast(
+            content,
+            Path::new("src/test.tsx"),
+            Path::new("src"),
+            None,
+            None,
+            "test.tsx".to_string(),
+            &CommandDetectionConfig::default(),
+        );
+
+        assert!(
+            analysis
+                .local_symbols
+                .iter()
+                .any(|s| s.name == "taskFilter"),
+            "taskFilter should be in local_symbols"
+        );
+        assert!(
+            analysis
+                .local_symbols
+                .iter()
+                .any(|s| s.name == "applyFilter"),
+            "applyFilter should be in local_symbols"
+        );
+        assert!(
+            analysis
+                .symbol_usages
+                .iter()
+                .any(|u| u.name == "taskFilter"),
+            "taskFilter should be in symbol_usages"
+        );
+        assert!(
+            analysis
+                .symbol_usages
+                .iter()
+                .any(|u| u.name == "MyComponent"),
+            "MyComponent usage should be tracked"
         );
     }
 }

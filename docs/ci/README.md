@@ -25,8 +25,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: pip install loctree-suite || cargo install loctree --locked
-      - run: loct auto
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo install loctree --locked
+      # Write artifacts into the workspace (easy to upload/jq in CI)
+      - run: LOCT_CACHE_DIR=.loctree loct auto
       - run: |
           HEALTH=$(jq -r '.summary.health_score' .loctree/agent.json)
           echo "Health: $HEALTH/100"
@@ -41,7 +43,7 @@ See [examples/ci/loctree-ci-v2.yml](../examples/ci/loctree-ci-v2.yml)
 
 | Command | Purpose | Exit Code |
 |---------|---------|-----------|
-| `loct auto` | Full scan → `.loctree/` artifacts | Always 0 |
+| `loct auto` | Full scan → artifacts dir (cache by default; set `LOCT_CACHE_DIR=.loctree` in CI) | Always 0 |
 | `loct lint --fail` | Structural lint | 1 if issues |
 | `loct dead --confidence high` | Dead exports | Always 0 |
 | `loct cycles` | Circular imports | Always 0 |
@@ -49,7 +51,7 @@ See [examples/ci/loctree-ci-v2.yml](../examples/ci/loctree-ci-v2.yml)
 
 ## Artifacts Generated
 
-After `loct auto`, you get:
+By default, artifacts go to the OS cache dir. In CI, set `LOCT_CACHE_DIR=.loctree` to write artifacts into the workspace:
 
 ```
 .loctree/
@@ -66,9 +68,6 @@ The `agent.json` contains a `health_score` (0-100):
 ```bash
 # Extract with jq
 HEALTH=$(jq -r '.summary.health_score' .loctree/agent.json)
-
-# Or with Python
-python3 -c "import json; print(json.load(open('.loctree/agent.json'))['summary']['health_score'])"
 ```
 
 ### Score Interpretation
@@ -102,4 +101,4 @@ Generate SARIF for GitHub Code Scanning:
 
 ---
 
-Created by M&K (c)2025 The LibraxisAI Team
+Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team

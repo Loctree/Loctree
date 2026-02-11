@@ -1,5 +1,8 @@
 # LSP Protocol Reference
 
+> **Part of [loctree-suite](https://github.com/Loctree/loctree-suite)**
+> The `loctree-lsp` language server ships with loctree-suite.
+
 Technical reference for the `loctree-lsp` Language Server Protocol implementation.
 
 ## Server Capabilities
@@ -148,7 +151,6 @@ Executable via `workspace/executeCommand`:
 {
   "initializationOptions": {
     "workspaceRoot": "/path/to/project",
-    "snapshotPath": ".loctree/snapshot.json",
     "autoRefresh": false
   }
 }
@@ -164,4 +166,4 @@ Executable via `workspace/executeCommand`:
 
 ---
 
-*Created by M&K (c)2025 The LibraxisAI Team*
+*VibeCrafted with AI Agents (c)2024-2026 VetCoders*

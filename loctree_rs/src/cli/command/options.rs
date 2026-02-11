@@ -1,6 +1,6 @@
 //! Per-command option structs for all CLI commands.
 //!
-//! Created by M&K (c)2025 The LibraxisAI Team
+//! Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team
 //! Co-Authored-By: Maciej <void@div0.space> & Klaudiusz <the1st@whoai.am>
 
 use std::path::PathBuf;
@@ -100,6 +100,16 @@ pub struct SliceOptions {
 pub struct FindOptions {
     /// Search query (can be regex pattern)
     pub query: Option<String>,
+
+    /// Positional query args (preserved as provided; used for split/AND modes in CLI).
+    ///
+    /// Examples:
+    /// - `loct find Foo Bar` => queries: ["Foo", "Bar"]
+    /// - `loct find "Foo Bar"` => queries: ["Foo Bar"] (single arg containing whitespace)
+    pub queries: Vec<String>,
+
+    /// Force legacy OR behavior for multi-arg queries (combine with `|`).
+    pub or_mode: bool,
 
     /// Filter by symbol name (regex supported)
     pub symbol: Option<String>,
@@ -230,6 +240,12 @@ pub struct CoverageOptions {
 
     /// Filter by minimum severity (critical/high/medium/low)
     pub min_severity: Option<String>,
+
+    /// Include structural test coverage report
+    pub tests: bool,
+
+    /// Include gap analysis (handlers/events without tests)
+    pub gaps: bool,
 }
 
 /// Options for the `routes` command.
@@ -270,6 +286,27 @@ pub struct EventsOptions {
     pub suppress_dynamic: bool,
 }
 
+/// Options for the `pipelines` command.
+#[derive(Debug, Clone, Default)]
+pub struct PipelinesOptions {
+    /// Root directories to analyze
+    pub roots: Vec<PathBuf>,
+}
+
+/// Options for the `insights` command.
+#[derive(Debug, Clone, Default)]
+pub struct InsightsOptions {
+    /// Root directories to analyze
+    pub roots: Vec<PathBuf>,
+}
+
+/// Options for the `manifests` command.
+#[derive(Debug, Clone, Default)]
+pub struct ManifestsOptions {
+    /// Root directories to analyze
+    pub roots: Vec<PathBuf>,
+}
+
 /// Options for the `info` command.
 #[derive(Debug, Clone, Default)]
 pub struct InfoOptions {
@@ -294,6 +331,18 @@ pub struct LintOptions {
 
     /// Enable Tauri-specific checks
     pub tauri: bool,
+
+    /// Enable deep lint checks (ts/react/memory)
+    pub deep: bool,
+
+    /// Include TypeScript lint checks
+    pub ts: bool,
+
+    /// Include React lint checks
+    pub react: bool,
+
+    /// Include memory leak lint checks
+    pub memory: bool,
 
     /// Suppress duplicate sections (noise reduction)
     pub suppress_duplicates: bool,
@@ -625,6 +674,12 @@ pub struct AuditOptions {
 
     /// Maximum items per category (default: 20)
     pub limit: usize,
+
+    /// Don't auto-open the report file (default: false)
+    pub no_open: bool,
+
+    /// Output to stdout instead of file (default: false)
+    pub stdout: bool,
 }
 
 impl Default for AuditOptions {
@@ -634,6 +689,8 @@ impl Default for AuditOptions {
             include_tests: false,
             todos: false,
             limit: 20,
+            no_open: false,
+            stdout: false,
         }
     }
 }
@@ -650,6 +707,44 @@ pub struct DoctorOptions {
 
     /// Automatically apply suggested suppressions to .loctignore
     pub apply_suppressions: bool,
+}
+
+/// Options for the `plan` command.
+/// Generate architectural refactoring plan based on module analysis.
+#[derive(Debug, Clone, Default)]
+pub struct PlanOptions {
+    /// Root directories/files to analyze
+    pub roots: Vec<PathBuf>,
+
+    /// Custom target layout mapping (e.g., "core=src/kernel,ui=src/components")
+    pub target_layout: Option<String>,
+
+    /// Output as markdown (default)
+    pub markdown: bool,
+
+    /// Output as JSON
+    pub json: bool,
+
+    /// Output as executable shell script
+    pub script: bool,
+
+    /// Generate all formats (.md, .json, .sh)
+    pub all: bool,
+
+    /// Minimum coupling score to include (0.0-1.0)
+    pub min_coupling: Option<f64>,
+
+    /// Maximum module size in LOC before suggesting split
+    pub max_module_size: Option<usize>,
+
+    /// Include test files in analysis (default: false)
+    pub include_tests: bool,
+
+    /// Output file path (without extension for --all)
+    pub output: Option<PathBuf>,
+
+    /// Don't auto-open the generated report
+    pub no_open: bool,
 }
 
 /// Options for the `help` command.

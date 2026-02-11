@@ -1,6 +1,6 @@
 //! Help text generation for CLI commands.
 //!
-//! Created by M&K (c)2025 The LibraxisAI Team
+//! Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team
 //! Co-Authored-By: Maciej <void@div0.space> & Klaudiusz <the1st@whoai.am>
 
 use super::help_texts::*;
@@ -21,6 +21,9 @@ impl Command {
             Command::Commands(_) => "commands",
             Command::Routes(_) => "routes",
             Command::Events(_) => "events",
+            Command::Pipelines(_) => "pipelines",
+            Command::Insights(_) => "insights",
+            Command::Manifests(_) => "manifests",
             Command::Info(_) => "info",
             Command::Lint(_) => "lint",
             Command::Report(_) => "report",
@@ -45,6 +48,7 @@ impl Command {
             Command::Health(_) => "health",
             Command::Audit(_) => "audit",
             Command::Doctor(_) => "doctor",
+            Command::Plan(_) => "plan",
         }
     }
 
@@ -61,6 +65,9 @@ impl Command {
             Command::Trace(_) => "Trace a Tauri/IPC handler end-to-end",
             Command::Commands(_) => "Show Tauri command bridges (FE <-> BE)",
             Command::Events(_) => "Show event flow and issues",
+            Command::Pipelines(_) => "Show pipeline summary (events/commands/risks)",
+            Command::Insights(_) => "Show AI insights summary",
+            Command::Manifests(_) => "Show manifest summaries (package.json/Cargo.toml)",
             Command::Info(_) => "Show snapshot metadata and project info",
             Command::Lint(_) => "Structural lint/policy checks",
             Command::Report(_) => "Generate HTML/JSON reports",
@@ -86,6 +93,7 @@ impl Command {
             Command::Health(_) => "Quick health check (cycles + dead + twins summary)",
             Command::Audit(_) => "Full audit (cycles + dead + twins + zombie + crowds)",
             Command::Doctor(_) => "Interactive diagnostics with actionable recommendations",
+            Command::Plan(_) => "Generate architectural refactoring plan",
         }
     }
 
@@ -98,9 +106,7 @@ impl Command {
         ));
 
         help.push_str("SCAN (produces artifacts):\n");
-        help.push_str(
-            "  loct                  Analyze -> .loctree/{snapshot,findings,agent,manifest}.json\n",
-        );
+        help.push_str("  loct                  Analyze -> cached artifacts (see LOCT_CACHE_DIR)\n");
         help.push_str("  loct --fresh          Ignore cache, full rescan\n");
         help.push_str("  loct --watch          Continuous scan on file changes\n\n");
 
@@ -127,13 +133,15 @@ impl Command {
         help.push_str("  loct i <file>         = impact (what breaks?)\n");
         help.push_str("  loct q <kind> <tgt>   = query (graph queries)\n\n");
 
-        help.push_str("ARTIFACTS:\n");
-        help.push_str("  .loctree/snapshot.json   Graph data (jq-able)\n");
-        help.push_str("  .loctree/findings.json   All issues (dead, cycles, twins...)\n");
-        help.push_str("  .loctree/agent.json      AI bundle\n");
-        help.push_str("  .loctree/manifest.json   Index for tooling\n\n");
+        help.push_str("ARTIFACTS (default: user cache dir; override via LOCT_CACHE_DIR):\n");
+        help.push_str("  snapshot.json            Graph data (jq-able)\n");
+        help.push_str("  findings.json            All issues (dead, cycles, twins...)\n");
+        help.push_str("  agent.json               AI bundle\n");
+        help.push_str("  manifest.json            Index for tooling\n\n");
 
-        help.push_str("Start: cat .loctree/manifest.json\n\n");
+        help.push_str("PROJECT CONFIG (repo-local, optional):\n");
+        help.push_str("  .loctree/config.toml       Custom rules/macros\n");
+        help.push_str("  .loctree/suppressions.toml Suppress findings\n\n");
 
         help.push_str("GLOBAL OPTIONS:\n");
         help.push_str("    --json           Output as JSON (stdout only)\n");
@@ -160,6 +168,9 @@ impl Command {
         help.push_str("  loct focus <dir>      Directory context\n");
         help.push_str("  loct hotspots         Import frequency heatmap\n");
         help.push_str("  loct commands         Tauri FE↔BE bridges\n");
+        help.push_str("  loct pipelines        Pipeline summary (events/commands)\n");
+        help.push_str("  loct insights         AI insights summary\n");
+        help.push_str("  loct manifests        Manifest summaries\n");
         help.push_str("  loct coverage         Test coverage gaps\n");
         help.push_str("  loct impact <file>    What breaks if changed\n\n");
 
@@ -185,6 +196,9 @@ impl Command {
             "trace" => Some(TRACE_HELP),
             "commands" => Some(COMMANDS_HELP),
             "events" => Some(EVENTS_HELP),
+            "pipelines" => Some(PIPELINES_HELP),
+            "insights" => Some(INSIGHTS_HELP),
+            "manifests" => Some(MANIFESTS_HELP),
             "info" => Some(INFO_HELP),
             "lint" => Some(LINT_HELP),
             "report" => Some(REPORT_HELP),
@@ -208,6 +222,7 @@ impl Command {
             "audit" => Some(AUDIT_HELP),
             "doctor" => Some(DOCTOR_HELP),
             "jq" => Some(JQ_HELP),
+            "plan" | "p" => Some(PLAN_HELP),
             _ => None,
         }
     }
@@ -233,6 +248,9 @@ impl Command {
             ("hotspots", "Import frequency heatmap (core vs peripheral)"),
             ("commands", "Tauri FE↔BE handler bridges"),
             ("events", "Event emit/listen flow analysis"),
+            ("pipelines", "Pipeline summary (events/commands/risks)"),
+            ("insights", "AI insights summary"),
+            ("manifests", "Manifest summaries (package.json/Cargo.toml)"),
             ("coverage", "Test coverage gaps (structural)"),
             ("health", "Quick health check (cycles + dead + twins)"),
             ("slice <file>", "Context for a file (deps + consumers)"),
@@ -290,7 +308,7 @@ impl Command {
         // === CORE WORKFLOW ===
         help.push_str("=== CORE WORKFLOW ===\n\n");
         let core_cmds = [
-            ("auto", "Full scan → .loctree/ artifacts (default)"),
+            ("auto", "Full scan → cached artifacts (see LOCT_CACHE_DIR)"),
             ("scan", "Build/update snapshot (supports --watch)"),
             ("tree", "Directory tree with LOC counts"),
             ("find <pattern>", "Search symbols/files with regex"),
@@ -318,11 +336,16 @@ impl Command {
         help.push_str("  --sarif            SARIF 2.1.0 output for CI\n\n");
 
         // === ARTIFACTS ===
-        help.push_str("=== ARTIFACTS (.loctree/) ===\n\n");
+        help.push_str("=== ARTIFACTS ===\n\n");
+        help.push_str("  (default: user cache dir; override via LOCT_CACHE_DIR)\n\n");
         help.push_str("  snapshot.json      Full dependency graph (jq-queryable)\n");
         help.push_str("  findings.json      All issues (dead, cycles, twins...)\n");
         help.push_str("  agent.json         AI-optimized bundle with health_score\n");
         help.push_str("  manifest.json      Index for tooling integration\n\n");
+
+        help.push_str("PROJECT CONFIG (repo-local, optional):\n");
+        help.push_str("  .loctree/config.toml       Custom rules/macros\n");
+        help.push_str("  .loctree/suppressions.toml Suppress findings\n\n");
 
         // === PER-COMMAND HELP ===
         help.push_str("=== PER-COMMAND HELP ===\n\n");

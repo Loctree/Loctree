@@ -1,6 +1,6 @@
 //! Dead code panel component - shows dead exports (Dead Parrots)
 
-use crate::components::icons::{Icon, ICON_GHOST};
+use crate::components::icons::{ICON_GHOST, Icon};
 use crate::types::DeadExport;
 use leptos::prelude::*;
 

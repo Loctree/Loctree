@@ -41,6 +41,7 @@
 //! }
 //! ```
 
+mod action_plan;
 mod audit;
 mod cascades;
 mod commands;
@@ -54,15 +55,18 @@ mod dynamic_imports;
 mod for_ai;
 mod graph;
 mod health_gauge;
+mod hub_files;
 pub mod icons;
 mod insights;
 mod pipelines;
 mod quick_commands;
+mod refactor_plan;
 mod section;
 mod tabs;
 mod tree;
 mod twins;
 
+pub use action_plan::ActionPlanPanel;
 pub use audit::AuditPanel;
 pub use cascades::CascadesList;
 pub use commands::TauriCommandCoverage;
@@ -76,10 +80,12 @@ pub use dynamic_imports::DynamicImportsTable;
 pub use for_ai::AiSummaryPanel;
 pub use graph::GraphContainer;
 pub use health_gauge::{HealthIndicator, HealthScoreGauge};
+pub use hub_files::HubFilesPanel;
 pub use icons::*;
 pub use insights::{AiInsightsPanel, AnalysisSummary};
 pub use pipelines::Pipelines;
 pub use quick_commands::QuickCommandsPanel;
+pub use refactor_plan::RefactorPlan;
 pub use section::ReportSectionView;
 pub use tabs::TabContent;
 pub use tree::TreeView;

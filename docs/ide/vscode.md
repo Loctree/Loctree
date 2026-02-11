@@ -1,18 +1,29 @@
 # VSCode Extension
 
+> **Part of [loctree-suite](https://github.com/Loctree/loctree-suite)**
+> The LSP server and editor integrations ship with loctree-suite.
+> Install the free CLI with `cargo install loctree`, then upgrade to suite for IDE features.
+
 The Loctree VSCode extension provides real-time dead code detection, circular import warnings, and code navigation powered by the `loctree-lsp` language server.
 
 ## Installation
 
-### From Source (Current)
+### From loctree-suite
 
 ```bash
-cd editors/vscode
+cd loctree-suite/editors/vscode
 npm install
 npm run compile
 ```
 
 Then in VSCode: `F1` → "Developer: Install Extension from Location" → select `editors/vscode`
+
+### VSIX (Recommended for forks like Cursor/Windsurf)
+
+```bash
+cd loctree-suite/editors/vscode
+LOCTREE_LSP_PATH=/path/to/loctree-lsp npm run package
+```
 
 ### From Marketplace (Coming Soon)
 
@@ -69,6 +80,9 @@ In VSCode settings (`Ctrl+,`):
 |---------|---------|-------------|
 | `serverPath` | auto-detect | Path to loctree-lsp binary |
 | `autoRefresh` | `false` | Re-scan on file save |
+| `autoDownload` | `true` | Download loctree-lsp if missing |
+| `downloadBaseUrl` | (empty) | Override repo URL for downloads |
+| `downloadTag` | `latest` | Release tag for downloads |
 | `trace.server` | `off` | LSP message logging |
 
 ## Status Bar
@@ -93,15 +107,16 @@ Open command palette (`F1`) and search for "Loctree":
 
 ## Requirements
 
+- [loctree-suite](https://github.com/Loctree/loctree-suite) with `loctree-lsp` binary
 - Loctree CLI installed (`cargo install loctree`)
-- Project must have `.loctree/` folder (run `loct` first)
+- Run `loct` once in the project root (writes snapshot to cache; set `LOCT_CACHE_DIR=.loctree` for repo-local artifacts)
 
 ## Troubleshooting
 
 ### No diagnostics appearing
 
 1. Check Output panel → "Loctree" for errors
-2. Ensure `.loctree/snapshot.json` exists
+2. Ensure a snapshot exists (run `loct` once)
 3. Run `loct` in project root
 
 ### Server not starting
@@ -120,4 +135,4 @@ Click status bar → "Loctree: Refresh" or run `loct` in terminal.
 
 ---
 
-*Created by M&K (c)2025 The LibraxisAI Team*
+*VibeCrafted with AI Agents (c)2024-2026 VetCoders*

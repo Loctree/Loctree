@@ -38,7 +38,7 @@ cargo install --path .
 
 ```bash
 cd your-project
-loct                          # Auto-detects stack, creates .loctree/
+loct                          # Auto-detects stack, writes cached artifacts (see LOCT_CACHE_DIR)
 loct report --serve           # Interactive HTML report
 loct --for-ai                 # AI-optimized hierarchical output
 ```
@@ -59,7 +59,7 @@ loct twins                    # Semantic duplicates analysis
 
 ### Snapshot-Based Analysis
 
-loctree operates on snapshots stored in `.loctree/`:
+loctree operates on snapshots stored in the artifacts dir (cache dir by default; override via `LOCT_CACHE_DIR`):
 
 - **snapshot.json** - Complete graph data (imports, exports, LOC per file)
 - **findings.json** - All detected issues (dead code, cycles, duplicates)
@@ -81,7 +81,7 @@ Scan once with `loct`, then query multiple times without re-parsing.
 
 ### Artifacts
 
-All outputs are stored as artifacts in `.loctree/`:
+All outputs are stored as artifacts in the artifacts dir (cache dir by default; override via `LOCT_CACHE_DIR`):
 
 ```bash
 loct                          # Creates snapshot + findings
@@ -93,23 +93,15 @@ loct jq '.metadata'           # Query snapshot.json directly
 
 ## IDE Integration
 
-Full LSP support for real-time dead code detection, cycle warnings, and code navigation.
+> **Available in [loctree-suite](https://github.com/Loctree/loctree-suite)**
+
+Full LSP support for real-time dead code detection, cycle warnings, and code navigation — powered by the `loctree-lsp` language server included in loctree-suite.
 
 | Editor | Documentation | Status |
 |--------|---------------|--------|
-| VSCode | [ide/vscode.md](ide/vscode.md) | ✅ Ready |
-| Neovim | [ide/neovim.md](ide/neovim.md) | ✅ Ready |
-| Any LSP client | [ide/lsp-protocol.md](ide/lsp-protocol.md) | ✅ Ready |
-
-### Quick Setup
-
-```bash
-# Build LSP server
-cd loctree_lsp
-cargo build --release
-
-# Binary at target/release/loctree-lsp
-```
+| VSCode | [ide/vscode.md](ide/vscode.md) | Ready (suite) |
+| Neovim | [ide/neovim.md](ide/neovim.md) | Ready (suite) |
+| Any LSP client | [ide/lsp-protocol.md](ide/lsp-protocol.md) | Ready (suite) |
 
 ### Features
 
@@ -182,9 +174,9 @@ Output includes:
 
 **Core components:**
 - `loctree_rs/` - Main analyzer (Rust)
-- `loctree_lsp/` - LSP server
 - `loctree-mcp/` - MCP server for AI agents
 - `reports/` - HTML report renderer (Leptos SSR)
+- `loctree_lsp/` - LSP server (in [loctree-suite](https://github.com/Loctree/loctree-suite))
 
 **Analysis flow:**
 1. Auto-detect stack (Rust/TS/Python/Dart)
@@ -304,5 +296,5 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for:
 
 ---
 
-Created by M&K (c)2025 The LibraxisAI Team
+VibeCrafted with AI Agents (c)2024-2026 VetCoders
 Co-Authored-By: [Maciej](mailto:void@div0.space) & [Klaudiusz](mailto:the1st@whoai.am)

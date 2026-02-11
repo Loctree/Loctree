@@ -60,8 +60,8 @@ pub use output::{
     print_symbol_results,
 };
 pub use search::{
-    ImpactResult, SimilarityCandidate, SymbolFileMatch, SymbolMatch, SymbolSearchResult,
-    analyze_impact, find_similar, search_symbol,
+    ImpactResult, SimilarityCandidate, SymbolFileMatch, SymbolMatch, SymbolMatchKind,
+    SymbolSearchResult, analyze_impact, find_similar, search_symbol,
 };
 
 // Internal imports
@@ -179,6 +179,11 @@ pub struct DeadFilterConfig {
     /// Include dynamically generated symbols (exec/eval/compile templates) in dead export analysis.
     /// By default these are excluded as they're generated at runtime, not actual dead code.
     pub include_dynamic: bool,
+    /// Glob patterns for suppressing dead-export findings.
+    ///
+    /// This is intended to be populated from `.loctignore` directives like:
+    /// `@loctignore:dead-ok src/generated/**`
+    pub dead_ok_globs: Vec<String>,
 }
 pub fn find_dead_exports(
     analyses: &[FileAnalysis],
@@ -202,6 +207,54 @@ pub fn find_dead_exports(
             }
         }
         builder.build().ok()
+    } else {
+        None
+    };
+
+    let dead_ok_globset = if !config.dead_ok_globs.is_empty() {
+        let mut builder = globset::GlobSetBuilder::new();
+        let mut any = false;
+
+        let mut add_glob = |pat: &str| {
+            let mut pat = pat.trim().replace('\\', "/");
+            if let Some(rest) = pat.strip_prefix("./") {
+                pat = rest.to_string();
+            }
+            if let Some(rest) = pat.strip_prefix('/') {
+                pat = rest.to_string();
+            }
+            if pat.is_empty() {
+                return;
+            }
+            match globset::Glob::new(&pat) {
+                Ok(glob) => {
+                    builder.add(glob);
+                    any = true;
+                }
+                Err(e) => {
+                    eprintln!("[loctree][warn] invalid dead-ok glob '{}': {}", pat, e);
+                }
+            }
+        };
+
+        for pat in &config.dead_ok_globs {
+            let trimmed = pat.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            // A trailing slash means "directory" in gitignore-ish conventions.
+            // We add both the directory itself and its contents.
+            if let Some(base) = trimmed.strip_suffix('/') {
+                if !base.is_empty() {
+                    add_glob(base);
+                    add_glob(&format!("{}/**", base));
+                }
+            } else {
+                add_glob(trimmed);
+            }
+        }
+
+        if any { builder.build().ok() } else { None }
     } else {
         None
     };
@@ -822,6 +875,13 @@ pub fn find_dead_exports(
         }
     }
 
+    if let Some(globs) = dead_ok_globset {
+        dead_candidates.retain(|d| {
+            let lower = d.file.to_ascii_lowercase();
+            !globs.is_match(&d.file) && !globs.is_match(&lower)
+        });
+    }
+
     dead_candidates
 }
 
@@ -1226,6 +1286,7 @@ mod tests {
                     line: 10,
                     context: "const foo = 1".to_string(),
                     is_definition: true,
+                    kind: SymbolMatchKind::Definition,
                 }],
             }],
         };
@@ -1320,6 +1381,34 @@ mod tests {
     }
 
     #[test]
+    fn test_find_dead_exports_dead_ok_glob_suppresses() {
+        let analyses = vec![
+            mock_file("src/app.ts"),
+            mock_file_with_exports("src/generated/utils.ts", vec!["unusedHelper"]),
+        ];
+        let result = find_dead_exports(
+            &analyses,
+            false,
+            None,
+            DeadFilterConfig {
+                include_tests: false,
+                include_helpers: false,
+                library_mode: false,
+                example_globs: Vec::new(),
+                python_library_mode: false,
+                include_ambient: false,
+                include_dynamic: false,
+                dead_ok_globs: vec!["src/generated/**".to_string()],
+            },
+        );
+        assert!(
+            result.is_empty(),
+            "dead-ok glob should suppress dead exports for matching files: {:?}",
+            result
+        );
+    }
+
+    #[test]
     fn test_find_dead_exports_skips_tests() {
         let mut test_file =
             mock_file_with_exports("src/__tests__/utils.test.ts", vec!["testHelper"]);
@@ -1349,6 +1438,7 @@ mod tests {
                 python_library_mode: false,
                 include_ambient: false,
                 include_dynamic: false,
+                dead_ok_globs: Vec::new(),
             },
         );
         assert_eq!(result.len(), 1);
@@ -1926,6 +2016,7 @@ mod tests {
                 python_library_mode: true, // Enable Python library mode
                 include_ambient: false,
                 include_dynamic: false,
+                dead_ok_globs: Vec::new(),
             },
         );
 
@@ -1967,6 +2058,7 @@ mod tests {
                 python_library_mode: true,
                 include_ambient: false,
                 include_dynamic: false,
+                dead_ok_globs: Vec::new(),
             },
         );
 
@@ -2086,6 +2178,7 @@ mod tests {
                 python_library_mode: true,
                 include_ambient: false,
                 include_dynamic: false,
+                dead_ok_globs: Vec::new(),
             },
         );
 

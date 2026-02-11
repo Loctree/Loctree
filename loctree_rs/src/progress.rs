@@ -34,13 +34,13 @@ impl Spinner {
     /// Finish with success message (green)
     pub fn finish_success(&self, message: &str) {
         self.bar.finish_and_clear();
-        println!("{} {}", style("[OK]").green().bold(), message);
+        eprintln!("{} {}", style("[OK]").green().bold(), message);
     }
 
     /// Finish with warning message (yellow)
     pub fn finish_warning(&self, message: &str) {
         self.bar.finish_and_clear();
-        println!("{} {}", style("[!]").yellow().bold(), message);
+        eprintln!("{} {}", style("[!]").yellow().bold(), message);
     }
 
     /// Finish with error message (red)
@@ -57,17 +57,17 @@ impl Spinner {
 
 /// Print a success message (green)
 pub fn success(message: &str) {
-    println!("{} {}", style("[OK]").green().bold(), message);
+    eprintln!("{} {}", style("[OK]").green().bold(), message);
 }
 
 /// Print an info message (blue)
 pub fn info(message: &str) {
-    println!("{} {}", style("[i]").blue().bold(), message);
+    eprintln!("{} {}", style("[i]").blue().bold(), message);
 }
 
 /// Print a warning message (yellow)
 pub fn warning(message: &str) {
-    println!("{} {}", style("[!]").yellow().bold(), message);
+    eprintln!("{} {}", style("[!]").yellow().bold(), message);
 }
 
 /// Print an error message (red)

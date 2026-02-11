@@ -2,7 +2,7 @@
 # ============================================================================
 # loct-grep-augment.sh v10 - SEMANTIC AUGMENTATION WITH loct find
 # ============================================================================
-# Created by M&K (c)2026 The LibraxisAI Team
+# Created by M&K (c)2026 The Loctree Team
 #
 # PHILOSOPHY: Every grep gets loctree context. Always <100ms.
 #
@@ -21,8 +21,50 @@
 set -uo pipefail
 export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 
-# Quick exit if loctree unavailable
+# Quick exit if dependencies unavailable
 command -v loct >/dev/null 2>&1 || exit 0
+command -v jq   >/dev/null 2>&1 || exit 0
+
+# ============================================================================
+# OPTIONAL LOGGING (default OFF - set LOCT_HOOK_LOG_FILE to enable)
+# ============================================================================
+# Only logs metadata (pattern truncated, timing, action) - never tool_response!
+# Enable: export LOCT_HOOK_LOG_FILE="$HOME/.claude/logs/loct-grep.log"
+
+LOG_FILE="${LOCT_HOOK_LOG_FILE:-}"
+LOG_START_MS=
+
+log_meta() {
+    [[ -z "$LOG_FILE" ]] && return 0
+    mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
+    printf '%s\n' "$*" >> "$LOG_FILE" 2>/dev/null || true
+}
+
+log_start() {
+    [[ -z "$LOG_FILE" ]] && return 0
+    LOG_START_MS=$(($(date +%s%N 2>/dev/null || echo "$(date +%s)000000000") / 1000000))
+    log_meta ""
+    log_meta "==== LOCT HOOK: $(date '+%Y-%m-%d %H:%M:%S') ===="
+}
+
+log_end() {
+    [[ -z "$LOG_FILE" ]] && return 0
+    local action="${1:-unknown}"
+    local pattern_short="${PATTERN:-?}"
+    [[ ${#pattern_short} -gt 40 ]] && pattern_short="${pattern_short:0:37}..."
+
+    local end_ms=$(($(date +%s%N 2>/dev/null || echo "$(date +%s)000000000") / 1000000))
+    local duration_ms=$((end_ms - LOG_START_MS))
+
+    log_meta "pattern: $pattern_short"
+    log_meta "path:    ${PATH_ARG:-.}"
+    log_meta "action:  $action"
+    log_meta "time:    ${duration_ms}ms"
+    log_meta "----"
+}
+
+# Start timing (if logging enabled)
+log_start
 
 # Read hook input
 HOOK_INPUT=$(cat)
@@ -65,12 +107,14 @@ else
     [[ -n "$SESSION_CWD" ]] && [[ -d "$SESSION_CWD" ]] && cd "$SESSION_CWD"
 fi
 
-# Find repo root (where .loctree exists)
-REPO_ROOT=$(pwd)
-while [[ "$REPO_ROOT" != "/" ]] && [[ ! -d "$REPO_ROOT/.loctree" ]]; do
-    REPO_ROOT=$(dirname "$REPO_ROOT")
-done
-[[ -d "$REPO_ROOT/.loctree" ]] && cd "$REPO_ROOT"
+# Find repo root (prefer git root; fall back to current dir).
+# We no longer require a project-local `.loctree/` for cached artifacts.
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || true)
+if [[ -n "$REPO_ROOT" ]] && [[ -d "$REPO_ROOT" ]]; then
+    cd "$REPO_ROOT"
+else
+    REPO_ROOT=$(pwd)
+fi
 
 # Validation
 [[ -z "$PATTERN" ]] && exit 0
@@ -88,13 +132,33 @@ PATTERN="${PATTERN#\'}"
 # OUTPUT HELPER
 # ============================================================================
 
+# Max payload size (32KB) to avoid bloating additionalContext
+MAX_PAYLOAD_BYTES=32768
+
+truncate_payload() {
+    local text="$1"
+    local max="$2"
+    if [[ ${#text} -gt $max ]]; then
+        printf '%s\n\n[...truncated, showing first %d bytes of %d total]' \
+            "${text:0:$max}" "$max" "${#text}"
+    else
+        printf '%s' "$text"
+    fi
+}
+
 output_json() {
     local header="$1"
     local json_content="$2"
 
+    # Log metadata (if enabled) - uses header as action name
+    log_end "$header"
+
     local msg="
 ━━━ 🌳 LOCTREE: $header ━━━
 $json_content"
+
+    # Truncate if too large (prevents client issues)
+    msg="$(truncate_payload "$msg" "$MAX_PAYLOAD_BYTES")"
 
     # Human-readable for Maciej (stderr)
     echo "$msg" >&2
@@ -102,7 +166,8 @@ $json_content"
     # JSON for Claude Code (stdout - CC parses hookSpecificOutput)
     local escaped
     escaped=$(echo "$msg" | jq -Rs .)
-    cat << EOF
+    local output
+    output=$(cat << EOF
 {
   "hookSpecificOutput": {
     "hookEventName": "PostToolUse",
@@ -110,6 +175,66 @@ $json_content"
   }
 }
 EOF
+)
+    # Output to stdout
+    echo "$output"
+
+    # Save to cache (if cache key is set)
+    [[ -n "${CACHE_KEY:-}" ]] && echo "$output" > "$CACHE_KEY" 2>/dev/null
+}
+
+# ============================================================================
+# RESPONSE CACHE (dedup - same query within TTL returns cached response)
+# ============================================================================
+
+CACHE_DIR="/tmp/.loct-grep-cache"
+CACHE_TTL=60  # seconds
+
+# Compute cache key from: repo_root + git_commit + pattern + path
+compute_cache_key() {
+    local repo="$1"
+    local pattern="$2"
+    local path="$3"
+
+    # Get current git commit (short hash) or "nocommit"
+    local commit
+    commit=$(git -C "$repo" rev-parse --short HEAD 2>/dev/null || echo "nocommit")
+
+    # Create cache dir if needed
+    mkdir -p "$CACHE_DIR" 2>/dev/null || true
+
+    # MD5 hash of key components
+    local hash
+    hash=$(printf '%s:%s:%s:%s' "$repo" "$commit" "$pattern" "$path" | md5 2>/dev/null || md5sum | cut -c1-32)
+
+    echo "${CACHE_DIR}/${hash}.json"
+}
+
+# Check cache - returns 0 and outputs cached response if hit, 1 if miss
+check_cache() {
+    local cache_file="$1"
+
+    [[ ! -f "$cache_file" ]] && return 1
+
+    # Check age
+    local cache_age
+    if stat -f%m "$cache_file" &>/dev/null; then
+        cache_age=$(($(date +%s) - $(stat -f%m "$cache_file")))
+    else
+        cache_age=$(($(date +%s) - $(stat -c%Y "$cache_file")))
+    fi
+
+    if [[ $cache_age -lt $CACHE_TTL ]]; then
+        # Cache hit - output cached response
+        cat "$cache_file"
+        # Debug to log only (not stderr - would pollute UI)
+        log_meta "[cache] hit (${cache_age}s old)"
+        return 0
+    fi
+
+    # Cache expired
+    rm -f "$cache_file" 2>/dev/null
+    return 1
 }
 
 # ============================================================================
@@ -213,6 +338,16 @@ augment_health() {
 }
 
 # ============================================================================
+# CACHE CHECK - Return cached response if available (dedup)
+# ============================================================================
+
+CACHE_KEY=$(compute_cache_key "$REPO_ROOT" "$PATTERN" "$PATH_ARG")
+if check_cache "$CACHE_KEY"; then
+    log_end "cache-hit"
+    exit 0
+fi
+
+# ============================================================================
 # SMART ROUTING - Pattern → Best Augmentation
 # ============================================================================
 
@@ -304,4 +439,5 @@ if echo "$PATTERN" | grep -qE '^[a-zA-Z_][a-zA-Z0-9_]{2,}$'; then
 fi
 
 # No augmentation needed for pure text/regex searches
+log_end "no-match"
 exit 0

@@ -3,6 +3,17 @@ use std::path::PathBuf;
 
 use crate::types::{ColorMode, DEFAULT_LOC_THRESHOLD, GitSubcommand, Mode, OutputMode};
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum SearchQueryMode {
+    /// Single query string (default behavior).
+    #[default]
+    Single,
+    /// Split-mode: run multiple subqueries and show cross-match summary.
+    Split,
+    /// AND-mode: tokenize a single quoted query and require all terms.
+    And,
+}
+
 #[derive(Clone)]
 pub struct ParsedArgs {
     pub extensions: Option<HashSet<String>>,
@@ -72,13 +83,17 @@ pub struct ParsedArgs {
     pub trace_handler: Option<String>,
     /// Unified search query
     pub search_query: Option<String>,
+    /// Multi-query terms (used when `search_query_mode != Single`).
+    pub search_queries: Vec<String>,
+    /// How to interpret multi-term queries.
+    pub search_query_mode: SearchQueryMode,
     /// Filter search to symbol matches only
     pub search_symbol_only: bool,
     /// Filter search to dead code only
     pub search_dead_only: bool,
     /// Filter search to semantic matches only
     pub search_semantic_only: bool,
-    /// Auto mode: eagerly emit HTML/JSON/cycle artifacts into .loctree
+    /// Auto mode: eagerly emit HTML/JSON/cycle artifacts into the artifacts dir (cache by default; set LOCT_CACHE_DIR to override).
     pub auto_outputs: bool,
     /// Filter search to exported symbols only
     pub search_exported_only: bool,
@@ -176,6 +191,8 @@ impl Default for ParsedArgs {
             slice_rescan: false,
             trace_handler: None,
             search_query: None,
+            search_queries: Vec::new(),
+            search_query_mode: SearchQueryMode::Single,
             search_symbol_only: false,
             search_dead_only: false,
             search_semantic_only: false,
@@ -332,8 +349,8 @@ pub fn preset_ignore_symbols(name: &str) -> Option<HashSet<String>> {
 }
 
 pub fn parse_args() -> Result<ParsedArgs, String> {
-    // SAFETY: CLI arg parsing only; not used for security-sensitive decisions
-    let args: Vec<String> = std::env::args_os() // nosemgrep: rust.lang.security.args-os.args-os
+    // nosemgrep:rust.lang.security.args-os.args-os - CLI arg parsing only; not used for security-sensitive decisions
+    let args: Vec<String> = std::env::args_os()
         .skip(1)
         .map(|s| s.to_string_lossy().into_owned())
         .collect();

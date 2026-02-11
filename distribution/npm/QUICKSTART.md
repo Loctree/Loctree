@@ -12,7 +12,7 @@ Get the loctree npm package published in 5 steps.
 
 Ensure binaries exist at:
 ```
-https://github.com/Loctree/Loctree/releases/tag/v0.8.4
+https://github.com/Loctree/Loctree/releases/tag/v0.8.11
 ```
 
 Required files:
@@ -88,7 +88,7 @@ Wait 30-60 seconds for npm registry to propagate, then try again.
 
 ### "Binary download failed"
 
-Check that GitHub release v0.8.4 exists with all 8 binaries.
+Check that GitHub release v0.8.11 exists with all 8 binaries.
 
 ### "Permission denied"
 

@@ -8,7 +8,7 @@
 //! - Plugin command parsing
 //! - Flow type annotation detection
 //!
-//! Created by M&K (c)2025 The LibraxisAI Team
+//! Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team
 
 use oxc_ast::ast::*;
 
@@ -101,6 +101,13 @@ impl<'a> JsVisitor<'a> {
     /// Detect Tauri invoke patterns and record command calls.
     fn handle_command_detection(&mut self, name: &str, call: &CallExpression<'a>) {
         let name_lower = name.to_lowercase();
+        if matches!(
+            name_lower.as_str(),
+            "registercommand" | "registertexteditorcommand"
+        ) {
+            // VSCode command registration is not a Tauri invoke.
+            return;
+        }
         let is_potential_command = name_lower.contains("invoke") || name.contains("Command");
 
         if is_potential_command
@@ -126,6 +133,11 @@ impl<'a> JsVisitor<'a> {
             // Skip if cmd_name is None - that means we couldn't extract the command name
             // (e.g., dynamic command name or wrapper function definition).
             if let Some(cmd_name) = cmd_name {
+                // VSCode-style commands are dotted (e.g., loctree.analyzeImpact). Those are not Tauri.
+                if !name_lower.contains("invoke") && cmd_name.contains('.') {
+                    return;
+                }
+
                 // Filter out command names that are clearly not Tauri commands
                 // (e.g., CLI tools, shell commands found in scripts/config files)
                 if self.command_cfg.invalid_command_names.contains(&cmd_name) {
@@ -270,7 +282,7 @@ impl<'a> JsVisitor<'a> {
     ///
     /// Captures constants like `const MY_EVENT = "event-name";` for event resolution.
     pub(super) fn handle_variable_declarator(&mut self, decl: &VariableDeclarator<'a>) {
-        if let BindingPatternKind::BindingIdentifier(id) = &decl.id.kind
+        if let BindingPattern::BindingIdentifier(id) = &decl.id
             && let Some(init) = &decl.init
             && let Expression::StringLiteral(s) = init
         {

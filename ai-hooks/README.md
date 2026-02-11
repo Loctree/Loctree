@@ -34,6 +34,25 @@ Integration hooks for AI coding assistants (Claude Code, Codex CLI, Gemini CLI).
 | `loct-grep-augment.sh` | PostToolUse:Grep | Auto-adds semantic context via `loct find` |
 | `loct-smart-suggest.sh` | PostToolUse:* | Proactive refactoring suggestions |
 
+### 🧠 Memex - Memory/RAG Augmentation
+
+**INSTITUTIONAL KNOWLEDGE** - automatically loads relevant memories from your vector DB.
+
+| Hook | Trigger | Function | Time |
+|------|---------|----------|------|
+| `memex-startup.sh` | SessionStart | Load project-specific memories | ~50ms |
+| `memex-context.sh` | PostToolUse:Grep | Augment grep with relevant memories | ~50ms |
+| `memory-on-compact.sh` | PreCompact | Save session context before compaction | ~50ms |
+
+**Requires:**
+- `rmcp-memex` server running: `rmcp-memex serve --http-port 8987`
+- Indexed memories (use `rmcp-memex index <file>` or MCP tools)
+
+**Environment Variables:**
+- `MEMEX_URL` - Server URL (default: `http://localhost:8987`)
+- `MEMEX_LIMIT` - Max results per query (default: `3`)
+- `MEMEX_TIMEOUT` - Request timeout in seconds (default: `3`)
+
 ## Installation
 
 ### Interactive (Recommended)
@@ -55,8 +74,14 @@ make ai-hooks CLI=all
 
 ## Requirements
 
+### Loctree hooks
 - `loct` CLI installed (`make install` in loctree-suite)
 - `jq` for JSON parsing
+
+### Memex hooks (optional)
+- `rmcp-memex` CLI installed (`cargo install rmcp-memex`)
+- Memex server running (`rmcp-memex serve --http-port 8987`)
+- `curl` and `jq` for HTTP API calls
 
 The installer will offer to install missing dependencies.
 
@@ -170,11 +195,11 @@ If automatic settings.json update fails, add hooks manually:
 
 ### Loctree not finding anything
 1. Run initial scan: `loct scan` in project root
-2. Check snapshot: `ls .loctree/`
+2. Check snapshot: `loct '.metadata'` (artifacts are cached by default; set `LOCT_CACHE_DIR=.loctree` for repo-local artifacts)
 
 ### No augmentation for a pattern
 - Pattern must be ≥3 chars and alphanumeric
 - `loct find` must return matches (check with `loct find <pattern> --json`)
 
 ---
-Created by M&K (c)2026 The LibraxisAI Team
+Vibecrafted with AI Agents by VetCoders (c)2026 The Loctree Team

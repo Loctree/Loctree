@@ -46,10 +46,10 @@ Zero false positives.
 
 ## Test Command
 ```bash
-loctree dead --path tools/fixtures/nodejs-loader
+loct dead --path tools/fixtures/nodejs-loader
 ```
 
 Expected output: 0 dead exports (all hooks are runtime-invoked)
 
-Created by M&K (c)2025 The LibraxisAI Team
+Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team
 Co-Authored-By: [Maciej](void@div0.space) & [Klaudiusz](the1st@whoai.am)

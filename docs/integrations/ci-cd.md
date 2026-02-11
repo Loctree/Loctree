@@ -25,7 +25,7 @@ jobs:
         run: cargo install loctree
 
       - name: Run analysis
-        run: loct --json > .loctree/findings.json
+        run: LOCT_CACHE_DIR=.loctree loct --findings > .loctree/findings.json
 
       - name: Check for issues
         run: |
@@ -189,4 +189,4 @@ jobs:
 
 ---
 
-*Created by M&K (c)2025 The LibraxisAI Team*
+*Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team*

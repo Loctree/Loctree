@@ -23,7 +23,7 @@ Preferred communication style: Simple, everyday language.
 
 ### Key Design Decisions
 
-1. **Snapshot-Based Architecture**: "Scan once, slice many" - initial scan creates a `.loctree/<branch@commit>/snapshot.json` file containing the full dependency graph. Subsequent queries (slice, find, dead, cycles) operate on this cached snapshot for speed.
+1. **Snapshot-Based Architecture**: "Scan once, slice many" - initial scan writes cached artifacts (snapshot/findings/agent/manifest) into the OS cache dir by default (override via `LOCT_CACHE_DIR`). Subsequent queries (slice, find, dead, cycles) operate on this cached snapshot for speed.
 
 2. **Multi-Language Support**: Dedicated analyzers per language (TypeScript/JavaScript via OxC, Python via custom parser, Rust via syn). Each analyzer extracts imports, exports, symbols, and metadata.
 

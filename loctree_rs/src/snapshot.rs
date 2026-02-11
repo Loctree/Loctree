@@ -5,6 +5,7 @@
 //! - Subsequent queries load the snapshot for instant context slicing
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
@@ -16,14 +17,86 @@ use std::time::Instant;
 use crate::args::ParsedArgs;
 use crate::types::{FileAnalysis, OutputMode};
 
-/// Current schema version for snapshot format
-pub const SNAPSHOT_SCHEMA_VERSION: &str = "0.8.0";
+/// Current schema version for snapshot format (synced to crate version)
+pub const SNAPSHOT_SCHEMA_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Extract major.minor from a semver string (e.g. "0.8.10" -> "0.8")
+/// Patch bumps don't change the snapshot schema, so we only compare major.minor.
+fn schema_major_minor(version: &str) -> &str {
+    // Find second dot (end of minor)
+    match version
+        .find('.')
+        .and_then(|i| version[i + 1..].find('.').map(|j| i + 1 + j))
+    {
+        Some(pos) => &version[..pos],
+        None => version, // no patch component, return as-is
+    }
+}
 
 /// Default snapshot directory name
 pub const SNAPSHOT_DIR: &str = ".loctree";
 
 /// Default snapshot file name
 pub const SNAPSHOT_FILE: &str = "snapshot.json";
+
+/// Environment variable to override the cache base directory.
+const LOCT_CACHE_DIR_ENV: &str = "LOCT_CACHE_DIR";
+
+/// Returns the global cache base directory for loctree artifacts.
+///
+/// Priority:
+/// 1. `LOCT_CACHE_DIR` environment variable
+/// 2. Platform default: `~/Library/Caches/loctree` (macOS) or `$XDG_CACHE_HOME/loctree` (Linux)
+/// 3. Fallback: OS temp dir (for environments without a home/cache directory)
+pub fn cache_base_dir() -> PathBuf {
+    if let Ok(custom) = std::env::var(LOCT_CACHE_DIR_ENV) {
+        let custom = custom.trim();
+        if !custom.is_empty() {
+            return PathBuf::from(custom);
+        }
+    }
+    if let Some(cache_dir) = dirs::cache_dir() {
+        return cache_dir.join("loctree");
+    }
+    // Last resort: CWD-local .loctree/ (backward compat for envs without $HOME)
+    PathBuf::from(SNAPSHOT_DIR)
+}
+
+/// Returns the cache directory for a specific project.
+///
+/// Layout: `<cache_base>/projects/<project_id>/`
+/// where `project_id` is the first 16 hex chars of SHA-256(canonical_project_root).
+pub fn project_cache_dir(root: &Path) -> PathBuf {
+    let canonical = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let mut hasher = Sha256::new();
+    hasher.update(canonical.to_string_lossy().as_bytes());
+    let hash = hasher.finalize();
+    let project_id = format!("{:x}", hash).chars().take(16).collect::<String>();
+
+    // If LOCT_CACHE_DIR is set:
+    // - Relative path => interpret relative to the project root (so scans from subdirs still write to root/.loctree)
+    // - Absolute path => treat as a multi-project cache base (we still namespace by project_id)
+    if let Ok(custom) = std::env::var(LOCT_CACHE_DIR_ENV) {
+        let custom = custom.trim();
+        if !custom.is_empty() {
+            let custom_path = PathBuf::from(custom);
+            if custom_path.is_relative() {
+                return canonical.join(custom_path);
+            }
+            return custom_path.join("projects").join(project_id);
+        }
+    }
+
+    cache_base_dir().join("projects").join(project_id)
+}
+
+/// Returns the project-local config directory (for user-editable files).
+///
+/// Config files (config.toml, suppressions.toml) stay in the project — they are
+/// user-editable and may be version-controlled. Only cache artifacts move to global cache.
+pub fn project_config_dir(root: &Path) -> PathBuf {
+    root.join(SNAPSHOT_DIR)
+}
 
 fn write_atomic(path: &Path, contents: impl AsRef<[u8]>) -> io::Result<()> {
     let dir = path
@@ -36,6 +109,390 @@ fn write_atomic(path: &Path, contents: impl AsRef<[u8]>) -> io::Result<()> {
     tmp.flush()?;
     tmp.persist(path).map_err(|e| e.error)?;
     Ok(())
+}
+
+fn find_git_root(start: &Path) -> Option<PathBuf> {
+    let mut current = start.canonicalize().ok()?;
+    loop {
+        let git_dir = current.join(".git");
+        if git_dir.is_dir() || git_dir.is_file() {
+            return Some(current);
+        }
+        match current.parent() {
+            Some(parent) if parent != current => current = parent.to_path_buf(),
+            _ => return None,
+        }
+    }
+}
+
+fn normalize_root_dir(root: &Path) -> PathBuf {
+    if root.is_file() {
+        return root.parent().unwrap_or(root).to_path_buf();
+    }
+    root.to_path_buf()
+}
+
+fn has_project_marker(root: &Path) -> bool {
+    const MARKERS: [&str; 11] = [
+        "Cargo.toml",
+        "package.json",
+        "pyproject.toml",
+        "tsconfig.json",
+        "deno.json",
+        "deno.jsonc",
+        "go.mod",
+        "pom.xml",
+        "build.gradle",
+        "build.gradle.kts",
+        "composer.json",
+    ];
+    MARKERS.iter().any(|marker| root.join(marker).is_file())
+}
+
+pub(crate) fn resolve_snapshot_root(root_list: &[PathBuf]) -> PathBuf {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let roots: Vec<PathBuf> = if root_list.is_empty() {
+        vec![cwd.clone()]
+    } else {
+        root_list
+            .iter()
+            .map(|root| normalize_root_dir(root))
+            .collect()
+    };
+
+    // If the given root itself looks like a project (has tsconfig.json, package.json, etc.),
+    // use it directly — don't walk upward past an explicit project boundary.
+    if roots.len() == 1 && has_project_marker(&roots[0]) {
+        return roots[0].clone();
+    }
+
+    let mut loctree_roots: Vec<PathBuf> = roots
+        .iter()
+        .filter_map(|root| Snapshot::find_loctree_root(root))
+        .collect();
+    if let Some(first) = loctree_roots.pop()
+        && loctree_roots.iter().all(|root| root == &first)
+    {
+        return first;
+    }
+
+    if let Some(first_git) = roots.first().and_then(|root| find_git_root(root))
+        && roots
+            .iter()
+            .all(|root| find_git_root(root).as_ref() == Some(&first_git))
+    {
+        return first_git;
+    }
+
+    find_git_root(&cwd).unwrap_or(cwd)
+}
+
+#[derive(Clone, Debug)]
+struct DeclaredEntrypoint {
+    source: String,
+    path: String,
+    exists: bool,
+    resolved: bool,
+    note: Option<String>,
+}
+
+fn normalize_snapshot_path(path: &str) -> String {
+    path.replace('\\', "/")
+}
+
+fn resolve_declared_path(root: &Path, raw: &str) -> Option<(String, bool)> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.contains('*') || trimmed.contains('?') {
+        return None;
+    }
+    if trimmed.starts_with("node:") {
+        return None;
+    }
+    let cleaned = trimmed.trim_start_matches("./");
+    let base = Path::new(cleaned);
+    let full = if base.is_absolute() {
+        base.to_path_buf()
+    } else {
+        root.join(cleaned)
+    };
+    let exists = full.exists();
+    let rel = full.strip_prefix(root).unwrap_or(&full);
+    Some((normalize_snapshot_path(&rel.to_string_lossy()), exists))
+}
+
+fn note_for_declared_path(path: &str, source: &str) -> Option<String> {
+    let lowered = path.to_lowercase();
+    if source.contains("types") || lowered.ends_with(".d.ts") {
+        return Some("types entry (non-runtime)".to_string());
+    }
+    let ext = Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    match ext {
+        "js" | "jsx" | "ts" | "tsx" | "mjs" | "cjs" => {
+            Some("js/ts entrypoint markers not detected".to_string())
+        }
+        _ => None,
+    }
+}
+
+fn collect_declared_entrypoints(summary: &ManifestSummary) -> Vec<DeclaredEntrypoint> {
+    let mut declared = Vec::new();
+    let root = PathBuf::from(&summary.root);
+
+    if let Some(pkg) = &summary.package_json {
+        for (label, value) in [
+            ("package.json:main", pkg.main.as_ref()),
+            ("package.json:module", pkg.module.as_ref()),
+            ("package.json:types", pkg.types.as_ref()),
+        ] {
+            if let Some(raw) = value {
+                if let Some((path, exists)) = resolve_declared_path(&root, raw) {
+                    declared.push(DeclaredEntrypoint {
+                        source: label.to_string(),
+                        path,
+                        exists,
+                        resolved: true,
+                        note: note_for_declared_path(raw, label),
+                    });
+                } else {
+                    declared.push(DeclaredEntrypoint {
+                        source: label.to_string(),
+                        path: raw.to_string(),
+                        exists: false,
+                        resolved: false,
+                        note: Some("unresolved manifest path".to_string()),
+                    });
+                }
+            }
+        }
+        for entry in &pkg.exports {
+            let source = format!("package.json:exports:{}", entry.key);
+            if let Some((path, exists)) = resolve_declared_path(&root, &entry.path) {
+                declared.push(DeclaredEntrypoint {
+                    source,
+                    path,
+                    exists,
+                    resolved: true,
+                    note: note_for_declared_path(&entry.path, "package.json:exports"),
+                });
+            } else {
+                declared.push(DeclaredEntrypoint {
+                    source,
+                    path: entry.path.clone(),
+                    exists: false,
+                    resolved: false,
+                    note: Some("unresolved manifest path".to_string()),
+                });
+            }
+        }
+        for entry in &pkg.bin {
+            let source = format!("package.json:bin:{}", entry.key);
+            if let Some((path, exists)) = resolve_declared_path(&root, &entry.path) {
+                declared.push(DeclaredEntrypoint {
+                    source,
+                    path,
+                    exists,
+                    resolved: true,
+                    note: note_for_declared_path(&entry.path, "package.json:bin"),
+                });
+            } else {
+                declared.push(DeclaredEntrypoint {
+                    source,
+                    path: entry.path.clone(),
+                    exists: false,
+                    resolved: false,
+                    note: Some("unresolved manifest path".to_string()),
+                });
+            }
+        }
+    }
+
+    if let Some(cargo) = &summary.cargo_toml {
+        if let Some(lib_path) = &cargo.lib_path {
+            if let Some((path, exists)) = resolve_declared_path(&root, lib_path) {
+                declared.push(DeclaredEntrypoint {
+                    source: "Cargo.toml:lib".to_string(),
+                    path,
+                    exists,
+                    resolved: true,
+                    note: None,
+                });
+            }
+        } else {
+            let lib_default = root.join("src/lib.rs");
+            let rel = normalize_snapshot_path(
+                &lib_default
+                    .strip_prefix(&root)
+                    .unwrap_or(&lib_default)
+                    .to_string_lossy(),
+            );
+            if lib_default.exists() {
+                declared.push(DeclaredEntrypoint {
+                    source: "Cargo.toml:lib:default".to_string(),
+                    path: rel,
+                    exists: true,
+                    resolved: true,
+                    note: None,
+                });
+            }
+        }
+
+        if cargo.bins.is_empty() {
+            let main_default = root.join("src/main.rs");
+            let rel = normalize_snapshot_path(
+                &main_default
+                    .strip_prefix(&root)
+                    .unwrap_or(&main_default)
+                    .to_string_lossy(),
+            );
+            if main_default.exists() {
+                declared.push(DeclaredEntrypoint {
+                    source: "Cargo.toml:bin:default".to_string(),
+                    path: rel,
+                    exists: true,
+                    resolved: true,
+                    note: None,
+                });
+            }
+        } else {
+            for bin in &cargo.bins {
+                let source = format!("Cargo.toml:bin:{}", bin.name);
+                let path_value = bin
+                    .path
+                    .clone()
+                    .unwrap_or_else(|| format!("src/bin/{}.rs", bin.name));
+                if let Some((path, exists)) = resolve_declared_path(&root, &path_value) {
+                    declared.push(DeclaredEntrypoint {
+                        source,
+                        path,
+                        exists,
+                        resolved: true,
+                        note: None,
+                    });
+                }
+            }
+        }
+
+        for member in &cargo.workspace_members {
+            let member_root = root.join(member);
+            if !member_root.join("Cargo.toml").exists() {
+                continue;
+            }
+            let member_lib = member_root.join("src/lib.rs");
+            if member_lib.exists() {
+                let rel = normalize_snapshot_path(
+                    &member_lib
+                        .strip_prefix(&root)
+                        .unwrap_or(&member_lib)
+                        .to_string_lossy(),
+                );
+                declared.push(DeclaredEntrypoint {
+                    source: format!("Cargo.toml:member:{}:lib", member),
+                    path: rel,
+                    exists: true,
+                    resolved: true,
+                    note: None,
+                });
+            }
+            let member_main = member_root.join("src/main.rs");
+            if member_main.exists() {
+                let rel = normalize_snapshot_path(
+                    &member_main
+                        .strip_prefix(&root)
+                        .unwrap_or(&member_main)
+                        .to_string_lossy(),
+                );
+                declared.push(DeclaredEntrypoint {
+                    source: format!("Cargo.toml:member:{}:bin", member),
+                    path: rel,
+                    exists: true,
+                    resolved: true,
+                    note: None,
+                });
+            }
+        }
+    }
+
+    if let Some(py) = &summary.pyproject_toml {
+        for script in &py.scripts {
+            declared.push(DeclaredEntrypoint {
+                source: "pyproject.toml:scripts".to_string(),
+                path: script.clone(),
+                exists: false,
+                resolved: false,
+                note: Some("script entry (no path mapping)".to_string()),
+            });
+        }
+        for entry in &py.entry_points {
+            declared.push(DeclaredEntrypoint {
+                source: "pyproject.toml:entry-points".to_string(),
+                path: entry.clone(),
+                exists: false,
+                resolved: false,
+                note: Some("entry-point group (no path mapping)".to_string()),
+            });
+        }
+    }
+
+    declared
+}
+
+fn compute_entrypoint_drift(
+    manifest_summary: &[ManifestSummary],
+    entrypoints: &[EntrypointSummary],
+) -> EntrypointDriftSummary {
+    let mut drift = EntrypointDriftSummary::default();
+
+    let mut declared_paths: HashSet<String> = HashSet::new();
+    let entrypoint_paths: HashSet<String> = entrypoints
+        .iter()
+        .map(|e| normalize_snapshot_path(&e.path))
+        .collect();
+
+    for summary in manifest_summary {
+        for declared in collect_declared_entrypoints(summary) {
+            if !declared.resolved {
+                drift.declared_unresolved.push(EntrypointDriftItem {
+                    source: declared.source,
+                    path: declared.path,
+                    note: declared.note,
+                });
+                continue;
+            }
+            let path = normalize_snapshot_path(&declared.path);
+            declared_paths.insert(path.clone());
+            if !declared.exists {
+                drift.declared_missing.push(EntrypointDriftItem {
+                    source: declared.source,
+                    path,
+                    note: declared.note,
+                });
+            } else if !entrypoint_paths.contains(&path) {
+                drift.declared_without_marker.push(EntrypointDriftItem {
+                    source: declared.source,
+                    path,
+                    note: declared.note,
+                });
+            }
+        }
+    }
+
+    for entry in entrypoints {
+        let path = normalize_snapshot_path(&entry.path);
+        if !declared_paths.contains(&path) {
+            drift.code_only_entrypoints.push(EntrypointSummary {
+                path,
+                kinds: entry.kinds.clone(),
+            });
+        }
+    }
+
+    drift
 }
 
 /// Git workspace context for artifact isolation.
@@ -80,6 +537,15 @@ pub struct SnapshotMetadata {
     /// Resolver configuration (tsconfig paths, etc.)
     #[serde(default)]
     pub resolver_config: Option<ResolverConfig>,
+    /// Manifest summaries (package.json, Cargo.toml, pyproject.toml)
+    #[serde(default)]
+    pub manifest_summary: Vec<ManifestSummary>,
+    /// Detected entrypoints across files
+    #[serde(default)]
+    pub entrypoints: Vec<EntrypointSummary>,
+    /// Drift between declared manifest roots and code entrypoints
+    #[serde(default)]
+    pub entrypoint_drift: EntrypointDriftSummary,
     /// Git repository name (extracted from remote origin)
     #[serde(default)]
     pub git_repo: Option<String>,
@@ -105,6 +571,126 @@ pub struct ResolverConfig {
     pub py_roots: Vec<String>,
     /// Rust crate roots
     pub rust_crate_roots: Vec<String>,
+}
+
+/// Single manifest entry (key -> path).
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct ManifestEntry {
+    pub key: String,
+    pub path: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct PackageJsonSummary {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub package_type: Option<String>,
+    #[serde(default)]
+    pub main: Option<String>,
+    #[serde(default)]
+    pub module: Option<String>,
+    #[serde(default)]
+    pub types: Option<String>,
+    #[serde(default)]
+    pub exports: Vec<ManifestEntry>,
+    #[serde(default)]
+    pub bin: Vec<ManifestEntry>,
+    #[serde(default)]
+    pub workspaces: Vec<String>,
+    #[serde(default)]
+    pub scripts: Vec<String>,
+    #[serde(default)]
+    pub package_manager: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct CargoBinSummary {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct CargoTomlSummary {
+    #[serde(default)]
+    pub package_name: Option<String>,
+    #[serde(default)]
+    pub workspace_members: Vec<String>,
+    #[serde(default)]
+    pub workspace_default_members: Vec<String>,
+    #[serde(default)]
+    pub lib_path: Option<String>,
+    #[serde(default)]
+    pub bins: Vec<CargoBinSummary>,
+    #[serde(default)]
+    pub features: Vec<String>,
+    #[serde(default)]
+    pub crate_roots: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct PyProjectSummary {
+    #[serde(default)]
+    pub project_name: Option<String>,
+    #[serde(default)]
+    pub poetry_name: Option<String>,
+    #[serde(default)]
+    pub scripts: Vec<String>,
+    #[serde(default)]
+    pub entry_points: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct ManifestSummary {
+    #[serde(default)]
+    pub root: String,
+    #[serde(default)]
+    pub package_json: Option<PackageJsonSummary>,
+    #[serde(default)]
+    pub cargo_toml: Option<CargoTomlSummary>,
+    #[serde(default)]
+    pub pyproject_toml: Option<PyProjectSummary>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct EntrypointSummary {
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    pub kinds: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct EntrypointDriftItem {
+    #[serde(default)]
+    pub source: String,
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct EntrypointDriftSummary {
+    #[serde(default)]
+    pub declared_missing: Vec<EntrypointDriftItem>,
+    #[serde(default)]
+    pub declared_without_marker: Vec<EntrypointDriftItem>,
+    #[serde(default)]
+    pub code_only_entrypoints: Vec<EntrypointSummary>,
+    #[serde(default)]
+    pub declared_unresolved: Vec<EntrypointDriftItem>,
+}
+
+impl EntrypointDriftSummary {
+    pub fn is_empty(&self) -> bool {
+        self.declared_missing.is_empty()
+            && self.declared_without_marker.is_empty()
+            && self.code_only_entrypoints.is_empty()
+            && self.declared_unresolved.is_empty()
+    }
 }
 
 /// Graph edge representing an import relationship
@@ -151,7 +737,6 @@ pub struct EventBridge {
 }
 
 /// Export index entry (used by VS2 slice module)
-#[allow(dead_code)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ExportEntry {
     /// Symbol name
@@ -219,6 +804,9 @@ impl Snapshot {
                 total_loc: 0,
                 scan_duration_ms: 0,
                 resolver_config: None,
+                manifest_summary: Vec::new(),
+                entrypoints: Vec::new(),
+                entrypoint_drift: EntrypointDriftSummary::default(),
                 git_repo: git_info.repo,
                 git_branch: git_info.branch,
                 git_commit: git_info.commit,
@@ -233,12 +821,23 @@ impl Snapshot {
         }
     }
 
-    /// Get git repository info (repo name, branch, commit) for given root
+    /// Get git repository info (repo name, branch, commit) for given root.
+    ///
+    /// Uses libgit2's repository discovery to properly find the git root,
+    /// even when called from a deeply nested subdirectory. This fixes issues
+    /// where git commands would fail if `root` wasn't directly inside a git repo.
     fn get_git_info(root: &Path) -> (Option<String>, Option<String>, Option<String>) {
         use std::process::{Command, Stdio};
+
+        // Find the actual git root (searches upward from root)
+        let git_root = match crate::git::find_git_root(root) {
+            Some(r) => r,
+            None => return (None, None, None), // Not a git repository
+        };
+
         let repo = Command::new("git")
             .args(["remote", "get-url", "origin"])
-            .current_dir(root)
+            .current_dir(&git_root)
             .stderr(Stdio::null())
             .output()
             .ok()
@@ -258,7 +857,7 @@ impl Snapshot {
             });
         let branch = Command::new("git")
             .args(["rev-parse", "--abbrev-ref", "HEAD"])
-            .current_dir(root)
+            .current_dir(&git_root)
             .stderr(Stdio::null())
             .output()
             .ok()
@@ -273,7 +872,7 @@ impl Snapshot {
             });
         let commit = Command::new("git")
             .args(["rev-parse", "--short", "HEAD"])
-            .current_dir(root)
+            .current_dir(&git_root)
             .stderr(Stdio::null())
             .output()
             .ok()
@@ -316,46 +915,142 @@ impl Snapshot {
     }
 
     fn candidate_snapshot_paths(root: &Path) -> Vec<PathBuf> {
+        let cache_dir = project_cache_dir(root);
         let mut paths = Vec::new();
         if let Some(seg) = Self::git_context_for(root).scan_id {
+            // Primary: global cache with branch@sha
+            paths.push(cache_dir.join(&seg).join(SNAPSHOT_FILE));
+            // Legacy: project-local with branch@sha
             paths.push(root.join(SNAPSHOT_DIR).join(seg).join(SNAPSHOT_FILE));
         }
+        // Legacy: project-local flat
         paths.push(root.join(SNAPSHOT_DIR).join(SNAPSHOT_FILE));
+        // Global cache flat (no git context)
+        paths.push(cache_dir.join(SNAPSHOT_FILE));
         paths
     }
 
-    /// Get the snapshot file path for a given root
+    /// Get the snapshot file path for a given root (writes go here).
+    ///
+    /// Returns a path under the global cache directory.
     pub fn snapshot_path(root: &Path) -> PathBuf {
-        // Prefer the branch@sha path; fall back to legacy path
-        let paths = Self::candidate_snapshot_paths(root);
-        paths
-            .first()
-            .cloned()
-            .unwrap_or_else(|| root.join(SNAPSHOT_DIR).join(SNAPSHOT_FILE))
+        let cache_dir = project_cache_dir(root);
+        if let Some(seg) = Self::git_context_for(root).scan_id {
+            cache_dir.join(seg).join(SNAPSHOT_FILE)
+        } else {
+            cache_dir.join(SNAPSHOT_FILE)
+        }
     }
 
-    /// Directory where snapshot and artifacts should be stored for the current scan
+    /// Directory where snapshot and artifacts should be stored for the current scan.
+    ///
+    /// Returns a path under the global cache directory.
     pub fn artifacts_dir(root: &Path) -> PathBuf {
         let path = Self::snapshot_path(root);
         path.parent()
             .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| root.join(SNAPSHOT_DIR))
+            .unwrap_or_else(|| project_cache_dir(root))
     }
 
-    /// Check if a snapshot exists for the given root (used by VS2 slice module)
-    #[allow(dead_code)]
+    fn remove_any_path(path: &Path) {
+        let meta = fs::symlink_metadata(path);
+        let Ok(meta) = meta else {
+            return;
+        };
+        if meta.is_dir() {
+            let _ = fs::remove_dir_all(path);
+        } else {
+            let _ = fs::remove_file(path);
+        }
+    }
+
+    fn refresh_latest_artifacts(root: &Path) -> io::Result<()> {
+        let Some(scan_id) = Self::git_context_for(root).scan_id else {
+            return Ok(());
+        };
+
+        let base_dir = project_cache_dir(root);
+        let scan_dir = base_dir.join(&scan_id);
+        if !scan_dir.exists() {
+            return Ok(());
+        }
+
+        // Validate scan_dir is contained within base_dir (prevent path traversal via crafted git refs)
+        let canon_base = base_dir.canonicalize().unwrap_or_else(|_| base_dir.clone());
+        let canon_scan = scan_dir.canonicalize().unwrap_or_else(|_| scan_dir.clone());
+        if !canon_scan.starts_with(&canon_base) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "scan directory escapes cache base: {}",
+                    canon_scan.display()
+                ),
+            ));
+        }
+
+        let latest_dir = base_dir.join("latest");
+        Self::remove_any_path(&latest_dir);
+        fs::create_dir_all(&latest_dir)?;
+
+        // Keep this list small and stable; these are the key artifacts CI and tooling depend on.
+        // Other ad-hoc outputs (e.g. report.html, circular.json) can still be found in the scan_id dir.
+        const POINTER_FILES: &[&str] = &[
+            "snapshot.json",
+            "analysis.json",
+            "findings.json",
+            "agent.json",
+            "manifest.json",
+            "report.sarif",
+            "dead.json",
+            "handlers.json",
+            "circular.json",
+            "py_races.json",
+            "report.html",
+        ];
+
+        for name in POINTER_FILES {
+            let src = canon_scan.join(name);
+            if !src.exists() {
+                continue;
+            }
+            // nosemgrep:rust.actix.path-traversal.tainted-path.tainted-path - SAFETY: canon_scan is canonicalized and bounded to canon_base via starts_with guard above; name is from hardcoded POINTER_FILES const
+            let bytes = fs::read(&src)?;
+
+            // Stable pointers at base dir: `.loctree/agent.json`, `.loctree/findings.json`, ...
+            // These are ignored by default gitignore (config.toml/suppressions.toml are explicitly unignored).
+            let dst_flat = base_dir.join(name);
+            write_atomic(&dst_flat, &bytes)?;
+
+            // Mirror into `.loctree/latest/` for snapshot-as-proof workflows.
+            let dst_latest = latest_dir.join(name);
+            write_atomic(&dst_latest, &bytes)?;
+        }
+
+        Ok(())
+    }
+
+    /// Check if a snapshot exists for the given root (checks both cache and legacy paths).
     pub fn exists(root: &Path) -> bool {
         Self::candidate_snapshot_paths(root)
             .iter()
             .any(|p| p.exists())
     }
 
-    /// Search upward for .loctree directory (like git finds .git/)
-    /// Returns the directory containing .loctree/, or None if not found.
+    /// Walk upward from `start` looking for a loctree project root.
+    ///
+    /// A directory is considered a root if it has a `.loctree/` config dir
+    /// (user-editable files like config.toml, suppressions.toml) OR if its
+    /// global cache directory contains at least one snapshot.
     pub fn find_loctree_root(start: &Path) -> Option<PathBuf> {
         let mut current = start.canonicalize().ok()?;
         loop {
+            // Check for .loctree config dir (config.toml, suppressions.toml, .loctreeignore)
             if current.join(SNAPSHOT_DIR).exists() {
+                return Some(current);
+            }
+            // Check global cache — require an actual snapshot, not just an empty dir
+            let cache = project_cache_dir(&current);
+            if cache.is_dir() && Self::cache_has_snapshot(&cache) {
                 return Some(current);
             }
             match current.parent() {
@@ -363,6 +1058,52 @@ impl Snapshot {
                 _ => return None,
             }
         }
+    }
+
+    /// Returns true if a cache directory contains at least one snapshot.json.
+    fn cache_has_snapshot(cache_dir: &Path) -> bool {
+        if cache_dir.join(SNAPSHOT_FILE).exists() {
+            return true;
+        }
+        if let Ok(entries) = std::fs::read_dir(cache_dir) {
+            for entry in entries.flatten() {
+                if entry.path().join(SNAPSHOT_FILE).exists() {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Normalize a path to be relative to snapshot roots
+    ///
+    /// Handles:
+    /// - Absolute paths: strips snapshot root prefix
+    /// - Relative paths with ./: removes the prefix
+    /// - Windows paths: normalizes backslashes to forward slashes
+    ///
+    /// # Examples
+    /// ```ignore
+    /// // Given snapshot with root "/Users/foo/project"
+    /// snapshot.normalize_path("/Users/foo/project/src/main.rs") // => "src/main.rs"
+    /// snapshot.normalize_path("./src/main.rs") // => "src/main.rs"
+    /// snapshot.normalize_path("src\\main.rs") // => "src/main.rs"
+    /// ```
+    pub fn normalize_path(&self, path: &str) -> String {
+        let path = path.trim_start_matches("./").replace('\\', "/");
+
+        // If path is absolute, try to strip snapshot root prefixes
+        if path.starts_with('/') {
+            for root in &self.metadata.roots {
+                let root_normalized = root.trim_end_matches('/');
+                if let Some(relative) = path.strip_prefix(root_normalized) {
+                    // Remove leading slash from relative path
+                    return relative.trim_start_matches('/').to_string();
+                }
+            }
+        }
+
+        path
     }
 
     /// Find the most recent snapshot in .loctree/*/snapshot.json
@@ -406,40 +1147,49 @@ impl Snapshot {
     }
 
     /// Find latest snapshot starting from a given root directory.
-    /// This is the core implementation used by `find_latest_snapshot` and tests.
+    /// Searches both global cache and legacy project-local `.loctree/` directory.
     pub fn find_latest_snapshot_in(root: &Path) -> Result<PathBuf, String> {
-        let loctree_root = match Self::find_loctree_root(root) {
-            Some(root) => root,
-            None => {
-                return Err(
-                    "No .loctree directory found. Run `loct scan` first to create a snapshot."
-                        .to_string(),
-                );
-            }
-        };
-
-        let loctree_dir = loctree_root.join(SNAPSHOT_DIR);
-
-        // Collect all snapshot.json files in .loctree/*/snapshot.json
         let mut snapshots: Vec<(PathBuf, std::time::SystemTime)> = Vec::new();
 
-        // Check for legacy snapshot at .loctree/snapshot.json
-        let legacy_path = loctree_dir.join(SNAPSHOT_FILE);
-        if legacy_path.exists()
-            && let Ok(meta) = fs::metadata(&legacy_path)
-            && let Ok(mtime) = meta.modified()
-        {
-            snapshots.push((legacy_path, mtime));
+        let effective_root =
+            Self::find_loctree_root(root).unwrap_or_else(|| normalize_root_dir(root));
+
+        // Search global cache directory for this project (effective root, not CWD)
+        let cache_dir = project_cache_dir(&effective_root);
+        Self::collect_snapshots_from_dir(&cache_dir, &mut snapshots);
+
+        // Search legacy project-local .loctree/ directory
+        let legacy_dir = effective_root.join(SNAPSHOT_DIR);
+        Self::collect_snapshots_from_dir(&legacy_dir, &mut snapshots);
+
+        if snapshots.is_empty() {
+            return Err("No snapshot found. Run `loct scan` first to create one.".to_string());
         }
 
-        // Check for branch@sha subdirectories: .loctree/*/snapshot.json
-        if let Ok(entries) = fs::read_dir(&loctree_dir) {
+        // Sort by mtime (newest first) and return the most recent
+        snapshots.sort_by(|a, b| b.1.cmp(&a.1));
+        Ok(snapshots.into_iter().next().unwrap().0)
+    }
+
+    /// Collect all snapshot.json files from a directory (flat + subdirs).
+    fn collect_snapshots_from_dir(
+        dir: &Path,
+        snapshots: &mut Vec<(PathBuf, std::time::SystemTime)>,
+    ) {
+        // Check flat: dir/snapshot.json
+        let flat_path = dir.join(SNAPSHOT_FILE);
+        if let Ok(meta) = fs::metadata(&flat_path)
+            && let Ok(mtime) = meta.modified()
+        {
+            snapshots.push((flat_path, mtime));
+        }
+        // Check subdirs: dir/*/snapshot.json
+        if let Ok(entries) = fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.is_dir() {
                     let snapshot_path = path.join(SNAPSHOT_FILE);
-                    if snapshot_path.exists()
-                        && let Ok(meta) = fs::metadata(&snapshot_path)
+                    if let Ok(meta) = fs::metadata(&snapshot_path)
                         && let Ok(mtime) = meta.modified()
                     {
                         snapshots.push((snapshot_path, mtime));
@@ -447,18 +1197,6 @@ impl Snapshot {
                 }
             }
         }
-
-        if snapshots.is_empty() {
-            return Err(format!(
-                "No snapshots found in '{}'. Run `loct scan` first.",
-                loctree_dir.display()
-            ));
-        }
-
-        // Sort by mtime (newest first) and return the most recent
-        snapshots.sort_by(|a, b| b.1.cmp(&a.1));
-
-        Ok(snapshots.into_iter().next().unwrap().0)
     }
 
     /// Save snapshot to disk
@@ -473,8 +1211,13 @@ impl Snapshot {
         ) && existing.metadata.git_commit.as_ref() == Some(commit)
             && existing.metadata.git_branch.as_ref() == Some(branch)
         {
+            let mut existing_roots = existing.metadata.roots.clone();
+            let mut current_roots = self.metadata.roots.clone();
+            existing_roots.sort();
+            current_roots.sort();
+            let same_roots = existing_roots == current_roots;
             let dirty = is_git_dirty(root).unwrap_or(false);
-            if !dirty {
+            if !dirty && same_roots {
                 // Clean worktree + same commit = skip (nothing changed)
                 crate::progress::info(&format!(
                     "Snapshot {}@{} up-to-date, skipping",
@@ -495,11 +1238,14 @@ impl Snapshot {
 
         write_atomic(&snapshot_path, json)?;
 
+        // Refresh stable pointers (base_dir/*.json + base_dir/latest/) for CI and human workflows.
+        // This is a no-op for non-git dirs (no scan_id).
+        let _ = Self::refresh_latest_artifacts(root);
+
         Ok(())
     }
 
     /// Load snapshot from disk (used by VS2 slice module)
-    #[allow(dead_code)]
     pub fn load(root: &Path) -> io::Result<Self> {
         let mut snapshot_path = None;
         for candidate in Self::candidate_snapshot_paths(root) {
@@ -528,8 +1274,10 @@ impl Snapshot {
         let snapshot: Self = serde_json::from_str(&content)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
-        // Check schema version compatibility
-        if snapshot.metadata.schema_version != SNAPSHOT_SCHEMA_VERSION {
+        // Check schema version compatibility (major.minor only - patch bumps don't change schema)
+        if schema_major_minor(&snapshot.metadata.schema_version)
+            != schema_major_minor(SNAPSHOT_SCHEMA_VERSION)
+        {
             eprintln!(
                 "[loctree][warn] Snapshot schema version mismatch: found {}, expected {}. Consider re-running `loctree`.",
                 snapshot.metadata.schema_version, SNAPSHOT_SCHEMA_VERSION
@@ -572,7 +1320,7 @@ impl Snapshot {
 
         let languages: Vec<_> = self.metadata.languages.iter().collect();
         if !languages.is_empty() {
-            println!(
+            eprintln!(
                 "Languages: {}",
                 languages
                     .iter()
@@ -599,25 +1347,25 @@ impl Snapshot {
             .count();
 
         if handler_count > 0 || missing_handlers > 0 {
-            print!("Commands: {} handlers", handler_count);
+            eprint!("Commands: {} handlers", handler_count);
             if missing_handlers > 0 {
-                print!(", {} missing", missing_handlers);
+                eprint!(", {} missing", missing_handlers);
             }
             if unused_handlers > 0 {
-                print!(", {} unused", unused_handlers);
+                eprint!(", {} unused", unused_handlers);
             }
-            println!();
+            eprintln!();
         }
 
         let event_count = self.event_bridges.len();
         if event_count > 0 {
-            println!("Events: {} tracked", event_count);
+            eprintln!("Events: {} tracked", event_count);
         }
 
         // Check for cycles or issues
         let barrel_count = self.barrels.len();
         if barrel_count > 0 {
-            println!("Barrels: {} detected", barrel_count);
+            eprintln!("Barrels: {} detected", barrel_count);
         }
 
         // Count duplicate exports (symbols exported from multiple files)
@@ -627,7 +1375,7 @@ impl Snapshot {
             .filter(|files| files.len() > 1)
             .count();
         if duplicate_count > 0 {
-            println!("Duplicates: {} export groups", duplicate_count);
+            eprintln!("Duplicates: {} export groups", duplicate_count);
         }
 
         // Count indexed parameters (NEW in 0.8.4)
@@ -644,20 +1392,20 @@ impl Snapshot {
                 .flat_map(|f| f.exports.iter())
                 .filter(|e| !e.params.is_empty())
                 .count();
-            println!(
+            eprintln!(
                 "Params: {} indexed ({} functions)",
                 param_count, func_with_params
             );
         }
 
-        println!("Status: OK");
-        println!();
-        println!("Next steps:");
-        println!("  loct --for-ai                # Project overview for AI agents");
-        println!("  loct slice <file> --json     # Extract context with dependencies");
-        println!("  loct twins                   # Dead parrots + duplicates + barrel chaos");
-        println!("  loct '.files | length'       # jq-style queries on snapshot");
-        println!("  loct query who-imports <f>   # Quick graph queries");
+        eprintln!("Status: OK");
+        eprintln!();
+        eprintln!("Next steps:");
+        eprintln!("  loct --for-ai                # Project overview for AI agents");
+        eprintln!("  loct slice <file> --json     # Extract context with dependencies");
+        eprintln!("  loct twins                   # Dead parrots + duplicates + barrel chaos");
+        eprintln!("  loct '.files | length'       # jq-style queries on snapshot");
+        eprintln!("  loct query who-imports <f>   # Quick graph queries");
     }
 }
 
@@ -694,14 +1442,7 @@ pub fn run_init_with_options(
 
     // Snapshot root defaults to the first provided root (common UX: keep artifacts near target),
     // falling back to CWD if multiple roots are provided.
-    let snapshot_root = if root_list.len() == 1 {
-        root_list
-            .first()
-            .cloned()
-            .unwrap_or_else(|| std::env::current_dir().expect("current dir"))
-    } else {
-        std::env::current_dir()?
-    };
+    let snapshot_root = resolve_snapshot_root(root_list);
 
     // Validate at least one root was specified
     if root_list.is_empty() {
@@ -845,6 +1586,31 @@ pub fn run_init_with_options(
             snapshot.metadata.languages.insert(lang.clone());
         }
     }
+
+    // Summarize manifests and derive crate roots (ScanOnce -> SliceMany)
+    let mut manifest_summary = Vec::new();
+    let mut rust_crate_roots = Vec::new();
+    for root in root_list {
+        let summary = crate::analyzer::manifests::summarize_manifests(root);
+        if let Some(cargo) = &summary.cargo_toml {
+            rust_crate_roots.extend(cargo.crate_roots.clone());
+        }
+        manifest_summary.push(summary);
+    }
+    rust_crate_roots.sort();
+    rust_crate_roots.dedup();
+    snapshot.metadata.manifest_summary = manifest_summary;
+
+    // Aggregate detected entrypoints for fast lookup
+    let entrypoints = crate::analyzer::entrypoints::find_entrypoints(&snapshot.files)
+        .into_iter()
+        .map(|(path, kinds)| EntrypointSummary { path, kinds })
+        .collect();
+    snapshot.metadata.entrypoints = entrypoints;
+    snapshot.metadata.entrypoint_drift = compute_entrypoint_drift(
+        &snapshot.metadata.manifest_summary,
+        &snapshot.metadata.entrypoints,
+    );
 
     // Build registered handlers set to filter BE commands (same as in loct.rs/loctree.rs)
     let registered_impls: HashSet<String> = scan_results
@@ -1028,7 +1794,10 @@ pub fn run_init_with_options(
     }
 
     // Store resolver configuration from scan results for caching
-    if scan_results.ts_resolver_config.is_some() || !scan_results.py_roots.is_empty() {
+    if scan_results.ts_resolver_config.is_some()
+        || !scan_results.py_roots.is_empty()
+        || !rust_crate_roots.is_empty()
+    {
         snapshot.metadata.resolver_config = Some(ResolverConfig {
             ts_paths: scan_results
                 .ts_resolver_config
@@ -1040,7 +1809,7 @@ pub fn run_init_with_options(
                 .as_ref()
                 .and_then(|c| c.ts_base_url.clone()),
             py_roots: scan_results.py_roots.clone(),
-            rust_crate_roots: vec![], // TODO: populate from Cargo.toml scanning
+            rust_crate_roots,
         });
     }
 
@@ -1059,16 +1828,25 @@ pub fn run_init_with_options(
         snapshot.print_summary(&snapshot_root);
     }
 
-    // Auto mode: emit full artifact set into ./.loctree to avoid extra commands
+    // Auto mode: emit full artifact set into the artifact directory (global cache by default)
     if parsed.auto_outputs {
         let artifacts_spinner = crate::progress::Spinner::new("Generating artifacts...");
-        match write_auto_artifacts(&snapshot_root, &scan_results, &parsed) {
+        match write_auto_artifacts(
+            &snapshot_root,
+            root_list,
+            &scan_results,
+            &parsed,
+            Some(&snapshot.metadata),
+        ) {
             Ok(paths) => {
                 artifacts_spinner.finish_clear();
                 if !paths.is_empty() {
-                    println!("Artifacts saved under ./.loctree:");
+                    eprintln!(
+                        "Artifacts saved under {}:",
+                        Snapshot::artifacts_dir(&snapshot_root).display()
+                    );
                     for p in paths {
-                        println!("  - {}", p);
+                        eprintln!("  - {}", p);
                     }
                 }
             }
@@ -1090,11 +1868,13 @@ pub fn run_init(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Result<()> {
     run_init_with_options(root_list, parsed, false)
 }
 
-/// In auto mode, generate the full set of analysis artifacts inside ./.loctree
+/// In auto mode, generate the full set of analysis artifacts in the artifact directory.
 pub(crate) fn write_auto_artifacts(
     snapshot_root: &Path,
+    roots: &[PathBuf],
     scan_results: &crate::analyzer::root_scan::ScanResults,
     parsed: &ParsedArgs,
+    metadata_override: Option<&SnapshotMetadata>,
 ) -> io::Result<Vec<String>> {
     use crate::analyzer::coverage::{
         CommandUsage, compute_command_gaps_with_confidence, compute_unregistered_handlers,
@@ -1110,7 +1890,7 @@ pub(crate) fn write_auto_artifacts(
     const DEFAULT_EXCLUDE_REPORT_PATTERNS: &[&str] =
         &["**/__tests__/**", "scripts/semgrep-fixtures/**"];
     const SCHEMA_NAME: &str = "loctree-json";
-    const SCHEMA_VERSION: &str = "1.2.0";
+    const SCHEMA_VERSION: &str = SNAPSHOT_SCHEMA_VERSION;
 
     let mut created = Vec::new();
 
@@ -1290,6 +2070,21 @@ pub(crate) fn write_auto_artifacts(
     let total_loc: usize = scan_results.global_analyses.iter().map(|a| a.loc).sum();
     let file_count = scan_results.global_analyses.len();
 
+    let entrypoint_drift = if let Some(meta) = metadata_override {
+        meta.entrypoint_drift.clone()
+    } else {
+        let manifest_summary: Vec<ManifestSummary> = roots
+            .iter()
+            .map(|root| crate::analyzer::manifests::summarize_manifests(root))
+            .collect();
+        let entrypoints =
+            crate::analyzer::entrypoints::find_entrypoints(&scan_results.global_analyses)
+                .into_iter()
+                .map(|(path, kinds)| EntrypointSummary { path, kinds })
+                .collect::<Vec<_>>();
+        compute_entrypoint_drift(&manifest_summary, &entrypoints)
+    };
+
     let bundle = json!({
         "schema": { "name": SCHEMA_NAME, "version": SCHEMA_VERSION },
         "generatedAt": time::OffsetDateTime::now_utc()
@@ -1310,6 +2105,7 @@ pub(crate) fn write_auto_artifacts(
         "pipelineSummary": pipeline_summary,
         "circularImports": cycles,
         "pyRaceIndicators": race_items,
+        "entrypointDrift": entrypoint_drift,
     });
     write_atomic(
         &analysis_json_path,
@@ -1330,6 +2126,9 @@ pub(crate) fn write_auto_artifacts(
         .flat_map(|ctx| ctx.filtered_ranked.clone())
         .collect();
     let high_confidence = parsed.dead_confidence.as_deref() == Some("high");
+    let mut dead_ok_globs = crate::fs_utils::load_loctignore_dead_ok_globs(snapshot_root);
+    dead_ok_globs.sort();
+    dead_ok_globs.dedup();
     let dead_exports = find_dead_exports(
         &scan_results.global_analyses,
         high_confidence,
@@ -1342,13 +2141,20 @@ pub(crate) fn write_auto_artifacts(
             python_library_mode: parsed.python_library,
             include_ambient: false,
             include_dynamic: false,
+            dead_ok_globs,
         },
     );
 
-    // Build minimal snapshot for SARIF enrichment (blast radius, consumer count)
+    // Build minimal snapshot for SARIF enrichment and findings analysis
     let minimal_snapshot = Snapshot {
-        metadata: SnapshotMetadata::default(),
-        files: vec![],
+        metadata: metadata_override
+            .cloned()
+            .unwrap_or_else(|| SnapshotMetadata {
+                roots: vec![snapshot_root.to_string_lossy().to_string()],
+                entrypoint_drift: entrypoint_drift.clone(),
+                ..Default::default()
+            }),
+        files: scan_results.global_analyses.clone(),
         edges: all_graph_edges
             .iter()
             .map(|(from, to, label)| GraphEdge {
@@ -1488,10 +2294,28 @@ pub(crate) fn write_auto_artifacts(
             .display()
     ));
 
+    // Save agent.json - AI-optimized bundle (used by CI and agent tooling)
+    let agent_json_path = loctree_dir.join("agent.json");
+    let agent_report = crate::analyzer::for_ai::generate_for_ai_report(
+        &snapshot_root.to_string_lossy(),
+        &report_sections,
+        &scan_results.global_analyses,
+        Some(&minimal_snapshot),
+    );
+    let agent_json = serde_json::to_vec_pretty(&agent_report).map_err(io::Error::other)?;
+    write_atomic(&agent_json_path, &agent_json)?;
+    created.push(format!(
+        "./{}",
+        agent_json_path
+            .strip_prefix(snapshot_root)
+            .unwrap_or(&agent_json_path)
+            .display()
+    ));
+
     // Save manifest.json - index of artifacts for AI agents
     let manifest_json_path = loctree_dir.join("manifest.json");
     let findings_size_kb = findings_json.len() / 1024;
-    let agent_size_kb = 0; // Will be updated when agent.json is written
+    let agent_size_kb = agent_json.len() / 1024;
     let manifest = crate::analyzer::findings::Manifest::produce(
         &minimal_snapshot,
         findings_size_kb,
@@ -1507,6 +2331,12 @@ pub(crate) fn write_auto_artifacts(
             .display()
     ));
 
+    // Now that the full artifact set exists, refresh stable pointers (base_dir/*.json + base_dir/latest/).
+    // Snapshot::save() runs this before auto artifacts are generated, so we do it again here.
+    if let Err(e) = Snapshot::refresh_latest_artifacts(snapshot_root) {
+        eprintln!("[loctree][warn] failed to refresh latest pointers: {}", e);
+    }
+
     Ok(created)
 }
 
@@ -1514,6 +2344,22 @@ pub(crate) fn write_auto_artifacts(
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    struct DirGuard {
+        path: PathBuf,
+    }
+
+    impl DirGuard {
+        fn new(path: PathBuf) -> Self {
+            Self { path }
+        }
+    }
+
+    impl Drop for DirGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
 
     #[test]
     fn test_snapshot_save_load_roundtrip() {
@@ -1560,9 +2406,13 @@ mod tests {
     #[test]
     fn test_snapshot_path() {
         let path = Snapshot::snapshot_path(Path::new("/some/project"));
-        // Accept branch@sha subdir if present, but require .loctree and snapshot.json
-        assert!(path.starts_with("/some/project/.loctree"));
+        // Snapshot path should be under the global cache, not project-local
         assert!(path.ends_with("snapshot.json"));
+        // Should NOT be under the project directory anymore
+        assert!(
+            !path.starts_with("/some/project/.loctree"),
+            "snapshot should go to global cache, not project-local .loctree"
+        );
     }
 
     #[test]
@@ -1587,11 +2437,11 @@ mod tests {
 
     #[test]
     fn test_artifacts_dir_uses_root_git_context() {
-        // Non-git directory should use legacy path
+        // Non-git directory should use global cache
         let dir = Snapshot::artifacts_dir(Path::new("/tmp/loctree"));
         assert!(
-            dir.ends_with(Path::new(".loctree")),
-            "non-git should use .loctree"
+            !dir.starts_with("/tmp/loctree/.loctree"),
+            "artifacts should go to global cache, not project-local"
         );
         // Git directory should include scan_id
         let cwd = std::env::current_dir().unwrap();
@@ -1742,7 +2592,7 @@ mod tests {
     #[test]
     fn test_snapshot_metadata_serde() {
         let metadata = SnapshotMetadata {
-            schema_version: "1.0".to_string(),
+            schema_version: SNAPSHOT_SCHEMA_VERSION.to_string(),
             generated_at: "2025-01-01T00:00:00Z".to_string(),
             roots: vec!["src".to_string()],
             languages: HashSet::from(["ts".to_string()]),
@@ -1755,6 +2605,9 @@ mod tests {
                 py_roots: vec![],
                 rust_crate_roots: vec![],
             }),
+            manifest_summary: Vec::new(),
+            entrypoints: Vec::new(),
+            entrypoint_drift: EntrypointDriftSummary::default(),
             git_repo: None,
             git_branch: None,
             git_commit: None,
@@ -1879,15 +2732,18 @@ mod tests {
     #[test]
     fn test_find_latest_snapshot_no_loctree_dir() {
         let tmp = TempDir::new().expect("create temp dir");
-        // No .loctree directory
+        // No .loctree directory and no cache entry
 
         // Use find_latest_snapshot_in to avoid changing global cwd (thread-safe)
         let result = Snapshot::find_latest_snapshot_in(tmp.path());
 
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(err.contains("No .loctree directory found"));
-        assert!(err.contains("Run `loct scan` first"));
+        assert!(
+            err.contains("No snapshot found"),
+            "Expected 'No snapshot found' in error: {}",
+            err
+        );
     }
 
     #[test]
@@ -1901,8 +2757,11 @@ mod tests {
 
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(err.contains("No snapshots found"));
-        assert!(err.contains("Run `loct scan` first"));
+        assert!(
+            err.contains("No snapshot found"),
+            "Expected 'No snapshot found' in error: {}",
+            err
+        );
     }
 
     #[test]
@@ -1925,6 +2784,29 @@ mod tests {
         // Compare canonicalized paths to handle /private/var vs /var on macOS
         let found = result.unwrap().canonicalize().unwrap_or_default();
         let expected = legacy_path.canonicalize().unwrap_or_default();
+        assert_eq!(found, expected);
+    }
+
+    #[test]
+    fn test_find_latest_snapshot_global_cache_from_subdir() {
+        let project = TempDir::new().expect("create temp project dir");
+        let nested = project.path().join("a/b/c");
+        std::fs::create_dir_all(&nested).expect("create nested dirs");
+
+        // Ensure we don't leave cache artifacts around after this test.
+        let _cleanup = DirGuard::new(project_cache_dir(project.path()));
+
+        // Save snapshot for project root -> goes to global cache (or temp dir fallback)
+        let snapshot = Snapshot::new(vec!["src".to_string()]);
+        snapshot.save(project.path()).expect("save snapshot");
+
+        // Discover from nested subdir: should resolve effective root via global cache
+        let found = Snapshot::find_latest_snapshot_in(&nested).expect("find snapshot");
+        let expected = Snapshot::snapshot_path(project.path());
+
+        // Compare canonicalized paths to handle /private/var vs /var on macOS
+        let found = found.canonicalize().unwrap_or(found);
+        let expected = expected.canonicalize().unwrap_or(expected);
         assert_eq!(found, expected);
     }
 }

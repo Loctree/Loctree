@@ -109,4 +109,4 @@ Loctree correctly detects these architectural patterns but they should be interp
 
 ---
 
-*Tested by M&K (c)2025 The LibraxisAI Team*
+*Tested by M&K (c)2025 The Loctree Team*

@@ -11,12 +11,11 @@
 class Loctree < Formula
   desc "Fast, language-aware codebase analyzer for detecting dead exports and circular imports"
   homepage "https://loctree.io"
-  # NOTE: Update URL and SHA256 before submitting to homebrew-core
-  # Use: curl -sL "https://crates.io/api/v1/crates/loctree/0.8.4/download" | shasum -a 256
-  url "https://crates.io/api/v1/crates/loctree/0.8.4/download"
+  # Update sha256 before release: curl -sL "https://crates.io/api/v1/crates/loctree/0.8.11/download" | shasum -a 256
+  url "https://crates.io/api/v1/crates/loctree/0.8.11/download"
   sha256 "UPDATE_SHA256_BEFORE_RELEASE"
-  license "MIT"
-  head "https://github.com/Loctree/Loctree-suite.git", branch: "main"
+  license any_of: ["MIT", "Apache-2.0"]
+  head "https://github.com/Loctree/Loctree.git", branch: "main"
 
   # Binary name is 'loctree' and 'loct' (alias)
   # Installed from: loctree_rs/src/bin/

@@ -14,7 +14,10 @@ pub(crate) fn regex_tauri_command_fn() -> &'static Regex {
         // Matches #[tauri::command] or #[command] (when imported with `use tauri::command`)
         // followed by optional additional attributes like #[allow(...)] before the function definition
         // Supports generic type parameters: fn name<R: Runtime>(...)
-        regex(r#"(?m)#\s*\[\s*(?:tauri::)?command([^\]]*)\](?:\s*#\s*\[[^\]]*\])*\s*(?:pub\s*(?:\([^)]*\)\s*)?)?(?:async\s+)?fn\s+([A-Za-z0-9_]+)\s*(?:<[^>]*>)?\s*\((?P<params>[^)]*)\)"#)
+        // Also handles comments (// line or /* block */) between attributes and the fn definition
+        // IMPORTANT: ^\s* anchors to line start to avoid matching inside comments/strings
+        // Comment pattern: (?:\s|//[^\n]*|/\*[\s\S]*?\*/)* handles whitespace, line comments, and block comments
+        regex(r#"(?m)^\s*#\s*\[\s*(?:tauri::)?command([^\]]*)\](?:\s*(?://[^\n]*|/\*[\s\S]*?\*/))?(?:(?:\s|//[^\n]*|/\*[\s\S]*?\*/)*#\s*\[[^\]]*\](?:\s*(?://[^\n]*|/\*[\s\S]*?\*/))?)*(?:\s|//[^\n]*|/\*[\s\S]*?\*/)*(?:pub\s*(?:\([^)]*\)\s*)?)?(?:async\s+)?fn\s+([A-Za-z0-9_]+)\s*(?:<[^>]*>)?\s*\((?P<params>[^)]*)\)"#)
     })
 }
 
@@ -35,9 +38,12 @@ pub fn regex_custom_command_fn(macro_names: &[String]) -> Option<Regex> {
 
     // Build regex similar to regex_tauri_command_fn but with dynamic macro names
     // Matches: #[macro_name(...)] fn name(...)
-    // Supports optional crate:: prefix, additional attributes, and generic type parameters
+    // Supports optional crate:: prefix, additional attributes, generic type parameters,
+    // and comments (// line or /* block */) between attributes and the fn definition
+    // IMPORTANT: ^\s* anchors to line start to avoid matching inside comments/strings
+    // Comment pattern: (?:\s|//[^\n]*|/\*[\s\S]*?\*/)* handles whitespace, line comments, and block comments
     let full_pattern = format!(
-        r#"(?m)#\s*\[\s*(?:crate::)?(?:{})([^\]]*)\](?:\s*#\s*\[[^\]]*\])*\s*(?:pub\s*(?:\([^)]*\)\s*)?)?(?:async\s+)?fn\s+([A-Za-z0-9_]+)\s*(?:<[^>]*>)?\s*\((?P<params>[^)]*)\)"#,
+        r#"(?m)^\s*#\s*\[\s*(?:crate::)?(?:{})([^\]]*)\](?:\s*(?://[^\n]*|/\*[\s\S]*?\*/))?(?:(?:\s|//[^\n]*|/\*[\s\S]*?\*/)*#\s*\[[^\]]*\](?:\s*(?://[^\n]*|/\*[\s\S]*?\*/))?)*(?:\s|//[^\n]*|/\*[\s\S]*?\*/)*(?:pub\s*(?:\([^)]*\)\s*)?)?(?:async\s+)?fn\s+([A-Za-z0-9_]+)\s*(?:<[^>]*>)?\s*\((?P<params>[^)]*)\)"#,
         pattern
     );
 
@@ -206,18 +212,6 @@ pub(crate) fn regex_py_all() -> &'static Regex {
     RE.get_or_init(|| regex(r#"(?s)__all__\s*=\s*\[([^\]]*)\]"#))
 }
 
-#[allow(dead_code)]
-pub(crate) fn regex_py_def() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| regex(r#"(?m)^\s*def\s+([A-Za-z_][A-Za-z0-9_]*)"#))
-}
-
-#[allow(dead_code)]
-pub(crate) fn regex_py_class() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| regex(r#"(?m)^\s*class\s+([A-Za-z_][A-Za-z0-9_]*)"#))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -301,4 +295,173 @@ mod tests {
         // but should still capture the mod name
         assert!(caps.is_some() || regex_rust_mod_decl().is_match("mod test_utils;"));
     }
+}
+
+#[test]
+fn test_tauri_command_with_inline_comment() {
+    let re = regex_tauri_command_fn();
+
+    // Inline comment after attribute (common pattern for documenting why an attribute is needed)
+    let with_comment = r#"#[tauri::command]
+#[allow(non_snake_case)] // parameter name matches frontend camelCase
+pub async fn convert_audio(
+    app_handle: tauri::AppHandle,
+    audioData: Vec<u8>,
+) -> Result<Vec<u8>, String> {"#;
+
+    let caps = re.captures(with_comment);
+    assert!(
+        caps.is_some(),
+        "Should match tauri command with inline comment after attribute"
+    );
+    assert_eq!(
+        caps.unwrap().get(2).map(|m| m.as_str()),
+        Some("convert_audio")
+    );
+}
+
+#[test]
+fn test_tauri_command_comment_between_attrs() {
+    let re = regex_tauri_command_fn();
+
+    // Comment on separate line between attributes
+    let comment_between = r#"#[tauri::command]
+// This is a comment explaining the function
+#[allow(dead_code)]
+pub fn my_handler() {}"#;
+
+    let caps = re.captures(comment_between);
+    assert!(
+        caps.is_some(),
+        "Should match with comment line between attributes"
+    );
+    assert_eq!(caps.unwrap().get(2).map(|m| m.as_str()), Some("my_handler"));
+}
+
+// === NEGATIVE TESTS ===
+// These ensure we don't get false positives from comments/strings
+
+#[test]
+fn test_tauri_command_in_line_comment_no_match() {
+    let re = regex_tauri_command_fn();
+
+    // #[tauri::command] inside a line comment should NOT match
+    let commented_out = r#"// #[tauri::command]
+// pub fn disabled_handler() {}"#;
+
+    assert!(
+        re.captures(commented_out).is_none(),
+        "Should NOT match #[tauri::command] inside a line comment"
+    );
+}
+
+#[test]
+fn test_tauri_command_in_string_no_match() {
+    let re = regex_tauri_command_fn();
+
+    // #[tauri::command] inside a string literal should NOT match as a handler
+    // Using r##""## to allow "# inside the string
+    let in_string = r##"let example = "#[tauri::command]
+pub fn fake_handler() {}";"##;
+
+    // This might match the fake_handler - let's verify it doesn't treat this as real
+    // The regex starts with # at line start (due to (?m)), so string content shouldn't match
+    let caps = re.captures(in_string);
+    // If it matches, it found something that looks like a command - which is a false positive
+    // In practice, the # inside the string won't be at line start in valid Rust code
+    assert!(
+        caps.is_none(),
+        "Should NOT match #[tauri::command] inside a string literal"
+    );
+}
+
+#[test]
+fn test_tauri_command_with_block_comment() {
+    let re = regex_tauri_command_fn();
+
+    // Block comments /* */ after attributes should be supported
+    let with_block_comment = r#"#[tauri::command]
+#[allow(non_snake_case)] /* camelCase for frontend */
+pub fn handler_with_block_comment() {}"#;
+
+    let caps = re.captures(with_block_comment);
+    assert!(
+        caps.is_some(),
+        "Should match tauri command with block comment after attribute"
+    );
+    assert_eq!(
+        caps.unwrap().get(2).map(|m| m.as_str()),
+        Some("handler_with_block_comment")
+    );
+}
+
+#[test]
+fn test_tauri_command_with_multiline_block_comment() {
+    let re = regex_tauri_command_fn();
+
+    // Multiline block comments between attributes
+    let multiline_comment = r#"#[tauri::command]
+/* This is a longer explanation
+   spanning multiple lines
+   about why this attribute exists */
+#[allow(dead_code)]
+pub async fn handler_multiline() {}"#;
+
+    let caps = re.captures(multiline_comment);
+    assert!(
+        caps.is_some(),
+        "Should match tauri command with multiline block comment"
+    );
+    assert_eq!(
+        caps.unwrap().get(2).map(|m| m.as_str()),
+        Some("handler_multiline")
+    );
+}
+
+#[test]
+fn test_tauri_command_with_doc_comments() {
+    let re = regex_tauri_command_fn();
+
+    // Rust doc comments (///) are common before functions
+    // They should work just like regular // comments
+    let with_doc_comments = r#"#[tauri::command]
+/// Process the incoming data and return the result.
+///
+/// # Arguments
+/// * `data` - The input data to process
+///
+/// # Returns
+/// The processed result as a string
+#[allow(dead_code)]
+pub async fn documented_handler(data: String) -> Result<String, String> {"#;
+
+    let caps = re.captures(with_doc_comments);
+    assert!(
+        caps.is_some(),
+        "Should match tauri command with /// doc comments"
+    );
+    assert_eq!(
+        caps.unwrap().get(2).map(|m| m.as_str()),
+        Some("documented_handler")
+    );
+}
+
+#[test]
+fn test_tauri_command_with_doc_comments_after_attr() {
+    let re = regex_tauri_command_fn();
+
+    // Doc comment after attribute (less common but valid)
+    let doc_after_attr = r#"#[tauri::command]
+#[allow(non_snake_case)] /// This allows camelCase params
+pub fn handler_with_doc_after_attr() {}"#;
+
+    let caps = re.captures(doc_after_attr);
+    assert!(
+        caps.is_some(),
+        "Should match tauri command with /// doc comment after attribute"
+    );
+    assert_eq!(
+        caps.unwrap().get(2).map(|m| m.as_str()),
+        Some("handler_with_doc_after_attr")
+    );
 }

@@ -4,7 +4,7 @@
 //! including lists of DOM APIs, non-invoke functions, and invalid command names
 //! that should be excluded from analysis.
 //!
-//! Created by M&K (c)2025 The LibraxisAI Team
+//! Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team
 
 use std::collections::HashSet;
 
@@ -36,6 +36,9 @@ pub(super) const NON_INVOKE_EXCLUSIONS: &[&str] = &[
     "useAssistantToolCommands",
     "useNewVisitVoiceCommands",
     "useAiTopicCommands",
+    // VSCode command registration (not Tauri)
+    "registerCommand",
+    "registerTextEditorCommand",
     // Build tools / CLI commands (not Tauri)
     "runGitCommand",
     "executeCommand",

@@ -6,7 +6,7 @@ use serde_json::json;
 use std::io::IsTerminal;
 
 use crate::fs_utils::{
-    GitIgnoreChecker, count_lines, is_allowed_hidden, normalise_ignore_patterns, should_ignore,
+    GitIgnoreChecker, build_ignore_matchers, count_lines, is_allowed_hidden, should_ignore,
     sort_dir_entries,
 };
 use crate::types::{
@@ -298,6 +298,7 @@ pub fn run_tree(root_list: &[PathBuf], parsed: &crate::args::ParsedArgs) -> io::
     let options = Options {
         extensions: parsed.extensions.clone(),
         ignore_paths: Vec::new(),
+        ignore_globs: None,
         use_gitignore: parsed.use_gitignore,
         max_depth: parsed.max_depth,
         color: parsed.color,
@@ -324,12 +325,13 @@ pub fn run_tree(root_list: &[PathBuf], parsed: &crate::args::ParsedArgs) -> io::
     let mut json_results = Vec::new();
 
     for (idx, root_path) in root_list.iter().enumerate() {
-        let ignore_paths = normalise_ignore_patterns(&parsed.ignore_patterns, root_path);
+        let ignore_matchers = build_ignore_matchers(&parsed.ignore_patterns, root_path);
         let root_canon = root_path
             .canonicalize()
             .unwrap_or_else(|_| root_path.clone());
         let root_options = Options {
-            ignore_paths,
+            ignore_paths: ignore_matchers.ignore_paths,
+            ignore_globs: ignore_matchers.ignore_globs,
             loc_threshold: parsed.loc_threshold,
             ..options.clone()
         };

@@ -43,6 +43,6 @@ for target in $targets; do
 fi
 
 echo "[tap] Updating Homebrew tap formula"
-python3 tools/release/update-tap.py "$VERSION" "$CONFIG"
+tools/release/update-tap.sh "$VERSION" "$CONFIG"
 
 echo "Done."

@@ -32,7 +32,7 @@ Stack detected: TypeScript (tsconfig.json)
 Scanning 247 files...
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% 247/247 files
 
-Artifacts written to .loctree/
+Artifacts saved under your cache dir (default)
   snapshot.json   - Full dependency graph (127 KB)
   findings.json   - Issues detected (dead code, cycles, etc.)
   agent.json      - AI-optimized context bundle
@@ -42,11 +42,13 @@ Health score: 82/100
   ✓ No circular imports
   ⚠ 3 unused exports (--confidence high)
   ⚠ 1 dead parrot (0 imports)
+
+Tip: set `LOCT_CACHE_DIR=.loctree` to write artifacts into the repo (handy for CI and quick inspection).
 ```
 
 ## Key Artifacts
 
-After scanning, loctree creates `.loctree/` with these files:
+After scanning, loctree writes these artifacts (in the cache dir by default; override via `LOCT_CACHE_DIR`):
 
 ### snapshot.json
 Complete import/export graph. Query it with jq-style syntax:
@@ -61,21 +63,21 @@ loct '.edges[] | select(.from | contains("api"))'  # Filter edges
 All detected issues:
 
 ```bash
-cat .loctree/findings.json | jq '.dead_exports[] | select(.confidence == "high")'
+loct --findings | jq '.dead_exports[] | select(.confidence == "high")'
 ```
 
 ### agent.json
 AI-optimized bundle with health score and quick wins:
 
 ```bash
-cat .loctree/agent.json | jq '.summary'
+loct --agent-json | jq '.summary'
 ```
 
 ### manifest.json
 Index for IDE integrations and tooling:
 
 ```bash
-cat .loctree/manifest.json
+loct manifests --json
 ```
 
 ## Essential Commands
@@ -304,5 +306,5 @@ loct slice src/main.rs --json | your-ai-tool
 
 ---
 
-**Created by M&K (c)2025 The LibraxisAI Team**
+**Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team**
 Co-Authored-By: [Maciej](void@div0.space) & [Klaudiusz](the1st@whoai.am)

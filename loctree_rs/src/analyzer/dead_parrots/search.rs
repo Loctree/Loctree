@@ -25,12 +25,22 @@ pub struct SymbolFileMatch {
     pub matches: Vec<SymbolMatch>,
 }
 
+/// The kind of symbol match found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SymbolMatchKind {
+    Definition,
+    Import,
+    Usage,
+}
+
 /// A single symbol match
 #[derive(Debug, Clone, Serialize)]
 pub struct SymbolMatch {
     pub line: usize,
     pub context: String,
     pub is_definition: bool,
+    pub kind: SymbolMatchKind,
 }
 
 /// Result of impact analysis
@@ -92,6 +102,11 @@ pub fn search_symbol(symbol: &str, analyses: &[FileAnalysis]) -> SymbolSearchRes
                     line: m.line,
                     context: m.context.clone(),
                     is_definition: is_def,
+                    kind: if is_def {
+                        SymbolMatchKind::Definition
+                    } else {
+                        SymbolMatchKind::Usage
+                    },
                 });
             }
         }
@@ -103,6 +118,80 @@ pub fn search_symbol(symbol: &str, analyses: &[FileAnalysis]) -> SymbolSearchRes
                     line: exp.line.unwrap_or(0),
                     context: format!("export {} {}", exp.kind, exp.name),
                     is_definition: true,
+                    kind: SymbolMatchKind::Definition,
+                });
+            }
+        }
+
+        // 3) Local symbols (non-exported definitions)
+        for local in &analysis.local_symbols {
+            if matches_text(&local.name) {
+                let context = if local.context.is_empty() {
+                    format!("local {} {}", local.kind, local.name)
+                } else {
+                    local.context.clone()
+                };
+                matches.push(SymbolMatch {
+                    line: local.line.unwrap_or(0),
+                    context,
+                    is_definition: true,
+                    kind: SymbolMatchKind::Definition,
+                });
+            }
+        }
+
+        // 4) Import symbols (local bindings + aliases)
+        for imp in &analysis.imports {
+            if imp.symbols.is_empty() {
+                continue;
+            }
+            let import_kw = if matches!(imp.kind, crate::types::ImportKind::Type) {
+                "import type"
+            } else {
+                "import"
+            };
+            let source = if imp.source_raw.is_empty() {
+                imp.source.as_str()
+            } else {
+                imp.source_raw.as_str()
+            };
+            for sym in &imp.symbols {
+                let mut matched = matches_text(&sym.name);
+                if !matched && let Some(alias) = &sym.alias {
+                    matched = matches_text(alias);
+                }
+                if matched {
+                    let display = if sym.is_default {
+                        sym.name.clone()
+                    } else if let Some(alias) = &sym.alias {
+                        format!("{} as {}", sym.name, alias)
+                    } else {
+                        sym.name.clone()
+                    };
+                    let context = format!("{} {} from {}", import_kw, display, source);
+                    matches.push(SymbolMatch {
+                        line: imp.line.unwrap_or(0),
+                        context,
+                        is_definition: false,
+                        kind: SymbolMatchKind::Import,
+                    });
+                }
+            }
+        }
+
+        // 5) Local usage sites
+        for usage in &analysis.symbol_usages {
+            if matches_text(&usage.name) {
+                let context = if usage.context.is_empty() {
+                    format!("use {}", usage.name)
+                } else {
+                    usage.context.clone()
+                };
+                matches.push(SymbolMatch {
+                    line: usage.line,
+                    context,
+                    is_definition: false,
+                    kind: SymbolMatchKind::Usage,
                 });
             }
         }

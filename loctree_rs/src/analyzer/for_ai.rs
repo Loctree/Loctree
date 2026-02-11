@@ -5,15 +5,20 @@
 //! - Navigate via slice references
 //! - Get actionable quick wins
 //!
-//! Developed with 💀 by The Loctree Team (c)2025
+//! Vibecrafted with AI Agents by VetCoders (c)2025 VetCoders
 
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 
+use super::barrels::analyze_barrel_chaos;
+use super::dead_parrots::{DeadFilterConfig, find_dead_exports};
 use super::health_score::{HealthMetrics, calculate_health_score};
+use super::memory_lint::lint_memory_file;
 use super::report::{Confidence, DupSeverity, RankedDup, ReportSection};
 use super::root_scan::normalize_module_id;
-use super::twins::{TwinCategory, categorize_twin};
+use super::ts_lint::lint_ts_file;
+use super::twins::{TwinCategory, categorize_twin, find_dead_parrots};
+use crate::snapshot::Snapshot;
 use crate::types::{FileAnalysis, SignatureUse, SignatureUseKind};
 
 /// Top-level AI summary - the entry point for agents
@@ -144,6 +149,12 @@ pub struct AgentBundle {
     pub dynamic_imports: Vec<AgentDynamicImport>,
     pub largest_files: Vec<AgentFile>,
     pub cycles: Vec<AgentCycle>,
+    /// TypeScript lint issues (any types, ts-ignore)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ts_lint: Vec<AgentTsLintIssue>,
+    /// Memory leak issues (subscriptions, intervals, caches)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub memory_lint: Vec<AgentMemoryLintIssue>,
 }
 
 #[derive(Serialize, Default)]
@@ -216,23 +227,46 @@ pub struct AgentCycle {
     pub members: Vec<String>,
 }
 
+#[derive(Serialize)]
+pub struct AgentTsLintIssue {
+    pub file: String,
+    pub line: usize,
+    pub rule: String,
+    pub severity: String,
+    pub message: String,
+}
+
+/// Memory leak issue for agent bundle
+#[derive(Serialize)]
+pub struct AgentMemoryLintIssue {
+    pub file: String,
+    pub line: usize,
+    pub rule: String,
+    pub severity: String,
+    pub message: String,
+}
+
 /// Generate AI report from analysis results
+///
+/// If `snapshot` is provided, it's used for accurate barrel_chaos calculation.
+/// Otherwise falls back to (possibly incomplete) sections.twins_data.
 pub fn generate_for_ai_report(
     project_root: &str,
     sections: &[ReportSection],
     analyses: &[FileAnalysis],
+    snapshot: Option<&Snapshot>,
 ) -> ForAiReport {
     let now = time::OffsetDateTime::now_utc();
     let generated_at = now
         .format(&time::format_description::well_known::Iso8601::DEFAULT)
         .unwrap_or_else(|_| "unknown".to_string());
 
-    let summary = compute_summary(sections, analyses);
+    let summary = compute_summary(sections, analyses, snapshot);
     let section_refs = build_section_refs(sections);
     let quick_wins = extract_quick_wins(sections, analyses);
     let priority_tasks = build_priority_tasks(&quick_wins);
     let hub_files = find_hub_files(analyses);
-    let bundle = build_agent_bundle(sections, analyses);
+    let bundle = build_agent_bundle(project_root, sections, analyses);
 
     ForAiReport {
         project: project_root.to_string(),
@@ -246,7 +280,7 @@ pub fn generate_for_ai_report(
     }
 }
 
-fn build_priority_tasks(quick_wins: &[QuickWin]) -> Vec<PriorityTask> {
+pub(crate) fn build_priority_tasks(quick_wins: &[QuickWin]) -> Vec<PriorityTask> {
     quick_wins
         .iter()
         .take(10)
@@ -287,7 +321,11 @@ fn build_priority_tasks(quick_wins: &[QuickWin]) -> Vec<PriorityTask> {
         .collect()
 }
 
-fn compute_summary(sections: &[ReportSection], analyses: &[FileAnalysis]) -> ForAiSummary {
+fn compute_summary(
+    sections: &[ReportSection],
+    analyses: &[FileAnalysis],
+    snapshot: Option<&Snapshot>,
+) -> ForAiSummary {
     // When sections are empty but we have analyses (e.g., --full-scan), use analyses.len()
     let files_analyzed: usize = if sections.is_empty() {
         analyses.len()
@@ -300,7 +338,29 @@ fn compute_summary(sections: &[ReportSection], analyses: &[FileAnalysis]) -> For
     } else {
         analyses.iter().map(|a| a.loc).sum()
     };
-    let dead_exports: usize = sections.iter().map(|s| s.dead_exports.len()).sum();
+    // Use find_dead_exports directly for consistency with findings.rs
+    let dead_exports: usize = {
+        let dead_ok_globs = snapshot
+            .map(|s| {
+                let mut merged: Vec<String> = Vec::new();
+                for root in &s.metadata.roots {
+                    merged.extend(crate::fs_utils::load_loctignore_dead_ok_globs(
+                        std::path::Path::new(root),
+                    ));
+                }
+                merged.sort();
+                merged.dedup();
+                merged
+            })
+            .unwrap_or_default();
+
+        let dead_filter = DeadFilterConfig {
+            dead_ok_globs,
+            ..Default::default()
+        };
+        let dead_parrots = find_dead_exports(analyses, false, None, dead_filter);
+        dead_parrots.len()
+    };
     let duplicate_exports: usize = sections.iter().map(|s| s.ranked_dups.len()).sum();
     let missing_handlers: usize = sections.iter().map(|s| s.missing_handlers.len()).sum();
     let unregistered_handlers: usize = sections.iter().map(|s| s.unregistered_handlers.len()).sum();
@@ -314,12 +374,31 @@ fn compute_summary(sections: &[ReportSection], analyses: &[FileAnalysis]) -> For
     let dynamic_imports: usize = sections.iter().map(|s| s.dynamic.len()).sum();
     let circular_imports: usize = sections.iter().map(|s| s.circular_imports.len()).sum();
 
-    // Collect twins data from sections
-    let twins_dead_parrots: usize = sections
-        .iter()
-        .filter_map(|s| s.twins_data.as_ref())
-        .map(|t| t.dead_parrots.len())
-        .sum();
+    // Count barrel chaos issues (missing barrels + deep chains + inconsistent paths)
+    // Use snapshot directly for accurate count (consistent with findings.rs)
+    let barrel_chaos_count: usize = if let Some(snap) = snapshot {
+        let barrel_analysis = analyze_barrel_chaos(snap);
+        barrel_analysis.missing_barrels.len()
+            + barrel_analysis.deep_chains.len()
+            + barrel_analysis.inconsistent_paths.len()
+    } else {
+        // Fallback to sections.twins_data (may be incomplete)
+        sections
+            .iter()
+            .filter_map(|s| s.twins_data.as_ref())
+            .map(|t| {
+                t.barrel_chaos.missing_barrels.len()
+                    + t.barrel_chaos.deep_chains.len()
+                    + t.barrel_chaos.inconsistent_paths.len()
+            })
+            .sum()
+    };
+
+    // Use find_dead_parrots from twins module directly for consistency with findings.rs
+    let twins_dead_parrots: usize = {
+        let twins_result = find_dead_parrots(analyses, false, false);
+        twins_result.dead_parrots.len()
+    };
 
     let (twins_same_language, twins_cross_language): (usize, usize) = sections
         .iter()
@@ -388,15 +467,16 @@ fn compute_summary(sections: &[ReportSection], analyses: &[FileAnalysis]) -> For
     };
 
     // Vector-based health score with 3 severity dimensions:
-    // - CERTAIN (50%): missing_handlers, unregistered_handlers, breaking_cycles
+    // - CERTAIN (50%): breaking_cycles (missing_handlers excluded for consistency with findings.rs)
     // - HIGH (30%): unused_high_confidence, dead_exports, twins_dead_parrots
     // - SMELL (20%): twins_same_language, barrel_chaos, structural_cycles, cascades, duplicates/5
     //
     // Log-normalized to project size: larger projects get less penalty per issue
+    // NOTE: missing_handlers/unregistered_handlers are excluded from health score
+    // to match findings.rs which doesn't have access to command gap data.
+    // These are still reported in the summary for visibility.
     let health_metrics = HealthMetrics {
-        // CERTAIN
-        missing_handlers,
-        unregistered_handlers,
+        // CERTAIN (missing_handlers excluded - not available in findings.rs)
         breaking_cycles: circular_imports, // TODO: distinguish breaking vs structural
         // HIGH
         unused_high_confidence,
@@ -404,8 +484,8 @@ fn compute_summary(sections: &[ReportSection], analyses: &[FileAnalysis]) -> For
         twins_dead_parrots,
         // SMELL
         twins_same_language,
-        barrel_chaos_count: 0, // TODO: integrate barrel analysis
-        structural_cycles: 0,  // TODO: distinguish from breaking
+        barrel_chaos_count,
+        structural_cycles: 0, // TODO: distinguish from breaking
         cascade_imports,
         duplicate_exports,
         // Context
@@ -468,7 +548,11 @@ fn build_section_refs(sections: &[ReportSection]) -> Vec<ForAiSectionRef> {
         .collect()
 }
 
-fn build_agent_bundle(sections: &[ReportSection], analyses: &[FileAnalysis]) -> AgentBundle {
+fn build_agent_bundle(
+    project_root: &str,
+    sections: &[ReportSection],
+    analyses: &[FileAnalysis],
+) -> AgentBundle {
     let handlers = build_handler_groups(sections);
 
     let mut all_dups: Vec<RankedDup> = sections
@@ -539,6 +623,71 @@ fn build_agent_bundle(sections: &[ReportSection], analyses: &[FileAnalysis]) -> 
 
     let cycles = build_agent_cycles(sections);
 
+    // TypeScript lint - scan TS/TSX files for type safety issues
+    let root = std::path::Path::new(project_root);
+    let ts_lint: Vec<AgentTsLintIssue> = analyses
+        .iter()
+        .filter(|a| {
+            matches!(
+                std::path::Path::new(&a.path)
+                    .extension()
+                    .and_then(std::ffi::OsStr::to_str),
+                Some("ts") | Some("tsx")
+            )
+        })
+        .flat_map(|a| {
+            let full_path = root.join(&a.path);
+            if let Ok(content) = std::fs::read_to_string(&full_path) {
+                lint_ts_file(&full_path, &content)
+                    .into_iter()
+                    .map(|issue| AgentTsLintIssue {
+                        file: a.path.clone(),
+                        line: issue.line,
+                        rule: issue.rule,
+                        severity: issue.severity,
+                        message: issue.message,
+                    })
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            }
+        })
+        .filter(|i| i.severity == "high") // Only high severity for quick wins
+        .take(50) // Limit output size
+        .collect();
+
+    // Memory lint - scan JS/TS files for memory leak patterns
+    let memory_lint: Vec<AgentMemoryLintIssue> = analyses
+        .iter()
+        .filter(|a| {
+            matches!(
+                std::path::Path::new(&a.path)
+                    .extension()
+                    .and_then(std::ffi::OsStr::to_str),
+                Some("ts") | Some("tsx") | Some("js") | Some("jsx")
+            )
+        })
+        .flat_map(|a| {
+            let full_path = root.join(&a.path);
+            if let Ok(content) = std::fs::read_to_string(&full_path) {
+                lint_memory_file(&full_path, &content)
+                    .into_iter()
+                    .map(|issue| AgentMemoryLintIssue {
+                        file: a.path.clone(),
+                        line: issue.line,
+                        rule: issue.rule,
+                        severity: issue.severity,
+                        message: issue.message,
+                    })
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            }
+        })
+        .filter(|i| i.severity == "high") // Only high severity for quick wins
+        .take(30) // Limit output size
+        .collect();
+
     AgentBundle {
         handlers,
         duplicates,
@@ -546,6 +695,8 @@ fn build_agent_bundle(sections: &[ReportSection], analyses: &[FileAnalysis]) -> 
         dynamic_imports,
         largest_files,
         cycles,
+        ts_lint,
+        memory_lint,
     }
 }
 
@@ -648,7 +799,10 @@ fn severity_label(severity: DupSeverity) -> &'static str {
     }
 }
 
-fn extract_quick_wins(sections: &[ReportSection], analyses: &[FileAnalysis]) -> Vec<QuickWin> {
+pub(crate) fn extract_quick_wins(
+    sections: &[ReportSection],
+    analyses: &[FileAnalysis],
+) -> Vec<QuickWin> {
     let mut wins = Vec::new();
     let mut priority = 1u8;
 
@@ -1115,7 +1269,7 @@ pub fn print_agent_feed_jsonl(report: &ForAiReport) {
     }
 }
 
-fn find_hub_files(analyses: &[FileAnalysis]) -> Vec<HubFile> {
+pub(crate) fn find_hub_files(analyses: &[FileAnalysis]) -> Vec<HubFile> {
     use std::collections::HashMap;
 
     // Build reverse index: who imports what
@@ -1213,6 +1367,9 @@ mod tests {
             lazy_circular_imports: vec![],
             dynamic: vec![],
             analyze_limit: 50,
+            generated_at: None,
+            schema_name: None,
+            schema_version: None,
             missing_handlers: vec![],
             unregistered_handlers: vec![],
             unused_handlers: vec![],
@@ -1225,11 +1382,14 @@ mod tests {
             graph_warning: None,
             git_branch: None,
             git_commit: None,
+            priority_tasks: vec![],
+            hub_files: vec![],
             crowds: vec![],
             dead_exports: vec![],
             twins_data: None,
             coverage_gaps: vec![],
             health_score: None,
+            refactor_plan: None,
         }
     }
 
@@ -1238,7 +1398,7 @@ mod tests {
         let sections: Vec<ReportSection> = vec![];
         let analyses: Vec<FileAnalysis> = vec![];
 
-        let summary = compute_summary(&sections, &analyses);
+        let summary = compute_summary(&sections, &analyses, None);
 
         assert_eq!(summary.files_analyzed, 0);
         assert_eq!(summary.total_loc, 0);
@@ -1257,7 +1417,7 @@ mod tests {
             mock_file("src/c.rs", 50),
         ];
 
-        let summary = compute_summary(&sections, &analyses);
+        let summary = compute_summary(&sections, &analyses, None);
 
         assert_eq!(summary.files_analyzed, 3);
         assert_eq!(summary.total_loc, 350);
@@ -1288,12 +1448,13 @@ mod tests {
         let sections = vec![section];
         let analyses: Vec<FileAnalysis> = vec![];
 
-        let summary = compute_summary(&sections, &analyses);
+        let summary = compute_summary(&sections, &analyses, None);
 
         assert_eq!(summary.missing_handlers, 2);
         assert!(summary.priority.contains("CRITICAL"));
-        // Missing handlers penalty: 2 * 20 = 40
-        assert!(summary.health_score < 100);
+        // Note: missing_handlers is excluded from health score (not available in findings.rs)
+        // so health score remains 100 with empty analyses
+        assert_eq!(summary.health_score, 100);
     }
 
     #[test]
@@ -1310,7 +1471,7 @@ mod tests {
         let sections = vec![section];
         let analyses: Vec<FileAnalysis> = vec![];
 
-        let summary = compute_summary(&sections, &analyses);
+        let summary = compute_summary(&sections, &analyses, None);
 
         assert_eq!(summary.unregistered_handlers, 1);
         assert!(summary.priority.contains("WARNING"));
@@ -1330,7 +1491,7 @@ mod tests {
         let sections = vec![section];
         let analyses: Vec<FileAnalysis> = vec![];
 
-        let summary = compute_summary(&sections, &analyses);
+        let summary = compute_summary(&sections, &analyses, None);
 
         assert_eq!(summary.unused_high_confidence, 1);
         assert!(summary.priority.contains("CLEANUP"));
@@ -1458,7 +1619,7 @@ mod tests {
         let sections = vec![mock_section("src", 5)];
         let analyses = vec![mock_file("src/a.ts", 100), mock_file("src/b.ts", 50)];
 
-        let report = generate_for_ai_report("/project", &sections, &analyses);
+        let report = generate_for_ai_report("/project", &sections, &analyses, None);
 
         assert_eq!(report.project, "/project");
         assert!(!report.generated_at.is_empty());
@@ -1485,19 +1646,17 @@ mod tests {
         let sections = vec![section];
         let analyses: Vec<FileAnalysis> = vec![];
 
-        let summary = compute_summary(&sections, &analyses);
+        let summary = compute_summary(&sections, &analyses, None);
 
         // Should be in valid range
         assert!(summary.health_score <= 100);
-        // With 10 missing handlers in ~1000 LOC project, should have significant penalty
-        // Log-normalized: ln(11)/ln(1001) * 50 ≈ 17 penalty → health ≈ 83
-        assert!(
-            summary.health_score < 90,
-            "Expected health < 90 with 10 missing handlers, got {}",
+        // missing_handlers is now excluded from health score (for consistency with findings.rs)
+        // With empty analyses and only missing_handlers, health should be 100
+        assert_eq!(
+            summary.health_score, 100,
+            "Expected health = 100 since missing_handlers is excluded, got {}",
             summary.health_score
         );
-        // But not zero - log normalization is more forgiving
-        assert!(summary.health_score > 0);
     }
 
     #[test]
@@ -1686,6 +1845,7 @@ mod tests {
             ..Default::default()
         };
         consumer.imports.push(ImportEntry {
+            line: None,
             source: "src/tray.rs".to_string(),
             source_raw: "src/tray.rs".to_string(),
             kind: ImportKind::Static,
@@ -1760,16 +1920,17 @@ mod tests {
         let sections = vec![section];
         let analyses: Vec<FileAnalysis> = vec![];
 
-        let summary = compute_summary(&sections, &analyses);
+        let summary = compute_summary(&sections, &analyses, None);
 
-        // Check twins are counted
-        assert_eq!(summary.twins_dead_parrots, 1);
+        // twins_dead_parrots now comes from find_dead_parrots(analyses), not sections
+        // With empty analyses, it returns 0
+        assert_eq!(summary.twins_dead_parrots, 0);
+        // twins_same_language still comes from sections
         assert_eq!(summary.twins_same_language, 1);
         assert_eq!(summary.twins_cross_language, 0);
 
-        // Health score should be reduced (but not much with log-normalization)
-        // 1 dead_parrot (HIGH) + 1 same_lang twin (SMELL) in ~1000 LOC
-        // Log-normalized penalties are small for few issues in decent-sized project
+        // Health score should be reduced slightly (only 1 same_lang twin - SMELL category)
+        // With log-normalization, penalty is small for 1 issue in ~1000 LOC
         assert!(
             summary.health_score < 100,
             "Expected health < 100 with twins, got {}",
@@ -1821,7 +1982,7 @@ mod tests {
         let sections = vec![section];
         let analyses: Vec<FileAnalysis> = vec![];
 
-        let summary = compute_summary(&sections, &analyses);
+        let summary = compute_summary(&sections, &analyses, None);
 
         // Cross-language twins should NOT add to penalty
         assert_eq!(summary.twins_same_language, 0);
@@ -1855,21 +2016,14 @@ mod tests {
         let sections = vec![section];
         let analyses: Vec<FileAnalysis> = vec![];
 
-        let summary = compute_summary(&sections, &analyses);
+        let summary = compute_summary(&sections, &analyses, None);
 
-        // 10 dead parrots (HIGH severity) in ~1000 LOC project
-        // Log-normalized: ln(11)/ln(1001) * 30 ≈ 10 penalty → health ≈ 90
-        assert_eq!(summary.twins_dead_parrots, 10);
-        assert!(
-            summary.health_score < 100,
-            "Expected health < 100 with 10 dead parrots, got {}",
-            summary.health_score
-        );
-        assert!(
-            summary.health_score > 80,
-            "Expected health > 80 with log-normalization, got {}",
-            summary.health_score
-        );
-        assert!(summary.priority.contains("dead parrots"));
+        // twins_dead_parrots now comes from find_dead_parrots(analyses), not sections
+        // With empty analyses, it returns 0
+        assert_eq!(summary.twins_dead_parrots, 0);
+        // With no dead parrots, health should be 100
+        assert_eq!(summary.health_score, 100);
+        // Priority should be HEALTHY since no issues
+        assert!(summary.priority.contains("HEALTHY"));
     }
 }

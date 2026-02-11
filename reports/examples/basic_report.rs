@@ -2,7 +2,7 @@
 //!
 //! Run with: `cargo run --example basic_report`
 
-use report_leptos::{render_report, types::ReportSection, JsAssets};
+use report_leptos::{JsAssets, render_report, types::ReportSection};
 
 fn main() {
     // Create a simple report section

@@ -55,13 +55,9 @@
 //!
 //! See the [README](https://github.com/Loctree/Loctree) for full documentation.
 
-#![doc(html_root_url = "https://docs.rs/loctree/0.8.4")]
-#![doc(
-    html_favicon_url = "https://raw.githubusercontent.com/Loctree/Loctree/main/assets/loctree-badge.svg"
-)]
-#![doc(
-    html_logo_url = "https://raw.githubusercontent.com/Loctree/Loctree/main/assets/loctree-badge.svg"
-)]
+#![doc(html_root_url = "https://docs.rs/loctree/0.8.12")]
+#![doc(html_favicon_url = "https://loct.io/assets/loctree-logo.png")]
+#![doc(html_logo_url = "https://loct.io/assets/loctree-logo.png")]
 
 // ============================================================================
 // Core Modules
@@ -189,7 +185,8 @@ pub mod layoutmap;
 
 /// Incremental snapshot persistence.
 ///
-/// Saves analysis results to `.loctree/snapshot.json` for faster subsequent runs.
+/// Saves analysis results to cached artifacts for faster subsequent runs.
+/// By default, artifacts live in the OS user cache dir (override via `LOCT_CACHE_DIR`).
 /// Uses file modification times to skip unchanged files.
 ///
 /// # Key Types
@@ -220,6 +217,17 @@ pub mod tree;
 /// - `ExportSymbol` - Export declaration
 /// - `CommandRef` - Tauri command reference
 pub mod types;
+
+/// Terminal color utilities for CLI output.
+///
+/// Provides ANSI color codes and semantic helpers for consistent
+/// colorized output across all loctree commands.
+///
+/// # Key Types
+///
+/// - [`Painter`](colors::Painter) - Color-aware string formatter
+/// - [`is_enabled`](colors::is_enabled) - Color mode detection
+pub mod colors;
 
 /// Git operations for temporal awareness.
 ///
@@ -303,6 +311,15 @@ pub mod impact;
 /// Provides file system watching with debouncing and incremental re-scanning.
 pub mod watch;
 
+/// Refactor plan generation for architectural reorganization.
+///
+/// Analyzes module coupling and suggests safe file reorganization:
+/// - Layer detection (UI, App, Kernel, Infra)
+/// - Risk scoring based on consumer count and file size
+/// - Topological ordering for safe incremental moves
+/// - Shim generation for backward compatibility
+pub mod refactor_plan;
+
 // ============================================================================
 // Re-exports for convenience
 // ============================================================================
@@ -348,6 +365,15 @@ pub use analyzer::CommandGap;
 
 /// Ranked duplicate export.
 pub use analyzer::RankedDup;
+
+/// Refactor plan result.
+pub use refactor_plan::RefactorPlan;
+
+/// Architectural layer classification.
+pub use refactor_plan::Layer;
+
+/// Risk level for refactor operations.
+pub use refactor_plan::RiskLevel;
 
 // ============================================================================
 // CLI types (new subcommand interface)

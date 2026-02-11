@@ -1,12 +1,17 @@
 # Neovim Setup
 
+> **Part of [loctree-suite](https://github.com/Loctree/loctree-suite)**
+> The LSP server and editor integrations ship with loctree-suite.
+> Install the free CLI with `cargo install loctree`, then upgrade to suite for IDE features.
+
 Configure Neovim to use `loctree-lsp` for dead code detection and navigation.
 
 ## Prerequisites
 
 - Neovim 0.8+
 - [nvim-lspconfig](https://github.com/neovim/nvim-lspconfig)
-- Loctree installed: `cargo install loctree`
+- [loctree-suite](https://github.com/Loctree/loctree-suite) with `loctree-lsp` binary
+- Loctree CLI installed: `cargo install loctree`
 
 ## Configuration
 
@@ -121,7 +126,7 @@ Check if loctree is listed and running.
 
 ### No diagnostics
 
-Ensure `.loctree/snapshot.json` exists:
+Ensure a snapshot exists (run `loct` once):
 
 ```bash
 loct  # Generate snapshot
@@ -135,4 +140,4 @@ loct  # Generate snapshot
 
 ---
 
-*Created by M&K (c)2025 The LibraxisAI Team*
+*VibeCrafted with AI Agents (c)2024-2026 VetCoders*

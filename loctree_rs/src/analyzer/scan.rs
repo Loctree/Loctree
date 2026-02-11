@@ -322,7 +322,6 @@ pub(crate) fn analyze_file(
 }
 
 /// Expand gather_files with gitignore handling. Returns the list of files and the visited set.
-#[allow(dead_code)]
 pub fn collect_files(
     root_path: &Path,
     options: &Options,
@@ -523,6 +522,7 @@ mod tests {
             FileAnalysis {
                 path: "src/app.ts".to_string(),
                 imports: vec![crate::types::ImportEntry {
+                    line: None,
                     source: "./constants".to_string(),
                     source_raw: "./constants".to_string(),
                     kind: crate::types::ImportKind::Static,
@@ -624,6 +624,7 @@ mod tests {
             FileAnalysis {
                 path: "src/app.ts".to_string(),
                 imports: vec![crate::types::ImportEntry {
+                    line: None,
                     source: "./constants".to_string(),
                     source_raw: "./constants".to_string(),
                     kind: crate::types::ImportKind::Static,

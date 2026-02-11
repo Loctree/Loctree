@@ -30,7 +30,8 @@ EXAMPLES:
   loctjq '[.edges[] | {a: .from, b: .to}] as $all | $all[] | select(. as $e | $all | any(.a == $e.b and .b == $e.a)) | [.a, .b] | sort | unique'
 
 NOTES:
-  - Snapshot discovery: newest .loctree/*/snapshot.json (by mtime)
+  - Snapshot discovery: global cache first, then legacy .loctree/*/snapshot.json
+  - Respects LOCT_CACHE_DIR env var
   - Requires: jq
   - Tip: pipe to 'less' or 'jq -C' for colored output
 EOF
@@ -58,11 +59,119 @@ if [[ ${1:-} == "--snapshot" ]]; then
 fi
 
 if [[ -z ${snapshot} ]]; then
-  snapshot=$(ls -1t .loctree/*/snapshot.json 2>/dev/null | head -1 || true)
+  # Resolve global cache directory (mirrors loctree_rs cache_base_dir logic)
+  cache_is_relative="0"
+  if [[ -n ${LOCT_CACHE_DIR:-} ]]; then
+    cache_base="${LOCT_CACHE_DIR}"
+    if [[ "${cache_base}" != /* ]]; then
+      cache_is_relative="1"
+    fi
+  elif [[ "$(uname)" == "Darwin" && -n ${HOME:-} ]]; then
+    cache_base="${HOME}/Library/Caches/loctree"
+  elif [[ -n ${XDG_CACHE_HOME:-} ]]; then
+    cache_base="${XDG_CACHE_HOME}/loctree"
+  elif [[ -n ${HOME:-} ]]; then
+    cache_base="${HOME}/.cache/loctree"
+  else
+    cache_base="/tmp/loctree"
+  fi
+
+  sha256_16() {
+    if command -v shasum >/dev/null 2>&1; then
+      printf '%s' "$1" | shasum -a 256 | cut -c1-16
+    else
+      # linux fallback
+      printf '%s' "$1" | sha256sum | awk '{print $1}' | cut -c1-16
+    fi
+  }
+
+  stat_mtime() {
+    if stat -f %m "$1" >/dev/null 2>&1; then
+      stat -f %m "$1"
+    else
+      stat -c %Y "$1"
+    fi
+  }
+
+  best_snapshot_from() {
+    local dir="$1"
+    local best=""
+    local best_mtime=0
+    local f=""
+
+    if [[ -f "${dir}/snapshot.json" ]]; then
+      best="${dir}/snapshot.json"
+      best_mtime=$(stat_mtime "${best}" || echo 0)
+    fi
+
+    shopt -s nullglob
+    for f in "${dir}"/*/snapshot.json; do
+      local m
+      m=$(stat_mtime "${f}" 2>/dev/null || echo 0)
+      if [[ -z ${best} || ${m} -gt ${best_mtime} ]]; then
+        best="${f}"
+        best_mtime="${m}"
+      fi
+    done
+    shopt -u nullglob
+
+    printf '%s' "${best}"
+  }
+
+  discover_root() {
+    local start
+    start=$(pwd -P)
+    local current="${start}"
+
+    while true; do
+      if [[ -d "${current}/.loctree" ]]; then
+        printf '%s' "${current}"
+        return 0
+      fi
+
+      if [[ "${cache_is_relative}" == "1" ]]; then
+        # LOCT_CACHE_DIR is a project-local dir (e.g. .loctree). Check relative to current.
+        if [[ -d "${current}/${cache_base}" ]]; then
+          printf '%s' "${current}"
+          return 0
+        fi
+      else
+        local pid
+        pid=$(sha256_16 "${current}")
+        if [[ -d "${cache_base}/projects/${pid}" ]]; then
+          printf '%s' "${current}"
+          return 0
+        fi
+      fi
+
+      local parent
+      parent=$(dirname "${current}")
+      if [[ "${parent}" == "${current}" ]]; then
+        break
+      fi
+      current="${parent}"
+    done
+
+    printf '%s' "${start}"
+  }
+
+  canonical_root=$(discover_root)
+  project_id=$(sha256_16 "${canonical_root}")
+  if [[ "${cache_is_relative}" == "1" ]]; then
+    cache_project="${canonical_root}/${cache_base}"
+  else
+    cache_project="${cache_base}/projects/${project_id}"
+  fi
+
+  # Try global cache first, then legacy project-local .loctree/
+  snapshot=$(best_snapshot_from "${cache_project}")
+  if [[ -z ${snapshot} ]]; then
+    snapshot=$(best_snapshot_from "${canonical_root}/.loctree")
+  fi
 fi
 
 if [[ -z ${snapshot} || ! -f ${snapshot} ]]; then
-  echo "loctjq: no snapshot found at .loctree/*/snapshot.json" >&2
+  echo "loctjq: no snapshot found (checked global cache and .loctree/)" >&2
   echo "Run: loct (or loct scan) to generate a snapshot." >&2
   exit 1
 fi

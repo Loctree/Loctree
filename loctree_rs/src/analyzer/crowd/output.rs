@@ -62,7 +62,7 @@ pub fn format_crowd(crowd: &Crowd, _verbose: bool) -> String {
     lines.push(String::new());
 
     // Members
-    lines.push(format!("📁 FILES IN CROWD ({} files)", crowd.members.len()));
+    lines.push(format!("FILES IN CROWD ({} files)", crowd.members.len()));
 
     let max_importers = crowd
         .members
@@ -90,32 +90,32 @@ pub fn format_crowd(crowd: &Crowd, _verbose: bool) -> String {
     // Issues
     if !crowd.issues.is_empty() {
         lines.push(String::new());
-        lines.push("🔍 ISSUES DETECTED".to_string());
+        lines.push("=== ISSUES DETECTED ===".to_string());
 
         for issue in &crowd.issues {
             match issue {
                 CrowdIssue::NameCollision { files } => {
                     lines.push(format!(
-                        "  • Name collision: {} files with similar names",
+                        "  - Name collision: {} files with similar names",
                         files.len()
                     ));
                 }
                 CrowdIssue::UsageAsymmetry { primary, underused } => {
                     lines.push(format!(
-                        "  • Usage asymmetry: {} is primary, {} underused",
+                        "  - Usage asymmetry: {} is primary, {} underused",
                         primary,
                         underused.len()
                     ));
                 }
                 CrowdIssue::ExportOverlap { files, overlap: _ } => {
                     lines.push(format!(
-                        "  • Export overlap: {} files export similar things",
+                        "  - Export overlap: {} files export similar things",
                         files.len()
                     ));
                 }
                 CrowdIssue::Fragmentation { categories } => {
                     lines.push(format!(
-                        "  • Fragmentation: functionality split across {} categories",
+                        "  - Fragmentation: functionality split across {} categories",
                         categories.len()
                     ));
                 }

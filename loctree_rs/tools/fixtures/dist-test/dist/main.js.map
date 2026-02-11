@@ -1,6 +1,0 @@
-{
-  "version": 3,
-  "sources": ["../src/index.ts", "../src/utils.ts"],
-  "names": ["usedFunction", "USED_CONST", "UsedClass", "helper"],
-  "mappings": "AAAA,SAASA,cAAc;AACvB,MAAMC,WAAW,GAAG,MAAM;AAC1B,MAAMC,SAAS;AACf,SAASC,MAAM"
-}

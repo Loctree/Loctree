@@ -1,6 +1,6 @@
 //! Command enum definition for the CLI interface.
 //!
-//! Created by M&K (c)2025 The LibraxisAI Team
+//! Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team
 //! Co-Authored-By: Maciej <void@div0.space> & Klaudiusz <the1st@whoai.am>
 
 use super::options::*;
@@ -43,6 +43,15 @@ pub enum Command {
 
     /// Show event flow (ghost events, orphan handlers, races).
     Events(EventsOptions),
+
+    /// Show pipeline summary (events, commands, risks).
+    Pipelines(PipelinesOptions),
+
+    /// Show AI insights summary.
+    Insights(InsightsOptions),
+
+    /// Show manifest summaries (package.json, Cargo.toml, pyproject).
+    Manifests(ManifestsOptions),
 
     /// Snapshot metadata and project info.
     Info(InfoOptions),
@@ -115,6 +124,9 @@ pub enum Command {
 
     /// Interactive diagnostics with actionable recommendations.
     Doctor(DoctorOptions),
+
+    /// Generate architectural refactoring plan based on module analysis.
+    Plan(PlanOptions),
 }
 
 impl Default for Command {

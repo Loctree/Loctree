@@ -76,8 +76,8 @@ pub fn analyze_impact(snapshot: &Snapshot, target: &str, options: &ImpactOptions
     // Build reverse dependency map for efficient lookup
     let reverse_deps = build_reverse_dependency_map(snapshot);
 
-    // Normalize target path
-    let normalized_target = normalize_path(target);
+    // Normalize target path (handles absolute paths, ./ prefix, backslashes)
+    let normalized_target = normalize_path(&snapshot.normalize_path(target));
 
     // Start BFS from target file
     queue.push_back((

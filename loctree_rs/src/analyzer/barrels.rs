@@ -487,24 +487,12 @@ mod tests {
     fn test_is_pure_rust_project() {
         use crate::snapshot::SnapshotMetadata;
         use crate::types::FileAnalysis;
-        use std::collections::HashSet;
 
         // Helper to create a snapshot with given files
         fn make_snapshot(file_paths: Vec<&str>) -> Snapshot {
             Snapshot {
                 metadata: SnapshotMetadata {
-                    schema_version: String::new(),
-                    generated_at: String::new(),
-                    roots: Vec::new(),
-                    languages: HashSet::new(),
-                    file_count: 0,
-                    total_loc: 0,
-                    scan_duration_ms: 0,
-                    resolver_config: None,
-                    git_repo: None,
-                    git_branch: None,
-                    git_commit: None,
-                    git_scan_id: None,
+                    ..Default::default()
                 },
                 files: file_paths
                     .iter()
@@ -546,23 +534,11 @@ mod tests {
     fn test_analyze_barrel_chaos_skips_rust_projects() {
         use crate::snapshot::SnapshotMetadata;
         use crate::types::FileAnalysis;
-        use std::collections::HashSet;
 
         // Pure Rust project should return empty analysis
         let rust_snapshot = Snapshot {
             metadata: SnapshotMetadata {
-                schema_version: String::new(),
-                generated_at: String::new(),
-                roots: Vec::new(),
-                languages: HashSet::new(),
-                file_count: 0,
-                total_loc: 0,
-                scan_duration_ms: 0,
-                resolver_config: None,
-                git_repo: None,
-                git_branch: None,
-                git_commit: None,
-                git_scan_id: None,
+                ..Default::default()
             },
             files: vec![
                 FileAnalysis {

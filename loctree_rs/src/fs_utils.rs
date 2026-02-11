@@ -4,6 +4,7 @@ use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 
 use crate::types::Options;
 
@@ -12,21 +13,18 @@ pub struct GitIgnoreChecker {
 }
 
 impl GitIgnoreChecker {
+    /// Create a new GitIgnoreChecker for the given path.
+    ///
+    /// Uses libgit2's repository discovery which properly searches upward
+    /// from the given path to find the git repository root. This handles:
+    /// - Nested directories (e.g., running from src/deep/nested/)
+    /// - Git worktrees (where .git is a file pointing to the main repo)
+    /// - Submodules
+    ///
+    /// Returns `None` if the path is not inside a git repository.
     pub fn new(root: &Path) -> Option<Self> {
-        let output = Command::new("git")
-            .arg("-C")
-            .arg(root)
-            .arg("rev-parse")
-            .arg("--show-toplevel")
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .output()
-            .ok()?;
-        if !output.status.success() {
-            return None;
-        }
-        let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let repo_root = PathBuf::from(path_str);
+        // Use libgit2 to find git root (searches upward properly)
+        let repo_root = crate::git::find_git_root(root)?;
         Some(Self { repo_root })
     }
 
@@ -49,10 +47,38 @@ impl GitIgnoreChecker {
     }
 }
 
-/// Load patterns from `.loctignore` (preferred) or `.loctreeignore` (legacy) file in root directory.
-/// Supports gitignore-style syntax: one pattern per line, # comments, empty lines ignored.
-/// Returns empty vec if file doesn't exist.
-pub fn load_loctreeignore(root: &Path) -> Vec<String> {
+#[derive(Debug, Default, Clone)]
+pub struct LoctignoreRules {
+    /// Ignore patterns for file scanning.
+    pub ignore_patterns: Vec<String>,
+    /// Glob patterns for suppressing dead-export findings.
+    ///
+    /// Lines in `.loctignore`:
+    /// - `@loctignore:dead-ok <glob>`
+    pub dead_ok_globs: Vec<String>,
+}
+
+fn parse_loctignore_directive(line: &str) -> Option<(&str, &str)> {
+    // Syntax: "@loctignore:<directive> <arg...>"
+    let rest = line.strip_prefix("@loctignore:")?.trim_start();
+    if rest.is_empty() {
+        return None;
+    }
+    // Split once on whitespace (directive + remainder)
+    let mut split_at: Option<usize> = None;
+    for (idx, ch) in rest.char_indices() {
+        if ch.is_whitespace() {
+            split_at = Some(idx);
+            break;
+        }
+    }
+    match split_at {
+        Some(idx) => Some((&rest[..idx], rest[idx..].trim())),
+        None => Some((rest, "")),
+    }
+}
+
+pub fn load_loctignore_rules(root: &Path) -> LoctignoreRules {
     // Prefer .loctignore (short form, matches `loct` CLI)
     let ignore_file = root.join(".loctignore");
     let ignore_file = if ignore_file.exists() {
@@ -61,18 +87,18 @@ pub fn load_loctreeignore(root: &Path) -> Vec<String> {
         // Fallback to .loctreeignore for backward compatibility
         let legacy = root.join(".loctreeignore");
         if !legacy.exists() {
-            return Vec::new();
+            return LoctignoreRules::default();
         }
         legacy
     };
 
     let file = match File::open(&ignore_file) {
         Ok(f) => f,
-        Err(_) => return Vec::new(),
+        Err(_) => return LoctignoreRules::default(),
     };
 
     let reader = BufReader::new(file);
-    let mut patterns = Vec::new();
+    let mut rules = LoctignoreRules::default();
 
     for line in reader.lines() {
         let line = match line {
@@ -87,16 +113,136 @@ pub fn load_loctreeignore(root: &Path) -> Vec<String> {
             continue;
         }
 
-        // Treat each line as an ignore pattern
-        patterns.push(trimmed.to_string());
+        if trimmed.starts_with("@loctignore:") {
+            if let Some((directive, arg)) = parse_loctignore_directive(trimmed)
+                && directive == "dead-ok"
+                && !arg.is_empty()
+            {
+                rules.dead_ok_globs.push(arg.to_string());
+            }
+            continue;
+        }
+
+        // Treat each non-directive line as an ignore pattern
+        rules.ignore_patterns.push(trimmed.to_string());
     }
 
-    patterns
+    rules
+}
+
+/// Load ignore patterns from `.loctignore` (preferred) or `.loctreeignore` (legacy).
+///
+/// Notes:
+/// - Supports `#` comments and empty lines.
+/// - Skips `@loctignore:*` directives (handled separately by `load_loctignore_rules`).
+/// - Returns empty vec if file doesn't exist.
+pub fn load_loctreeignore(root: &Path) -> Vec<String> {
+    load_loctignore_rules(root).ignore_patterns
+}
+
+pub fn load_loctignore_dead_ok_globs(root: &Path) -> Vec<String> {
+    load_loctignore_rules(root).dead_ok_globs
+}
+
+fn is_glob_pattern(pattern: &str) -> bool {
+    // Minimal, pragmatic detection: if it looks like a glob, treat it as one.
+    pattern.contains('*') || pattern.contains('?') || pattern.contains('[')
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct IgnoreMatchers {
+    pub ignore_paths: Vec<PathBuf>,
+    pub ignore_globs: Option<Arc<globset::GlobSet>>,
+}
+
+pub fn build_ignore_matchers(patterns: &[String], root: &Path) -> IgnoreMatchers {
+    let mut ignore_paths: Vec<PathBuf> = Vec::new();
+    let mut builder = globset::GlobSetBuilder::new();
+    let mut any_globs = false;
+
+    for pattern in patterns {
+        let trimmed = pattern.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with("@loctignore:") {
+            continue;
+        }
+
+        if is_glob_pattern(trimmed) {
+            // For relative patterns, anchor at scan root (absolute match against `full_path`).
+            let mut add_glob = |glob_pat: &str| {
+                let candidate = if Path::new(glob_pat).is_absolute() {
+                    PathBuf::from(glob_pat)
+                } else {
+                    root.join(glob_pat)
+                };
+                let Some(mut glob_str) = candidate.to_str().map(|s| s.replace('\\', "/")) else {
+                    return;
+                };
+                // Normalize accidental "./" segments for nicer patterns.
+                if glob_str.contains("/./") {
+                    glob_str = glob_str.replace("/./", "/");
+                }
+                match globset::Glob::new(&glob_str) {
+                    Ok(glob) => {
+                        builder.add(glob);
+                        any_globs = true;
+                    }
+                    Err(e) => {
+                        eprintln!("[loctree][warn] invalid ignore glob '{}': {}", glob_pat, e);
+                    }
+                }
+            };
+
+            // A trailing slash means "directory" in gitignore-ish conventions.
+            // We add both the directory itself and its contents.
+            if let Some(base) = trimmed.strip_suffix('/') {
+                if !base.is_empty() {
+                    add_glob(base);
+                    add_glob(&format!("{}/**", base));
+                }
+            } else {
+                add_glob(trimmed);
+            }
+            continue;
+        }
+
+        // Literal path prefix ignore (fast)
+        let candidate = PathBuf::from(trimmed);
+        let full = if candidate.is_absolute() {
+            candidate
+        } else {
+            root.join(candidate)
+        };
+        ignore_paths.push(full.canonicalize().unwrap_or(full));
+    }
+
+    let ignore_globs = if any_globs {
+        match builder.build() {
+            Ok(set) => Some(Arc::new(set)),
+            Err(e) => {
+                eprintln!("[loctree][warn] failed to build ignore globset: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    IgnoreMatchers {
+        ignore_paths,
+        ignore_globs,
+    }
 }
 
 pub fn normalise_ignore_patterns(patterns: &[String], root: &Path) -> Vec<PathBuf> {
     patterns
         .iter()
+        .filter(|pattern| {
+            let trimmed = pattern.trim();
+            !trimmed.is_empty()
+                && !trimmed.starts_with('#')
+                && !trimmed.starts_with("@loctignore:")
+                && !is_glob_pattern(trimmed)
+        })
         .map(|pattern| {
             let candidate = PathBuf::from(pattern);
             let full = if candidate.is_absolute() {
@@ -152,6 +298,11 @@ pub fn should_ignore(
         .ignore_paths
         .iter()
         .any(|ignored| full_path.starts_with(ignored))
+    {
+        return true;
+    }
+    if let Some(globs) = &options.ignore_globs
+        && globs.is_match(full_path)
     {
         return true;
     }
@@ -281,6 +432,7 @@ mod tests {
         Options {
             extensions: Some(HashSet::from([ext.to_string()])),
             ignore_paths: Vec::new(),
+            ignore_globs: None,
             use_gitignore: false,
             max_depth: Some(1),
             color: ColorMode::Never,
@@ -309,6 +461,7 @@ mod tests {
         Options {
             extensions: None,
             ignore_paths: Vec::new(),
+            ignore_globs: None,
             use_gitignore: false,
             max_depth: None,
             color: ColorMode::Never,
@@ -376,6 +529,7 @@ mod tests {
         let opts = Options {
             extensions: None,
             ignore_paths: Vec::new(),
+            ignore_globs: None,
             use_gitignore: false,
             max_depth: Some(1),
             color: ColorMode::Never,
@@ -542,6 +696,38 @@ mod tests {
         assert!(patterns.contains(&"node_modules".to_string()));
         assert!(patterns.contains(&"*.log".to_string()));
         assert!(patterns.contains(&"build/".to_string()));
+    }
+
+    #[test]
+    fn test_load_loctignore_directives() {
+        let tmp = tempfile::tempdir().expect("tmp dir");
+        let ignore_file = tmp.path().join(".loctignore");
+        std::fs::write(
+            &ignore_file,
+            "# Comment\nfixtures/\n@loctignore:dead-ok src/generated/**\n",
+        )
+        .expect("write loctignore");
+
+        let patterns = load_loctreeignore(tmp.path());
+        assert_eq!(patterns, vec!["fixtures/".to_string()]);
+
+        let dead_ok = load_loctignore_dead_ok_globs(tmp.path());
+        assert_eq!(dead_ok, vec!["src/generated/**".to_string()]);
+    }
+
+    #[test]
+    fn test_should_ignore_with_ignore_globs() {
+        let tmp = tempfile::tempdir().expect("tmp dir");
+        let patterns = vec!["**/*.log".to_string()];
+        let matchers = build_ignore_matchers(&patterns, tmp.path());
+        let opts = Options {
+            ignore_paths: matchers.ignore_paths,
+            ignore_globs: matchers.ignore_globs,
+            ..default_opts()
+        };
+
+        assert!(should_ignore(&tmp.path().join("app.log"), &opts, None));
+        assert!(!should_ignore(&tmp.path().join("app.txt"), &opts, None));
     }
 
     #[test]

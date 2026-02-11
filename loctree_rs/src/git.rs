@@ -9,6 +9,28 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use time::{OffsetDateTime, format_description};
 
+/// Find the git repository root by searching upward from the given path.
+///
+/// Uses libgit2's `Repository::discover()` which properly handles:
+/// - Nested directories (searches upward to find .git)
+/// - Git worktrees (where .git is a file, not a directory)
+/// - Submodules
+///
+/// Returns `None` if no git repository is found.
+///
+/// # Example
+/// ```ignore
+/// // From /home/user/project/src/deep/nested/file.rs
+/// // finds /home/user/project (where .git lives)
+/// let root = find_git_root(Path::new("/home/user/project/src/deep/nested"));
+/// assert_eq!(root, Some(PathBuf::from("/home/user/project")));
+/// ```
+pub fn find_git_root(path: &Path) -> Option<PathBuf> {
+    Repository::discover(path)
+        .ok()
+        .and_then(|repo| repo.workdir().map(|p| p.to_path_buf()))
+}
+
 /// Error type for git operations
 #[derive(Debug)]
 pub enum GitError {
@@ -733,6 +755,224 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let result = GitRepo::discover(temp_dir.path());
         assert!(matches!(result, Err(GitError::NotARepository(_))));
+    }
+
+    // === find_git_root tests ===
+
+    #[test]
+    #[serial]
+    fn test_find_git_root_from_repo_root() {
+        let (temp_dir, _repo) = create_test_repo();
+        let root = super::find_git_root(temp_dir.path());
+        assert!(root.is_some());
+        // Canonicalize to handle macOS /private/var symlink
+        let expected = temp_dir.path().canonicalize().unwrap();
+        let actual = root.unwrap().canonicalize().unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    #[serial]
+    fn test_find_git_root_from_nested_dir() {
+        let (temp_dir, _repo) = create_test_repo();
+        let path = temp_dir.path();
+
+        // Create deeply nested directory structure
+        let nested = path.join("src").join("deep").join("nested").join("dir");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("file.rs"), "// test").unwrap();
+
+        // find_git_root should find the repo root from nested dir
+        let root = super::find_git_root(&nested);
+        assert!(root.is_some(), "Should find git root from nested directory");
+
+        let expected = temp_dir.path().canonicalize().unwrap();
+        let actual = root.unwrap().canonicalize().unwrap();
+        assert_eq!(
+            actual, expected,
+            "Should return the repo root, not the nested dir"
+        );
+    }
+
+    #[test]
+    fn test_find_git_root_non_git_dir() {
+        let temp_dir = TempDir::new().unwrap();
+        let root = super::find_git_root(temp_dir.path());
+        assert!(root.is_none(), "Should return None for non-git directory");
+    }
+
+    #[test]
+    #[serial]
+    fn test_find_git_root_nested_repo_chooses_closest() {
+        // Create outer repo
+        let outer_dir = TempDir::new().unwrap();
+        let outer_path = outer_dir.path();
+
+        Command::new("git")
+            .args(["init"])
+            .current_dir(outer_path)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.email", "test@test.com"])
+            .current_dir(outer_path)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(outer_path)
+            .output()
+            .unwrap();
+        std::fs::write(outer_path.join("outer.txt"), "outer").unwrap();
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(outer_path)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "outer"])
+            .current_dir(outer_path)
+            .output()
+            .unwrap();
+
+        // Create inner repo (nested git repo)
+        let inner_path = outer_path.join("packages").join("inner");
+        std::fs::create_dir_all(&inner_path).unwrap();
+
+        Command::new("git")
+            .args(["init"])
+            .current_dir(&inner_path)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.email", "test@test.com"])
+            .current_dir(&inner_path)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(&inner_path)
+            .output()
+            .unwrap();
+        std::fs::write(inner_path.join("inner.txt"), "inner").unwrap();
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(&inner_path)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "inner"])
+            .current_dir(&inner_path)
+            .output()
+            .unwrap();
+
+        // Create deep nested dir inside inner repo
+        let deep = inner_path.join("src").join("deep");
+        std::fs::create_dir_all(&deep).unwrap();
+
+        // find_git_root from deep should find INNER repo (closest), not outer
+        let root = super::find_git_root(&deep);
+        assert!(root.is_some(), "Should find git root from nested repo");
+
+        let inner_canon = inner_path.canonicalize().unwrap();
+        let found_canon = root.unwrap().canonicalize().unwrap();
+        assert_eq!(
+            found_canon, inner_canon,
+            "Should find closest (inner) repo, not outer"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_find_git_root_worktree() {
+        // Create main repo
+        let main_dir = TempDir::new().unwrap();
+        let main_path = main_dir.path();
+
+        Command::new("git")
+            .args(["init"])
+            .current_dir(main_path)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.email", "test@test.com"])
+            .current_dir(main_path)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(main_path)
+            .output()
+            .unwrap();
+        std::fs::write(main_path.join("main.txt"), "main").unwrap();
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(main_path)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "initial"])
+            .current_dir(main_path)
+            .output()
+            .unwrap();
+
+        // Create a branch for the worktree
+        Command::new("git")
+            .args(["branch", "feature"])
+            .current_dir(main_path)
+            .output()
+            .unwrap();
+
+        // Create worktree in a sibling directory
+        let worktree_dir = TempDir::new().unwrap();
+        let worktree_path = worktree_dir.path().join("feature-worktree");
+
+        let output = Command::new("git")
+            .args([
+                "worktree",
+                "add",
+                worktree_path.to_str().unwrap(),
+                "feature",
+            ])
+            .current_dir(main_path)
+            .output()
+            .unwrap();
+
+        if !output.status.success() {
+            // Skip test if git worktree not supported (old git version)
+            eprintln!("Skipping worktree test: git worktree not available");
+            return;
+        }
+
+        // Verify .git is a file (not directory) in worktree
+        let git_path = worktree_path.join(".git");
+        assert!(git_path.exists(), "Worktree should have .git");
+        assert!(
+            git_path.is_file(),
+            "Worktree .git should be a file, not directory"
+        );
+
+        // find_git_root should work from worktree
+        let root = super::find_git_root(&worktree_path);
+        assert!(root.is_some(), "Should find git root from worktree");
+
+        let worktree_canon = worktree_path.canonicalize().unwrap();
+        let found_canon = root.unwrap().canonicalize().unwrap();
+        assert_eq!(
+            found_canon, worktree_canon,
+            "Should return worktree path as root"
+        );
+
+        // Cleanup worktree
+        let _ = Command::new("git")
+            .args([
+                "worktree",
+                "remove",
+                "--force",
+                worktree_path.to_str().unwrap(),
+            ])
+            .current_dir(main_path)
+            .output();
     }
 
     #[test]

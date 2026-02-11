@@ -6,7 +6,7 @@
 //! - Re-exports: `export { foo } from './bar'`, `export * from './module'`
 //! - TypeScript-specific: interfaces, type aliases, enums
 //!
-//! Created by M&K (c)2025 The LibraxisAI Team
+//! Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team
 
 use oxc_ast::ast::*;
 use oxc_ast_visit::Visit;
@@ -74,7 +74,7 @@ impl<'a> JsVisitor<'a> {
                 match declaration {
                     Declaration::VariableDeclaration(var) => {
                         for d in &var.declarations {
-                            if let BindingPatternKind::BindingIdentifier(id) = &d.id.kind {
+                            if let BindingPattern::BindingIdentifier(id) = &d.id {
                                 let name = id.name.to_string();
                                 // Check if it's a function expression or arrow function
                                 if let Some(init) = &d.init {

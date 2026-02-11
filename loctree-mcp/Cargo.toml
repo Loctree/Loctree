@@ -1,9 +1,10 @@
 [package]
 name = "loctree-mcp"
-version = "0.2.3"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 description = "MCP server for loctree - hot codebase analysis for AI agents"
-license = "MIT OR Apache-2.0"
+license.workspace = true
+authors.workspace = true
 repository = "https://github.com/Loctree/Loctree"
 keywords = ["mcp", "loctree", "ai", "code-analysis", "agents"]
 categories = ["development-tools", "command-line-utilities"]
@@ -12,8 +13,8 @@ categories = ["development-tools", "command-line-utilities"]
 # MCP Protocol
 rmcp = { version = "0.12", features = ["server", "transport-io"] }
 
-# Loctree core (path for local dev, version for crates.io)
-loctree = { version = "0.8.4", path = "../loctree_rs" }
+# Loctree core (workspace version)
+loctree = { workspace = true }
 
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }

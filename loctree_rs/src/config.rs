@@ -41,7 +41,7 @@ impl LoctreeConfig {
     /// Load config from `.loctree/config.toml` in the given root directory.
     /// Returns default config if file doesn't exist or is invalid.
     pub fn load(root: &Path) -> Self {
-        let config_path = root.join(".loctree").join("config.toml");
+        let config_path = crate::snapshot::project_config_dir(root).join("config.toml");
         Self::load_from_path(&config_path)
     }
 

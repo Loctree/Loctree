@@ -119,7 +119,7 @@ loct --for-ai > context.jsonl
 
 ### `--agent-json`
 
-Emit single-shot agent JSON bundle (vs JSONL stream). Saved to `.loctree/agent.json`.
+Emit single-shot agent JSON bundle (vs JSONL stream). Saved to the artifacts dir (cache by default; override via `LOCT_CACHE_DIR`).
 
 ```bash
 loct --agent-json
@@ -318,7 +318,11 @@ LOCT_COLOR=always loct health | less -R  # Force color in pipe
 
 ### `LOCT_CACHE_DIR`
 
-Override default cache directory. Default: `.loctree/`
+Override default cache directory.
+
+Default: platform user cache directory (`~/Library/Caches/loctree` on macOS, `~/.cache/loctree` on Linux).
+
+Tip: set `LOCT_CACHE_DIR=.loctree` to restore legacy project-local artifacts.
 
 **Example:**
 ```bash
@@ -603,5 +607,5 @@ loct auto --verbose
 
 ---
 
-Created by M&K (c)2025 The LibraxisAI Team
+Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team
 Co-Authored-By: Maciej <void@div0.space> & Klaudiusz <the1st@whoai.am>

@@ -300,7 +300,7 @@ Interactive Graph
 
 ## Credits
 
-**Created by**: M&K (c)2025 The LibraxisAI Team
+**Created by**: M&K (c)2025 The Loctree Team
 **Technology**: Cytoscape.js v3.28.1
 **Inspired by**: Dead Parrot Spaghetti Protocol
 **Project**: loctree - Code relationship analyzer

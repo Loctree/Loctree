@@ -1,12 +1,9 @@
-# Loctree ignore patterns
-# Created by M&K (c)2026 VetCoders
+# Loctree ignore patterns for loctree-suite monorepo
+# Created by M&K (c)2025 The LibraxisAI Team
 # Note: Only literal paths supported, no globs
 
 # Test fixtures - intentional patterns (cycles, dead code, etc)
 loctree_rs/tests/fixtures/
-
-# VSCode extension - depends on loctree-lsp (only in loctree-suite)
-editors/vscode/
 
 # Build outputs - not source code
 reports/wasm/assets/

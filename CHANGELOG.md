@@ -4,7 +4,204 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
+## [0.8.12] - 2026-02-11
+
+### Added
+- sync with loctree-suite v0.8.4
+- sync loctree_rs + loctree_server with loctree-suite
+- implement OXC-based AST parser for JS/TS
+- Add `loct` as short alias for `loctree` + clippy fixes (#39)
+
+### Fixed
+- support workspace-version crates in make version
+- exclude known false positives from Semgrep scan
+- inline nosemgrep annotations for Semgrep OSS
+- address PR #49 review feedback
+- Clippy warnings - needless borrows and useless vec
+
+## [0.8.11] - 2026-02-07
+
+### Added
+- **Cross-match search** (`loct find`): Multi-term queries (`loct find Snapshot FileAnalysis`) now show WHERE terms MEET — files and functions where 2+ different terms co-occur. Replaces flat OR bloat with semantic cross-matching. Single-term queries unchanged.
+- **`make publish` target**: Cascading publish to crates.io in correct dependency order (report-leptos -> loctree -> loctree-mcp) with pre-publish validation. Supports `BUMP=true` for version bump + publish in one step.
+
+### Fixed
+- **Snapshot schema compatibility**: Patch bumps no longer invalidate user snapshots. Schema version comparison now uses `major.minor` only — a 0.8.10 snapshot works with 0.8.11 binary without warnings.
+- **Version management scripts**: Fixed `version-bump.sh` and `sync-version.sh` for workspace versioning (`version.workspace = true`). Both scripts failed silently when crates inherit version from workspace root.
+- **Publish dependency order**: Fixed cascade from wrong order (loctree -> report-leptos) to correct (report-leptos -> loctree -> loctree-mcp) matching actual Cargo dependency chain. Increased crates.io index wait from 10s to 15s.
+
+### Changed
+- Multi-term search splits display into compact cross-match summary + filtered symbol matches (files with cross-matches listed first, symbols filtered to those files only)
+- `search_params()` uses function-level cross-match for multi-term: only params from functions where 2+ different terms match in the signature
+
+## [0.8.9] - 2026-01-21
+
+### Added
+- add sys.modules monkey-patch detection
+- Add loctree-lsp crate and VSCode extension scaffold
+- Add health score gauge, audit tab & style unification
+- add clickable file links to Pipelines tab
+- v0.8.0 - auto-snapshot + dual license MIT/Apache-2.0
+- Add rmcp-mux launcher, configs, and documentation
+- Embedded blog system with markdown rendering
+- Add micro-animation to loct startup + rebrand to loct
+- add batch index CLI command
+
+### Fixed
+- handle comments between #[tauri::command] and fn
+- use libgit2 for upward git root discovery
+- clippy warnings in query.rs
+- respect suppressions in loct twins command
+- handle async def for route detection
+- multiline imports and __all__ duplicate detection
+- refactor Pipelines to vanilla JS for expand/filter/search
+- critical path rebasing + file existence validation
+- add Pipelines nav tab + remove memex from scripts and hooks
+- Add SLED_PATH env for multi-instance support
+- Use ASCII characters in deprecation warning
+
+## [0.8.9-dev] - 2026-01-20
+
+### Added
+- add sys.modules monkey-patch detection
+- Add loctree-lsp crate and VSCode extension scaffold
+- Add health score gauge, audit tab & style unification
+- add clickable file links to Pipelines tab
+- v0.8.0 - auto-snapshot + dual license MIT/Apache-2.0
+- Add rmcp-mux launcher, configs, and documentation
+- Embedded blog system with markdown rendering
+- Add micro-animation to loct startup + rebrand to loct
+- add batch index CLI command
+
+### Fixed
+- clippy warnings in query.rs
+- respect suppressions in loct twins command
+- handle async def for route detection
+- multiline imports and __all__ duplicate detection
+- refactor Pipelines to vanilla JS for expand/filter/search
+- critical path rebasing + file existence validation
+- add Pipelines nav tab + remove memex from scripts and hooks
+- Add SLED_PATH env for multi-instance support
+- Use ASCII characters in deprecation warning
+
+## [0.8.8] - 2026-01-18
+
+### Added
+- add sys.modules monkey-patch detection
+- Add loctree-lsp crate and VSCode extension scaffold
+- Add health score gauge, audit tab & style unification
+- add clickable file links to Pipelines tab
+- v0.8.0 - auto-snapshot + dual license MIT/Apache-2.0
+- Add rmcp-mux launcher, configs, and documentation
+- Embedded blog system with markdown rendering
+- Add micro-animation to loct startup + rebrand to loct
+- add batch index CLI command
+
+### Fixed
+- clippy warnings in query.rs
+- respect suppressions in loct twins command
+- handle async def for route detection
+- multiline imports and __all__ duplicate detection
+- refactor Pipelines to vanilla JS for expand/filter/search
+- critical path rebasing + file existence validation
+- add Pipelines nav tab + remove memex from scripts and hooks
+- Add SLED_PATH env for multi-instance support
+- Use ASCII characters in deprecation warning
+
+## [0.8.7] - 2026-01-15
+
+### Added
+- add sys.modules monkey-patch detection
+- Add loctree-lsp crate and VSCode extension scaffold
+- Add health score gauge, audit tab & style unification
+- add clickable file links to Pipelines tab
+- v0.8.0 - auto-snapshot + dual license MIT/Apache-2.0
+- Add rmcp-mux launcher, configs, and documentation
+- Embedded blog system with markdown rendering
+- Add micro-animation to loct startup + rebrand to loct
+- add batch index CLI command
+
+### Fixed
+- clippy warnings in query.rs
+- respect suppressions in loct twins command
+- handle async def for route detection
+- multiline imports and __all__ duplicate detection
+- refactor Pipelines to vanilla JS for expand/filter/search
+- critical path rebasing + file existence validation
+- add Pipelines nav tab + remove memex from scripts and hooks
+- Add SLED_PATH env for multi-instance support
+- Use ASCII characters in deprecation warning
+
+## [0.8.6] - 2026-01-15
+
+### Added
+- add sys.modules monkey-patch detection
+- Add loctree-lsp crate and VSCode extension scaffold
+- Add health score gauge, audit tab & style unification
+- add clickable file links to Pipelines tab
+- v0.8.0 - auto-snapshot + dual license MIT/Apache-2.0
+- Add rmcp-mux launcher, configs, and documentation
+- Embedded blog system with markdown rendering
+- Add micro-animation to loct startup + rebrand to loct
+- add batch index CLI command
+
+### Fixed
+- respect suppressions in loct twins command
+- handle async def for route detection
+- multiline imports and __all__ duplicate detection
+- refactor Pipelines to vanilla JS for expand/filter/search
+- critical path rebasing + file existence validation
+- add Pipelines nav tab + remove memex from scripts and hooks
+- Add SLED_PATH env for multi-instance support
+- Use ASCII characters in deprecation warning
+
+## [0.8.5-dev] - 2026-01-12
+
+### Added
+- add sys.modules monkey-patch detection
+- Add loctree-lsp crate and VSCode extension scaffold
+- Add health score gauge, audit tab & style unification
+- add clickable file links to Pipelines tab
+- v0.8.0 - auto-snapshot + dual license MIT/Apache-2.0
+- Add rmcp-mux launcher, configs, and documentation
+- Embedded blog system with markdown rendering
+- Add micro-animation to loct startup + rebrand to loct
+- add batch index CLI command
+
+### Fixed
+- respect suppressions in loct twins command
+- handle async def for route detection
+- multiline imports and __all__ duplicate detection
+- refactor Pipelines to vanilla JS for expand/filter/search
+- critical path rebasing + file existence validation
+- add Pipelines nav tab + remove memex from scripts and hooks
+- Add SLED_PATH env for multi-instance support
+- Use ASCII characters in deprecation warning
+
 ## [0.8.4] - 2026-01-10
+
+### Added
+- add sys.modules monkey-patch detection
+- Add loctree-lsp crate and VSCode extension scaffold
+- Add health score gauge, audit tab & style unification
+- add clickable file links to Pipelines tab
+- v0.8.0 - auto-snapshot + dual license MIT/Apache-2.0
+- Add rmcp-mux launcher, configs, and documentation
+- Embedded blog system with markdown rendering
+- Add micro-animation to loct startup + rebrand to loct
+- add batch index CLI command
+
+### Fixed
+- respect suppressions in loct twins command
+- handle async def for route detection
+- multiline imports and __all__ duplicate detection
+- refactor Pipelines to vanilla JS for expand/filter/search
+- critical path rebasing + file existence validation
+- add Pipelines nav tab + remove memex from scripts and hooks
+- Add SLED_PATH env for multi-instance support
+- Use ASCII characters in deprecation warning
+
+## [0.8.4] - 2026-01-09
 
 ### Added
 - **Function parameter indexing**: `ExportSymbol` now includes `params: Vec<ParamInfo>` with name, type annotation, and default value info
@@ -21,6 +218,9 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
   - Case-insensitive regex matching (consistent with CLI)
   - Parameter search in MCP tool output
   - Multi-query support via `foo|bar` syntax
+- **Fuzzy fallback for `loct query where-symbol`**: When no exact match found, returns semantic matches via `find_similar`
+  - Enables hook augmentation for typos/partial names (e.g., `analyze_python` → `analyze_py_file`)
+  - Top 5 matches with score > 0.5 returned with similarity scores
 
 ### Changed
 - Rust analyzer now correctly sets `kind` field (was hardcoded to "const" for all items)

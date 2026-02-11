@@ -3,13 +3,13 @@
 //! Implements the App Shell layout with Sidebar and Main Content areas.
 
 use super::{
-    Icon, ReportSectionView, ICON_ARROWS_CLOCKWISE, ICON_CLIPBOARD_LIST, ICON_COPY, ICON_FLASK,
-    ICON_GHOST, ICON_GRAPH, ICON_LIGHTNING, ICON_PLUG, ICON_SQUARES_FOUR, ICON_TREE_STRUCTURE,
-    ICON_TWINS, ICON_USERS,
+    ICON_ARROWS_CLOCKWISE, ICON_CLIPBOARD_LIST, ICON_COPY, ICON_FLASK, ICON_GHOST, ICON_GRAPH,
+    ICON_LIGHTNING, ICON_PLUG, ICON_SQUARES_FOUR, ICON_TREE_STRUCTURE, ICON_TWINS, ICON_USERS,
+    Icon, ReportSectionView,
 };
+use crate::JsAssets;
 use crate::styles::{CSP, REPORT_CSS};
 use crate::types::ReportSection;
-use crate::JsAssets;
 use leptos::prelude::*;
 
 // Inline data URI for the loctree logo (ensures logo renders offline in reports)
@@ -100,6 +100,10 @@ pub fn ReportDocument(
                                 <Icon path=ICON_TWINS class="icon-sm" />
                                 "Twins"
                             </button>
+                            <button class="nav-item" data-tab="refactor">
+                                <Icon path=ICON_TREE_STRUCTURE class="icon-sm" />
+                                "Refactor"
+                            </button>
                             <button class="nav-item" data-tab="coverage">
                                 <Icon path=ICON_FLASK class="icon-sm" />
                                 "Coverage"
@@ -120,7 +124,7 @@ pub fn ReportDocument(
                                 <span id="test-toggle-text">"Hide Tests"</span>
                             </button>
                             <div style="margin-top: 8px; font-size: 11px;">
-                                "loctree v0.8.4"
+                                "loctree v0.8.12"
                                 <br />
                                 <span style="color:var(--theme-text-tertiary)">"Snapshot"</span>
                             </div>
@@ -229,29 +233,34 @@ const APP_SCRIPT: &str = r#"
       themeToggle.addEventListener('click', toggleTheme);
   }
 
+  const activateTab = (tabName) => {
+      if (!tabName) return;
+
+      // Update Sidebar buttons
+      document.querySelectorAll('.sidebar-nav .nav-item').forEach(b => {
+          b.classList.toggle('active', b.dataset.tab === tabName);
+      });
+
+      // Update all tab panels across all sections
+      document.querySelectorAll('.tab-panel').forEach(p => {
+          const isActive = p.dataset.tabName === tabName;
+          p.classList.toggle('active', isActive);
+
+          if (isActive && tabName === 'graph') {
+              window.dispatchEvent(new Event('resize'));
+          }
+      });
+
+      // Also update header tab-bar buttons if present (for visual sync)
+      document.querySelectorAll('.tab-bar .tab-btn').forEach(b => {
+          b.classList.toggle('active', b.dataset.tab === tabName);
+      });
+  };
+
   // 1. Sidebar Navigation (Tab Switching)
   document.querySelectorAll('.sidebar-nav .nav-item[data-tab]').forEach(btn => {
       btn.addEventListener('click', () => {
-          const tabName = btn.dataset.tab;
-
-          // Update Sidebar buttons
-          document.querySelectorAll('.sidebar-nav .nav-item').forEach(b => b.classList.remove('active'));
-          btn.classList.add('active');
-
-          // Update all tab panels across all sections
-          document.querySelectorAll('.tab-panel').forEach(p => {
-              const isActive = p.dataset.tabName === tabName;
-              p.classList.toggle('active', isActive);
-
-              if (isActive && tabName === 'graph') {
-                  window.dispatchEvent(new Event('resize'));
-              }
-          });
-
-          // Also update header tab-bar buttons if present (for visual sync)
-          document.querySelectorAll('.tab-bar .tab-btn').forEach(b => {
-              b.classList.toggle('active', b.dataset.tab === tabName);
-          });
+          activateTab(btn.dataset.tab);
       });
   });
 
@@ -353,6 +362,38 @@ const APP_SCRIPT: &str = r#"
       });
   });
 
+  // 3d2. Coverage Filter Buttons - filter coverage rows by severity
+  document.querySelectorAll('.coverage-summary').forEach(summary => {
+      const buttons = summary.querySelectorAll('[data-coverage-filter]');
+      const panel = summary.closest('.panel');
+      const table = panel ? panel.querySelector('.coverage-table') : null;
+      const rows = table ? table.querySelectorAll('tbody tr[data-coverage-severity]') : [];
+
+      if (!buttons.length || !rows.length) return;
+
+      const applyFilter = (filter) => {
+          const current = filter || 'all';
+
+          rows.forEach(row => {
+              const sev = row.dataset.coverageSeverity || '';
+              const show = current === 'all' || sev === current;
+              row.style.display = show ? '' : 'none';
+          });
+
+          buttons.forEach(btn => {
+              btn.classList.toggle('active', (btn.dataset.coverageFilter || 'all') === current);
+          });
+      };
+
+      buttons.forEach(btn => {
+          btn.addEventListener('click', () => {
+              applyFilter(btn.dataset.coverageFilter || 'all');
+          });
+      });
+
+      applyFilter(summary.dataset.coverageDefaultFilter || 'all');
+  });
+
   // 3e. Pipeline Search - filter cards by name
   const pipelineSearch = document.querySelector('[data-pipeline-search]');
   if (pipelineSearch) {
@@ -440,6 +481,16 @@ const APP_SCRIPT: &str = r#"
       }
   });
 
+  // 3g. Refactor Phase Toggle - collapse/expand phases
+  document.querySelectorAll('.phase-header[data-toggle="phase"]').forEach(header => {
+      header.addEventListener('click', () => {
+          const card = header.closest('.phase-card');
+          if (card) {
+              card.classList.toggle('collapsed');
+          }
+      });
+  });
+
   // 4. Test Files Toggle - Hide/Show test file rows
   const toggleTestsBtn = document.getElementById('toggle-tests-btn');
   const toggleIcon = document.getElementById('test-toggle-icon');
@@ -474,6 +525,17 @@ const APP_SCRIPT: &str = r#"
     toggleTestsBtn.addEventListener('click', () => {
       const currentlyHidden = localStorage.getItem('loctree-hide-tests') === 'true';
       updateTestsVisibility(!currentlyHidden);
+
+      // Open Coverage tab when user asks to show/hide tests
+      activateTab('coverage');
+
+      // Scroll to coverage section for quick access
+      const coverageSection = document.querySelector('.coverage-summary');
+      if (coverageSection) {
+        coverageSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } else {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
     });
   }
 })();

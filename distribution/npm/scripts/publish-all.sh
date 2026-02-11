@@ -3,7 +3,28 @@
 
 set -e
 
-VERSION=${1:-"0.6.14"}
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+WORKSPACE_TOML="$ROOT_DIR/Cargo.toml"
+
+WORKSPACE_VERSION="$(
+  awk '
+    /^\[workspace\.package\]/ { in_ws=1; next }
+    in_ws && /^\[/ { in_ws=0 }
+    in_ws && /^version[[:space:]]*=/ {
+      gsub(/"/, "", $3)
+      print $3
+      exit
+    }
+  ' "$WORKSPACE_TOML"
+)"
+
+if [ -z "$WORKSPACE_VERSION" ]; then
+  echo "Error: failed to resolve workspace version from $WORKSPACE_TOML" >&2
+  exit 1
+fi
+
+VERSION=${1:-"$WORKSPACE_VERSION"}
 DRY_RUN=${DRY_RUN:-false}
 
 echo "=== loctree npm Publishing Script ==="

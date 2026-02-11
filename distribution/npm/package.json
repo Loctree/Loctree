@@ -1,18 +1,13 @@
 {
   "name": "loctree",
-  "version": "0.8.4",
-  "description": "Fast, language-aware codebase analyzer for detecting dead exports, circular imports, and generating dependency graphs",
+  "version": "0.8.11",
+  "description": "Scan once, query everything: AI-oriented static analysis for dead exports, circular imports, dependency graphs, and context slices",
   "keywords": [
     "static-analysis",
-    "dead-code",
-    "imports",
-    "exports",
-    "codebase",
-    "typescript",
-    "javascript",
-    "rust",
-    "circular-dependencies",
-    "dependency-graph"
+    "dependency-graph",
+    "dead-exports",
+    "circular-imports",
+    "ai-agents"
   ],
   "main": "index.js",
   "types": "index.d.ts",
@@ -45,13 +40,13 @@
     "node": ">=14.0.0"
   },
   "optionalDependencies": {
-    "@loctree/darwin-arm64": "0.8.4",
-    "@loctree/darwin-x64": "0.8.4",
-    "@loctree/linux-arm64-gnu": "0.8.4",
-    "@loctree/linux-arm64-musl": "0.8.4",
-    "@loctree/linux-x64-gnu": "0.8.4",
-    "@loctree/linux-x64-musl": "0.8.4",
-    "@loctree/win32-arm64-msvc": "0.8.4",
-    "@loctree/win32-x64-msvc": "0.8.4"
+    "@loctree/darwin-arm64": "0.8.11",
+    "@loctree/darwin-x64": "0.8.11",
+    "@loctree/linux-arm64-gnu": "0.8.11",
+    "@loctree/linux-arm64-musl": "0.8.11",
+    "@loctree/linux-x64-gnu": "0.8.11",
+    "@loctree/linux-x64-musl": "0.8.11",
+    "@loctree/win32-arm64-msvc": "0.8.11",
+    "@loctree/win32-x64-msvc": "0.8.11"
   }
 }

@@ -160,13 +160,10 @@ pub struct HealthMetrics {
 
     // === Optional: issue details for drill-down ===
     /// Details for CERTAIN issues (up to 10)
-    #[allow(dead_code)]
     pub certain_items: Vec<HealthIssue>,
     /// Details for HIGH issues (up to 10)
-    #[allow(dead_code)]
     pub high_items: Vec<HealthIssue>,
     /// Details for SMELL issues (up to 10)
-    #[allow(dead_code)]
     pub smell_items: Vec<HealthIssue>,
 }
 

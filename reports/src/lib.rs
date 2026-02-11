@@ -262,4 +262,57 @@ mod tests {
         // Raw unescaped quote should not appear in node definitions
         assert!(!dot.contains("file\"with\"quotes"));
     }
+
+    #[test]
+    fn renders_action_plan_panel() {
+        use types::PriorityTask;
+
+        let section = ReportSection {
+            root: "test-root".into(),
+            files_analyzed: 1,
+            priority_tasks: vec![PriorityTask {
+                priority: 1,
+                kind: "dead_export".into(),
+                target: "GhostFunc".into(),
+                location: "src/ghost.rs:42".into(),
+                why: "Exported but unused".into(),
+                risk: "high".into(),
+                fix_hint: "Remove unused export".into(),
+                verify_cmd: "loct dead --confidence high".into(),
+            }],
+            ..Default::default()
+        };
+        let assets = JsAssets::default();
+        let html = render_report(&[section], &assets, false);
+
+        assert!(html.contains("Action Plan"));
+        assert!(html.contains("GhostFunc"));
+        assert!(html.contains("src/ghost.rs:42"));
+    }
+
+    #[test]
+    fn renders_hub_files_panel() {
+        use types::HubFile;
+
+        let section = ReportSection {
+            root: "test-root".into(),
+            files_analyzed: 1,
+            hub_files: vec![HubFile {
+                path: "src/lib.rs".into(),
+                loc: 120,
+                imports_count: 3,
+                exports_count: 7,
+                importers_count: 5,
+                commands_count: 1,
+                slice_cmd: "loct slice src/lib.rs".into(),
+            }],
+            ..Default::default()
+        };
+        let assets = JsAssets::default();
+        let html = render_report(&[section], &assets, false);
+
+        assert!(html.contains("Context Anchors"));
+        assert!(html.contains("src/lib.rs"));
+        assert!(html.contains("loct slice src/lib.rs"));
+    }
 }

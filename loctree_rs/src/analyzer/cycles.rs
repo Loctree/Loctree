@@ -58,9 +58,9 @@ impl CycleCompilability {
 
     pub fn icon(&self) -> &'static str {
         match self {
-            CycleCompilability::Breaking => "🔴",
-            CycleCompilability::Structural => "🟡",
-            CycleCompilability::DiamondDependency => "🟢",
+            CycleCompilability::Breaking => "[HIGH]",
+            CycleCompilability::Structural => "[LOW]",
+            CycleCompilability::DiamondDependency => "[OK]",
         }
     }
 
@@ -626,7 +626,7 @@ pub fn print_cycles_classified(classified_cycles: &[ClassifiedCycle], json_outpu
     }
 
     if classified_cycles.is_empty() {
-        println!("No circular imports detected. ✓");
+        println!("No circular imports detected. [OK]");
         return;
     }
 

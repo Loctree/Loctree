@@ -145,6 +145,46 @@ pub struct CommandBridge {
     pub emits_events: Vec<String>,
 }
 
+/// High-priority task for a first-shot plan (action + verify).
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct PriorityTask {
+    /// Priority rank (1 = highest).
+    pub priority: u8,
+    /// Task category, e.g. "dead_export", "duplicate".
+    pub kind: String,
+    /// Primary target (symbol, file, or module).
+    pub target: String,
+    /// Location hint (file:line).
+    pub location: String,
+    /// Why this is important.
+    pub why: String,
+    /// Risk severity of leaving it unfixed: high|medium|low
+    pub risk: String,
+    /// Suggested fix (short).
+    pub fix_hint: String,
+    /// Verification command to confirm fix.
+    pub verify_cmd: String,
+}
+
+/// High-connectivity file that makes a good context anchor.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct HubFile {
+    /// Relative path of the file.
+    pub path: String,
+    /// Lines of code in the file.
+    pub loc: usize,
+    /// Number of imports.
+    pub imports_count: usize,
+    /// Number of exports.
+    pub exports_count: usize,
+    /// Number of importers (reverse deps).
+    pub importers_count: usize,
+    /// Number of registered commands (if any).
+    pub commands_count: usize,
+    /// Suggested command to slice this file.
+    pub slice_cmd: String,
+}
+
 /// Directory or file node used by the report tree view.
 ///
 /// Contains relative path, aggregated LOC, and children.
@@ -917,6 +957,99 @@ pub struct InconsistentImport {
     pub alternative_paths: Vec<(String, usize)>,
 }
 
+// ============================================================================
+// Refactor Plan Types
+// ============================================================================
+
+/// A single file move in the refactor plan.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct RefactorMove {
+    /// Source file path
+    pub source: String,
+    /// Target file path
+    pub target: String,
+    /// Current architectural layer
+    pub current_layer: String,
+    /// Target architectural layer
+    pub target_layer: String,
+    /// Risk level (low, medium, high)
+    pub risk: String,
+    /// Lines of code in file
+    pub loc: usize,
+    /// Number of direct consumers (importers)
+    pub direct_consumers: usize,
+    /// Reason for move suggestion
+    pub reason: String,
+    /// Verification command
+    pub verify_cmd: String,
+}
+
+/// A shim suggestion for backward compatibility.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct RefactorShim {
+    /// Original file path (where shim will be created)
+    pub old_path: String,
+    /// New file path (where code was moved)
+    pub new_path: String,
+    /// Number of importers that would need updating
+    pub importer_count: usize,
+    /// Generated shim code (pub use statement)
+    pub code: String,
+}
+
+/// A phase in the refactor execution plan.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct RefactorPhase {
+    /// Phase name (e.g., "Phase 1: LOW Risk")
+    pub name: String,
+    /// Risk level for this phase (low, medium, high)
+    pub risk: String,
+    /// Moves in this phase
+    #[serde(default)]
+    pub moves: Vec<RefactorMove>,
+    /// Git commands for this phase
+    pub git_script: String,
+}
+
+/// Statistics about the refactor plan.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct RefactorStats {
+    /// Total files analyzed
+    pub total_files: usize,
+    /// Files that need to move
+    pub files_to_move: usize,
+    /// Shims that should be created
+    pub shims_needed: usize,
+    /// Layer distribution before refactoring (layer -> count)
+    #[serde(default)]
+    pub layer_before: std::collections::HashMap<String, usize>,
+    /// Layer distribution after refactoring (layer -> count)
+    #[serde(default)]
+    pub layer_after: std::collections::HashMap<String, usize>,
+    /// Risk breakdown (risk level -> count)
+    #[serde(default)]
+    pub by_risk: std::collections::HashMap<String, usize>,
+}
+
+/// Complete refactor plan data for visualization.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct RefactorPlanData {
+    /// Target directory analyzed
+    pub target: String,
+    /// Execution phases ordered by risk (LOW -> MEDIUM -> HIGH)
+    #[serde(default)]
+    pub phases: Vec<RefactorPhase>,
+    /// Suggested shims for backward compatibility
+    #[serde(default)]
+    pub shims: Vec<RefactorShim>,
+    /// Groups of files with cyclic dependencies
+    #[serde(default)]
+    pub cyclic_groups: Vec<Vec<String>>,
+    /// Statistics summary
+    #[serde(default)]
+    pub stats: RefactorStats,
+}
+
 /// A complete report section for one analyzed directory.
 ///
 /// This is the main data structure passed to [`crate::render_report`].
@@ -961,6 +1094,15 @@ pub struct ReportSection {
     pub dynamic: Vec<(String, Vec<String>)>,
     /// Maximum files to analyze (0 = unlimited)
     pub analyze_limit: usize,
+    /// Report generation time (RFC3339)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generated_at: Option<String>,
+    /// Schema name for artifact payload
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema_name: Option<String>,
+    /// Schema version for artifact payload
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema_version: Option<String>,
     /// Frontend commands missing backend handlers
     pub missing_handlers: Vec<CommandGap>,
     /// Backend handlers not registered in generate_handler![]
@@ -987,6 +1129,12 @@ pub struct ReportSection {
     pub git_branch: Option<String>,
     /// Git commit hash (if available)
     pub git_commit: Option<String>,
+    /// Top actionable tasks (why + fix + verify)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub priority_tasks: Vec<PriorityTask>,
+    /// High-connectivity context anchors
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hub_files: Vec<HubFile>,
     /// Crowd analysis results (naming collision detection)
     #[serde(default)]
     pub crowds: Vec<Crowd>,
@@ -1002,4 +1150,7 @@ pub struct ReportSection {
     /// Overall health score 0-100 (higher is better)
     #[serde(default)]
     pub health_score: Option<u8>,
+    /// Refactor plan data (architectural reorganization suggestions)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refactor_plan: Option<RefactorPlanData>,
 }

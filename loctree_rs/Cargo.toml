@@ -1,14 +1,14 @@
 [package]
 name = "loctree"
-version = "0.8.4"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 default-run = "loctree"
-authors = ["Loctree <loct@loctree.io>"]
-description = "Fast, language-aware codebase analyzer for detecting dead exports, circular imports, and generating dependency graphs"
-license = "MIT OR Apache-2.0"
+authors.workspace = true
+description = "Structural code intelligence for AI agents. Scan once, query everything."
+license.workspace = true
 repository = "https://github.com/Loctree/Loctree"
 readme = "../README.md"
-keywords = ["static-analysis", "dead-code", "imports", "exports", "codebase"]
+keywords = ["static-analysis", "dependency-graph", "dead-exports", "circular-imports", "ai-agents"]
 categories = ["development-tools", "command-line-utilities"]
 
 [lib]
@@ -31,23 +31,23 @@ regex = "1.12"
 globset = "0.4"
 heck = "0.5"
 time = { version = "0.3", features = ["formatting"] }
-report-leptos = { version = "0.1.21", path = "../reports" }
+report-leptos = { workspace = true }
 git2 = "0.20"
 toml = "0.8"
 urlencoding = "2.1"
 once_cell = "1.19"
 
 # AST Parsing (TypeScript/JavaScript) - OXC
-oxc_allocator = "0.102.0"
-oxc_parser = "0.102.0"
-oxc_span = "0.102.0"
-oxc_ast = "0.102.0"
-oxc_ast_visit = "0.102.0"
-oxc_semantic = "0.102.0"
+oxc_allocator = "0.110.0"
+oxc_parser = "0.110.0"
+oxc_span = "0.110.0"
+oxc_ast = "0.110.0"
+oxc_ast_visit = "0.110.0"
+oxc_semantic = "0.110.0"
 tempfile = "3"
 
 # AI Memory integration (memex command) - optional, pulls heavy deps (datafusion)
-# rmcp-memex = { version = "0.3", optional = true }
+rmcp-memex = { version = "0.3", optional = true }
 tokio = { version = "1.0", features = ["rt-multi-thread"] }
 
 # Progress UI (spinners, progress bars)
@@ -67,6 +67,10 @@ jaq-json = "1.1"
 # Fuzzy string matching for command suggestions
 strsim = "0.11"
 
+# Cache directory resolution
+sha2 = "0.10"
+dirs = "6"
+
 # Watch mode for live snapshot refresh
 notify = "8.0"
 notify-debouncer-full = "0.6"
@@ -79,4 +83,4 @@ serial_test = "3.2"
 
 [features]
 default = []
-memex = []  # feature gate for AI memory integration - enable with rmcp-memex dep when ready
+memex = ["rmcp-memex"]  # feature gate for AI memory integration

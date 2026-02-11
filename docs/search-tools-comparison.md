@@ -74,7 +74,7 @@
 | `loct commands` | Tauri FE↔BE handlers | ❌ | Frontend-backend bridges |
 | `loct events` | Event emit/listen flow | ❌ | Event analysis |
 
-### JQ Queries (on .loctree/snapshot.json)
+### JQ Queries (on snapshot.json; artifacts cached by default)
 
 ```bash
 loct '.metadata'              # Scan metadata
@@ -297,4 +297,4 @@ Claude Code's Grep tool is automatically augmented with loctree context via Post
 
 ---
 
-*Created by M&K (c)2026 VetCoders*
+*Vibecrafted with AI Agents by VetCoders (c)2026 VetCoders*

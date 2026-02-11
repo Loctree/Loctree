@@ -192,10 +192,12 @@ USAGE:
 
 DESCRIPTION:
     Semantic search for symbols (functions, classes, types) matching name patterns.
-    Uses regex patterns. Multiple queries are combined with OR logic.
+    Uses regex patterns. Multi-arg QUERY defaults to split-mode (subqueries + cross-match).
+    Use --or to combine multiple QUERY args into a single OR regex.
     Uses snapshot for instant results (15x faster than re-scanning).
 
 OPTIONS:
+    --or                                Combine multiple QUERY args with OR (legacy behavior)
     --symbol <PATTERN>, -s <PATTERN>    Search for symbols matching regex
     --pattern <PATTERN>                 Alias for --symbol (regex)
     --file <PATTERN>, -f <PATTERN>      Search for files matching regex
@@ -208,7 +210,9 @@ OPTIONS:
 
 EXAMPLES:
     loct find Patient                   # Find symbols containing \"Patient\"
-    loct find foo bar baz               # Multi-query: find any of these (NEW!)
+    loct find Props Options ViewModel   # Split-mode: run subqueries + cross-match
+    loct find \"Props Options\"          # AND-mode: require ALL terms (quoted)
+    loct find --or foo bar baz          # Legacy: combine with OR
     loct find --symbol \".*Config$\"      # Regex: symbols ending with Config"
             .to_string());
     }
@@ -220,6 +224,10 @@ EXAMPLES:
     while i < args.len() {
         let arg = &args[i];
         match arg.as_str() {
+            "--or" => {
+                opts.or_mode = true;
+                i += 1;
+            }
             "--symbol" | "-s" => {
                 let value = args
                     .get(i + 1)
@@ -288,15 +296,16 @@ EXAMPLES:
         }
     }
 
-    // Combine multiple queries with | for regex OR matching
+    // Preserve positional queries as provided; dispatch decides split/AND/OR behavior.
     if !queries.is_empty() {
-        opts.query = Some(queries.join("|"));
+        opts.queries = queries.clone();
     }
 
     // Validate that at least one search criterion is specified and not empty
     let effective_query = opts
         .query
         .as_ref()
+        .or_else(|| opts.queries.first())
         .or(opts.symbol.as_ref())
         .or(opts.file.as_ref())
         .or(opts.similar.as_ref())

@@ -4,7 +4,7 @@
 //! Differentiates between strict cycles (always circular) and
 //! lazy cycles (circular only via lazy/dynamic imports).
 
-use crate::components::icons::{Icon, ICON_SIREN, ICON_WARNING_CIRCLE};
+use crate::components::icons::{ICON_SIREN, ICON_WARNING_CIRCLE, Icon};
 use leptos::prelude::*;
 
 /// Displays circular import cycles with visual differentiation

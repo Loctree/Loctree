@@ -1,12 +1,28 @@
 use assert_cmd::cargo::cargo_bin_cmd;
-use std::path::PathBuf;
+use std::process::Command;
 
 fn loct() -> assert_cmd::Command {
     cargo_bin_cmd!("loct")
 }
 
-fn agent_index_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../landing/api/agent/index.json")
+fn agent_index_url() -> &'static str {
+    "https://loct.io/api/agent/index.json"
+}
+
+fn fetch_agent_index_json() -> serde_json::Value {
+    let output = Command::new("curl")
+        .args(["-fsSL", agent_index_url()])
+        .output()
+        .expect("run curl for loct.io agent index");
+    assert!(
+        output.status.success(),
+        "failed to fetch {} (status: {}):\n{}",
+        agent_index_url(),
+        output.status,
+        String::from_utf8_lossy(&output.stderr),
+    );
+    let text = String::from_utf8(output.stdout).expect("decode loct.io agent index as utf-8");
+    serde_json::from_str(&text).expect("parse https://loct.io/api/agent/index.json")
 }
 
 fn help_args_for_agent_cmd(cmd: &str) -> Vec<String> {
@@ -59,21 +75,12 @@ fn help_args_for_agent_cmd(cmd: &str) -> Vec<String> {
 
 #[test]
 fn agent_index_commands_have_help() {
-    let path = agent_index_path();
-    // Skip test if landing is not present (public repo excludes landing)
-    let Ok(text) = std::fs::read_to_string(&path) else {
-        eprintln!(
-            "Skipping test: landing/api/agent/index.json not found (expected in loctree-suite only)"
-        );
-        return;
-    };
-    let json: serde_json::Value =
-        serde_json::from_str(&text).expect("parse landing/api/agent/index.json");
+    let json = fetch_agent_index_json();
 
     let commands = json
         .get("commands")
         .and_then(|v| v.as_object())
-        .expect("landing/api/agent/index.json must have a top-level 'commands' object");
+        .expect("https://loct.io/api/agent/index.json must have a top-level 'commands' object");
 
     for (name, entry) in commands {
         let cmd_str = entry

@@ -27,6 +27,9 @@ pub(crate) const SUBCOMMANDS: &[&str] = &[
     "trace",
     "commands",
     "events",
+    "pipelines",
+    "insights",
+    "manifests",
     "info",
     "lint",
     "report",
@@ -54,6 +57,8 @@ pub(crate) const SUBCOMMANDS: &[&str] = &[
     "h", // alias for health
     "audit",
     "doctor",
+    "plan",
+    "p", // alias for plan
 ];
 
 /// Check if an argument looks like a new-style subcommand.

@@ -51,8 +51,8 @@ cargo install loctree loctree-mcp rmcp-memex rmcp-mux
 ### 2. Homebrew (macOS/Linux)
 
 ```bash
-# Coming soon - formula pending approval
-brew install loctree
+# Coming soon - Homebrew formula is planned but not yet available
+# brew install loctree
 ```
 
 ### 3. From Source
@@ -317,4 +317,4 @@ rm -rf ~/.rmcp_servers
 
 ---
 
-Created by M&K (c)2025 The LibraxisAI Team
+Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team

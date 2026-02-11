@@ -6,7 +6,7 @@
 
 use anyhow::{Context, Result};
 use chrono::Utc;
-use rmcp_memex::embeddings::FastEmbedder;
+use rmcp_memex::embeddings::{EmbeddingClient, EmbeddingConfig};
 use rmcp_memex::storage::{ChromaDocument, StorageManager};
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -16,6 +16,7 @@ use uuid::Uuid;
 use walkdir::WalkDir;
 
 use crate::cli::MemexOptions;
+use crate::snapshot::{Snapshot, project_cache_dir};
 
 // --- Data Structures for analysis.json ---
 
@@ -60,7 +61,6 @@ struct DeadSymbol {
 
 /// Summary of code duplication metrics.
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct CiSummary {
     /// Total number of duplication clusters found.
     #[serde(rename = "duplicateClustersCount")]
@@ -100,11 +100,7 @@ pub async fn run_memex(
 
 async fn run_memex_inner(opts: &MemexOptions, _json_output: bool, verbose: bool) -> Result<usize> {
     // 1. Resolve Analysis File Path
-    let analysis_path = if opts.report_path.is_dir() {
-        find_analysis_json(&opts.report_path)?
-    } else {
-        opts.report_path.clone()
-    };
+    let analysis_path = resolve_analysis_path(opts)?;
 
     // Canonicalize path to prevent path traversal attacks
     let analysis_path = analysis_path
@@ -140,7 +136,9 @@ async fn run_memex_inner(opts: &MemexOptions, _json_output: bool, verbose: bool)
     if verbose {
         eprintln!("[memex] Initializing embedding model...");
     }
-    let embedder = FastEmbedder::new().context("Failed to initialize FastEmbedder")?;
+    let mut embedder = EmbeddingClient::new(&EmbeddingConfig::default())
+        .await
+        .context("Failed to initialize embedding client")?;
 
     let db_path = opts
         .db_path
@@ -177,13 +175,13 @@ async fn run_memex_inner(opts: &MemexOptions, _json_output: bool, verbose: bool)
         // Convert our internal metadata string back to JSON
         let meta_json = parse_metadata_string(&metadata_str);
 
-        chroma_docs.push(ChromaDocument {
-            id: Uuid::new_v4().to_string(),
-            namespace: opts.namespace.clone(),
+        chroma_docs.push(ChromaDocument::new_flat(
+            Uuid::new_v4().to_string(),
+            opts.namespace.clone(),
             embedding,
-            metadata: Value::Object(meta_json),
-            document: text,
-        });
+            Value::Object(meta_json),
+            text,
+        ));
     }
 
     let doc_count = chroma_docs.len();
@@ -209,6 +207,51 @@ fn find_analysis_json(path: &Path) -> Result<PathBuf> {
         }
     }
     anyhow::bail!("No analysis.json found in {:?}", path)
+}
+
+fn resolve_analysis_path(opts: &MemexOptions) -> Result<PathBuf> {
+    // If user passes an explicit file, trust it.
+    if opts.report_path.is_file() {
+        return Ok(opts.report_path.clone());
+    }
+
+    // If it's a directory, search within it.
+    if opts.report_path.is_dir() {
+        return find_analysis_json(&opts.report_path);
+    }
+
+    // Default behavior: `loct memex` with no args.
+    // Historically this used `.loctree/`, but artifacts now live in the global cache by default.
+    // We keep the CLI default as `.loctree` for backwards compat, but resolve to the current
+    // project's cached artifacts if `.loctree` isn't a real directory.
+    if opts.report_path.as_path() == Path::new(".loctree") {
+        let cwd = std::env::current_dir().context("Failed to read current working directory")?;
+        let root = Snapshot::find_loctree_root(&cwd).unwrap_or(cwd);
+
+        let base_dir = project_cache_dir(&root);
+        let candidates = [
+            // Primary: current scan dir (branch@sha) in cache
+            Snapshot::artifacts_dir(&root).join("analysis.json"),
+            // Stable pointers (written by refresh_latest_artifacts)
+            base_dir.join("analysis.json"),
+            base_dir.join("latest").join("analysis.json"),
+        ];
+
+        for candidate in candidates {
+            if candidate.is_file() {
+                return Ok(candidate);
+            }
+        }
+
+        anyhow::bail!(
+            "No analysis.json found for this project. Run `loct auto` first to generate artifacts."
+        );
+    }
+
+    anyhow::bail!(
+        "Report path does not exist (or is not a directory/file): {:?}",
+        opts.report_path
+    )
 }
 
 /// Helper to parse "key:val|key2:val2" metadata string into a JSON Map.
@@ -246,20 +289,27 @@ fn prepare_documents(report: &AnalysisReport, project_id: &str) -> Vec<(String, 
         }
 
         // --- Process Duplicates ---
-        if let Some(summary) = &run.ai_views.ci_summary
-            && let Some(clusters) = &summary.top_clusters
-        {
-            for cluster in clusters {
-                let context = format!(
-                    "Code Duplication: Symbol '{}' appears {} times. Severity: {}.",
-                    cluster.symbol_name, cluster.size, cluster.severity
-                );
+        if let Some(summary) = &run.ai_views.ci_summary {
+            let summary_context = format!(
+                "Code Duplication Summary: {} duplicate clusters detected.",
+                summary.duplicate_count
+            );
+            let summary_meta = format!("type:duplication_summary|project:{}", project_id);
+            docs.push((summary_meta, summary_context));
 
-                let metadata = format!(
-                    "type:duplication|project:{}|symbol:{}",
-                    project_id, cluster.symbol_name
-                );
-                docs.push((metadata, context));
+            if let Some(clusters) = &summary.top_clusters {
+                for cluster in clusters {
+                    let context = format!(
+                        "Code Duplication: Symbol '{}' appears {} times. Severity: {}.",
+                        cluster.symbol_name, cluster.size, cluster.severity
+                    );
+
+                    let metadata = format!(
+                        "type:duplication|project:{}|symbol:{}",
+                        project_id, cluster.symbol_name
+                    );
+                    docs.push((metadata, context));
+                }
             }
         }
     }

@@ -2,7 +2,7 @@
 //!
 //! Shows helpful CLI commands based on the current report context.
 
-use crate::components::icons::{Icon, ICON_TERMINAL};
+use crate::components::icons::{ICON_TERMINAL, Icon};
 use leptos::prelude::*;
 
 /// Quick Commands Panel - shows helpful CLI commands

@@ -9,9 +9,15 @@ use crate::progress::Spinner;
 /// Handle the lint command - run linting checks
 pub fn handle_lint_command(opts: &LintOptions, global: &GlobalOptions) -> DispatchResult {
     use std::path::Path;
+    use std::path::PathBuf;
+
+    use crate::analyzer::report::CommandGap;
+
+    let sarif_mode = opts.sarif;
+    let show_output = !global.quiet && !sarif_mode;
 
     // Show spinner unless in quiet/json mode
-    let spinner = if !global.quiet && !global.json {
+    let spinner = if show_output && !global.json {
         Some(Spinner::new("Running lint checks..."))
     } else {
         None
@@ -37,32 +43,42 @@ pub fn handle_lint_command(opts: &LintOptions, global: &GlobalOptions) -> Dispat
     };
 
     let mut issues_found = 0;
+    let mut missing_gaps: Vec<CommandGap> = Vec::new();
+    let mut pipeline_summary = serde_json::json!({});
 
     // Check for missing handlers if requested
-    if opts.fail || opts.tauri {
-        let missing_handlers: Vec<_> = snapshot
-            .command_bridges
-            .iter()
-            .filter(|b| !b.has_handler && b.is_called)
-            .collect();
+    let run_handler_checks = opts.fail || opts.tauri || sarif_mode;
+    if run_handler_checks {
+        for bridge in &snapshot.command_bridges {
+            if !bridge.has_handler && bridge.is_called {
+                missing_gaps.push(CommandGap {
+                    name: bridge.name.clone(),
+                    confidence: None,
+                    locations: bridge.frontend_calls.clone(),
+                    implementation_name: None,
+                    string_literal_matches: Vec::new(),
+                });
+            }
+        }
 
-        if !missing_handlers.is_empty() {
-            issues_found += missing_handlers.len();
+        if !missing_gaps.is_empty() {
+            issues_found += missing_gaps.len();
 
-            if !global.quiet {
+            if show_output {
                 eprintln!(
                     "[loct][lint] {} missing Tauri handlers:",
-                    missing_handlers.len()
+                    missing_gaps.len()
                 );
-                for bridge in &missing_handlers {
-                    eprintln!("  - {}", bridge.name);
+                for gap in &missing_gaps {
+                    eprintln!("  - {}", gap.name);
                 }
             }
         }
     }
 
     // Check for problematic event bridges if requested
-    if opts.fail {
+    let run_event_checks = opts.fail || sarif_mode;
+    if run_event_checks {
         // Count events with no emitters or no listeners
         let orphan_events = snapshot
             .event_bridges
@@ -70,10 +86,10 @@ pub fn handle_lint_command(opts: &LintOptions, global: &GlobalOptions) -> Dispat
             .filter(|e| e.emits.is_empty() || e.listens.is_empty())
             .collect::<Vec<_>>();
 
-        if !orphan_events.is_empty() {
+        if opts.fail && !orphan_events.is_empty() {
             issues_found += orphan_events.len();
 
-            if !global.quiet {
+            if show_output {
                 eprintln!("[loct][lint] {} orphan events:", orphan_events.len());
                 for event in orphan_events.iter().take(5) {
                     if event.emits.is_empty() {
@@ -84,6 +100,185 @@ pub fn handle_lint_command(opts: &LintOptions, global: &GlobalOptions) -> Dispat
                 }
                 if orphan_events.len() > 5 {
                     eprintln!("  ... and {} more", orphan_events.len() - 5);
+                }
+            }
+        }
+
+        if sarif_mode {
+            let mut ghost_emits = Vec::new();
+            let mut orphan_listeners = Vec::new();
+
+            for event in &snapshot.event_bridges {
+                if event.listens.is_empty() {
+                    for (file, line, _kind) in &event.emits {
+                        ghost_emits.push(serde_json::json!({
+                            "name": event.name,
+                            "path": file,
+                            "line": line,
+                            "confidence": "high",
+                        }));
+                    }
+                }
+                if event.emits.is_empty() {
+                    for (file, line) in &event.listens {
+                        orphan_listeners.push(serde_json::json!({
+                            "name": event.name,
+                            "path": file,
+                            "line": line,
+                        }));
+                    }
+                }
+            }
+
+            pipeline_summary = serde_json::json!({
+                "events": {
+                    "ghostEmits": ghost_emits,
+                    "orphanListeners": orphan_listeners,
+                }
+            });
+        }
+    }
+
+    if opts.entrypoints {
+        let drift = &snapshot.metadata.entrypoint_drift;
+        let entrypoints = &snapshot.metadata.entrypoints;
+        let drift_count = drift.declared_missing.len()
+            + drift.declared_without_marker.len()
+            + drift.code_only_entrypoints.len()
+            + drift.declared_unresolved.len();
+        if show_output {
+            if entrypoints.is_empty() {
+                eprintln!("[loct][lint] No entrypoints detected");
+            } else {
+                eprintln!("[loct][lint] Entrypoints ({}):", entrypoints.len());
+                for entry in entrypoints.iter().take(10) {
+                    let kinds = if entry.kinds.is_empty() {
+                        "unknown".to_string()
+                    } else {
+                        entry.kinds.join(", ")
+                    };
+                    eprintln!("  - {} ({})", entry.path, kinds);
+                }
+                if entrypoints.len() > 10 {
+                    eprintln!("  ... and {} more", entrypoints.len() - 10);
+                }
+            }
+        }
+        if drift_count > 0 {
+            issues_found += drift_count;
+            if show_output {
+                eprintln!("[loct][lint] Entrypoint drift detected:");
+                for item in &drift.declared_missing {
+                    eprintln!("  - missing: {} ({})", item.path, item.source);
+                }
+                for item in &drift.declared_without_marker {
+                    eprintln!("  - no marker: {} ({})", item.path, item.source);
+                }
+                for item in &drift.declared_unresolved {
+                    eprintln!("  - unresolved: {} ({})", item.path, item.source);
+                }
+                for item in &drift.code_only_entrypoints {
+                    eprintln!("  - code-only: {}", item.path);
+                }
+            }
+        } else if show_output {
+            eprintln!("[loct][lint] No entrypoint drift detected");
+        }
+    }
+
+    let run_ts = opts.deep || opts.ts;
+    let run_react = opts.deep || opts.react;
+    let run_memory = opts.deep || opts.memory;
+
+    if run_ts || run_react || run_memory {
+        let roots: Vec<PathBuf> = if snapshot.metadata.roots.is_empty() {
+            vec![PathBuf::from(".")]
+        } else {
+            snapshot.metadata.roots.iter().map(PathBuf::from).collect()
+        };
+
+        let resolve_path = |rel: &str| -> Option<PathBuf> {
+            roots
+                .iter()
+                .map(|root| root.join(rel))
+                .find(|candidate| candidate.exists())
+        };
+
+        let mut ts_issues = Vec::new();
+        let mut react_issues = Vec::new();
+        let mut memory_issues = Vec::new();
+
+        for file in &snapshot.files {
+            let ext = std::path::Path::new(&file.path)
+                .extension()
+                .and_then(std::ffi::OsStr::to_str)
+                .unwrap_or("");
+            let full_path = match resolve_path(&file.path) {
+                Some(path) => path,
+                None => continue,
+            };
+            let content = match std::fs::read_to_string(&full_path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+
+            if run_ts && matches!(ext, "ts" | "tsx") {
+                ts_issues.extend(crate::analyzer::ts_lint::lint_ts_file(&full_path, &content));
+            }
+
+            if run_react && matches!(ext, "ts" | "tsx" | "js" | "jsx") {
+                react_issues.extend(crate::analyzer::react_lint::analyze_react_file(
+                    &content,
+                    &full_path,
+                    file.path.clone(),
+                ));
+            }
+
+            if run_memory && matches!(ext, "ts" | "tsx" | "js" | "jsx") {
+                memory_issues.extend(crate::analyzer::memory_lint::lint_memory_file(
+                    &full_path, &content,
+                ));
+            }
+        }
+
+        if !ts_issues.is_empty() {
+            issues_found += ts_issues.len();
+            if show_output {
+                eprintln!("[loct][lint] {} TypeScript lint issue(s)", ts_issues.len());
+                for issue in ts_issues.iter().take(10) {
+                    eprintln!(
+                        "  - {}:{}:{} {}",
+                        issue.file, issue.line, issue.column, issue.message
+                    );
+                }
+                if ts_issues.len() > 10 {
+                    eprintln!("  ... and {} more", ts_issues.len() - 10);
+                }
+            }
+        }
+
+        if !react_issues.is_empty() {
+            issues_found += react_issues.len();
+            if show_output {
+                eprintln!("[loct][lint] {} React lint issue(s)", react_issues.len());
+                for issue in react_issues.iter().take(10) {
+                    eprintln!("  - {}:{} {}", issue.file, issue.line, issue.message);
+                }
+                if react_issues.len() > 10 {
+                    eprintln!("  ... and {} more", react_issues.len() - 10);
+                }
+            }
+        }
+
+        if !memory_issues.is_empty() {
+            issues_found += memory_issues.len();
+            if show_output {
+                eprintln!("[loct][lint] {} Memory lint issue(s)", memory_issues.len());
+                for issue in memory_issues.iter().take(10) {
+                    eprintln!("  - {}:{} {}", issue.file, issue.line, issue.message);
+                }
+                if memory_issues.len() > 10 {
+                    eprintln!("  ... and {} more", memory_issues.len() - 10);
                 }
             }
         }
@@ -98,7 +293,7 @@ pub fn handle_lint_command(opts: &LintOptions, global: &GlobalOptions) -> Dispat
         } else {
             s.finish_success("No issues found");
         }
-    } else if !global.quiet {
+    } else if show_output {
         if issues_found == 0 {
             println!("[loct][lint] No issues found");
         } else {
@@ -108,8 +303,19 @@ pub fn handle_lint_command(opts: &LintOptions, global: &GlobalOptions) -> Dispat
 
     // Output SARIF format if requested
     if opts.sarif {
-        // TODO: Implement SARIF output using crate::analyzer::sarif
-        eprintln!("[loct][warn] SARIF output not yet implemented for unified lint command");
+        let inputs = crate::analyzer::sarif::SarifInputs {
+            duplicate_exports: &[],
+            missing_handlers: &missing_gaps,
+            unused_handlers: &[],
+            dead_exports: &[],
+            circular_imports: &[],
+            pipeline_summary: &pipeline_summary,
+            snapshot: Some(&snapshot),
+        };
+        if let Err(err) = crate::analyzer::sarif::print_sarif(inputs) {
+            eprintln!("[loct][error] Failed to emit SARIF: {}", err);
+            return DispatchResult::Exit(1);
+        }
     }
 
     DispatchResult::Exit(exit_code)

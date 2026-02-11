@@ -9,7 +9,7 @@
 //!
 //! Also handles namespace member access tracking for accurate symbol usage.
 //!
-//! Created by M&K (c)2025 The LibraxisAI Team
+//! Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team
 
 use oxc_ast::ast::*;
 
@@ -22,6 +22,7 @@ impl<'a> JsVisitor<'a> {
     pub(super) fn handle_import_declaration(&mut self, decl: &ImportDeclaration<'a>) {
         let source = decl.source.value.to_string();
         let mut entry = ImportEntry::new(source.clone(), ImportKind::Static);
+        entry.line = Some(self.get_line(decl.span));
         entry.resolved_path = self.resolve_path(&source);
         entry.is_bare = !source.starts_with('.') && !source.starts_with('/');
         if matches!(decl.import_kind, ImportOrExportKind::Type) {

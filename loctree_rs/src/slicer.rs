@@ -105,8 +105,8 @@ fn strip_extension(path: &str) -> &str {
 impl HolographicSlice {
     /// Create a slice from a file path using snapshot data
     pub fn from_path(snapshot: &Snapshot, target_path: &str, config: &SliceConfig) -> Option<Self> {
-        // Normalize target path (remove leading ./)
-        let normalized = target_path.trim_start_matches("./").replace('\\', "/");
+        // Normalize target path (handles absolute paths, ./ prefix, backslashes)
+        let normalized = snapshot.normalize_path(target_path);
 
         // Build adjacency maps from snapshot edges
         // Note: edges may have paths with or without extensions, so we build
@@ -498,7 +498,7 @@ impl HolographicSlice {
 
 /// Auto-create snapshot if it doesn't exist, or prompt in interactive mode
 fn ensure_snapshot(root: &Path, parsed: &ParsedArgs) -> io::Result<bool> {
-    let snapshot_path = root.join(".loctree").join("snapshot.json");
+    let snapshot_path = crate::snapshot::Snapshot::snapshot_path(root);
 
     if !std::io::stdin().is_terminal() {
         // Non-interactive: auto-create snapshot silently
@@ -606,7 +606,7 @@ mod tests {
     fn create_test_snapshot() -> Snapshot {
         Snapshot {
             metadata: SnapshotMetadata {
-                schema_version: "0.5.0-test".to_string(),
+                schema_version: crate::snapshot::SNAPSHOT_SCHEMA_VERSION.to_string(),
                 generated_at: "2025-01-01T00:00:00Z".to_string(),
                 roots: vec!["/test".to_string()],
                 languages: ["rust".to_string()].into_iter().collect(),
@@ -614,6 +614,9 @@ mod tests {
                 total_loc: 400,
                 scan_duration_ms: 100,
                 resolver_config: None,
+                manifest_summary: Vec::new(),
+                entrypoints: Vec::new(),
+                entrypoint_drift: crate::snapshot::EntrypointDriftSummary::default(),
                 git_repo: None,
                 git_branch: None,
                 git_commit: None,
@@ -904,7 +907,7 @@ mod tests {
         // Component.tsx -> features/index.ts (barrel) -> App.tsx
         let snapshot = Snapshot {
             metadata: SnapshotMetadata {
-                schema_version: "0.5.0-test".to_string(),
+                schema_version: crate::snapshot::SNAPSHOT_SCHEMA_VERSION.to_string(),
                 generated_at: "2025-01-01T00:00:00Z".to_string(),
                 roots: vec!["/test".to_string()],
                 languages: ["typescript".to_string()].into_iter().collect(),
@@ -912,6 +915,9 @@ mod tests {
                 total_loc: 300,
                 scan_duration_ms: 100,
                 resolver_config: None,
+                manifest_summary: Vec::new(),
+                entrypoints: Vec::new(),
+                entrypoint_drift: crate::snapshot::EntrypointDriftSummary::default(),
                 git_repo: None,
                 git_branch: None,
                 git_commit: None,
