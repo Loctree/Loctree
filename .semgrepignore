@@ -28,3 +28,11 @@ loctree_rs/src/args.rs
 # ============================================================================
 
 loctree_rs/tests/
+
+# ============================================================================
+# STATIC LANDING PAGE
+# <link rel="canonical"> is SEO metadata, not a resource loader.
+# Semgrep missing-integrity rule is a false positive on non-script tags.
+# ============================================================================
+
+public_dist/index.html

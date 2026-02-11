@@ -22,10 +22,10 @@ for platform_spec in "${PLATFORMS[@]}"; do
   cat > "$dir/package.json" << PACKAGE_EOF
 {
   "name": "@loctree/$platform",
-  "version": "0.6.14",
+  "version": "0.8.11",
   "description": "loctree binary for $desc",
   "keywords": ["loctree", "$os", "$cpu"],
-  "license": "MIT",
+  "license": "(MIT OR Apache-2.0)",
   "os": ["$os"],
   "cpu": ["$cpu"],
   "repository": {

@@ -1,14 +1,28 @@
 use assert_cmd::cargo::cargo_bin_cmd;
-use std::path::PathBuf;
+use std::process::Command;
 
 fn loct() -> assert_cmd::Command {
     cargo_bin_cmd!("loct")
 }
 
-fn agent_index_path() -> PathBuf {
-    // The agent index is shipped as part of the published landing bundle (`public_dist/`).
-    // Keep this test aligned with the artifact we actually distribute.
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../public_dist/api/agent/index.json")
+fn agent_index_url() -> &'static str {
+    "https://loct.io/api/agent/index.json"
+}
+
+fn fetch_agent_index_json() -> serde_json::Value {
+    let output = Command::new("curl")
+        .args(["-fsSL", agent_index_url()])
+        .output()
+        .expect("run curl for loct.io agent index");
+    assert!(
+        output.status.success(),
+        "failed to fetch {} (status: {}):\n{}",
+        agent_index_url(),
+        output.status,
+        String::from_utf8_lossy(&output.stderr),
+    );
+    let text = String::from_utf8(output.stdout).expect("decode loct.io agent index as utf-8");
+    serde_json::from_str(&text).expect("parse https://loct.io/api/agent/index.json")
 }
 
 fn help_args_for_agent_cmd(cmd: &str) -> Vec<String> {
@@ -61,15 +75,12 @@ fn help_args_for_agent_cmd(cmd: &str) -> Vec<String> {
 
 #[test]
 fn agent_index_commands_have_help() {
-    let path = agent_index_path();
-    let text = std::fs::read_to_string(&path).expect("read landing/api/agent/index.json");
-    let json: serde_json::Value =
-        serde_json::from_str(&text).expect("parse landing/api/agent/index.json");
+    let json = fetch_agent_index_json();
 
     let commands = json
         .get("commands")
         .and_then(|v| v.as_object())
-        .expect("landing/api/agent/index.json must have a top-level 'commands' object");
+        .expect("https://loct.io/api/agent/index.json must have a top-level 'commands' object");
 
     for (name, entry) in commands {
         let cmd_str = entry

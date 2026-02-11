@@ -58,8 +58,8 @@ pub fn cache_base_dir() -> PathBuf {
     if let Some(cache_dir) = dirs::cache_dir() {
         return cache_dir.join("loctree");
     }
-    // Last resort: temp dir (avoid dirtying repos in minimal/container envs)
-    std::env::temp_dir().join("loctree")
+    // Last resort: CWD-local .loctree/ (backward compat for envs without $HOME)
+    PathBuf::from(SNAPSHOT_DIR)
 }
 
 /// Returns the cache directory for a specific project.

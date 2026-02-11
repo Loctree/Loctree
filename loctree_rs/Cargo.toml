@@ -4,11 +4,11 @@ version.workspace = true
 edition.workspace = true
 default-run = "loctree"
 authors.workspace = true
-description = "Fast, language-aware codebase analyzer for detecting dead exports, circular imports, and generating dependency graphs"
+description = "Structural code intelligence for AI agents. Scan once, query everything."
 license.workspace = true
 repository = "https://github.com/Loctree/Loctree"
 readme = "../README.md"
-keywords = ["static-analysis", "dead-code", "imports", "exports", "codebase"]
+keywords = ["static-analysis", "dependency-graph", "dead-exports", "circular-imports", "ai-agents"]
 categories = ["development-tools", "command-line-utilities"]
 
 [lib]

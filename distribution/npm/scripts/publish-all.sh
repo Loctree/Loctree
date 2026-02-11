@@ -3,7 +3,7 @@
 
 set -e
 
-VERSION=${1:-"0.6.14"}
+VERSION=${1:-"0.8.11"}
 DRY_RUN=${DRY_RUN:-false}
 
 echo "=== loctree npm Publishing Script ==="

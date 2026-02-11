@@ -218,17 +218,17 @@ publish:
 	cargo test --workspace || exit 1; \
 	echo ""; \
 	echo "[3/5] Publishing report-leptos v$$VER..."; \
-	cargo publish -p report-leptos --allow-dirty || { echo "FATAL: report-leptos publish failed"; exit 1; }; \
+	cargo publish -p report-leptos || { echo "FATAL: report-leptos publish failed"; exit 1; }; \
 	echo "Waiting for crates.io index (15s)..."; \
 	sleep 15; \
 	echo ""; \
 	echo "[4/5] Publishing loctree v$$VER..."; \
-	cargo publish -p loctree --allow-dirty || { echo "FATAL: loctree publish failed"; exit 1; }; \
+	cargo publish -p loctree || { echo "FATAL: loctree publish failed"; exit 1; }; \
 	echo "Waiting for crates.io index (15s)..."; \
 	sleep 15; \
 	echo ""; \
 	echo "[5/5] Publishing loctree-mcp v$$VER..."; \
-	cargo publish -p loctree-mcp --allow-dirty || { echo "FATAL: loctree-mcp publish failed"; exit 1; }; \
+	cargo publish -p loctree-mcp || { echo "FATAL: loctree-mcp publish failed"; exit 1; }; \
 	echo ""; \
 	echo "=== All 3 crates published (v$$VER) ==="
 
