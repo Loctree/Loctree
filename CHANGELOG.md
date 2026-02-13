@@ -6,6 +6,11 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [0.8.12] - 2026-02-11
 
+### Fixed
+- bump workspace.package version in version script
+
+## [0.8.12] - 2026-02-11
+
 ### Added
 - sync with loctree-suite v0.8.4
 - sync loctree_rs + loctree_server with loctree-suite

@@ -11,7 +11,7 @@ documentation = "https://docs.rs/report-leptos"
 readme = "README.md"
 keywords = ["leptos", "ssr", "html", "report", "static-site"]
 categories = ["web-programming", "template-engine", "visualization"]
-rust-version = "1.85.0"
+rust-version.workspace = true
 
 [package.metadata.docs.rs]
 all-features = true

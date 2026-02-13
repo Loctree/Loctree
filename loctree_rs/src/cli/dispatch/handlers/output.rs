@@ -3,12 +3,11 @@
 //! Handles: lint, dist
 
 use super::super::super::command::{DistOptions, LintOptions};
-use super::super::{DispatchResult, GlobalOptions, load_or_create_snapshot};
+use super::super::{DispatchResult, GlobalOptions, load_or_create_snapshot_for_roots};
 use crate::progress::Spinner;
 
 /// Handle the lint command - run linting checks
 pub fn handle_lint_command(opts: &LintOptions, global: &GlobalOptions) -> DispatchResult {
-    use std::path::Path;
     use std::path::PathBuf;
 
     use crate::analyzer::report::CommandGap;
@@ -23,14 +22,28 @@ pub fn handle_lint_command(opts: &LintOptions, global: &GlobalOptions) -> Dispat
         None
     };
 
-    // Load snapshot (auto-scan if missing)
-    let root = opts
-        .roots
-        .first()
-        .map(|p| p.as_path())
-        .unwrap_or(Path::new("."));
+    // Load snapshot (auto-scan if missing) using ALL provided roots.
+    // This is critical for Tauri projects where FE and BE roots are passed separately
+    // (e.g. `src` + `src-tauri/src`).
+    let roots: Vec<PathBuf> = if opts.roots.is_empty() {
+        vec![PathBuf::from(".")]
+    } else {
+        opts.roots.clone()
+    };
 
-    let snapshot = match load_or_create_snapshot(root, global) {
+    // Fail fast on invalid roots to avoid misleading "missing handlers" noise.
+    let missing_roots: Vec<&PathBuf> = roots.iter().filter(|p| !p.exists()).collect();
+    if !missing_roots.is_empty() {
+        if show_output {
+            eprintln!("[loct][lint] Invalid root path(s):");
+            for root in missing_roots {
+                eprintln!("  - {}", root.display());
+            }
+        }
+        return DispatchResult::Exit(2);
+    }
+
+    let snapshot = match load_or_create_snapshot_for_roots(&roots, global) {
         Ok(s) => s,
         Err(e) => {
             if let Some(s) = spinner {

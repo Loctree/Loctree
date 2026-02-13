@@ -1925,7 +1925,7 @@ mod management_commands {
         let fixture = fixtures_path().join("simple_ts");
 
         // --fail should work (exit code depends on findings)
-        loctree()
+        let _ = loctree()
             .current_dir(&fixture)
             .args(["lint", "--fail"])
             .assert(); // Don't check success/failure - depends on findings

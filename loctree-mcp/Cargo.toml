@@ -6,6 +6,9 @@ description = "MCP server for loctree - hot codebase analysis for AI agents"
 license.workspace = true
 authors.workspace = true
 repository = "https://github.com/Loctree/Loctree"
+homepage = "https://loct.io"
+documentation = "https://docs.rs/loctree-mcp"
+rust-version.workspace = true
 keywords = ["mcp", "loctree", "ai", "code-analysis", "agents"]
 categories = ["development-tools", "command-line-utilities"]
 

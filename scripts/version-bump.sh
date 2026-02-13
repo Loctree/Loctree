@@ -211,6 +211,15 @@ resolve_scope() {
   esac
 }
 
+# Returns success when crate version is inherited from workspace.
+crate_uses_workspace_version() {
+  local crate="$1"
+  local path
+  path=$(get_crate_field "$crate" "path")
+  local cargo_toml="$ROOT_DIR/$path/Cargo.toml"
+  [[ -f "$cargo_toml" ]] && grep -qE '^[[:space:]]*version[[:space:]]*\.workspace[[:space:]]*=[[:space:]]*true' "$cargo_toml"
+}
+
 # Check if crate is in scope
 is_in_scope() {
   local crate="$1"
@@ -294,6 +303,15 @@ if [[ -n "$explicit_version" ]]; then
   validate_semver "$explicit_version"
 fi
 
+# Workspace-versioned crates cannot be bumped independently.
+if [[ "$scope" != "all" ]]; then
+  resolved_scope="$(resolve_scope "$scope")"
+  if crate_uses_workspace_version "$resolved_scope"; then
+    log_warn "Crate '$resolved_scope' uses workspace versioning; promoting scope to --all."
+    scope="all"
+  fi
+fi
+
 # If --dev/--rc/--alpha/--beta is set without an explicit bump flag, keep current version
 if { $dev_suffix || $rc_suffix || $alpha_suffix || $beta_suffix; } && ! $bump_flag_set; then
   bump_type="none"
@@ -354,6 +372,45 @@ update_sed() {
       log_success "Updated: $file"
     fi
   fi
+}
+
+update_workspace_package_version() {
+  local new_ver="$1"
+  local file="$ROOT_DIR/Cargo.toml"
+
+  if [[ ! -f "$file" ]]; then
+    log_warn "Workspace Cargo.toml not found: $file"
+    return
+  fi
+
+  if $dry_run; then
+    log_info "Would update workspace.package version in: $file"
+    return
+  fi
+
+  local tmp
+  tmp="$(mktemp)"
+  awk -v v="$new_ver" '
+    BEGIN { in_ws_pkg = 0; updated = 0 }
+    /^\[workspace\.package\]/ { in_ws_pkg = 1; print; next }
+    /^\[.*\]/ { in_ws_pkg = 0 }
+    {
+      if (in_ws_pkg && $0 ~ /^[[:space:]]*version[[:space:]]*=/) {
+        sub(/"[^"]+"/, "\"" v "\"")
+        updated = 1
+      }
+      print
+    }
+    END {
+      if (!updated) exit 42
+    }
+  ' "$file" > "$tmp" || {
+    rm -f "$tmp"
+    log_error "Failed to update [workspace.package] version in $file"
+    exit 1
+  }
+  mv "$tmp" "$file"
+  log_success "Updated workspace package version: $new_ver"
 }
 
 # Apply suffixes to version
@@ -585,6 +642,14 @@ if is_in_scope "loctree"; then
   "$ROOT_DIR/scripts/sync-version.sh" "$loctree_new_ver"
 fi
 
+# Keep workspace version as source of truth for publish versioning.
+if is_in_scope "loctree"; then
+  log_step "Updating workspace version"
+  update_workspace_package_version "$loctree_new_ver"
+  update_sed "$ROOT_DIR/Cargo.toml" 's/\(loctree = { path = "loctree_rs", version = \)"[^"]*"/\1"'"$loctree_new_ver"'"/'
+  update_sed "$ROOT_DIR/Cargo.toml" 's/\(report-leptos = { path = "reports", version = \)"[^"]*"/\1"'"$loctree_new_ver"'"/'
+fi
+
 # Update other crates' Cargo.toml versions
 log_step "Updating crate versions"
 
@@ -593,7 +658,12 @@ for entry in "${CRATE_LIST[@]}"; do
   if is_in_scope "$crate" && [[ "$crate" != "loctree" ]]; then
     path=$(get_crate_field "$crate" "path")
     new_ver=$(get_version "$crate" "$NEW_VERSIONS_FILE")
-    update_sed "$ROOT_DIR/$path/Cargo.toml" 's/^version = ".*"/version = "'"$new_ver"'"/'
+    cargo_toml="$ROOT_DIR/$path/Cargo.toml"
+    if grep -qE '^[[:space:]]*version[[:space:]]*\.workspace[[:space:]]*=[[:space:]]*true' "$cargo_toml"; then
+      log_dim "  $crate uses workspace version (skipping direct crate version edit)"
+    else
+      update_sed "$cargo_toml" 's/^version = ".*"/version = "'"$new_ver"'"/'
+    fi
   fi
 done
 
