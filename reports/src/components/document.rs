@@ -124,7 +124,7 @@ pub fn ReportDocument(
                                 <span id="test-toggle-text">"Hide Tests"</span>
                             </button>
                             <div style="margin-top: 8px; font-size: 11px;">
-                                "loctree v0.8.12"
+                                "loctree v0.8.13"
                                 <br />
                                 <span style="color:var(--theme-text-tertiary)">"Snapshot"</span>
                             </div>

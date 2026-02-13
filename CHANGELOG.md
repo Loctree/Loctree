@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
+## [0.8.13] - 2026-02-13
+
+### Fixed
+- bump workspace.package version in version script
+
 ## [0.8.12] - 2026-02-11
 
 ### Fixed

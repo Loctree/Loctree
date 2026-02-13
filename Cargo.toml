@@ -14,7 +14,7 @@ members = [
 # - rmcp-config-ui: moved to ~/Libraxis/rmcp-config-ui
 
 [workspace.package]
-version = "0.8.12"
+version = "0.8.13"
 edition = "2024"
 rust-version = "1.85.0"
 license = "MIT OR Apache-2.0"
@@ -42,8 +42,8 @@ rmcp = { version = "0.12", features = ["server"] }
 futures = "0.3"
 
 # The local crates (for inter-crate dependencies)
-loctree = { path = "loctree_rs", version = "0.8.12" }
-report-leptos = { path = "reports", version = "0.8.12" }
+loctree = { path = "loctree_rs", version = "0.8.13" }
+report-leptos = { path = "reports", version = "0.8.13" }
 
 # Release profile - good defaults for all crates
 [profile.release]
