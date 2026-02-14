@@ -2002,13 +2002,13 @@ pub(crate) fn write_auto_artifacts(
     }
 
     write_report(&report_path, &report_sections, parsed.verbose)?;
-    created.push(format!(
-        "./{}",
+    created.push(
         report_path
-            .strip_prefix(snapshot_root)
+            .strip_prefix(&loctree_dir)
             .unwrap_or(&report_path)
             .display()
-    ));
+            .to_string(),
+    );
 
     let all_graph_edges: Vec<_> = scan_results
         .contexts
@@ -2024,13 +2024,13 @@ pub(crate) fn write_auto_artifacts(
         }))
         .map_err(io::Error::other)?,
     )?;
-    created.push(format!(
-        "./{}",
+    created.push(
         circular_json_path
-            .strip_prefix(snapshot_root)
+            .strip_prefix(&loctree_dir)
             .unwrap_or(&circular_json_path)
             .display()
-    ));
+            .to_string(),
+    );
 
     let race_items: Vec<_> = scan_results
         .global_analyses
@@ -2052,13 +2052,13 @@ pub(crate) fn write_auto_artifacts(
         &races_json_path,
         serde_json::to_string_pretty(&race_items).map_err(io::Error::other)?,
     )?;
-    created.push(format!(
-        "./{}",
+    created.push(
         races_json_path
-            .strip_prefix(snapshot_root)
+            .strip_prefix(&loctree_dir)
             .unwrap_or(&races_json_path)
             .display()
-    ));
+            .to_string(),
+    );
 
     let mut languages: Vec<String> = scan_results
         .contexts
@@ -2111,13 +2111,13 @@ pub(crate) fn write_auto_artifacts(
         &analysis_json_path,
         serde_json::to_string_pretty(&bundle).map_err(io::Error::other)?,
     )?;
-    created.push(format!(
-        "./{}",
+    created.push(
         analysis_json_path
-            .strip_prefix(snapshot_root)
+            .strip_prefix(&loctree_dir)
             .unwrap_or(&analysis_json_path)
             .display()
-    ));
+            .to_string(),
+    );
 
     // Generate SARIF report for CI integration
     let all_ranked_dups: Vec<_> = scan_results
@@ -2180,13 +2180,13 @@ pub(crate) fn write_auto_artifacts(
     })
     .map_err(|err| io::Error::other(format!("Failed to serialize SARIF: {err}")))?;
     write_atomic(&sarif_path, sarif_content)?;
-    created.push(format!(
-        "./{}",
+    created.push(
         sarif_path
-            .strip_prefix(snapshot_root)
+            .strip_prefix(&loctree_dir)
             .unwrap_or(&sarif_path)
             .display()
-    ));
+            .to_string(),
+    );
 
     // Save dead exports to standalone JSON for easy access
     let dead_json_path = loctree_dir.join("dead.json");
@@ -2206,13 +2206,13 @@ pub(crate) fn write_auto_artifacts(
         &dead_json_path,
         serde_json::to_string_pretty(&dead_json).map_err(io::Error::other)?,
     )?;
-    created.push(format!(
-        "./{}",
+    created.push(
         dead_json_path
-            .strip_prefix(snapshot_root)
+            .strip_prefix(&loctree_dir)
             .unwrap_or(&dead_json_path)
             .display()
-    ));
+            .to_string(),
+    );
 
     // Save command handlers coverage to standalone JSON
     let handlers_json_path = loctree_dir.join("handlers.json");
@@ -2263,13 +2263,13 @@ pub(crate) fn write_auto_artifacts(
         &handlers_json_path,
         serde_json::to_string_pretty(&handlers_json).map_err(io::Error::other)?,
     )?;
-    created.push(format!(
-        "./{}",
+    created.push(
         handlers_json_path
-            .strip_prefix(snapshot_root)
+            .strip_prefix(&loctree_dir)
             .unwrap_or(&handlers_json_path)
             .display()
-    ));
+            .to_string(),
+    );
 
     // Save findings.json - consolidated issue report
     let findings_json_path = loctree_dir.join("findings.json");
@@ -2286,13 +2286,13 @@ pub(crate) fn write_auto_artifacts(
     );
     let findings_json = findings.to_json().map_err(io::Error::other)?;
     write_atomic(&findings_json_path, &findings_json)?;
-    created.push(format!(
-        "./{}",
+    created.push(
         findings_json_path
-            .strip_prefix(snapshot_root)
+            .strip_prefix(&loctree_dir)
             .unwrap_or(&findings_json_path)
             .display()
-    ));
+            .to_string(),
+    );
 
     // Save agent.json - AI-optimized bundle (used by CI and agent tooling)
     let agent_json_path = loctree_dir.join("agent.json");
@@ -2304,13 +2304,13 @@ pub(crate) fn write_auto_artifacts(
     );
     let agent_json = serde_json::to_vec_pretty(&agent_report).map_err(io::Error::other)?;
     write_atomic(&agent_json_path, &agent_json)?;
-    created.push(format!(
-        "./{}",
+    created.push(
         agent_json_path
-            .strip_prefix(snapshot_root)
+            .strip_prefix(&loctree_dir)
             .unwrap_or(&agent_json_path)
             .display()
-    ));
+            .to_string(),
+    );
 
     // Save manifest.json - index of artifacts for AI agents
     let manifest_json_path = loctree_dir.join("manifest.json");
@@ -2323,13 +2323,13 @@ pub(crate) fn write_auto_artifacts(
     );
     let manifest_json = manifest.to_json().map_err(io::Error::other)?;
     write_atomic(&manifest_json_path, &manifest_json)?;
-    created.push(format!(
-        "./{}",
+    created.push(
         manifest_json_path
-            .strip_prefix(snapshot_root)
+            .strip_prefix(&loctree_dir)
             .unwrap_or(&manifest_json_path)
             .display()
-    ));
+            .to_string(),
+    );
 
     // Now that the full artifact set exists, refresh stable pointers (base_dir/*.json + base_dir/latest/).
     // Snapshot::save() runs this before auto artifacts are generated, so we do it again here.

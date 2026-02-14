@@ -169,7 +169,9 @@ impl LoctreeServer {
     }
 
     /// Resolve project path to absolute, canonicalized path.
-    /// Searches upward for .loctree directory (like git finds .git/).
+    /// The caller specifies the project root explicitly via --project,
+    /// so we trust it as-is — no upward walk.  If the path doesn't have
+    /// a snapshot yet, `get_snapshot()` will auto-scan it.
     /// Note: Path traversal is intentional - MCP server runs locally with same privileges as client.
     fn resolve_project(project: &str) -> Result<PathBuf> {
         // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path
@@ -183,9 +185,7 @@ impl LoctreeServer {
             .canonicalize()
             .with_context(|| format!("Project directory not found: {}", project))?;
 
-        // Search upward for .loctree directory (like git finds .git/)
-        // This allows MCP to work when called from subdirectories or with absolute paths
-        Ok(Snapshot::find_loctree_root(&canonical).unwrap_or(canonical))
+        Ok(canonical)
     }
 
     /// Get or load snapshot for a project. Auto-scans if needed.
