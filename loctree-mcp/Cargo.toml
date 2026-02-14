@@ -14,7 +14,7 @@ categories = ["development-tools", "command-line-utilities"]
 
 [dependencies]
 # MCP Protocol
-rmcp = { version = "0.12", features = ["server", "transport-io"] }
+rmcp = { workspace = true, features = ["server", "transport-io"] }
 
 # Loctree core (workspace version)
 loctree = { workspace = true }
@@ -34,7 +34,7 @@ schemars = "1.1"
 
 # Error handling
 anyhow = "1.0"
-thiserror = "1.0"
+thiserror = { workspace = true }
 
 # Unix signal handling (for SIGPIPE)
 [target.'cfg(unix)'.dependencies]

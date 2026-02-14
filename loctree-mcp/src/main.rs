@@ -932,6 +932,7 @@ impl ServerHandler for LoctreeServer {
             server_info: rmcp::model::Implementation {
                 name: "loctree".to_string(),
                 title: Some("Loctree MCP Server".to_string()),
+                description: Some("Structural code intelligence for AI agents".to_string()),
                 version: env!("CARGO_PKG_VERSION").to_string(),
                 icons: None,
                 website_url: Some("https://github.com/Loctree/Loctree".to_string()),

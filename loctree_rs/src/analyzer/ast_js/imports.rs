@@ -47,7 +47,7 @@ impl<'a> JsVisitor<'a> {
                         };
 
                         // Fix cmp_owned: compare &str directly
-                        let alias = if s.local.name != name {
+                        let alias = if *s.local.name != *name {
                             Some(s.local.name.to_string())
                         } else {
                             None
