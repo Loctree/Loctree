@@ -4,13 +4,13 @@
 > The LSP server and editor integrations ship with loctree-suite.
 > Install the free CLI with `cargo install loctree`, then upgrade to suite for IDE features.
 
-Configure Neovim to use `loctree-lsp` for dead code detection and navigation.
+Configure Neovim to use the loctree-suite language server for dead code detection and navigation.
 
 ## Prerequisites
 
 - Neovim 0.8+
 - [nvim-lspconfig](https://github.com/neovim/nvim-lspconfig)
-- [loctree-suite](https://github.com/Loctree/loctree-suite) with `loctree-lsp` binary
+- [loctree-suite](https://github.com/Loctree/loctree-suite) with language server binary
 - Loctree CLI installed: `cargo install loctree`
 
 ## Configuration
@@ -26,7 +26,7 @@ local configs = require('lspconfig.configs')
 if not configs.loctree then
   configs.loctree = {
     default_config = {
-      cmd = { 'loctree-lsp' },
+      cmd = { '/path/to/suite-language-server' },
       filetypes = {
         'typescript', 'typescriptreact',
         'javascript', 'javascriptreact',
@@ -59,7 +59,7 @@ lspconfig.loctree.setup({
     if not configs.loctree then
       configs.loctree = {
         default_config = {
-          cmd = { 'loctree-lsp' },
+          cmd = { '/path/to/suite-language-server' },
           filetypes = { 'typescript', 'javascript', 'rust', 'python' },
           root_dir = lspconfig.util.root_pattern('.loctree', '.git'),
         },

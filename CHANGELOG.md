@@ -4,17 +4,32 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
+## [0.9.0]
+
 ## [0.8.14] - 2026-02-14
+
+### Added
+- Global artifact cache via `LOCT_CACHE_DIR`; default artifact location moved from project-local `.loctree/` to OS cache directories (`~/Library/Caches/loctree/` on macOS, `~/.cache/loctree/` on Linux).
+- Deterministic project cache directories using SHA-256 project ID hashing.
+- Stable cache pointers via `latest/` symlink and `base_dir/*.json` pointer files for fast AI agent access.
+
+### Fixed
+- Artifact path rendering no longer prefixes absolute paths with `.//`.
+- `resolve_project()` in `loctree-mcp` now respects explicit `--project` without directory walk-up.
+- OXC `0.113` API adaptation for `Ident` comparison changes.
+- rmcp `0.15` API adaptation by adding the required `description` field to MCP `Implementation`.
+
+### Changed
+- Dependency updates: `oxc` `0.110 -> 0.113`, `rmcp` `0.12 -> 0.15`, `notify-debouncer-full` `0.6 -> 0.7`, and workspace `thiserror` alignment.
+- IDE docs updated with loctree-suite teaser banners for VSCode, Neovim, and LSP protocol pages.
+
+### Removed
+- Workspace and script references to deprecated `loctree-server` and `loctree-lsp` components.
 
 ## [0.8.13] - 2026-02-13
 
 ### Fixed
-- bump workspace.package version in version script
-
-## [0.8.12] - 2026-02-11
-
-### Fixed
-- bump workspace.package version in version script
+- `scripts/version-bump.sh` now updates `[workspace.package] version` in root `Cargo.toml`.
 
 ## [0.8.12] - 2026-02-11
 
@@ -48,53 +63,9 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [0.8.9] - 2026-01-21
 
-### Added
-- add sys.modules monkey-patch detection
-- Add loctree-lsp crate and VSCode extension scaffold
-- Add health score gauge, audit tab & style unification
-- add clickable file links to Pipelines tab
-- v0.8.0 - auto-snapshot + dual license MIT/Apache-2.0
-- Add rmcp-mux launcher, configs, and documentation
-- Embedded blog system with markdown rendering
-- Add micro-animation to loct startup + rebrand to loct
-- add batch index CLI command
-
 ### Fixed
-- handle comments between #[tauri::command] and fn
+- handle comments between `#[tauri::command]` and `fn`
 - use libgit2 for upward git root discovery
-- clippy warnings in query.rs
-- respect suppressions in loct twins command
-- handle async def for route detection
-- multiline imports and __all__ duplicate detection
-- refactor Pipelines to vanilla JS for expand/filter/search
-- critical path rebasing + file existence validation
-- add Pipelines nav tab + remove memex from scripts and hooks
-- Add SLED_PATH env for multi-instance support
-- Use ASCII characters in deprecation warning
-
-## [0.8.9-dev] - 2026-01-20
-
-### Added
-- add sys.modules monkey-patch detection
-- Add loctree-lsp crate and VSCode extension scaffold
-- Add health score gauge, audit tab & style unification
-- add clickable file links to Pipelines tab
-- v0.8.0 - auto-snapshot + dual license MIT/Apache-2.0
-- Add rmcp-mux launcher, configs, and documentation
-- Embedded blog system with markdown rendering
-- Add micro-animation to loct startup + rebrand to loct
-- add batch index CLI command
-
-### Fixed
-- clippy warnings in query.rs
-- respect suppressions in loct twins command
-- handle async def for route detection
-- multiline imports and __all__ duplicate detection
-- refactor Pipelines to vanilla JS for expand/filter/search
-- critical path rebasing + file existence validation
-- add Pipelines nav tab + remove memex from scripts and hooks
-- Add SLED_PATH env for multi-instance support
-- Use ASCII characters in deprecation warning
 
 ## [0.8.8] - 2026-01-18
 
@@ -168,29 +139,6 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 - Use ASCII characters in deprecation warning
 
 ## [0.8.5-dev] - 2026-01-12
-
-### Added
-- add sys.modules monkey-patch detection
-- Add loctree-lsp crate and VSCode extension scaffold
-- Add health score gauge, audit tab & style unification
-- add clickable file links to Pipelines tab
-- v0.8.0 - auto-snapshot + dual license MIT/Apache-2.0
-- Add rmcp-mux launcher, configs, and documentation
-- Embedded blog system with markdown rendering
-- Add micro-animation to loct startup + rebrand to loct
-- add batch index CLI command
-
-### Fixed
-- respect suppressions in loct twins command
-- handle async def for route detection
-- multiline imports and __all__ duplicate detection
-- refactor Pipelines to vanilla JS for expand/filter/search
-- critical path rebasing + file existence validation
-- add Pipelines nav tab + remove memex from scripts and hooks
-- Add SLED_PATH env for multi-instance support
-- Use ASCII characters in deprecation warning
-
-## [0.8.4] - 2026-01-10
 
 ### Added
 - add sys.modules monkey-patch detection

@@ -2810,3 +2810,307 @@ mod tests {
         assert_eq!(found, expected);
     }
 }
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+    use serial_test::serial;
+    use sha2::{Digest, Sha256};
+    use std::ffi::OsString;
+    use std::process::Command;
+    use tempfile::TempDir;
+
+    const CACHE_ENV: &str = "LOCT_CACHE_DIR";
+
+    #[derive(Debug)]
+    struct EnvVarGuard {
+        key: &'static str,
+        original: Option<OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set_path(key: &'static str, value: &Path) -> Self {
+            let guard = Self {
+                key,
+                original: std::env::var_os(key),
+            };
+            set_env_var(key, value.as_os_str());
+            guard
+        }
+
+        fn clear(key: &'static str) -> Self {
+            let guard = Self {
+                key,
+                original: std::env::var_os(key),
+            };
+            remove_env_var(key);
+            guard
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match &self.original {
+                Some(value) => set_env_var(self.key, value),
+                None => remove_env_var(self.key),
+            }
+        }
+    }
+
+    #[allow(unused_unsafe)]
+    fn set_env_var<K: AsRef<std::ffi::OsStr>, V: AsRef<std::ffi::OsStr>>(key: K, value: V) {
+        unsafe {
+            std::env::set_var(key, value);
+        }
+    }
+
+    #[allow(unused_unsafe)]
+    fn remove_env_var<K: AsRef<std::ffi::OsStr>>(key: K) {
+        unsafe {
+            std::env::remove_var(key);
+        }
+    }
+
+    fn expected_project_id(root: &Path) -> String {
+        let canonical = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+        let mut hasher = Sha256::new();
+        hasher.update(canonical.to_string_lossy().as_bytes());
+        format!("{:x}", hasher.finalize())
+            .chars()
+            .take(16)
+            .collect::<String>()
+    }
+
+    fn display_artifact_path(artifact: &Path, loctree_dir: &Path) -> String {
+        artifact
+            .strip_prefix(loctree_dir)
+            .unwrap_or(artifact)
+            .display()
+            .to_string()
+    }
+
+    fn run_git(repo: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(repo)
+            .output()
+            .unwrap_or_else(|e| panic!("failed to run git {:?}: {e}", args));
+        assert!(
+            output.status.success(),
+            "git {:?} failed.\nstdout: {}\nstderr: {}",
+            args,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn git_stdout(repo: &Path, args: &[&str]) -> String {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(repo)
+            .output()
+            .unwrap_or_else(|e| panic!("failed to run git {:?}: {e}", args));
+        assert!(
+            output.status.success(),
+            "git {:?} failed.\nstdout: {}\nstderr: {}",
+            args,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    #[test]
+    #[serial]
+    fn cache_base_dir_uses_loct_cache_dir_override() {
+        let tmp = TempDir::new().expect("create temp dir");
+        let custom = tmp.path().join("custom-cache");
+        let _guard = EnvVarGuard::set_path(CACHE_ENV, &custom);
+
+        let actual = cache_base_dir();
+        assert_eq!(actual, custom);
+        assert!(actual.is_absolute(), "cache base should be absolute");
+    }
+
+    #[test]
+    #[serial]
+    fn cache_base_dir_defaults_to_platform_cache_dir() {
+        let _guard = EnvVarGuard::clear(CACHE_ENV);
+
+        let actual = cache_base_dir();
+        let expected = dirs::cache_dir()
+            .map(|path| path.join("loctree"))
+            .unwrap_or_else(|| PathBuf::from(SNAPSHOT_DIR));
+
+        assert_eq!(actual, expected);
+        if dirs::cache_dir().is_some() {
+            assert!(
+                actual.is_absolute(),
+                "platform cache dir should be absolute"
+            );
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn project_cache_dir_uses_expected_sha256_id() {
+        let _guard = EnvVarGuard::clear(CACHE_ENV);
+        let project = TempDir::new().expect("create temp project dir");
+
+        let expected_id = expected_project_id(project.path());
+        let actual = project_cache_dir(project.path());
+
+        assert_eq!(actual, cache_base_dir().join("projects").join(&expected_id));
+        assert_eq!(expected_id.len(), 16);
+        assert!(expected_id.chars().all(|ch| ch.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    #[serial]
+    fn project_cache_dir_honors_absolute_cache_override_structure() {
+        let tmp = TempDir::new().expect("create temp dir");
+        let custom_base = tmp.path().join("global-cache");
+        let _guard = EnvVarGuard::set_path(CACHE_ENV, &custom_base);
+        let project = TempDir::new().expect("create temp project dir");
+
+        let expected_id = expected_project_id(project.path());
+        let actual = project_cache_dir(project.path());
+        let expected = custom_base.join("projects").join(expected_id);
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    #[serial]
+    fn project_cache_dir_differs_for_different_roots() {
+        let _guard = EnvVarGuard::clear(CACHE_ENV);
+        let project_a = TempDir::new().expect("create temp dir A");
+        let project_b = TempDir::new().expect("create temp dir B");
+
+        let cache_a = project_cache_dir(project_a.path());
+        let cache_b = project_cache_dir(project_b.path());
+
+        let id_a = cache_a
+            .file_name()
+            .expect("cache dir should have id segment")
+            .to_string_lossy()
+            .to_string();
+        let id_b = cache_b
+            .file_name()
+            .expect("cache dir should have id segment")
+            .to_string_lossy()
+            .to_string();
+
+        assert_ne!(id_a, id_b);
+    }
+
+    #[test]
+    #[serial]
+    fn project_cache_dir_is_stable_for_same_root() {
+        let _guard = EnvVarGuard::clear(CACHE_ENV);
+        let project = TempDir::new().expect("create temp project dir");
+
+        let first = project_cache_dir(project.path());
+        let second = project_cache_dir(project.path());
+
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    #[serial]
+    fn project_cache_dir_normalizes_trailing_slash() {
+        let _guard = EnvVarGuard::clear(CACHE_ENV);
+        let project = TempDir::new().expect("create temp project dir");
+        let canonical = project
+            .path()
+            .canonicalize()
+            .expect("canonicalize project path");
+        let with_trailing_slash = PathBuf::from(format!("{}/", canonical.display()));
+
+        let without_slash = project_cache_dir(&canonical);
+        let with_slash = project_cache_dir(&with_trailing_slash);
+
+        assert_eq!(without_slash, with_slash);
+    }
+
+    #[test]
+    #[serial]
+    fn artifacts_dir_for_non_git_root_matches_project_cache_dir() {
+        let _guard = EnvVarGuard::clear(CACHE_ENV);
+        let project = TempDir::new().expect("create temp project dir");
+
+        let artifacts = Snapshot::artifacts_dir(project.path());
+        let cache = project_cache_dir(project.path());
+
+        assert_eq!(artifacts, cache);
+    }
+
+    #[test]
+    #[serial]
+    fn artifacts_dir_sanitizes_branch_in_scan_segment() {
+        let _guard = EnvVarGuard::clear(CACHE_ENV);
+        let repo = TempDir::new().expect("create temp repo");
+        let root = repo.path();
+        std::fs::write(root.join("README.md"), "init").expect("write seed file");
+
+        run_git(root, &["init"]);
+        run_git(root, &["config", "user.email", "test@example.com"]);
+        run_git(root, &["config", "user.name", "Test User"]);
+        run_git(root, &["add", "."]);
+        run_git(root, &["commit", "-m", "init"]);
+        run_git(root, &["checkout", "-b", "release/v0.8.13"]);
+
+        let commit = git_stdout(root, &["rev-parse", "--short", "HEAD"]);
+        let artifacts = Snapshot::artifacts_dir(root);
+        let scan_segment = artifacts
+            .file_name()
+            .expect("artifacts dir should end with scan segment")
+            .to_string_lossy()
+            .to_string();
+
+        assert_eq!(scan_segment, format!("release_v0.8.13@{commit}"));
+    }
+
+    #[test]
+    fn artifact_display_is_relative_without_dot_prefix() {
+        let loctree_dir = PathBuf::from("/tmp/cache/loctree/projects/abc/main@1234");
+        let artifact = loctree_dir.join("report.html");
+
+        let display = display_artifact_path(&artifact, &loctree_dir);
+
+        assert_eq!(display, "report.html");
+        assert!(!display.starts_with("./"));
+        assert!(!display.contains(".//"));
+        assert!(!Path::new(&display).is_absolute());
+    }
+
+    #[test]
+    fn artifact_display_falls_back_to_absolute_when_strip_prefix_fails() {
+        let loctree_dir = PathBuf::from("/tmp/cache/loctree/projects/abc/main@1234");
+        let artifact = PathBuf::from("/tmp/other/path/report.html");
+
+        let display = display_artifact_path(&artifact, &loctree_dir);
+
+        assert_eq!(display, artifact.display().to_string());
+        assert!(!display.starts_with("./"));
+        assert!(!display.contains(".//"));
+        assert!(Path::new(&display).is_absolute());
+    }
+
+    #[test]
+    #[serial]
+    fn resolve_snapshot_root_does_not_walk_up_past_explicit_project_marker() {
+        let _guard = EnvVarGuard::clear(CACHE_ENV);
+        let workspace = TempDir::new().expect("create temp workspace");
+        let subproject = workspace.path().join("apps/web");
+        std::fs::create_dir_all(&subproject).expect("create nested project");
+        std::fs::write(subproject.join("package.json"), "{}").expect("write package.json");
+
+        run_git(workspace.path(), &["init"]);
+
+        let resolved = resolve_snapshot_root(std::slice::from_ref(&subproject));
+        let expected = subproject.canonicalize().expect("canonicalize subproject");
+        let actual = resolved.canonicalize().expect("canonicalize resolved root");
+        assert_eq!(actual, expected);
+    }
+}

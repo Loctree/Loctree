@@ -95,7 +95,7 @@ loct jq '.metadata'           # Query snapshot.json directly
 
 > **Available in [loctree-suite](https://github.com/Loctree/loctree-suite)**
 
-Full LSP support for real-time dead code detection, cycle warnings, and code navigation — powered by the `loctree-lsp` language server included in loctree-suite.
+Full LSP support for real-time dead code detection, cycle warnings, and code navigation is available through the language server included in loctree-suite.
 
 | Editor | Documentation | Status |
 |--------|---------------|--------|
@@ -176,7 +176,7 @@ Output includes:
 - `loctree_rs/` - Main analyzer (Rust)
 - `loctree-mcp/` - MCP server for AI agents
 - `reports/` - HTML report renderer (Leptos SSR)
-- `loctree_lsp/` - LSP server (in [loctree-suite](https://github.com/Loctree/loctree-suite))
+- Editor integrations and the LSP server are maintained in [loctree-suite](https://github.com/Loctree/loctree-suite)
 
 **Analysis flow:**
 1. Auto-detect stack (Rust/TS/Python/Dart)

@@ -4,7 +4,7 @@
 > The LSP server and editor integrations ship with loctree-suite.
 > Install the free CLI with `cargo install loctree`, then upgrade to suite for IDE features.
 
-The Loctree VSCode extension provides real-time dead code detection, circular import warnings, and code navigation powered by the `loctree-lsp` language server.
+The Loctree VSCode extension provides real-time dead code detection, circular import warnings, and code navigation powered by the loctree-suite language server.
 
 ## Installation
 
@@ -22,7 +22,7 @@ Then in VSCode: `F1` → "Developer: Install Extension from Location" → select
 
 ```bash
 cd loctree-suite/editors/vscode
-LOCTREE_LSP_PATH=/path/to/loctree-lsp npm run package
+LOCTREE_LSP_PATH=/path/to/suite-language-server npm run package
 ```
 
 ### From Marketplace (Coming Soon)
@@ -70,7 +70,7 @@ In VSCode settings (`Ctrl+,`):
 
 ```json
 {
-  "loctree.serverPath": "/custom/path/to/loctree-lsp",
+  "loctree.serverPath": "/custom/path/to/suite-language-server",
   "loctree.autoRefresh": false,
   "loctree.trace.server": "verbose"
 }
@@ -78,9 +78,9 @@ In VSCode settings (`Ctrl+,`):
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `serverPath` | auto-detect | Path to loctree-lsp binary |
+| `serverPath` | auto-detect | Path to the loctree-suite language server binary |
 | `autoRefresh` | `false` | Re-scan on file save |
-| `autoDownload` | `true` | Download loctree-lsp if missing |
+| `autoDownload` | `true` | Download the loctree-suite language server if missing |
 | `downloadBaseUrl` | (empty) | Override repo URL for downloads |
 | `downloadTag` | `latest` | Release tag for downloads |
 | `trace.server` | `off` | LSP message logging |
@@ -107,7 +107,7 @@ Open command palette (`F1`) and search for "Loctree":
 
 ## Requirements
 
-- [loctree-suite](https://github.com/Loctree/loctree-suite) with `loctree-lsp` binary
+- [loctree-suite](https://github.com/Loctree/loctree-suite) with the language server binary
 - Loctree CLI installed (`cargo install loctree`)
 - Run `loct` once in the project root (writes snapshot to cache; set `LOCT_CACHE_DIR=.loctree` for repo-local artifacts)
 
@@ -122,11 +122,11 @@ Open command palette (`F1`) and search for "Loctree":
 ### Server not starting
 
 ```bash
-# Check if loctree-lsp is in PATH
-which loctree-lsp
+# Check if your language server binary is in PATH
+which <suite-language-server-binary>
 
 # Or set custom path in settings
-"loctree.serverPath": "/path/to/loctree-lsp"
+"loctree.serverPath": "/path/to/suite-language-server"
 ```
 
 ### Stale diagnostics
