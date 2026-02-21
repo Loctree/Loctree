@@ -20,7 +20,7 @@
 //! loctree-mcp
 //! ```
 //!
-//! Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team
+//! Vibecrafted with AI Agents by VetCoders (c)2026 The Loctree Team
 
 use std::collections::HashMap;
 use std::panic;
@@ -137,6 +137,27 @@ struct FocusParams {
     project: String,
     /// Directory to focus on (e.g., 'src/components')
     directory: String,
+}
+
+fn default_follow_scope() -> String {
+    "all".to_string()
+}
+
+fn default_follow_limit() -> usize {
+    10
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+struct FollowParams {
+    /// Project directory (default: current directory)
+    #[serde(default = "default_project")]
+    project: String,
+    /// What to follow: "dead", "cycles", "twins", "hotspots", or "all"
+    #[serde(default = "default_follow_scope")]
+    scope: String,
+    /// Max trails to return per scope (default: 10)
+    #[serde(default = "default_follow_limit")]
+    limit: usize,
 }
 
 fn default_depth() -> usize {
@@ -892,6 +913,231 @@ impl LoctreeServer {
         serde_json::to_string_pretty(&result)
             .unwrap_or_else(|e| format!("Serialization error: {}", e))
     }
+
+    /// Follow signals flagged by repo-view at field level
+    #[tool(
+        name = "follow",
+        description = "Pursue structural signals at field level. repo-view flags problems (dead exports, cycles, twins, hotspots) — follow gives you the details with actionable recommendations. Scopes: dead, cycles, twins, hotspots, all."
+    )]
+    async fn follow(&self, Parameters(params): Parameters<FollowParams>) -> String {
+        let project = match Self::resolve_project(&params.project) {
+            Ok(p) => p,
+            Err(e) => return format!("Error: {}", e),
+        };
+
+        let snapshot = match self.get_snapshot(&project).await {
+            Ok(s) => s,
+            Err(e) => return format!("Error loading project: {}", e),
+        };
+
+        let scope = params.scope.to_lowercase();
+        let limit = params.limit;
+        let mut trails = serde_json::Map::new();
+
+        // Dead exports trail
+        if scope == "dead" || scope == "all" {
+            let config = DeadFilterConfig::default();
+            let dead = find_dead_exports(&snapshot.files, true, None, config);
+
+            // Find nearest candidate consumers for each dead export
+            let signals: Vec<_> = dead
+                .iter()
+                .take(limit)
+                .map(|d| {
+                    // Find files that import from the same directory (potential wiring candidates)
+                    let dir = Path::new(&d.file)
+                        .parent()
+                        .map(|p| p.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    let candidates: Vec<_> = snapshot
+                        .edges
+                        .iter()
+                        .filter(|e| e.to.starts_with(&dir) && e.from != d.file)
+                        .map(|e| e.from.clone())
+                        .collect::<std::collections::HashSet<_>>()
+                        .into_iter()
+                        .take(3)
+                        .collect();
+
+                    let loc = snapshot
+                        .files
+                        .iter()
+                        .find(|f| f.path == d.file)
+                        .map(|f| f.loc)
+                        .unwrap_or(0);
+
+                    serde_json::json!({
+                        "file": d.file,
+                        "symbol": d.symbol,
+                        "confidence": d.confidence,
+                        "reason": d.reason,
+                        "loc": loc,
+                        "nearest_candidates": candidates,
+                        "action": "remove or wire into candidate consumers"
+                    })
+                })
+                .collect();
+
+            trails.insert(
+                "dead_exports".to_string(),
+                serde_json::json!({
+                    "total": dead.len(),
+                    "shown": signals.len(),
+                    "signals": signals
+                }),
+            );
+        }
+
+        // Cycles trail
+        if scope == "cycles" || scope == "all" {
+            let edges: Vec<_> = snapshot
+                .edges
+                .iter()
+                .map(|e| (e.from.clone(), e.to.clone(), e.label.clone()))
+                .collect();
+            let cycles = find_cycles(&edges);
+
+            let signals: Vec<_> = cycles
+                .iter()
+                .take(limit)
+                .map(|chain| {
+                    // Calculate total LOC in cycle
+                    let total_loc: usize = chain
+                        .iter()
+                        .filter_map(|f| snapshot.files.iter().find(|a| a.path == *f))
+                        .map(|a| a.loc)
+                        .sum();
+
+                    // Find weakest link (edge with fewest symbols crossing)
+                    let mut weakest = ("", "", usize::MAX);
+                    for i in 0..chain.len() {
+                        let from = &chain[i];
+                        let to = &chain[(i + 1) % chain.len()];
+                        let symbols_crossed = snapshot
+                            .edges
+                            .iter()
+                            .filter(|e| e.from == *from && e.to == *to)
+                            .count();
+                        if symbols_crossed < weakest.2 {
+                            weakest = (from, to, symbols_crossed);
+                        }
+                    }
+
+                    serde_json::json!({
+                        "chain": chain,
+                        "length": chain.len(),
+                        "total_loc": total_loc,
+                        "weakest_link": {
+                            "from": weakest.0,
+                            "to": weakest.1,
+                            "symbols_crossed": weakest.2
+                        },
+                        "action": "break at weakest link"
+                    })
+                })
+                .collect();
+
+            trails.insert(
+                "cycles".to_string(),
+                serde_json::json!({
+                    "total": cycles.len(),
+                    "shown": signals.len(),
+                    "signals": signals
+                }),
+            );
+        }
+
+        // Twins trail
+        if scope == "twins" || scope == "all" {
+            let twins = detect_exact_twins(&snapshot.files, false);
+
+            let signals: Vec<_> = twins
+                .iter()
+                .take(limit)
+                .map(|twin| {
+                    let files: Vec<_> = twin.locations.iter().map(|l| &l.file_path).collect();
+                    serde_json::json!({
+                        "symbol": twin.name,
+                        "files": files,
+                        "locations": twin.locations.iter().map(|l| serde_json::json!({
+                            "file": l.file_path,
+                            "line": l.line,
+                            "kind": l.kind,
+                            "importers": l.import_count
+                        })).collect::<Vec<_>>(),
+                        "signature_similarity": twin.signature_similarity,
+                        "action": "consolidate into single module"
+                    })
+                })
+                .collect();
+
+            trails.insert(
+                "twins".to_string(),
+                serde_json::json!({
+                    "total": twins.len(),
+                    "shown": signals.len(),
+                    "signals": signals
+                }),
+            );
+        }
+
+        // Hotspots trail (files with most importers)
+        if scope == "hotspots" || scope == "all" {
+            let mut import_counts: HashMap<&str, usize> = HashMap::new();
+            for edge in &snapshot.edges {
+                *import_counts.entry(&edge.to).or_default() += 1;
+            }
+            let mut hubs: Vec<_> = import_counts.into_iter().collect();
+            hubs.sort_by(|a, b| b.1.cmp(&a.1));
+
+            let signals: Vec<_> = hubs
+                .iter()
+                .take(limit)
+                .map(|(file, importers)| {
+                    let loc = snapshot
+                        .files
+                        .iter()
+                        .find(|f| f.path == *file)
+                        .map(|f| f.loc)
+                        .unwrap_or(0);
+
+                    let risk = if *importers > 30 {
+                        "high — changes here ripple everywhere"
+                    } else if *importers > 10 {
+                        "medium — significant blast radius"
+                    } else {
+                        "low"
+                    };
+
+                    serde_json::json!({
+                        "file": file,
+                        "importers": importers,
+                        "loc": loc,
+                        "risk": risk,
+                        "action": if *importers > 20 { "split or freeze interface" } else { "monitor" }
+                    })
+                })
+                .collect();
+
+            trails.insert(
+                "hotspots".to_string(),
+                serde_json::json!({
+                    "total": hubs.len(),
+                    "shown": signals.len(),
+                    "signals": signals
+                }),
+            );
+        }
+
+        let result = serde_json::json!({
+            "project": project.display().to_string(),
+            "scope": params.scope,
+            "trails": trails
+        });
+
+        serde_json::to_string_pretty(&result)
+            .unwrap_or_else(|e| format!("Serialization error: {}", e))
+    }
 }
 
 // ============================================================================
@@ -923,7 +1169,8 @@ impl ServerHandler for LoctreeServer {
                  - find(name) - Before creating. Symbol search with regex support.\n\
                  - impact(file) - Before deleting. Direct + transitive consumers (blast radius).\n\
                  - focus(directory) - Understand a module. Files, internal edges, external deps.\n\
-                 - tree(project) - Directory structure with LOC counts.\n\n\
+                 - tree(project) - Directory structure with LOC counts.\n\
+                 - follow(scope) - Pursue signals: dead exports, cycles, twins, hotspots. Field-level detail.\n\n\
                  All tools accept 'project' parameter (default: current dir).\n\
                  First use auto-scans if no snapshot exists."
                     .into(),
