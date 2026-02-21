@@ -41,6 +41,7 @@ pub const SNAPSHOT_FILE: &str = "snapshot.json";
 
 /// Environment variable to override the cache base directory.
 const LOCT_CACHE_DIR_ENV: &str = "LOCT_CACHE_DIR";
+const LEGACY_MIGRATION_MARKER: &str = ".snapshot-migrated-to-cache";
 
 /// Returns the global cache base directory for loctree artifacts.
 ///
@@ -914,20 +915,111 @@ impl Snapshot {
         Self::git_context_for(&std::env::current_dir().unwrap_or_default())
     }
 
-    fn candidate_snapshot_paths(root: &Path) -> Vec<PathBuf> {
+    fn cache_snapshot_paths(root: &Path) -> Vec<PathBuf> {
         let cache_dir = project_cache_dir(root);
         let mut paths = Vec::new();
         if let Some(seg) = Self::git_context_for(root).scan_id {
-            // Primary: global cache with branch@sha
-            paths.push(cache_dir.join(&seg).join(SNAPSHOT_FILE));
-            // Legacy: project-local with branch@sha
-            paths.push(root.join(SNAPSHOT_DIR).join(seg).join(SNAPSHOT_FILE));
+            paths.push(cache_dir.join(seg).join(SNAPSHOT_FILE));
         }
-        // Legacy: project-local flat
-        paths.push(root.join(SNAPSHOT_DIR).join(SNAPSHOT_FILE));
-        // Global cache flat (no git context)
+        // Cache flat fallback (non-git or pre-git-layout artifacts)
         paths.push(cache_dir.join(SNAPSHOT_FILE));
         paths
+    }
+
+    fn legacy_snapshot_paths(root: &Path) -> Vec<PathBuf> {
+        let mut paths = Vec::new();
+        if let Some(seg) = Self::git_context_for(root).scan_id {
+            paths.push(root.join(SNAPSHOT_DIR).join(seg).join(SNAPSHOT_FILE));
+        }
+        paths.push(root.join(SNAPSHOT_DIR).join(SNAPSHOT_FILE));
+        paths
+    }
+
+    fn candidate_snapshot_paths(root: &Path) -> Vec<PathBuf> {
+        // Always prefer cache paths over legacy project-local paths.
+        let mut paths = Self::cache_snapshot_paths(root);
+        paths.extend(Self::legacy_snapshot_paths(root));
+        paths
+    }
+
+    fn first_existing_path(paths: &[PathBuf]) -> Option<PathBuf> {
+        paths.iter().find(|p| p.exists()).cloned()
+    }
+
+    fn newest_snapshot_path(snapshots: &mut [(PathBuf, std::time::SystemTime)]) -> Option<PathBuf> {
+        snapshots.sort_by(|a, b| b.1.cmp(&a.1));
+        snapshots.first().map(|(path, _)| path.clone())
+    }
+
+    fn warn_dual_snapshot_sources(cache_path: &Path, legacy_path: &Path) {
+        eprintln!(
+            "[loctree][warn] Both cache and legacy snapshots found; using cache: {} (legacy ignored: {})",
+            cache_path.display(),
+            legacy_path.display()
+        );
+    }
+
+    fn cache_path_for_legacy_snapshot(root: &Path, legacy_snapshot_path: &Path) -> PathBuf {
+        let legacy_base = root.join(SNAPSHOT_DIR);
+        let cache_dir = project_cache_dir(root);
+        if let Ok(relative) = legacy_snapshot_path.strip_prefix(&legacy_base)
+            && relative.ends_with(Path::new(SNAPSHOT_FILE))
+        {
+            return cache_dir.join(relative);
+        }
+        Self::snapshot_path(root)
+    }
+
+    fn write_legacy_migration_marker(
+        root: &Path,
+        legacy_snapshot_path: &Path,
+        cache_snapshot_path: &Path,
+    ) -> io::Result<()> {
+        let legacy_dir = root.join(SNAPSHOT_DIR);
+        fs::create_dir_all(&legacy_dir)?;
+        let marker_path = legacy_dir.join(LEGACY_MIGRATION_MARKER);
+        if marker_path.exists() {
+            return Ok(());
+        }
+        let marker_contents = format!(
+            "legacy_snapshot={}\ncache_snapshot={}\n",
+            legacy_snapshot_path.display(),
+            cache_snapshot_path.display()
+        );
+        write_atomic(&marker_path, marker_contents)
+    }
+
+    fn migrate_legacy_snapshot_to_cache(
+        root: &Path,
+        legacy_snapshot_path: &Path,
+    ) -> io::Result<PathBuf> {
+        let cache_snapshot_path = Self::cache_path_for_legacy_snapshot(root, legacy_snapshot_path);
+        if cache_snapshot_path.exists() {
+            return Ok(cache_snapshot_path);
+        }
+
+        let bytes = fs::read(legacy_snapshot_path)?;
+        if let Some(parent) = cache_snapshot_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        write_atomic(&cache_snapshot_path, bytes)?;
+
+        if let Err(err) =
+            Self::write_legacy_migration_marker(root, legacy_snapshot_path, &cache_snapshot_path)
+        {
+            eprintln!(
+                "[loctree][warn] Snapshot migrated but failed to write migration marker: {}",
+                err
+            );
+        }
+
+        eprintln!(
+            "[loctree][info] Migrated legacy snapshot to cache: {} -> {}",
+            legacy_snapshot_path.display(),
+            cache_snapshot_path.display()
+        );
+
+        Ok(cache_snapshot_path)
     }
 
     /// Get the snapshot file path for a given root (writes go here).
@@ -1147,28 +1239,47 @@ impl Snapshot {
     }
 
     /// Find latest snapshot starting from a given root directory.
-    /// Searches both global cache and legacy project-local `.loctree/` directory.
+    /// Prefers global cache as source of truth and falls back to legacy `.loctree/` only if needed.
     pub fn find_latest_snapshot_in(root: &Path) -> Result<PathBuf, String> {
-        let mut snapshots: Vec<(PathBuf, std::time::SystemTime)> = Vec::new();
-
         let effective_root =
             Self::find_loctree_root(root).unwrap_or_else(|| normalize_root_dir(root));
 
+        let mut cache_snapshots: Vec<(PathBuf, std::time::SystemTime)> = Vec::new();
+        let mut legacy_snapshots: Vec<(PathBuf, std::time::SystemTime)> = Vec::new();
+
         // Search global cache directory for this project (effective root, not CWD)
         let cache_dir = project_cache_dir(&effective_root);
-        Self::collect_snapshots_from_dir(&cache_dir, &mut snapshots);
+        Self::collect_snapshots_from_dir(&cache_dir, &mut cache_snapshots);
 
         // Search legacy project-local .loctree/ directory
         let legacy_dir = effective_root.join(SNAPSHOT_DIR);
-        Self::collect_snapshots_from_dir(&legacy_dir, &mut snapshots);
+        Self::collect_snapshots_from_dir(&legacy_dir, &mut legacy_snapshots);
 
-        if snapshots.is_empty() {
-            return Err("No snapshot found. Run `loct scan` first to create one.".to_string());
+        let cache_latest = Self::newest_snapshot_path(&mut cache_snapshots);
+        let legacy_latest = Self::newest_snapshot_path(&mut legacy_snapshots);
+
+        match (cache_latest, legacy_latest) {
+            (Some(cache_path), Some(legacy_path)) => {
+                Self::warn_dual_snapshot_sources(&cache_path, &legacy_path);
+                Ok(cache_path)
+            }
+            (Some(cache_path), None) => Ok(cache_path),
+            (None, Some(legacy_path)) => {
+                match Self::migrate_legacy_snapshot_to_cache(&effective_root, &legacy_path) {
+                    Ok(migrated) => Ok(migrated),
+                    Err(err) => {
+                        eprintln!(
+                            "[loctree][warn] Failed to migrate legacy snapshot to cache, using legacy path: {}",
+                            err
+                        );
+                        Ok(legacy_path)
+                    }
+                }
+            }
+            (None, None) => {
+                Err("No snapshot found. Run `loct scan` first to create one.".to_string())
+            }
         }
-
-        // Sort by mtime (newest first) and return the most recent
-        snapshots.sort_by(|a, b| b.1.cmp(&a.1));
-        Ok(snapshots.into_iter().next().unwrap().0)
     }
 
     /// Collect all snapshot.json files from a directory (flat + subdirs).
@@ -1247,17 +1358,30 @@ impl Snapshot {
 
     /// Load snapshot from disk (used by VS2 slice module)
     pub fn load(root: &Path) -> io::Result<Self> {
-        let mut snapshot_path = None;
-        for candidate in Self::candidate_snapshot_paths(root) {
-            if candidate.exists() {
-                snapshot_path = Some(candidate);
-                break;
-            }
-        }
+        let cache_candidates = Self::cache_snapshot_paths(root);
+        let legacy_candidates = Self::legacy_snapshot_paths(root);
+        let cache_snapshot = Self::first_existing_path(&cache_candidates);
+        let legacy_snapshot = Self::first_existing_path(&legacy_candidates);
 
-        let snapshot_path = match snapshot_path {
-            Some(p) => p,
-            None => {
+        let snapshot_path = match (cache_snapshot, legacy_snapshot) {
+            (Some(cache_path), Some(legacy_path)) => {
+                Self::warn_dual_snapshot_sources(&cache_path, &legacy_path);
+                cache_path
+            }
+            (Some(cache_path), None) => cache_path,
+            (None, Some(legacy_path)) => {
+                match Self::migrate_legacy_snapshot_to_cache(root, &legacy_path) {
+                    Ok(migrated) => migrated,
+                    Err(err) => {
+                        eprintln!(
+                            "[loctree][warn] Failed to migrate legacy snapshot to cache, using legacy path: {}",
+                            err
+                        );
+                        legacy_path
+                    }
+                }
+            }
+            (None, None) => {
                 let primary = Self::snapshot_path(root);
                 return Err(io::Error::new(
                     io::ErrorKind::NotFound,
@@ -2695,6 +2819,7 @@ mod tests {
     fn test_find_latest_snapshot_picks_newest_by_mtime() {
         let tmp = TempDir::new().expect("create temp dir");
         let loctree_dir = tmp.path().join(SNAPSHOT_DIR);
+        let _cleanup = DirGuard::new(project_cache_dir(tmp.path()));
 
         // Create two branch@sha subdirectories with snapshots
         let old_dir = loctree_dir.join("main@old123");
@@ -2768,6 +2893,7 @@ mod tests {
     fn test_find_latest_snapshot_legacy_path() {
         let tmp = TempDir::new().expect("create temp dir");
         let loctree_dir = tmp.path().join(SNAPSHOT_DIR);
+        let _cleanup = DirGuard::new(project_cache_dir(tmp.path()));
 
         // Create legacy snapshot at .loctree/snapshot.json (not in subdirectory)
         std::fs::create_dir_all(&loctree_dir).expect("create .loctree dir");
@@ -2781,10 +2907,16 @@ mod tests {
         let result = Snapshot::find_latest_snapshot_in(tmp.path());
 
         assert!(result.is_ok());
-        // Compare canonicalized paths to handle /private/var vs /var on macOS
+        // Legacy path should be migrated to cache and returned from there.
         let found = result.unwrap().canonicalize().unwrap_or_default();
-        let expected = legacy_path.canonicalize().unwrap_or_default();
+        let expected = Snapshot::snapshot_path(tmp.path())
+            .canonicalize()
+            .unwrap_or_default();
         assert_eq!(found, expected);
+        assert!(
+            legacy_path.exists(),
+            "legacy source remains for compatibility"
+        );
     }
 
     #[test]
@@ -3112,5 +3244,141 @@ mod cache_tests {
         let expected = subproject.canonicalize().expect("canonicalize subproject");
         let actual = resolved.canonicalize().expect("canonicalize resolved root");
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    #[serial]
+    fn load_prefers_cache_when_both_cache_and_legacy_exist() {
+        let cache_root = TempDir::new().expect("create temp cache dir");
+        let _guard = EnvVarGuard::set_path(CACHE_ENV, cache_root.path());
+        let project = TempDir::new().expect("create temp project dir");
+
+        let cache_path = Snapshot::snapshot_path(project.path());
+        std::fs::create_dir_all(
+            cache_path
+                .parent()
+                .expect("cache snapshot path must have parent"),
+        )
+        .expect("create cache snapshot parent");
+        let cache_snapshot = Snapshot::new(vec!["cache-source".to_string()]);
+        std::fs::write(
+            &cache_path,
+            serde_json::to_string_pretty(&cache_snapshot).expect("serialize cache snapshot"),
+        )
+        .expect("write cache snapshot");
+
+        let legacy_path = project.path().join(SNAPSHOT_DIR).join(SNAPSHOT_FILE);
+        std::fs::create_dir_all(
+            legacy_path
+                .parent()
+                .expect("legacy snapshot path must have parent"),
+        )
+        .expect("create legacy snapshot parent");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        let legacy_snapshot = Snapshot::new(vec!["legacy-source".to_string()]);
+        std::fs::write(
+            &legacy_path,
+            serde_json::to_string_pretty(&legacy_snapshot).expect("serialize legacy snapshot"),
+        )
+        .expect("write legacy snapshot");
+
+        let loaded = Snapshot::load(project.path()).expect("load snapshot");
+        assert_eq!(loaded.metadata.roots, vec!["cache-source".to_string()]);
+
+        let marker_path = project
+            .path()
+            .join(SNAPSHOT_DIR)
+            .join(LEGACY_MIGRATION_MARKER);
+        assert!(
+            !marker_path.exists(),
+            "marker should not be written when cache already exists"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn load_migrates_legacy_snapshot_to_cache_with_marker() {
+        let cache_root = TempDir::new().expect("create temp cache dir");
+        let _guard = EnvVarGuard::set_path(CACHE_ENV, cache_root.path());
+        let project = TempDir::new().expect("create temp project dir");
+
+        let legacy_path = project.path().join(SNAPSHOT_DIR).join(SNAPSHOT_FILE);
+        std::fs::create_dir_all(
+            legacy_path
+                .parent()
+                .expect("legacy snapshot path must have parent"),
+        )
+        .expect("create legacy snapshot parent");
+        let legacy_snapshot = Snapshot::new(vec!["legacy-source".to_string()]);
+        std::fs::write(
+            &legacy_path,
+            serde_json::to_string_pretty(&legacy_snapshot).expect("serialize legacy snapshot"),
+        )
+        .expect("write legacy snapshot");
+
+        let loaded = Snapshot::load(project.path()).expect("load migrated snapshot");
+        assert_eq!(loaded.metadata.roots, vec!["legacy-source".to_string()]);
+
+        let cache_path = Snapshot::snapshot_path(project.path());
+        assert!(cache_path.exists(), "cache snapshot should be created");
+
+        let marker_path = project
+            .path()
+            .join(SNAPSHOT_DIR)
+            .join(LEGACY_MIGRATION_MARKER);
+        assert!(marker_path.exists(), "migration marker should be created");
+        let marker = std::fs::read_to_string(&marker_path).expect("read migration marker");
+        assert!(marker.contains("legacy_snapshot="));
+        assert!(marker.contains("cache_snapshot="));
+
+        std::fs::remove_file(&legacy_path).expect("remove legacy snapshot");
+        let loaded_again = Snapshot::load(project.path()).expect("load from cache after migration");
+        assert_eq!(
+            loaded_again.metadata.roots,
+            vec!["legacy-source".to_string()]
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn find_latest_snapshot_prefers_cache_even_when_legacy_is_newer() {
+        let cache_root = TempDir::new().expect("create temp cache dir");
+        let _guard = EnvVarGuard::set_path(CACHE_ENV, cache_root.path());
+        let project = TempDir::new().expect("create temp project dir");
+
+        let cache_path = Snapshot::snapshot_path(project.path());
+        std::fs::create_dir_all(
+            cache_path
+                .parent()
+                .expect("cache snapshot path must have parent"),
+        )
+        .expect("create cache snapshot parent");
+        let cache_snapshot = Snapshot::new(vec!["cache-source".to_string()]);
+        std::fs::write(
+            &cache_path,
+            serde_json::to_string_pretty(&cache_snapshot).expect("serialize cache snapshot"),
+        )
+        .expect("write cache snapshot");
+
+        let legacy_path = project.path().join(SNAPSHOT_DIR).join(SNAPSHOT_FILE);
+        std::fs::create_dir_all(
+            legacy_path
+                .parent()
+                .expect("legacy snapshot path must have parent"),
+        )
+        .expect("create legacy snapshot parent");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        let legacy_snapshot = Snapshot::new(vec!["legacy-source".to_string()]);
+        std::fs::write(
+            &legacy_path,
+            serde_json::to_string_pretty(&legacy_snapshot).expect("serialize legacy snapshot"),
+        )
+        .expect("write legacy snapshot");
+
+        let found =
+            Snapshot::find_latest_snapshot_in(project.path()).expect("find latest snapshot");
+        let found = found.canonicalize().unwrap_or(found);
+        let expected = cache_path.canonicalize().unwrap_or(cache_path);
+        assert_eq!(found, expected);
     }
 }

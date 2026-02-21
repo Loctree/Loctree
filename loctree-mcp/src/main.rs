@@ -190,17 +190,19 @@ impl LoctreeServer {
 
     /// Get or load snapshot for a project. Auto-scans if needed.
     async fn get_snapshot(&self, project: &Path) -> Result<Arc<Snapshot>> {
-        // Check cache first
-        {
+        let cached_snapshot = {
             let cache = self.cache.read().await;
-            if let Some(snapshot) = cache.get(project) {
-                // Check if snapshot is stale
-                if !Self::is_snapshot_stale(snapshot, project) {
-                    debug!("Using cached snapshot for {:?}", project);
-                    return Ok(Arc::clone(snapshot));
-                }
-                debug!("Cached snapshot is stale for {:?}", project);
+            cache.get(project).map(Arc::clone)
+        };
+
+        // Check cache first
+        if let Some(snapshot) = cached_snapshot {
+            // Check if snapshot is stale
+            if !Self::is_snapshot_stale(&snapshot, project) {
+                debug!("Using cached snapshot for {:?}", project);
+                return Ok(snapshot);
             }
+            debug!("Cached snapshot is stale for {:?}", project);
         }
 
         // Need to load or create snapshot
@@ -254,44 +256,20 @@ impl LoctreeServer {
         false
     }
 
-    /// Run loctree scan as subprocess (avoids stdout pollution)
+    /// Run loctree scan in-process using library API.
     fn run_scan(project: &Path) -> Result<()> {
-        use std::process::{Command, Stdio};
-
-        let output = Command::new("loct")
-            .arg("scan")
-            .current_dir(project)
-            .stdout(Stdio::null())
-            .stderr(Stdio::inherit())
-            .output()
-            .map_err(|e| anyhow::anyhow!("Failed to run loct scan: {}", e))?;
-
-        if !output.status.success() {
-            return Err(anyhow::anyhow!(
-                "loct scan failed with exit code: {:?}",
-                output.status.code()
-            ));
-        }
-
-        Ok(())
+        use loctree::args::ParsedArgs;
+        let roots = vec![project.to_path_buf()];
+        let parsed = ParsedArgs::default();
+        loctree::snapshot::run_init_with_options(&roots, &parsed, true)
+            .map_err(|e| anyhow::anyhow!("Scan failed: {}", e))
     }
 
     /// Get current git HEAD commit hash
     fn get_git_head(project: &Path) -> Option<String> {
-        std::process::Command::new("git")
-            .args(["rev-parse", "HEAD"])
-            .current_dir(project)
-            .output()
+        loctree::git::GitRepo::discover(project)
             .ok()
-            .and_then(|output| {
-                if output.status.success() {
-                    String::from_utf8(output.stdout)
-                        .ok()
-                        .map(|s| s.trim().to_string())
-                } else {
-                    None
-                }
-            })
+            .and_then(|repo| repo.head_commit().ok())
     }
 
     /// Validate file path: check if within project, return matched path from snapshot or error.

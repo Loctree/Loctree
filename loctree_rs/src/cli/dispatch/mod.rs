@@ -609,30 +609,55 @@ pub(crate) fn load_or_create_snapshot_for_roots(
     use crate::snapshot::resolve_snapshot_root;
 
     let snapshot_root = resolve_snapshot_root(roots);
+    let requested_roots =
+        normalize_roots_for_scope_compare(roots.iter().map(|p| p.as_path()), &snapshot_root);
 
     // If --fresh, skip loading and go straight to scan
     if !global.fresh {
         match Snapshot::load(&snapshot_root) {
             Ok(s) => {
-                // Check for stale snapshot if --fail-stale is set
-                if global.fail_stale
-                    && let Some(snapshot_commit) = &s.metadata.git_commit
-                {
-                    let current_commit = get_current_git_head(&snapshot_root);
-                    if let Some(ref current) = current_commit {
-                        // Compare using prefix match (snapshot may have short hash)
-                        let is_same = current.starts_with(snapshot_commit)
-                            || snapshot_commit.starts_with(current);
-                        if !is_same {
-                            return Err(std::io::Error::other(format!(
-                                "Snapshot is stale: snapshot commit={} but current HEAD={}. Run 'loct' to rescan or use --fresh.",
-                                &snapshot_commit[..7.min(snapshot_commit.len())],
-                                &current[..7.min(current.len())]
-                            )));
+                // Guard against stale scope reuse: if snapshot roots differ from requested roots,
+                // force a rescan (or fail with --no-scan).
+                let snapshot_roots = normalize_roots_for_scope_compare(
+                    s.metadata.roots.iter().map(std::path::Path::new),
+                    &snapshot_root,
+                );
+                if requested_roots != snapshot_roots {
+                    if global.no_scan {
+                        return Err(std::io::Error::other(format!(
+                            "Snapshot scope mismatch and --no-scan is set.\nrequested roots: [{}]\nsnapshot roots:  [{}]\nRun `loct scan` (or the command without --no-scan) to refresh scope.",
+                            requested_roots.join(", "),
+                            snapshot_roots.join(", ")
+                        )));
+                    }
+                    if !global.quiet {
+                        eprintln!(
+                            "[loct] Snapshot roots differ from requested roots; refreshing snapshot scope.\n  requested: [{}]\n  snapshot:  [{}]",
+                            requested_roots.join(", "),
+                            snapshot_roots.join(", ")
+                        );
+                    }
+                } else {
+                    // Check for stale snapshot if --fail-stale is set
+                    if global.fail_stale
+                        && let Some(snapshot_commit) = &s.metadata.git_commit
+                    {
+                        let current_commit = get_current_git_head(&snapshot_root);
+                        if let Some(ref current) = current_commit {
+                            // Compare using prefix match (snapshot may have short hash)
+                            let is_same = current.starts_with(snapshot_commit)
+                                || snapshot_commit.starts_with(current);
+                            if !is_same {
+                                return Err(std::io::Error::other(format!(
+                                    "Snapshot is stale: snapshot commit={} but current HEAD={}. Run 'loct' to rescan or use --fresh.",
+                                    &snapshot_commit[..7.min(snapshot_commit.len())],
+                                    &current[..7.min(current.len())]
+                                )));
+                            }
                         }
                     }
+                    return Ok(s);
                 }
-                return Ok(s);
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 // No snapshot - check if --no-scan forbids auto-scan
@@ -671,6 +696,34 @@ pub(crate) fn load_or_create_snapshot_for_roots(
 
     // Now load the freshly created snapshot
     Snapshot::load(&snapshot_root)
+}
+
+/// Normalize root paths for scope comparison between requested roots and snapshot metadata.
+///
+/// - Resolves relative paths against snapshot_root
+/// - Canonicalizes when possible
+/// - Normalizes separators
+/// - Sorts and deduplicates
+fn normalize_roots_for_scope_compare<'a, I>(
+    roots: I,
+    snapshot_root: &std::path::Path,
+) -> Vec<String>
+where
+    I: Iterator<Item = &'a std::path::Path>,
+{
+    let mut normalized = Vec::new();
+    for root in roots {
+        let candidate = if root.is_absolute() {
+            root.to_path_buf()
+        } else {
+            snapshot_root.join(root)
+        };
+        let canon = candidate.canonicalize().unwrap_or(candidate);
+        normalized.push(canon.to_string_lossy().replace('\\', "/"));
+    }
+    normalized.sort();
+    normalized.dedup();
+    normalized
 }
 
 pub(crate) fn load_or_create_snapshot(
@@ -739,6 +792,7 @@ pub(crate) fn is_test_file(path: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
 
     #[test]
     fn test_auto_command_to_parsed_args() {
@@ -830,6 +884,44 @@ mod tests {
         assert_eq!(parsed.slice_target, Some("src/main.rs".into()));
         assert!(parsed.slice_consumers);
         assert!(matches!(parsed.output, OutputMode::Json));
+    }
+
+    #[test]
+    fn test_normalize_roots_for_scope_compare_relative_and_absolute_match() {
+        let tmp = TempDir::new().expect("temp dir");
+        std::fs::create_dir_all(tmp.path().join("src")).expect("create src");
+
+        let relative = normalize_roots_for_scope_compare(
+            [std::path::Path::new("src")].into_iter(),
+            tmp.path(),
+        );
+        let absolute = normalize_roots_for_scope_compare(
+            [tmp.path().join("src")].iter().map(|p| p.as_path()),
+            tmp.path(),
+        );
+
+        assert_eq!(relative, absolute);
+        assert_eq!(relative.len(), 1);
+    }
+
+    #[test]
+    fn test_normalize_roots_for_scope_compare_sorted_and_deduped() {
+        let tmp = TempDir::new().expect("temp dir");
+        std::fs::create_dir_all(tmp.path().join("a")).expect("create a");
+        std::fs::create_dir_all(tmp.path().join("b")).expect("create b");
+
+        let normalized = normalize_roots_for_scope_compare(
+            [
+                std::path::Path::new("b"),
+                std::path::Path::new("./a"),
+                std::path::Path::new("b"),
+            ]
+            .into_iter(),
+            tmp.path(),
+        );
+
+        assert_eq!(normalized.len(), 2);
+        assert!(normalized[0] <= normalized[1]);
     }
 
     #[test]

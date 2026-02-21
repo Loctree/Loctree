@@ -12,6 +12,11 @@ AI-oriented codebase analyzer for detecting dead code, circular imports, and gen
 - [Getting Started](getting-started.md)
 - [CLI Commands](cli/commands.md)
 - [CLI Options](cli/options.md)
+- [Context Manifesto](manifest/context-over-memory.md)
+- [Context ADR](adr/2026-02-17-context-over-memory.md)
+- [Agent Context KPIs](metrics/agent-context-kpis.md)
+- [Global Direction Research](research/context-over-memory-global-direction-2026-02-17.md)
+- [Loctree Map + Vision](research/loctree-codebase-map-and-perception-first-vision-2026-02-17.md)
 - [IDE Integration](#ide-integration)
 - [AI Agent Integration](#ai-agent-integration)
 - [CI/CD Integration](integrations/ci-cd.md)
@@ -114,6 +119,19 @@ Full LSP support for real-time dead code detection, cycle warnings, and code nav
 ---
 
 ## AI Agent Integration
+
+### Context Architecture (Default)
+
+For agentic workflows in this repo, the default strategy is **context-over-memory**:
+
+- [Manifesto](manifest/context-over-memory.md)
+- [ADR](adr/2026-02-17-context-over-memory.md)
+- [KPI definitions](metrics/agent-context-kpis.md)
+- [Global research synthesis](research/context-over-memory-global-direction-2026-02-17.md)
+- [Loctree codebase map + roadmap](research/loctree-codebase-map-and-perception-first-vision-2026-02-17.md)
+
+Guardrail sequence before non-trivial edits:
+`repo-view -> focus -> slice -> impact -> find`
 
 ### MCP Server
 

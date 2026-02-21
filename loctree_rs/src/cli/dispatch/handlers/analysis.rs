@@ -7,7 +7,9 @@ use super::super::super::command::{
     FocusOptions, HealthOptions, HotspotsOptions, InsightsOptions, LayoutmapOptions,
     ManifestsOptions, PipelinesOptions, PlanOptions, RoutesOptions, TraceOptions, ZombieOptions,
 };
-use super::super::{DispatchResult, GlobalOptions, load_or_create_snapshot};
+use super::super::{
+    DispatchResult, GlobalOptions, load_or_create_snapshot, load_or_create_snapshot_for_roots,
+};
 use super::deprecation::warn_deprecated;
 use crate::progress::Spinner;
 
@@ -15,6 +17,7 @@ use crate::progress::Spinner;
 pub fn handle_dead_command(opts: &DeadOptions, global: &GlobalOptions) -> DispatchResult {
     use crate::analyzer::dead_parrots::{DeadFilterConfig, find_dead_exports, print_dead_exports};
     use std::path::Path;
+    use std::path::PathBuf;
 
     // Show spinner unless in quiet/json mode
     let spinner = if !global.quiet && !global.json {
@@ -23,14 +26,15 @@ pub fn handle_dead_command(opts: &DeadOptions, global: &GlobalOptions) -> Dispat
         None
     };
 
-    // Load snapshot (auto-scan if missing)
-    let root = opts
-        .roots
-        .first()
-        .map(|p| p.as_path())
-        .unwrap_or(Path::new("."));
+    // Load snapshot (auto-scan if missing) using ALL provided roots.
+    let roots: Vec<PathBuf> = if opts.roots.is_empty() {
+        vec![PathBuf::from(".")]
+    } else {
+        opts.roots.clone()
+    };
+    let root = roots.first().map(|p| p.as_path()).unwrap_or(Path::new("."));
 
-    let snapshot = match load_or_create_snapshot(root, global) {
+    let snapshot = match load_or_create_snapshot_for_roots(&roots, global) {
         Ok(s) => s,
         Err(e) => {
             if let Some(s) = spinner {
@@ -351,7 +355,7 @@ pub fn handle_cycles_command(opts: &CyclesOptions, global: &GlobalOptions) -> Di
         CycleCompilability, find_cycles_classified_with_lazy, print_cycles_classified,
         print_cycles_classified_legacy,
     };
-    use std::path::Path;
+    use std::path::PathBuf;
 
     // Show spinner unless in quiet/json mode
     let spinner = if !global.quiet && !global.json {
@@ -360,14 +364,14 @@ pub fn handle_cycles_command(opts: &CyclesOptions, global: &GlobalOptions) -> Di
         None
     };
 
-    // Load snapshot (auto-scan if missing)
-    let root = opts
-        .roots
-        .first()
-        .map(|p| p.as_path())
-        .unwrap_or(Path::new("."));
+    // Load snapshot (auto-scan if missing) using ALL provided roots.
+    let roots: Vec<PathBuf> = if opts.roots.is_empty() {
+        vec![PathBuf::from(".")]
+    } else {
+        opts.roots.clone()
+    };
 
-    let snapshot = match load_or_create_snapshot(root, global) {
+    let snapshot = match load_or_create_snapshot_for_roots(&roots, global) {
         Ok(s) => s,
         Err(e) => {
             if let Some(s) = spinner {

@@ -6,6 +6,10 @@
 
 loctree-mcp exposes loctree's analysis capabilities as MCP tools that Claude can invoke directly during conversations.
 
+For default agent operating model in this repository, see:
+- `docs/manifest/context-over-memory.md`
+- `docs/adr/2026-02-17-context-over-memory.md`
+
 ## Architecture
 
 ```
