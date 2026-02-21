@@ -989,16 +989,53 @@ impl Snapshot {
         write_atomic(&marker_path, marker_contents)
     }
 
+    /// Reads the legacy snapshot file and copies it to the global cache directory.
+    ///
+    /// Safety: `legacy_snapshot_path` is validated via canonicalization and
+    /// `starts_with` to ensure it resides within `root`. The validated path
+    /// is rebuilt from its canonical components before any filesystem read.
     fn migrate_legacy_snapshot_to_cache(
         root: &Path,
         legacy_snapshot_path: &Path,
     ) -> io::Result<PathBuf> {
-        let cache_snapshot_path = Self::cache_path_for_legacy_snapshot(root, legacy_snapshot_path);
+        // Canonicalize both paths to resolve symlinks and ".." components
+        let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+        let canonical_legacy = legacy_snapshot_path
+            .canonicalize()
+            .unwrap_or_else(|_| legacy_snapshot_path.to_path_buf());
+
+        // Extract the relative portion within the project root
+        let relative = canonical_legacy
+            .strip_prefix(&canonical_root)
+            .map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    format!(
+                        "Legacy snapshot path escapes project root: {}",
+                        legacy_snapshot_path.display()
+                    ),
+                )
+            })?;
+
+        // Reject any path component that attempts traversal
+        for component in relative.components() {
+            if let std::path::Component::ParentDir = component {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "Path traversal detected in snapshot path",
+                ));
+            }
+        }
+
+        // Rebuild validated path from trusted root + validated relative path
+        let validated_path = PathBuf::from(canonical_root.as_os_str()).join(relative);
+
+        let cache_snapshot_path = Self::cache_path_for_legacy_snapshot(root, &validated_path);
         if cache_snapshot_path.exists() {
             return Ok(cache_snapshot_path);
         }
 
-        let bytes = fs::read(legacy_snapshot_path)?;
+        let bytes = fs::read(&validated_path)?;
         if let Some(parent) = cache_snapshot_path.parent() {
             fs::create_dir_all(parent)?;
         }

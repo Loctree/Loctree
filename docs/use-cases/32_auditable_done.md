@@ -129,4 +129,4 @@ With snapshot:    dead_parrots: 8 → 2         → verify me
 
 ---
 
-*Extracted from production agent sessions. VibeCrafted with AI Agents (c)2026 VetCoders*
+*Extracted from production agent sessions. VibeCrafted with AI Agents (c)2026 Loctree Team

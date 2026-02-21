@@ -6,6 +6,23 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [0.9.0]
 
+## [0.8.15] - 2026-02-21
+
+### Added
+- **`follow` MCP tool** — 7th tool: pursue signals flagged by repo-view at field level. Scopes: dead exports, cycles, twins, hotspots.
+- **Claude Plugin structure** — `plugin/` directory with `.mcp.json`, skill, and marketplace metadata.
+- **`PERCEPTION.md`** — Perception-over-memory manifesto with supporting ADR, KPIs, and research in `docs/perception/`.
+
+### Changed
+- **Self-contained MCP server** — `loctree-mcp` no longer shells out to `loct` binary. All scanning and git operations use library API directly (`snapshot::run_init_with_options`, `git::GitRepo::discover`).
+- **Watch subprocess removed** — background `loct scan --watch` replaced with on-demand staleness check via `is_snapshot_stale()`. Eliminates kernel panic risk from continuous I/O.
+- **Cache migration** — legacy `.loctree/{branch}@{commit}/` snapshots auto-migrate to global cache on load.
+- **Scope validation** — `dead` and `cycles` commands now pass all roots for accurate cross-root analysis.
+- **Branding sanitized** — removed personal emails, normalized to `Loctree Team`.
+
+### Fixed
+- Clippy `ptr_arg` warning in `snapshot.rs` (pre-existing).
+
 ## [0.8.14] - 2026-02-14
 
 ### Added

@@ -2,8 +2,7 @@
 //!
 //! Each constant provides detailed usage documentation for a specific command.
 //!
-//! Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team
-//! Co-Authored-By: Maciej <void@div0.space> & Klaudiusz <the1st@whoai.am>
+//! VibeCrafted with AI Agents (c)2026 Loctree Team
 
 pub(super) const AUTO_HELP: &str =
     "loct auto - Full auto-scan with stack detection (default command)

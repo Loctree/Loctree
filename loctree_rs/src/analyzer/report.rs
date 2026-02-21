@@ -275,7 +275,7 @@ pub struct TwinsData {
 
 // ============================================================================
 // Refactor Plan Report Types
-// Vibecrafted with AI Agents by VetCoders (c)2026 VetCoders
+// VibeCrafted with AI Agents (c)2026 Loctree Team
 // ============================================================================
 
 /// A single file move formatted for the HTML report.

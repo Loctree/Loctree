@@ -88,4 +88,4 @@ The recon phase typically takes 5-10 seconds. The alternative — an agent explo
 
 ---
 
-*Extracted from production agent sessions. VibeCrafted with AI Agents (c)2026 VetCoders*
+*Extracted from production agent sessions. VibeCrafted with AI Agents (c)2026 Loctree Team

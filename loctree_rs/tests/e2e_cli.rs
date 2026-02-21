@@ -1,7 +1,7 @@
 //! End-to-End CLI Tests for loctree
 //!
 //! Following TDD principles - tests define expected behavior.
-//! Vibecrafted with AI Agents by VetCoders (c)2025 VetCoders
+//! VibeCrafted with AI Agents (c)2026 Loctree Team
 
 use assert_cmd::Command;
 use assert_cmd::cargo::cargo_bin_cmd;
@@ -872,7 +872,7 @@ fn copy_dir_excluding(
 // ============================================
 // Instant Commands Tests (<100ms)
 // ============================================
-// Vibecrafted with AI Agents by VetCoders (c)2026 VetCoders
+// VibeCrafted with AI Agents (c)2026 Loctree Team
 
 mod instant_commands {
     use super::*;
@@ -1184,7 +1184,7 @@ mod instant_commands {
 // ============================================
 // Analysis Commands Tests
 // ============================================
-// Vibecrafted with AI Agents by VetCoders (c)2026 VetCoders
+// VibeCrafted with AI Agents (c)2026 Loctree Team
 
 mod analysis_commands {
     use super::*;
@@ -1610,7 +1610,7 @@ mod analysis_commands {
 // ============================================
 // Management & Core Workflow Commands Tests
 // ============================================
-// Vibecrafted with AI Agents by VetCoders (c)2026 VetCoders
+// VibeCrafted with AI Agents (c)2026 Loctree Team
 
 mod management_commands {
     use super::*;
@@ -1949,7 +1949,7 @@ mod management_commands {
 // ============================================
 // Framework-Specific Command Tests
 // ============================================
-// Vibecrafted with AI Agents by VetCoders (c)2026 VetCoders
+// VibeCrafted with AI Agents (c)2026 Loctree Team
 
 mod framework_commands {
     use super::*;

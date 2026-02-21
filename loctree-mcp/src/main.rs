@@ -20,7 +20,7 @@
 //! loctree-mcp
 //! ```
 //!
-//! Vibecrafted with AI Agents by VetCoders (c)2026 The Loctree Team
+//! VibeCrafted with AI Agents (c)2026 Loctree Team
 
 use std::collections::HashMap;
 use std::panic;

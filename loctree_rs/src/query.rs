@@ -5,7 +5,7 @@
 //! - `where-symbol <symbol>` - Find where a symbol is defined
 //! - `component-of <file>` - Show what component/module a file belongs to
 //!
-//! Vibecrafted with AI Agents by VetCoders (c)2026 VetCoders
+//! VibeCrafted with AI Agents (c)2026 Loctree Team
 
 use serde::{Deserialize, Serialize};
 

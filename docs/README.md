@@ -2,7 +2,7 @@
 
 AI-oriented codebase analyzer for detecting dead code, circular imports, and generating dependency graphs.
 
-**Current version:** 0.8.3
+**Current version:** 0.8.15
 **CLI command:** `loct` (old `loctree` is deprecated)
 
 ---
@@ -12,10 +12,10 @@ AI-oriented codebase analyzer for detecting dead code, circular imports, and gen
 - [Getting Started](getting-started.md)
 - [CLI Commands](cli/commands.md)
 - [CLI Options](cli/options.md)
-- [Context Manifesto](manifest/context-over-memory.md)
-- [Context ADR](adr/2026-02-17-context-over-memory.md)
-- [Agent Context KPIs](metrics/agent-context-kpis.md)
-- [Global Direction Research](research/context-over-memory-global-direction-2026-02-17.md)
+- [Perception over Memory](../PERCEPTION.md)
+- [Perception ADR](perception/adr.md)
+- [Agent Context KPIs](perception/kpis.md)
+- [Perception Research](perception/research.md)
 - [Loctree Map + Vision](research/loctree-codebase-map-and-perception-first-vision-2026-02-17.md)
 - [IDE Integration](#ide-integration)
 - [AI Agent Integration](#ai-agent-integration)
@@ -124,14 +124,13 @@ Full LSP support for real-time dead code detection, cycle warnings, and code nav
 
 For agentic workflows in this repo, the default strategy is **context-over-memory**:
 
-- [Manifesto](manifest/context-over-memory.md)
-- [ADR](adr/2026-02-17-context-over-memory.md)
-- [KPI definitions](metrics/agent-context-kpis.md)
-- [Global research synthesis](research/context-over-memory-global-direction-2026-02-17.md)
-- [Loctree codebase map + roadmap](research/loctree-codebase-map-and-perception-first-vision-2026-02-17.md)
+- [Perception over Memory](../PERCEPTION.md)
+- [ADR](perception/adr.md)
+- [KPI definitions](perception/kpis.md)
+- [Research synthesis](perception/research.md)
 
 Guardrail sequence before non-trivial edits:
-`repo-view -> focus -> slice -> impact -> find`
+`repo-view -> focus -> slice -> impact -> find -> follow`
 
 ### MCP Server
 
@@ -150,8 +149,8 @@ Add to your MCP config (e.g., Claude Desktop):
 {
   "mcpServers": {
     "loctree": {
-      "command": "path/to/loctree-mcp",
-      "args": ["--project", "/path/to/your/project"]
+      "command": "loctree-mcp",
+      "args": []
     }
   }
 }
@@ -159,10 +158,13 @@ Add to your MCP config (e.g., Claude Desktop):
 
 #### Available Tools
 
-- `loctree_scan` - Full codebase scan
-- `loctree_slice` - Extract focused context
-- `loctree_query` - jq-style queries on snapshot
-- `loctree_health` - Health summary
+- `repo-view` - Repository overview: files, LOC, languages, health, top hubs
+- `slice` - File context: dependencies + consumers in one call
+- `find` - Symbol search with regex and multi-query support
+- `impact` - Blast radius: direct + transitive consumers
+- `focus` - Module deep-dive: files, internal edges, external deps
+- `tree` - Directory structure with LOC counts
+- `follow` - Pursue signals: dead exports, cycles, twins, hotspots
 
 #### Use Cases
 
@@ -314,5 +316,4 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for:
 
 ---
 
-VibeCrafted with AI Agents (c)2024-2026 VetCoders
-Co-Authored-By: [Maciej](mailto:void@div0.space) & [Klaudiusz](mailto:the1st@whoai.am)
+VibeCrafted with AI Agents (c)2026 Loctree Team

@@ -135,4 +135,4 @@ Click status bar → "Loctree: Refresh" or run `loct` in terminal.
 
 ---
 
-*VibeCrafted with AI Agents (c)2024-2026 VetCoders*
+VibeCrafted with AI Agents (c)2026 Loctree Team

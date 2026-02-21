@@ -166,4 +166,4 @@ Executable via `workspace/executeCommand`:
 
 ---
 
-*VibeCrafted with AI Agents (c)2024-2026 VetCoders*
+VibeCrafted with AI Agents (c)2026 Loctree Team

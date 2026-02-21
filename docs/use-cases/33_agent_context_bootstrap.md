@@ -149,4 +149,4 @@ Loctree compresses the "understand" phase from minutes/hours to seconds — and 
 
 ---
 
-*Extracted from production agent sessions. VibeCrafted with AI Agents (c)2026 VetCoders*
+*Extracted from production agent sessions. VibeCrafted with AI Agents (c)2026 Loctree Team

@@ -4,8 +4,7 @@
 //! Uses existing building blocks (impact, focus, cycles) with layer detection
 //! heuristics and topological ordering.
 //!
-//! Vibecrafted with AI Agents by VetCoders (c)2026 VetCoders
-//! Co-Authored-By: Maciej <void@div0.space> & Klaudiusz <the1st@whoai.am>
+//! VibeCrafted with AI Agents (c)2026 Loctree Team
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;

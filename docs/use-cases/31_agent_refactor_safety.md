@@ -113,4 +113,4 @@ loct health   # no new issues
 
 ---
 
-*Extracted from production agent sessions. VibeCrafted with AI Agents (c)2026 VetCoders*
+*Extracted from production agent sessions. VibeCrafted with AI Agents (c)2026 Loctree Team

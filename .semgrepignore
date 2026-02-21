@@ -1,5 +1,5 @@
 # Semgrep ignore patterns
-# Created by M&K (c)2026 VetCoders
+# (c)2026 Loctree Team
 
 # ============================================================================
 # STATIC HTML TEMPLATES
@@ -36,3 +36,10 @@ loctree_rs/tests/
 # ============================================================================
 
 public_dist/index.html
+
+# ============================================================================
+# VENDORED MINIFIED LIBRARIES
+# Third-party code we don't control. Findings are upstream responsibility.
+# ============================================================================
+
+loctree_rs/src/analyzer/assets/cytoscape.min.js

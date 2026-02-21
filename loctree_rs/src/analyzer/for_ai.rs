@@ -5,7 +5,7 @@
 //! - Navigate via slice references
 //! - Get actionable quick wins
 //!
-//! Vibecrafted with AI Agents by VetCoders (c)2025 VetCoders
+//! VibeCrafted with AI Agents (c)2026 Loctree Team
 
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};

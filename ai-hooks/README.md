@@ -202,4 +202,4 @@ If automatic settings.json update fails, add hooks manually:
 - `loct find` must return matches (check with `loct find <pattern> --json`)
 
 ---
-Vibecrafted with AI Agents by VetCoders (c)2026 The Loctree Team
+VibeCrafted with AI Agents (c)2026 Loctree Team
