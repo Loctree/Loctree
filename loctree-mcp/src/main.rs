@@ -278,10 +278,14 @@ impl LoctreeServer {
     }
 
     /// Run loctree scan in-process using library API.
+    /// Respects `.loctignore` patterns from the project root.
     fn run_scan(project: &Path) -> Result<()> {
         use loctree::args::ParsedArgs;
         let roots = vec![project.to_path_buf()];
-        let parsed = ParsedArgs::default();
+        let parsed = ParsedArgs {
+            ignore_patterns: loctree::fs_utils::load_loctreeignore(project),
+            ..ParsedArgs::default()
+        };
         loctree::snapshot::run_init_with_options(&roots, &parsed, true)
             .map_err(|e| anyhow::anyhow!("Scan failed: {}", e))
     }
