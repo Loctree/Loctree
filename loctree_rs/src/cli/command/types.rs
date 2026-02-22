@@ -126,6 +126,9 @@ pub enum Command {
 
     /// Generate architectural refactoring plan based on module analysis.
     Plan(PlanOptions),
+
+    /// Manage snapshot cache (list, clean).
+    Cache(CacheOptions),
 }
 
 impl Default for Command {

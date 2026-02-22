@@ -59,6 +59,7 @@ pub(crate) const SUBCOMMANDS: &[&str] = &[
     "doctor",
     "plan",
     "p", // alias for plan
+    "cache",
 ];
 
 /// Check if an argument looks like a new-style subcommand.

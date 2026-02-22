@@ -759,6 +759,28 @@ pub struct HelpOptions {
     pub full: bool,
 }
 
+/// Cache subcommand action.
+#[derive(Debug, Clone)]
+pub enum CacheAction {
+    /// List all cached projects with sizes and ages
+    List,
+    /// Clean cache: all projects, or a specific one, or stale entries
+    Clean {
+        /// Only clean cache for a specific project directory
+        project: Option<PathBuf>,
+        /// Only clean entries older than this duration (e.g., "7d", "30d")
+        older_than: Option<String>,
+        /// Skip confirmation prompt
+        force: bool,
+    },
+}
+
+/// Options for the `cache` command.
+#[derive(Debug, Clone)]
+pub struct CacheOptions {
+    pub action: CacheAction,
+}
+
 /// Query kind for the `query` command.
 #[derive(Debug, Clone)]
 pub enum QueryKind {

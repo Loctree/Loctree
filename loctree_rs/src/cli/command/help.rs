@@ -48,6 +48,7 @@ impl Command {
             Command::Audit(_) => "audit",
             Command::Doctor(_) => "doctor",
             Command::Plan(_) => "plan",
+            Command::Cache(_) => "cache",
         }
     }
 
@@ -93,6 +94,7 @@ impl Command {
             Command::Audit(_) => "Full audit (cycles + dead + twins + zombie + crowds)",
             Command::Doctor(_) => "Interactive diagnostics with actionable recommendations",
             Command::Plan(_) => "Generate architectural refactoring plan",
+            Command::Cache(_) => "Manage snapshot cache (list, clean)",
         }
     }
 

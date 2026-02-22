@@ -5,6 +5,7 @@
 
 pub mod ai;
 pub mod analysis;
+pub mod cache;
 pub mod deprecation;
 pub mod diff;
 pub mod output;

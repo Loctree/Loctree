@@ -16,9 +16,9 @@ use super::context_commands::{
 };
 use super::helpers::{SUBCOMMANDS, is_jq_filter, parse_color_mode, suggest_similar_command};
 use super::misc_commands::{
-    parse_audit_command, parse_crowd_command, parse_dist_command, parse_doctor_command,
-    parse_health_command, parse_help_command, parse_layoutmap_command, parse_plan_command,
-    parse_suppress_command, parse_tagmap_command, parse_zombie_command,
+    parse_audit_command, parse_cache_command, parse_crowd_command, parse_dist_command,
+    parse_doctor_command, parse_health_command, parse_help_command, parse_layoutmap_command,
+    parse_plan_command, parse_suppress_command, parse_tagmap_command, parse_zombie_command,
 };
 use super::output_commands::{
     parse_diff_command, parse_info_command, parse_insights_command, parse_jq_query_command,
@@ -303,6 +303,7 @@ pub fn parse_command(args: &[String]) -> Result<Option<ParsedCommand>, String> {
         Some("audit") => parse_audit_command(&remaining_args)?,
         Some("doctor") => parse_doctor_command(&remaining_args)?,
         Some("plan") | Some("p") => parse_plan_command(&remaining_args)?,
+        Some("cache") => parse_cache_command(&remaining_args)?,
         Some(unknown) => {
             // Try to find a similar command using fuzzy matching
             let suggestion = suggest_similar_command(unknown);

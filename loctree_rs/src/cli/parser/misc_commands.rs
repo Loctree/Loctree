@@ -6,8 +6,9 @@
 use std::path::PathBuf;
 
 use super::super::command::{
-    AuditOptions, Command, CrowdOptions, DistOptions, DoctorOptions, HealthOptions, HelpOptions,
-    LayoutmapOptions, PlanOptions, SuppressOptions, TagmapOptions, ZombieOptions,
+    AuditOptions, CacheAction, CacheOptions, Command, CrowdOptions, DistOptions, DoctorOptions,
+    HealthOptions, HelpOptions, LayoutmapOptions, PlanOptions, SuppressOptions, TagmapOptions,
+    ZombieOptions,
 };
 
 /// Parse `loct crowd [pattern] [options]` command - detect functional crowds.
@@ -657,6 +658,82 @@ pub(super) fn parse_plan_command(args: &[String]) -> Result<Command, String> {
     Ok(Command::Plan(opts))
 }
 
+/// Parse `loct cache <list|clean> [options]` command.
+pub(super) fn parse_cache_command(args: &[String]) -> Result<Command, String> {
+    if args.iter().any(|a| a == "--help" || a == "-h") || args.is_empty() {
+        return Err("loct cache - Manage snapshot cache
+
+USAGE:
+    loct cache <SUBCOMMAND> [OPTIONS]
+
+SUBCOMMANDS:
+    list                   List cached projects with sizes and ages
+    clean                  Remove cached snapshots
+
+CLEAN OPTIONS:
+    --project <DIR>        Only clean cache for a specific project
+    --older-than <DAYS>d   Only remove entries older than N days (e.g., 7d, 30d)
+    --force, -f            Skip confirmation prompt
+
+EXAMPLES:
+    loct cache list                        # Show all cached projects
+    loct cache clean                       # Remove all (with confirmation)
+    loct cache clean --force               # Remove all without asking
+    loct cache clean --project .           # Clean cache for current project
+    loct cache clean --older-than 30d      # Remove entries older than 30 days"
+            .to_string());
+    }
+
+    let sub = args[0].as_str();
+    let sub_args = &args[1..];
+
+    match sub {
+        "list" | "ls" => Ok(Command::Cache(CacheOptions {
+            action: CacheAction::List,
+        })),
+        "clean" | "rm" | "purge" => {
+            let mut project = None;
+            let mut older_than = None;
+            let mut force = false;
+            let mut i = 0;
+            while i < sub_args.len() {
+                match sub_args[i].as_str() {
+                    "--project" | "-p" => {
+                        i += 1;
+                        if i >= sub_args.len() {
+                            return Err("--project requires a directory argument".to_string());
+                        }
+                        project = Some(PathBuf::from(&sub_args[i]));
+                    }
+                    "--older-than" => {
+                        i += 1;
+                        if i >= sub_args.len() {
+                            return Err(
+                                "--older-than requires a duration (e.g., 7d, 30d)".to_string()
+                            );
+                        }
+                        older_than = Some(sub_args[i].clone());
+                    }
+                    "--force" | "-f" => force = true,
+                    other => return Err(format!("Unknown cache clean option: {}", other)),
+                }
+                i += 1;
+            }
+            Ok(Command::Cache(CacheOptions {
+                action: CacheAction::Clean {
+                    project,
+                    older_than,
+                    force,
+                },
+            }))
+        }
+        other => Err(format!(
+            "Unknown cache subcommand '{}'. Use 'list' or 'clean'.",
+            other
+        )),
+    }
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -718,6 +795,32 @@ mod tests {
             assert_eq!(opts.command, Some("scan".into()));
         } else {
             panic!("Expected Help command");
+        }
+    }
+
+    #[test]
+    fn test_parse_cache_list() {
+        let args = vec!["list".into()];
+        let result = parse_cache_command(&args).unwrap();
+        assert!(matches!(
+            result,
+            Command::Cache(CacheOptions {
+                action: CacheAction::List
+            })
+        ));
+    }
+
+    #[test]
+    fn test_parse_cache_clean() {
+        let args: Vec<String> = vec!["clean".into(), "--force".into()];
+        let result = parse_cache_command(&args).unwrap();
+        if let Command::Cache(CacheOptions {
+            action: CacheAction::Clean { force, .. },
+        }) = result
+        {
+            assert!(force);
+        } else {
+            panic!("Expected Cache Clean command");
         }
     }
 

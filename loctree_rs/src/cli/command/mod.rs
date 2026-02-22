@@ -22,13 +22,13 @@ mod types;
 // Re-export the main types at the module level
 pub use global::GlobalOptions;
 pub use options::{
-    AuditOptions, AutoOptions, CommandsOptions, CoverageOptions, CrowdOptions, CyclesOptions,
-    DeadOptions, DiffOptions, DistOptions, DoctorOptions, EventsOptions, FindOptions, FocusOptions,
-    HealthOptions, HelpOptions, HotspotsOptions, ImpactCommandOptions, InfoOptions,
-    InsightsOptions, JqQueryOptions, LayoutmapOptions, LintOptions, ManifestsOptions, MemexOptions,
-    PipelinesOptions, PlanOptions, QueryKind, QueryOptions, ReportOptions, RoutesOptions,
-    ScanOptions, SliceOptions, SniffOptions, SuppressOptions, TagmapOptions, TraceOptions,
-    TreeOptions, TwinsOptions, ZombieOptions,
+    AuditOptions, AutoOptions, CacheAction, CacheOptions, CommandsOptions, CoverageOptions,
+    CrowdOptions, CyclesOptions, DeadOptions, DiffOptions, DistOptions, DoctorOptions,
+    EventsOptions, FindOptions, FocusOptions, HealthOptions, HelpOptions, HotspotsOptions,
+    ImpactCommandOptions, InfoOptions, InsightsOptions, JqQueryOptions, LayoutmapOptions,
+    LintOptions, ManifestsOptions, MemexOptions, PipelinesOptions, PlanOptions, QueryKind,
+    QueryOptions, ReportOptions, RoutesOptions, ScanOptions, SliceOptions, SniffOptions,
+    SuppressOptions, TagmapOptions, TraceOptions, TreeOptions, TwinsOptions, ZombieOptions,
 };
 pub use parsed::ParsedCommand;
 pub use types::Command;

@@ -13,16 +13,13 @@
 //! ## Usage
 //!
 //! ```bash
-//! # Start via mux (recommended)
-//! rmcp-mux --socket /tmp/loctree.sock --cmd loctree-mcp
-//!
 //! # Standalone
 //! loctree-mcp
 //! ```
 //!
 //! VibeCrafted with AI Agents (c)2026 Loctree Team
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::panic;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -62,6 +59,30 @@ struct Args {
 // Tool Parameter Types - All tools have optional `project` parameter
 // ============================================================================
 
+/// Deserialize usize from either a number or a string (Claude Code sends strings).
+mod deserialize_usize_lenient {
+    use serde::{self, Deserialize, Deserializer};
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<usize, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum StringOrNum {
+            Num(usize),
+            Str(String),
+        }
+        match StringOrNum::deserialize(deserializer)? {
+            StringOrNum::Num(n) => Ok(n),
+            StringOrNum::Str(s) => s
+                .trim()
+                .parse()
+                .map_err(|_| serde::de::Error::custom(format!("invalid number: {s}"))),
+        }
+    }
+}
+
 fn default_project() -> String {
     // Normalize "." to absolute path - MCP server cwd may differ from agent cwd
     std::env::current_dir()
@@ -96,7 +117,10 @@ struct FindParams {
     /// Symbol name or regex pattern to search for
     name: String,
     /// Maximum results to return (default: 50)
-    #[serde(default = "default_limit")]
+    #[serde(
+        default = "default_limit",
+        deserialize_with = "deserialize_usize_lenient::deserialize"
+    )]
     limit: usize,
 }
 
@@ -123,7 +147,10 @@ struct TreeParams {
     #[serde(default = "default_project")]
     project: String,
     /// Maximum depth (default: 3)
-    #[serde(default = "default_depth")]
+    #[serde(
+        default = "default_depth",
+        deserialize_with = "deserialize_usize_lenient::deserialize"
+    )]
     depth: usize,
     /// LOC threshold for highlighting (default: 500)
     #[serde(default = "default_loc_threshold")]
@@ -156,7 +183,10 @@ struct FollowParams {
     #[serde(default = "default_follow_scope")]
     scope: String,
     /// Max trails to return per scope (default: 10)
-    #[serde(default = "default_follow_limit")]
+    #[serde(
+        default = "default_follow_limit",
+        deserialize_with = "deserialize_usize_lenient::deserialize"
+    )]
     limit: usize,
 }
 
@@ -166,6 +196,78 @@ fn default_depth() -> usize {
 
 fn default_loc_threshold() -> usize {
     500
+}
+
+fn common_prefix_len(a: &str, b: &str) -> usize {
+    a.chars()
+        .zip(b.chars())
+        .take_while(|(left, right)| left == right)
+        .count()
+}
+
+fn suggest_directories(snapshot: &Snapshot, query: &str, max: usize) -> Vec<String> {
+    if max == 0 {
+        return Vec::new();
+    }
+
+    let mut dirs = BTreeSet::new();
+    for file in &snapshot.files {
+        if let Some(parent) = Path::new(&file.path).parent() {
+            let dir = parent.to_string_lossy().replace('\\', "/");
+            if !dir.is_empty() && dir != "." {
+                dirs.insert(dir);
+            }
+        }
+    }
+
+    if dirs.is_empty() {
+        return Vec::new();
+    }
+
+    let normalized_query = query.trim().trim_matches('/');
+    let query_lower = normalized_query.to_ascii_lowercase();
+    let query_last = normalized_query
+        .split('/')
+        .rfind(|part| !part.is_empty())
+        .unwrap_or(normalized_query);
+    let query_last_lower = query_last.to_ascii_lowercase();
+    let query_tokens: Vec<_> = query_lower
+        .split(['/', '_', '-', '.'])
+        .filter(|token| token.len() >= 2)
+        .collect();
+
+    let mut scored: Vec<(String, usize)> = dirs
+        .iter()
+        .map(|dir| {
+            let dir_lower = dir.to_ascii_lowercase();
+            let mut score = 0usize;
+
+            if !query_last_lower.is_empty() && dir.contains(query_last) {
+                score += 100;
+            }
+            if query_last_lower.len() > 2 && dir_lower.contains(&query_last_lower) {
+                score += 50;
+            }
+            if !query_lower.is_empty() {
+                score += common_prefix_len(&dir_lower, &query_lower) * 10;
+            }
+            for token in &query_tokens {
+                if dir_lower.contains(token) {
+                    score += 3;
+                }
+            }
+
+            (dir.clone(), score)
+        })
+        .filter(|(_, score)| *score > 0)
+        .collect();
+
+    if scored.is_empty() {
+        return dirs.into_iter().take(max).collect();
+    }
+
+    scored.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    scored.into_iter().take(max).map(|(dir, _)| dir).collect()
 }
 
 // ============================================================================
@@ -405,7 +507,7 @@ impl LoctreeServer {
                 "slice(file) - before modifying any file",
                 "find(name) - before creating anything new",
                 "impact(file) - before deleting or major refactor",
-                "health() - sanity check before commits"
+                "follow(all) - pursue signals before commits"
             ]
         });
 
@@ -446,37 +548,59 @@ impl LoctreeServer {
             "language": target.language
         })];
 
-        // Dependencies
-        let deps: Vec<_> = snapshot
-            .edges
+        let files_by_path: HashMap<_, _> = snapshot
+            .files
             .iter()
-            .filter(|e| e.from == target.path)
+            .map(|f| (f.path.as_str(), f))
             .collect();
 
-        for edge in &deps {
-            if let Some(dep) = snapshot.files.iter().find(|f| f.path == edge.to) {
+        // Dependencies - dedup by path and exclude self-references.
+        let mut dep_paths: HashSet<&str> = HashSet::new();
+        let mut dep_import_types: HashMap<&str, &str> = HashMap::new();
+        for edge in snapshot
+            .edges
+            .iter()
+            .filter(|e| e.from == target.path && e.to != target.path)
+        {
+            dep_paths.insert(edge.to.as_str());
+            dep_import_types
+                .entry(edge.to.as_str())
+                .or_insert(edge.label.as_str());
+        }
+        let dep_count = dep_paths.len();
+
+        let mut dep_paths: Vec<_> = dep_paths.into_iter().collect();
+        dep_paths.sort_unstable();
+
+        for dep_path in dep_paths {
+            if let Some(dep) = files_by_path.get(dep_path) {
                 files.push(serde_json::json!({
                     "path": dep.path,
                     "layer": "dependency",
                     "loc": dep.loc,
-                    "import_type": edge.label
+                    "import_type": dep_import_types.get(dep_path).copied().unwrap_or("unknown")
                 }));
             }
         }
 
-        // Consumers
-        let consumers: Vec<_> = if params.consumers {
+        // Consumers - dedup by path and exclude self-references.
+        let consumer_paths: HashSet<&str> = if params.consumers {
             snapshot
                 .edges
                 .iter()
-                .filter(|e| e.to == target.path)
+                .filter(|e| e.to == target.path && e.from != target.path)
+                .map(|e| e.from.as_str())
                 .collect()
         } else {
-            vec![]
+            HashSet::new()
         };
+        let consumer_count = consumer_paths.len();
 
-        for edge in &consumers {
-            if let Some(consumer) = snapshot.files.iter().find(|f| f.path == edge.from) {
+        let mut consumer_paths: Vec<_> = consumer_paths.into_iter().collect();
+        consumer_paths.sort_unstable();
+
+        for consumer_path in consumer_paths {
+            if let Some(consumer) = files_by_path.get(consumer_path) {
                 files.push(serde_json::json!({
                     "path": consumer.path,
                     "layer": "consumer",
@@ -489,8 +613,8 @@ impl LoctreeServer {
             "target": params.file,
             "project": project.display().to_string(),
             "core_loc": target.loc,
-            "dependencies": deps.len(),
-            "consumers": consumers.len(),
+            "dependencies": dep_count,
+            "consumers": consumer_count,
             "files": files
         });
 
@@ -666,6 +790,19 @@ impl LoctreeServer {
                 "is_dead": search_results.dead_status.is_dead
             }
         });
+
+        let no_primary_matches =
+            symbol_matches.is_empty() && param_matches.is_empty() && semantic_matches.is_empty();
+        let mut result = result;
+        if no_primary_matches && let Some(obj) = result.as_object_mut() {
+            obj.insert(
+                "suggestions".to_string(),
+                serde_json::json!([
+                    "Try a broader pattern or check spelling.",
+                    "Browse available exports with repo-view()."
+                ]),
+            );
+        }
 
         serde_json::to_string_pretty(&result)
             .unwrap_or_else(|e| format!("Serialization error: {}", e))
@@ -844,10 +981,12 @@ impl LoctreeServer {
             .collect();
 
         if files_in_dir.is_empty() {
+            let suggestions = suggest_directories(&snapshot, &params.directory, 3);
             return serde_json::json!({
                 "directory": params.directory,
                 "project": project.display().to_string(),
-                "error": "No files found in this directory. Check the path."
+                "error": "No files found in this directory. Check the path.",
+                "suggestions": suggestions
             })
             .to_string();
         }
@@ -877,7 +1016,7 @@ impl LoctreeServer {
                     && !e.to.starts_with(&dir_prefix)
             })
             .map(|e| e.to.clone())
-            .collect::<std::collections::HashSet<_>>()
+            .collect::<BTreeSet<_>>()
             .into_iter()
             .collect();
 
@@ -891,7 +1030,7 @@ impl LoctreeServer {
                         || e.to == params.directory.trim_end_matches('/'))
             })
             .map(|e| e.from.clone())
-            .collect::<std::collections::HashSet<_>>()
+            .collect::<BTreeSet<_>>()
             .into_iter()
             .collect();
 

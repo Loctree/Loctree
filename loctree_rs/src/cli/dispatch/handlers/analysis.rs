@@ -1772,6 +1772,7 @@ pub fn handle_health_command(opts: &HealthOptions, global: &GlobalOptions) -> Di
     use crate::analyzer::dead_parrots::{DeadFilterConfig, find_dead_exports};
     use crate::analyzer::twins::detect_exact_twins;
     use crate::colors::Painter;
+    use std::collections::{HashMap, HashSet};
     use std::path::Path;
 
     let p = Painter::new(global.color);
@@ -1845,10 +1846,45 @@ pub fn handle_health_command(opts: &HealthOptions, global: &GlobalOptions) -> Di
         .filter(|d| d.confidence == "high")
         .count();
     let low_confidence = dead_exports.len() - high_confidence;
+    let mut dead_by_file: HashMap<String, usize> = HashMap::new();
+    for dead in &dead_exports {
+        *dead_by_file.entry(dead.file.clone()).or_insert(0) += 1;
+    }
+    let mut top_dead_files: Vec<(String, usize)> = dead_by_file.into_iter().collect();
+    top_dead_files.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    let top_dead_files: Vec<String> = top_dead_files
+        .into_iter()
+        .take(3)
+        .map(|(path, count)| {
+            let display_name = Path::new(&path)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or(path.as_str());
+            format!("{display_name} ({count} dead)")
+        })
+        .collect();
 
     // 3. Twins analysis
     let twins = detect_exact_twins(&snapshot.files, opts.include_tests);
     let twin_count = twins.len();
+    let mut twin_examples: Vec<(String, usize)> = twins
+        .iter()
+        .map(|twin| {
+            let file_count = twin
+                .locations
+                .iter()
+                .map(|loc| loc.file_path.as_str())
+                .collect::<HashSet<_>>()
+                .len();
+            (twin.name.clone(), file_count)
+        })
+        .collect();
+    twin_examples.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    let top_twin_groups: Vec<String> = twin_examples
+        .into_iter()
+        .take(3)
+        .map(|(name, file_count)| format!("{name} ({file_count} files)"))
+        .collect();
 
     if let Some(s) = spinner {
         s.finish_success("Health check complete");
@@ -1901,6 +1937,9 @@ pub fn handle_health_command(opts: &HealthOptions, global: &GlobalOptions) -> Di
                 p.ok(&high_confidence.to_string()),
                 p.warn(&low_confidence.to_string())
             );
+            if !top_dead_files.is_empty() {
+                println!("             top files: {}", top_dead_files.join(", "));
+            }
         }
 
         // Twins
@@ -1911,6 +1950,9 @@ pub fn handle_health_command(opts: &HealthOptions, global: &GlobalOptions) -> Di
                 "Twins:       {} duplicate symbol groups",
                 p.warn(&twin_count.to_string())
             );
+            if !top_twin_groups.is_empty() {
+                println!("             top: {}", top_twin_groups.join(", "));
+            }
         }
 
         println!();

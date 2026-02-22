@@ -434,6 +434,10 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
             // Plan is handled specially in dispatch_command
             // as it doesn't go through ParsedArgs
         }
+
+        Command::Cache(_) => {
+            // Cache is handled specially in dispatch_command
+        }
     }
 
     parsed
@@ -580,6 +584,9 @@ pub fn dispatch_command(parsed_cmd: &ParsedCommand) -> DispatchResult {
         }
         Command::Plan(opts) => {
             return handlers::analysis::handle_plan_command(opts, &parsed_cmd.global);
+        }
+        Command::Cache(opts) => {
+            return handlers::cache::handle_cache_command(opts);
         }
         Command::Scan(opts) if opts.watch => {
             return handlers::watch::handle_scan_watch_command(opts, &parsed_cmd.global);
