@@ -20,6 +20,7 @@
 //! VibeCrafted with AI Agents (c)2026 Loctree Team
 
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::io::Write as _;
 use std::panic;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -535,11 +536,15 @@ impl LoctreeServer {
             Ok(p) => p,
             Err(e) => return format!("Error: {}", e),
         };
-        let target = snapshot
-            .files
-            .iter()
-            .find(|f| f.path == target_path)
-            .unwrap();
+        let target = match snapshot.files.iter().find(|f| f.path == target_path) {
+            Some(target) => target,
+            None => {
+                return format!(
+                    "Error: Internal snapshot inconsistency for '{}'. Run a fresh scan and retry.",
+                    params.file
+                );
+            }
+        };
 
         let mut files = vec![serde_json::json!({
             "path": target.path,
@@ -1328,6 +1333,14 @@ impl ServerHandler for LoctreeServer {
 
 /// Install custom panic hook that logs to stderr and exits cleanly.
 /// This handles the "broken pipe" panic from rmcp when client disconnects.
+fn safe_stderr_log(line: &str) {
+    // Never panic while reporting errors from a panic hook.
+    let mut stderr = std::io::stderr().lock();
+    let _ = stderr.write_all(line.as_bytes());
+    let _ = stderr.write_all(b"\n");
+    let _ = stderr.flush();
+}
+
 fn install_panic_hook() {
     panic::set_hook(Box::new(|panic_info| {
         let msg = if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
@@ -1340,18 +1353,16 @@ fn install_panic_hook() {
 
         // Check if this is a broken pipe - expected when client disconnects
         if msg.contains("Broken pipe") || msg.contains("os error 32") {
-            eprintln!("[loctree-mcp] Client disconnected (broken pipe), shutting down");
+            safe_stderr_log("[loctree-mcp] Client disconnected (broken pipe), shutting down");
+            std::process::exit(0);
         } else {
             // Log other panics with location info
             let location = panic_info
                 .location()
                 .map(|loc| format!(" at {}:{}:{}", loc.file(), loc.line(), loc.column()))
                 .unwrap_or_default();
-            eprintln!("[loctree-mcp] Panic{}: {}", location, msg);
+            safe_stderr_log(&format!("[loctree-mcp] Panic{}: {}", location, msg));
         }
-
-        // Exit with code 1 (not 101 which indicates panic)
-        std::process::exit(1);
     }));
 }
 
@@ -1376,6 +1387,8 @@ async fn run_server() -> Result<()> {
     // Initialize logging - MUST write to stderr, stdout is for MCP JSON-RPC
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
+        // Prevent tracing from recursively writing fallback errors to stderr when stderr is closed.
+        .log_internal_errors(false)
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| args.log_level.parse().unwrap_or_default()),
