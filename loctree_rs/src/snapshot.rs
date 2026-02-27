@@ -1369,36 +1369,50 @@ impl Snapshot {
         }
     }
 
-    /// Save snapshot to disk
-    pub fn save(&self, root: &Path) -> io::Result<()> {
-        // If a snapshot already exists for the same branch/commit AND worktree is clean,
-        // skip rewriting (no changes since last commit = same code).
-        // But if worktree is dirty, ALWAYS save fresh snapshot (user is actively working).
-        if let (Some(commit), Some(branch), Ok(existing)) = (
-            self.metadata.git_commit.as_ref(),
-            self.metadata.git_branch.as_ref(),
-            Self::load(root),
-        ) && existing.metadata.git_commit.as_ref() == Some(commit)
-            && existing.metadata.git_branch.as_ref() == Some(branch)
-        {
-            let mut existing_roots = existing.metadata.roots.clone();
-            let mut current_roots = self.metadata.roots.clone();
-            existing_roots.sort();
-            current_roots.sort();
-            let same_roots = existing_roots == current_roots;
-            let dirty = is_git_dirty(root).unwrap_or(false);
-            if !dirty && same_roots {
-                // Clean worktree + same commit = skip (nothing changed)
-                crate::progress::info(&format!(
-                    "Snapshot {}@{} up-to-date, skipping",
-                    branch,
-                    &commit[..7.min(commit.len())]
-                ));
-                return Ok(());
+    /// Check if the git HEAD has moved since this snapshot was created.
+    ///
+    /// This is a lightweight check (commit hash comparison only).
+    /// Returns `false` for non-git directories.
+    pub fn is_commit_stale(&self, root: &Path) -> bool {
+        if let Some(snapshot_commit) = &self.metadata.git_commit {
+            if let Ok(repo) = crate::git::GitRepo::discover(root) {
+                if let Ok(current_commit) = repo.head_commit() {
+                    // Snapshot stores short hash, head_commit() returns full —
+                    // prefix comparison handles both directions.
+                    let is_same = current_commit.starts_with(snapshot_commit)
+                        || snapshot_commit.starts_with(&current_commit);
+                    return !is_same;
+                }
             }
-            // Dirty worktree = continue and save fresh snapshot
         }
+        false
+    }
 
+    /// Check if this snapshot is stale relative to the current repository state.
+    ///
+    /// A snapshot is considered stale if:
+    /// - Git HEAD has moved since the snapshot was created (commit mismatch)
+    /// - The worktree has uncommitted changes (dirty worktree)
+    ///
+    /// Use `is_commit_stale()` for a cheaper check that ignores dirty worktree
+    /// (suitable for CLI commands where rescanning on every dirty state is too aggressive).
+    ///
+    /// Returns `false` for non-git directories (no staleness concept without VCS).
+    pub fn is_stale(&self, root: &Path) -> bool {
+        if self.is_commit_stale(root) {
+            return true;
+        }
+        // Check dirty worktree: uncommitted changes mean snapshot may not
+        // reflect the files on disk (the common refactoring scenario).
+        is_git_dirty(root).unwrap_or(false)
+    }
+
+    /// Save snapshot to disk.
+    ///
+    /// Always writes — the previous "skip if same commit" optimization was removed
+    /// because it caused stale snapshots to persist through refactoring workflows
+    /// (the core use case for loctree). Atomic writes keep this fast enough.
+    pub fn save(&self, root: &Path) -> io::Result<()> {
         let snapshot_path = Self::snapshot_path(root);
         if let Some(dir) = snapshot_path.parent() {
             fs::create_dir_all(dir)?;
@@ -1593,7 +1607,9 @@ impl Snapshot {
 }
 
 /// Best-effort check for uncommitted changes in the working tree
-fn is_git_dirty(root: &Path) -> Option<bool> {
+/// Check if the git worktree has uncommitted changes.
+/// Returns `Some(true)` if dirty, `Some(false)` if clean, `None` if not a git repo.
+pub fn is_git_dirty(root: &Path) -> Option<bool> {
     let output = Command::new("git")
         .arg("status")
         .arg("--porcelain")
@@ -1635,11 +1651,24 @@ pub fn run_init_with_options(
         ));
     }
 
-    // Try to load existing snapshot for incremental scanning
-    let cached_analyses: Option<HashMap<String, FileAnalysis>> =
-        if !parsed.full_scan && Snapshot::exists(&snapshot_root) {
-            match Snapshot::load(&snapshot_root) {
-                Ok(old_snapshot) => {
+    // Try to load existing snapshot for incremental scanning.
+    // Only reuse cached analyses if the old snapshot is from the same git branch —
+    // cross-branch cache reuse can contaminate results (different file contents,
+    // same mtimes after branch switch).
+    let cached_analyses: Option<HashMap<String, FileAnalysis>> = if !parsed.full_scan
+        && Snapshot::exists(&snapshot_root)
+    {
+        match Snapshot::load(&snapshot_root) {
+            Ok(old_snapshot) => {
+                // Validate git context: only reuse cache from same branch.
+                // After branch switch, files may differ despite same mtimes.
+                let current_ctx = Snapshot::git_context_for(&snapshot_root);
+                let same_branch = match (&old_snapshot.metadata.git_branch, &current_ctx.branch) {
+                    (Some(old_b), Some(cur_b)) => old_b == cur_b,
+                    (None, None) => true, // Non-git: always reuse
+                    _ => false,
+                };
+                if same_branch {
                     if parsed.verbose {
                         eprintln!(
                             "[loctree][incremental] Loaded existing snapshot ({} files cached)",
@@ -1647,20 +1676,30 @@ pub fn run_init_with_options(
                         );
                     }
                     Some(old_snapshot.cached_analyses())
-                }
-                Err(e) => {
+                } else {
                     if parsed.verbose {
                         eprintln!(
-                            "[loctree][warn] Could not load snapshot for incremental: {}",
-                            e
+                            "[loctree][incremental] Branch changed ({} → {}), full rescan",
+                            old_snapshot.metadata.git_branch.as_deref().unwrap_or("?"),
+                            current_ctx.branch.as_deref().unwrap_or("?"),
                         );
                     }
                     None
                 }
             }
-        } else {
-            None
-        };
+            Err(e) => {
+                if parsed.verbose {
+                    eprintln!(
+                        "[loctree][warn] Could not load snapshot for incremental: {}",
+                        e
+                    );
+                }
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     // Log scan mode for clarity (especially in CI)
     let scan_mode = if parsed.full_scan {

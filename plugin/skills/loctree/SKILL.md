@@ -2,7 +2,7 @@
 name: loctree
 description: >
   A holographic map of code for AI agents. Use loctree-mcp as the primary
-  mapping layer before any edit, delete, or refactor. Build context with
+  mapping layer on sessions start, before any edit, delete, or refactor. Build context with
   repo-view/focus/slice/impact/find/follow, then use grep only for local detail.
 ---
 

@@ -644,25 +644,25 @@ pub(crate) fn load_or_create_snapshot_for_roots(
                             snapshot_roots.join(", ")
                         );
                     }
-                } else {
-                    // Check for stale snapshot if --fail-stale is set
-                    if global.fail_stale
-                        && let Some(snapshot_commit) = &s.metadata.git_commit
-                    {
-                        let current_commit = get_current_git_head(&snapshot_root);
-                        if let Some(ref current) = current_commit {
-                            // Compare using prefix match (snapshot may have short hash)
-                            let is_same = current.starts_with(snapshot_commit)
-                                || snapshot_commit.starts_with(current);
-                            if !is_same {
-                                return Err(std::io::Error::other(format!(
-                                    "Snapshot is stale: snapshot commit={} but current HEAD={}. Run 'loct' to rescan or use --fresh.",
-                                    &snapshot_commit[..7.min(snapshot_commit.len())],
-                                    &current[..7.min(current.len())]
-                                )));
-                            }
-                        }
+                } else if s.is_stale(&snapshot_root) {
+                    // Snapshot is stale (git HEAD moved or worktree dirty).
+                    // --fail-stale / --no-scan: hard fail for CI pipelines.
+                    // Default: auto-rescan to keep data fresh (core refactoring workflow).
+                    if global.fail_stale || global.no_scan {
+                        let snap_commit = s.metadata.git_commit.as_deref().unwrap_or("unknown");
+                        let current = get_current_git_head(&snapshot_root)
+                            .unwrap_or_else(|| "unknown".into());
+                        return Err(std::io::Error::other(format!(
+                            "Snapshot is stale: snapshot commit={} but current HEAD={}. Run 'loct scan' to refresh.",
+                            &snap_commit[..7.min(snap_commit.len())],
+                            &current[..7.min(current.len())]
+                        )));
                     }
+                    if !global.quiet {
+                        eprintln!("[loct] Snapshot stale, rescanning...");
+                    }
+                } else {
+                    // Snapshot is fresh — use it directly.
                     return Ok(s);
                 }
             }

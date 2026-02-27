@@ -368,16 +368,11 @@ impl LoctreeServer {
         Ok(snapshot)
     }
 
-    /// Check if snapshot is stale (git HEAD changed)
+    /// Check if snapshot is stale (git HEAD changed OR dirty worktree).
+    /// Delegates to `Snapshot::is_stale()` — single source of truth shared
+    /// with CLI and LSP, covers both commit mismatch and uncommitted changes.
     fn is_snapshot_stale(snapshot: &Snapshot, project: &Path) -> bool {
-        if let Some(snapshot_commit) = &snapshot.metadata.git_commit
-            && let Some(current_commit) = Self::get_git_head(project)
-        {
-            let is_same = current_commit.starts_with(snapshot_commit)
-                || snapshot_commit.starts_with(&current_commit);
-            return !is_same;
-        }
-        false
+        snapshot.is_stale(project)
     }
 
     /// Run loctree scan in-process using library API.
@@ -391,13 +386,6 @@ impl LoctreeServer {
         };
         loctree::snapshot::run_init_with_options(&roots, &parsed, true)
             .map_err(|e| anyhow::anyhow!("Scan failed: {}", e))
-    }
-
-    /// Get current git HEAD commit hash
-    fn get_git_head(project: &Path) -> Option<String> {
-        loctree::git::GitRepo::discover(project)
-            .ok()
-            .and_then(|repo| repo.head_commit().ok())
     }
 
     /// Validate file path: check if within project, return matched path from snapshot or error.
