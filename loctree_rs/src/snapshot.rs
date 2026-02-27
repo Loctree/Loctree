@@ -134,7 +134,7 @@ fn normalize_root_dir(root: &Path) -> PathBuf {
 }
 
 fn has_project_marker(root: &Path) -> bool {
-    const MARKERS: [&str; 11] = [
+    const MARKERS: [&str; 16] = [
         "Cargo.toml",
         "package.json",
         "pyproject.toml",
@@ -146,6 +146,13 @@ fn has_project_marker(root: &Path) -> bool {
         "build.gradle",
         "build.gradle.kts",
         "composer.json",
+        // Python projects without pyproject.toml
+        "requirements.txt",
+        "setup.py",
+        "setup.cfg",
+        // Common project root markers
+        "Makefile",
+        "pubspec.yaml",
     ];
     MARKERS.iter().any(|marker| root.join(marker).is_file())
 }
@@ -167,6 +174,17 @@ pub(crate) fn resolve_snapshot_root(root_list: &[PathBuf]) -> PathBuf {
         return roots[0].clone();
     }
 
+    // Prefer git root — the most reliable project boundary. Checked before
+    // find_loctree_root to avoid walking past .git into unrelated parent caches
+    // (e.g. a stale cache entry at "/" would trap all non-marker projects).
+    if let Some(first_git) = roots.first().and_then(|root| find_git_root(root))
+        && roots
+            .iter()
+            .all(|root| find_git_root(root).as_ref() == Some(&first_git))
+    {
+        return first_git;
+    }
+
     let mut loctree_roots: Vec<PathBuf> = roots
         .iter()
         .filter_map(|root| Snapshot::find_loctree_root(root))
@@ -175,14 +193,6 @@ pub(crate) fn resolve_snapshot_root(root_list: &[PathBuf]) -> PathBuf {
         && loctree_roots.iter().all(|root| root == &first)
     {
         return first;
-    }
-
-    if let Some(first_git) = roots.first().and_then(|root| find_git_root(root))
-        && roots
-            .iter()
-            .all(|root| find_git_root(root).as_ref() == Some(&first_git))
-    {
-        return first_git;
     }
 
     find_git_root(&cwd).unwrap_or(cwd)
@@ -1170,8 +1180,12 @@ impl Snapshot {
     /// A directory is considered a root if it has a `.loctree/` config dir
     /// (user-editable files like config.toml, suppressions.toml) OR if its
     /// global cache directory contains at least one snapshot.
+    ///
+    /// Stops at git boundaries: once we pass a `.git` directory without finding
+    /// a loctree root, we don't continue into unrelated parent directories.
     pub fn find_loctree_root(start: &Path) -> Option<PathBuf> {
         let mut current = start.canonicalize().ok()?;
+        let mut passed_git = false;
         loop {
             // Check for .loctree config dir (config.toml, suppressions.toml, .loctreeignore)
             if current.join(SNAPSHOT_DIR).exists() {
@@ -1181,6 +1195,14 @@ impl Snapshot {
             let cache = project_cache_dir(&current);
             if cache.is_dir() && Self::cache_has_snapshot(&cache) {
                 return Some(current);
+            }
+            // Track git boundaries — don't walk past a .git into unrelated parents
+            if current.join(".git").exists() {
+                if passed_git {
+                    // Already passed one git root, don't walk into another project
+                    return None;
+                }
+                passed_git = true;
             }
             match current.parent() {
                 Some(parent) if parent != current => current = parent.to_path_buf(),
