@@ -318,4 +318,4 @@ Potential improvements for future versions:
 
 ---
 
-VibeCrafted with AI Agents (c)2026 Loctree Team
+Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team

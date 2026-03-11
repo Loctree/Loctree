@@ -14,7 +14,7 @@
 //! - [`analysis_commands`] - dead, cycles, find, query, impact, twins, sniff parsers
 //! - [`context_commands`] - slice, trace, focus, coverage, hotspots parsers
 //! - [`tauri_commands`] - commands, events, routes parsers
-//! - [`output_commands`] - report, info, lint, diff, memex, jq_query parsers
+//! - [`output_commands`] - report, findings, info, lint, diff, memex, jq_query parsers
 //! - [`misc_commands`] - crowd, tagmap, suppress, dist, layoutmap, zombie, health, audit, doctor, help parsers
 //!
 //! # Usage

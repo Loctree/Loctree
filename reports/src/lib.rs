@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 //! # report-leptos
 //!
 //! Leptos SSR renderer for generating static HTML reports.
@@ -314,5 +316,51 @@ mod tests {
         assert!(html.contains("Context Anchors"));
         assert!(html.contains("src/lib.rs"));
         assert!(html.contains("loct slice src/lib.rs"));
+    }
+
+    #[test]
+    fn renders_dist_panel_when_present() {
+        use types::{DistAnalysisLevel, DistDeadExport, DistFileImpact, DistReport};
+
+        let section = ReportSection {
+            root: "test-root".into(),
+            files_analyzed: 1,
+            dist: Some(DistReport {
+                src_dir: "src".into(),
+                source_map_paths: vec!["dist/app.js.map".into()],
+                source_maps: 1,
+                source_exports: 8,
+                bundled_exports: 5,
+                dead_exports: vec![DistDeadExport {
+                    file: "src/unused.ts".into(),
+                    line: 12,
+                    name: "UnusedThing".into(),
+                    kind: "function".into(),
+                }],
+                reduction: "38%".into(),
+                symbol_level: true,
+                analysis_level: DistAnalysisLevel::Symbol,
+                tree_shaken_exports: 3,
+                tree_shaken_pct: 38,
+                coverage_pct: 63,
+                impacted_files: vec![DistFileImpact {
+                    file: "src/unused.ts".into(),
+                    source_exports: 3,
+                    bundled_exports: 0,
+                    tree_shaken_exports: 3,
+                    status: "fully-shaken".into(),
+                }],
+                candidate_counts: Default::default(),
+                candidates: Vec::new(),
+            }),
+            ..Default::default()
+        };
+        let assets = JsAssets::default();
+        let html = render_report(&[section], &assets, false);
+
+        assert!(html.contains("Bundles"));
+        assert!(html.contains("Bundle distribution"));
+        assert!(html.contains("UnusedThing"));
+        assert!(html.contains("63%"));
     }
 }

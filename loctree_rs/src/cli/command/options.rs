@@ -135,6 +135,16 @@ pub struct FindOptions {
     pub limit: Option<usize>,
 }
 
+/// Options for the `findings` command.
+#[derive(Debug, Clone, Default)]
+pub struct FindingsOptions {
+    /// Root directories to analyze
+    pub roots: Vec<PathBuf>,
+
+    /// Emit summary-only JSON instead of the full findings artifact
+    pub summary: bool,
+}
+
 /// Options for the `dead` command.
 #[derive(Debug, Clone, Default)]
 pub struct DeadOptions {
@@ -356,9 +366,6 @@ pub struct ReportOptions {
     /// Root directories to report on
     pub roots: Vec<PathBuf>,
 
-    /// Output format (html, json)
-    pub format: Option<String>,
-
     /// Output file path
     pub output: Option<PathBuf>,
 
@@ -514,11 +521,14 @@ pub struct SuppressOptions {
 /// Analyzes bundle distribution using source maps.
 #[derive(Debug, Clone, Default)]
 pub struct DistOptions {
-    /// Path to source map file (.js.map)
-    pub source_map: Option<PathBuf>,
+    /// Source map inputs (.map files or directories to auto-discover under)
+    pub source_maps: Vec<PathBuf>,
 
     /// Source directory to scan for exports
     pub src: Option<PathBuf>,
+
+    /// Optional path to write the JSON report
+    pub report_path: Option<PathBuf>,
 }
 
 /// Options for the `sniff` command.
@@ -660,7 +670,7 @@ pub struct HealthOptions {
 
 /// Options for the `audit` command.
 /// Full audit combining all structural analyses into one actionable markdown report.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct AuditOptions {
     /// Root directories to analyze
     pub roots: Vec<PathBuf>,
@@ -671,29 +681,12 @@ pub struct AuditOptions {
     /// Output as actionable todo checklist (default: false)
     pub todos: bool,
 
-    /// Maximum items per category (default: 20)
-    pub limit: usize,
+    /// Optional maximum items per category; unset means full report
+    pub limit: Option<usize>,
 
     /// Don't auto-open the report file (default: false)
     pub no_open: bool,
-
-    /// Output to stdout instead of file (default: false)
-    pub stdout: bool,
 }
-
-impl Default for AuditOptions {
-    fn default() -> Self {
-        Self {
-            roots: Vec::new(),
-            include_tests: false,
-            todos: false,
-            limit: 20,
-            no_open: false,
-            stdout: false,
-        }
-    }
-}
-
 /// Options for the `doctor` command.
 /// Interactive diagnostics with categorized findings and suggested suppressions.
 #[derive(Debug, Clone, Default)]

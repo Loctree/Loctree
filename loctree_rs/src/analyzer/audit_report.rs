@@ -7,6 +7,8 @@
 
 use std::fmt::Write as _;
 
+use serde::Serialize;
+
 use super::crowd::types::Crowd;
 use super::cycles::ClassifiedCycle;
 use super::dead_parrots::DeadExport;
@@ -26,23 +28,39 @@ pub struct AuditFindings {
 }
 
 /// Orphan file with no importers
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct OrphanFile {
     pub path: String,
     pub loc: usize,
 }
 
 /// Shadow export - same symbol with some dead instances
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ShadowExport {
     pub name: String,
     pub total_locations: usize,
     pub dead_locations: usize,
 }
 
-/// Generate full markdown audit report
-pub fn generate_markdown_report(findings: &AuditFindings, limit: usize) -> String {
+fn write_limit_notice(out: &mut String, total_items: usize, limit: Option<usize>, reason: &str) {
+    if let Some(limit) = limit {
+        let omitted = total_items.saturating_sub(limit);
+        if omitted > 0 {
+            writeln!(
+                out,
+                "- _{} additional items omitted by {}_",
+                omitted, reason
+            )
+            .unwrap();
+        }
+    }
+}
+
+/// Generate full markdown audit report.
+/// When `limit` is `None`, the report includes every finding.
+pub fn generate_markdown_report(findings: &AuditFindings, limit: Option<usize>) -> String {
     let mut out = String::with_capacity(8192);
+    let display_limit = limit.unwrap_or(usize::MAX);
 
     // Header
     writeln!(out, "# Codebase Audit Report\n").unwrap();
@@ -83,12 +101,10 @@ pub fn generate_markdown_report(findings: &AuditFindings, limit: usize) -> Strin
 
         if !breaking_cycles.is_empty() {
             writeln!(out, "### Breaking Cycles ({})\n", breaking_cycles.len()).unwrap();
-            for cycle in breaking_cycles.iter().take(limit) {
+            for cycle in breaking_cycles.iter().take(display_limit) {
                 writeln!(out, "- [ ] {}", format_cycle(cycle)).unwrap();
             }
-            if breaking_cycles.len() > limit {
-                writeln!(out, "- _...and {} more_", breaking_cycles.len() - limit).unwrap();
-            }
+            write_limit_notice(&mut out, breaking_cycles.len(), limit, "--limit");
             writeln!(out).unwrap();
         }
 
@@ -99,7 +115,7 @@ pub fn generate_markdown_report(findings: &AuditFindings, limit: usize) -> Strin
                 high_confidence_dead.len()
             )
             .unwrap();
-            for dead in high_confidence_dead.iter().take(limit) {
+            for dead in high_confidence_dead.iter().take(display_limit) {
                 writeln!(
                     out,
                     "- [ ] Remove `{}` in {}:{}",
@@ -109,14 +125,7 @@ pub fn generate_markdown_report(findings: &AuditFindings, limit: usize) -> Strin
                 )
                 .unwrap();
             }
-            if high_confidence_dead.len() > limit {
-                writeln!(
-                    out,
-                    "- _...and {} more_",
-                    high_confidence_dead.len() - limit
-                )
-                .unwrap();
-            }
+            write_limit_notice(&mut out, high_confidence_dead.len(), limit, "--limit");
             writeln!(out).unwrap();
         }
     }
@@ -143,18 +152,16 @@ pub fn generate_markdown_report(findings: &AuditFindings, limit: usize) -> Strin
 
         if !structural_cycles.is_empty() {
             writeln!(out, "### Structural Cycles ({})\n", structural_cycles.len()).unwrap();
-            for cycle in structural_cycles.iter().take(limit) {
+            for cycle in structural_cycles.iter().take(display_limit) {
                 writeln!(out, "- [ ] {}", format_cycle(cycle)).unwrap();
             }
-            if structural_cycles.len() > limit {
-                writeln!(out, "- _...and {} more_", structural_cycles.len() - limit).unwrap();
-            }
+            write_limit_notice(&mut out, structural_cycles.len(), limit, "--limit");
             writeln!(out).unwrap();
         }
 
         if !findings.twins.is_empty() {
             writeln!(out, "### Duplicate Symbols ({})\n", findings.twins.len()).unwrap();
-            for twin in findings.twins.iter().take(limit) {
+            for twin in findings.twins.iter().take(display_limit) {
                 let locations: Vec<_> = twin
                     .locations
                     .iter()
@@ -169,9 +176,7 @@ pub fn generate_markdown_report(findings: &AuditFindings, limit: usize) -> Strin
                 )
                 .unwrap();
             }
-            if findings.twins.len() > limit {
-                writeln!(out, "- _...and {} more_", findings.twins.len() - limit).unwrap();
-            }
+            write_limit_notice(&mut out, findings.twins.len(), limit, "--limit");
             writeln!(out).unwrap();
         }
 
@@ -183,7 +188,7 @@ pub fn generate_markdown_report(findings: &AuditFindings, limit: usize) -> Strin
             )
             .unwrap();
             writeln!(out, "_Same symbol with some dead instances_\n").unwrap();
-            for shadow in findings.shadow_exports.iter().take(limit) {
+            for shadow in findings.shadow_exports.iter().take(display_limit) {
                 writeln!(
                     out,
                     "- [ ] `{}`: {}/{} locations dead",
@@ -191,14 +196,7 @@ pub fn generate_markdown_report(findings: &AuditFindings, limit: usize) -> Strin
                 )
                 .unwrap();
             }
-            if findings.shadow_exports.len() > limit {
-                writeln!(
-                    out,
-                    "- _...and {} more_",
-                    findings.shadow_exports.len() - limit
-                )
-                .unwrap();
-            }
+            write_limit_notice(&mut out, findings.shadow_exports.len(), limit, "--limit");
             writeln!(out).unwrap();
         }
 
@@ -209,7 +207,7 @@ pub fn generate_markdown_report(findings: &AuditFindings, limit: usize) -> Strin
                 low_confidence_dead.len()
             )
             .unwrap();
-            for dead in low_confidence_dead.iter().take(limit) {
+            for dead in low_confidence_dead.iter().take(display_limit) {
                 writeln!(
                     out,
                     "- [ ] Review `{}` in {}:{}",
@@ -219,9 +217,7 @@ pub fn generate_markdown_report(findings: &AuditFindings, limit: usize) -> Strin
                 )
                 .unwrap();
             }
-            if low_confidence_dead.len() > limit {
-                writeln!(out, "- _...and {} more_", low_confidence_dead.len() - limit).unwrap();
-            }
+            write_limit_notice(&mut out, low_confidence_dead.len(), limit, "--limit");
             writeln!(out).unwrap();
         }
     }
@@ -240,29 +236,20 @@ pub fn generate_markdown_report(findings: &AuditFindings, limit: usize) -> Strin
             )
             .unwrap();
             writeln!(out, "_Files with no importers (may be entry points)_\n").unwrap();
-            for orphan in findings.orphan_files.iter().take(limit) {
+            for orphan in findings.orphan_files.iter().take(display_limit) {
                 writeln!(out, "- `{}` ({} LOC)", orphan.path, orphan.loc).unwrap();
             }
-            if findings.orphan_files.len() > limit {
-                writeln!(
-                    out,
-                    "- _...and {} more_",
-                    findings.orphan_files.len() - limit
-                )
-                .unwrap();
-            }
+            write_limit_notice(&mut out, findings.orphan_files.len(), limit, "--limit");
             writeln!(out).unwrap();
         }
 
         if !findings.crowds.is_empty() {
             writeln!(out, "### Crowds ({})\n", findings.crowds.len()).unwrap();
             writeln!(out, "_Files with high coupling_\n").unwrap();
-            for crowd in findings.crowds.iter().take(limit) {
+            for crowd in findings.crowds.iter().take(display_limit) {
                 writeln!(out, "- `{}`: {} files", crowd.pattern, crowd.members.len()).unwrap();
             }
-            if findings.crowds.len() > limit {
-                writeln!(out, "- _...and {} more_", findings.crowds.len() - limit).unwrap();
-            }
+            write_limit_notice(&mut out, findings.crowds.len(), limit, "--limit");
             writeln!(out).unwrap();
         }
     }
@@ -274,15 +261,17 @@ pub fn generate_markdown_report(findings: &AuditFindings, limit: usize) -> Strin
         for (i, win) in quick_wins.iter().enumerate().take(5) {
             writeln!(out, "{}. {}", i + 1, win).unwrap();
         }
+        write_limit_notice(&mut out, quick_wins.len(), Some(5), "quick-win summary cap");
         writeln!(out).unwrap();
     }
 
     out
 }
 
-/// Generate actionable todo checklist only
-pub fn generate_todos(findings: &AuditFindings, limit: usize) -> String {
+/// Generate actionable todo checklist only.
+pub fn generate_todos(findings: &AuditFindings, limit: Option<usize>) -> String {
     let mut out = String::with_capacity(4096);
+    let display_limit = limit.unwrap_or(usize::MAX);
 
     let today = chrono::Local::now().format("%Y-%m-%d");
     writeln!(out, "# Audit Todos ({})\n", today).unwrap();
@@ -303,11 +292,12 @@ pub fn generate_todos(findings: &AuditFindings, limit: usize) -> String {
     if !breaking_cycles.is_empty() || !high_confidence_dead.is_empty() {
         writeln!(out, "## Critical\n").unwrap();
 
-        for cycle in breaking_cycles.iter().take(limit) {
+        for cycle in breaking_cycles.iter().take(display_limit) {
             writeln!(out, "- [ ] Break cycle: {}", format_cycle(cycle)).unwrap();
         }
+        write_limit_notice(&mut out, breaking_cycles.len(), limit, "--limit");
 
-        for dead in high_confidence_dead.iter().take(limit) {
+        for dead in high_confidence_dead.iter().take(display_limit) {
             writeln!(
                 out,
                 "- [ ] Remove `{}` in {}:{}",
@@ -317,6 +307,7 @@ pub fn generate_todos(findings: &AuditFindings, limit: usize) -> String {
             )
             .unwrap();
         }
+        write_limit_notice(&mut out, high_confidence_dead.len(), limit, "--limit");
         writeln!(out).unwrap();
     }
 
@@ -330,11 +321,12 @@ pub fn generate_todos(findings: &AuditFindings, limit: usize) -> String {
     if !structural_cycles.is_empty() || !findings.twins.is_empty() {
         writeln!(out, "## Warnings\n").unwrap();
 
-        for cycle in structural_cycles.iter().take(limit) {
+        for cycle in structural_cycles.iter().take(display_limit) {
             writeln!(out, "- [ ] Review cycle: {}", format_cycle(cycle)).unwrap();
         }
+        write_limit_notice(&mut out, structural_cycles.len(), limit, "--limit");
 
-        for twin in findings.twins.iter().take(limit) {
+        for twin in findings.twins.iter().take(display_limit) {
             writeln!(
                 out,
                 "- [ ] Consolidate `{}` ({} locations)",
@@ -343,6 +335,7 @@ pub fn generate_todos(findings: &AuditFindings, limit: usize) -> String {
             )
             .unwrap();
         }
+        write_limit_notice(&mut out, findings.twins.len(), limit, "--limit");
         writeln!(out).unwrap();
     }
 
@@ -353,6 +346,7 @@ pub fn generate_todos(findings: &AuditFindings, limit: usize) -> String {
         for win in quick_wins.iter().take(5) {
             writeln!(out, "- [ ] {}", win).unwrap();
         }
+        write_limit_notice(&mut out, quick_wins.len(), Some(5), "quick-win summary cap");
     }
 
     out
@@ -452,10 +446,22 @@ fn calculate_quick_wins(findings: &AuditFindings) -> Vec<String> {
 mod tests {
     use super::*;
 
+    fn dead_export(symbol: &str, line: usize) -> DeadExport {
+        DeadExport {
+            file: "src/lib.rs".into(),
+            symbol: symbol.into(),
+            line: Some(line),
+            confidence: "high".into(),
+            reason: "unused export".into(),
+            open_url: None,
+            is_test: false,
+        }
+    }
+
     #[test]
     fn test_empty_findings_generates_report() {
         let findings = AuditFindings::default();
-        let report = generate_markdown_report(&findings, 20);
+        let report = generate_markdown_report(&findings, None);
         assert!(report.contains("# Codebase Audit Report"));
         assert!(report.contains("Health Score | 100/100"));
     }
@@ -463,7 +469,58 @@ mod tests {
     #[test]
     fn test_todos_output() {
         let findings = AuditFindings::default();
-        let todos = generate_todos(&findings, 20);
+        let todos = generate_todos(&findings, None);
         assert!(todos.contains("# Audit Todos"));
+    }
+
+    #[test]
+    fn test_markdown_report_is_full_by_default() {
+        let findings = AuditFindings {
+            dead_exports: (0..3)
+                .map(|idx| dead_export(&format!("dead_{idx}"), idx + 1))
+                .collect(),
+            ..AuditFindings::default()
+        };
+
+        let report = generate_markdown_report(&findings, None);
+
+        assert!(report.contains("dead_0"));
+        assert!(report.contains("dead_1"));
+        assert!(report.contains("dead_2"));
+        assert!(!report.contains("omitted by --limit"));
+    }
+
+    #[test]
+    fn test_markdown_report_calls_out_explicit_limit() {
+        let findings = AuditFindings {
+            dead_exports: (0..3)
+                .map(|idx| dead_export(&format!("dead_{idx}"), idx + 1))
+                .collect(),
+            ..AuditFindings::default()
+        };
+
+        let report = generate_markdown_report(&findings, Some(2));
+
+        assert!(report.contains("dead_0"));
+        assert!(report.contains("dead_1"));
+        assert!(!report.contains("dead_2"));
+        assert!(report.contains("1 additional items omitted by --limit"));
+    }
+
+    #[test]
+    fn test_todos_call_out_explicit_limit() {
+        let findings = AuditFindings {
+            dead_exports: (0..3)
+                .map(|idx| dead_export(&format!("dead_{idx}"), idx + 1))
+                .collect(),
+            ..AuditFindings::default()
+        };
+
+        let todos = generate_todos(&findings, Some(2));
+
+        assert!(todos.contains("dead_0"));
+        assert!(todos.contains("dead_1"));
+        assert!(!todos.contains("dead_2"));
+        assert!(todos.contains("1 additional items omitted by --limit"));
     }
 }

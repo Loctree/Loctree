@@ -44,16 +44,6 @@ update_file "$ROOT_DIR/loctree_rs/src/lib.rs" 's|html_root_url = "https://docs.r
 # Update reports crate footer
 update_file "$ROOT_DIR/reports/src/components/document.rs" 's/"loctree v[^"]*"/"loctree v'$VERSION'"/'
 
-# Update landing page easter eggs
-update_file "$ROOT_DIR/landing/src/sections/easter_eggs.rs" 's/v[0-9]\+\.[0-9]\+\.[0-9]\+ | loctree.io/v'$VERSION' | loctree.io/'
-
-# Update landing page version constant
-update_file "$ROOT_DIR/landing/src/sections/mod.rs" 's/VERSION: \&str = "v[^"]*"/VERSION: \&str = "v'$VERSION'"/'
-
-# Update API agent endpoint files
-update_file "$ROOT_DIR/landing/api/agent/index.json" 's/"version": "[^"]*"/"version": "'$VERSION'"/'
-update_file "$ROOT_DIR/landing/public/api/agent/index.txt" 's/loctree v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*/loctree v'$VERSION'/'
-
 echo ""
 echo "Version sync complete: v$VERSION"
 echo ""

@@ -584,7 +584,7 @@ fn run_findings(
         example_globs: parsed.library_example_globs.clone(),
     };
 
-    let findings = Findings::produce(&scan_results, &snap, config);
+    let findings = Findings::produce(&scan_results, &snap, config, None);
 
     if summary_only {
         let summary = findings.summary_only();

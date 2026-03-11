@@ -99,6 +99,7 @@ fn write_js_assets(dir: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::render_html_report;
+    use crate::analyzer::dist::{DeadBundleExport, DistAnalysisLevel, DistFileImpact, DistResult};
     use crate::analyzer::report::{AiInsight, DupSeverity, RankedDup, ReportSection};
     use std::fs;
     use tempfile::tempdir;
@@ -159,6 +160,35 @@ mod tests {
             hub_files: Vec::new(),
             crowds: Vec::new(),
             dead_exports: Vec::new(),
+            dist: Some(DistResult {
+                src_dir: "src".into(),
+                source_map_paths: vec!["dist/app.js.map".into()],
+                source_maps: 1,
+                source_exports: 2,
+                bundled_exports: 1,
+                dead_exports: vec![DeadBundleExport {
+                    file: "src/b.ts".into(),
+                    line: 12,
+                    name: "Ghost".into(),
+                    kind: "function".into(),
+                }],
+                reduction: "50%".into(),
+                symbol_level: true,
+                analysis_level: DistAnalysisLevel::Symbol,
+                tree_shaken_exports: 1,
+                tree_shaken_pct: 50,
+                coverage_pct: 50,
+                impacted_files: vec![DistFileImpact {
+                    file: "src/b.ts".into(),
+                    source_exports: 1,
+                    bundled_exports: 0,
+                    tree_shaken_exports: 1,
+                    status: "fully-shaken".into(),
+                }],
+                chunks: Vec::new(),
+                candidate_counts: std::collections::BTreeMap::new(),
+                candidates: Vec::new(),
+            }),
             twins_data: None,
             coverage_gaps: Vec::new(),
             health_score: None,
@@ -176,6 +206,8 @@ mod tests {
         assert!(html.contains("Hint"));
         assert!(html.contains("Foo"));
         assert!(html.contains("test-root"));
+        assert!(html.contains("Bundle distribution"));
+        assert!(html.contains("Ghost"));
     }
 
     #[test]
@@ -214,6 +246,7 @@ mod tests {
             hub_files: Vec::new(),
             crowds: Vec::new(),
             dead_exports: Vec::new(),
+            dist: None,
             twins_data: None,
             coverage_gaps: Vec::new(),
             health_score: None,

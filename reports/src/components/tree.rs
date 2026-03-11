@@ -63,6 +63,9 @@ fn TreeNodeView(
     let path_for_toggle = path.clone();
     let path_check_1 = path.clone();
     let path_check_2 = path.clone();
+    let path_for_display = path.clone();
+    let path_for_highlight = path.clone();
+    let node_for_visibility = node.clone();
     let is_dir = !node.children.is_empty();
     let loc = node.loc;
     let children = node.children.clone();
@@ -103,36 +106,26 @@ fn TreeNodeView(
 
     let is_collapsed_chevron = move || collapsed.get().contains(&path_check_1);
     let is_collapsed_children = move || collapsed.get().contains(&path_check_2);
-
-    let filter_val = filter.get();
-    if !node_matches(&node, &filter_val) {
-        return view! { <div></div> }.into_any();
-    }
-
-    // Highlight matching text
-    let display_path =
-        if !filter_val.is_empty() && path.to_lowercase().contains(&filter_val.to_lowercase()) {
-            let lower_path = path.to_lowercase();
+    let highlighted_path = move || {
+        let filter_val = filter.get_untracked();
+        if !filter_val.is_empty()
+            && path_for_highlight
+                .to_lowercase()
+                .contains(&filter_val.to_lowercase())
+        {
+            let lower_path = path_for_highlight.to_lowercase();
             let lower_filter = filter_val.to_lowercase();
-            if let Some(idx) = lower_path.find(&lower_filter) {
-                let before = &path[..idx];
-                let matched = &path[idx..idx + filter_val.len()];
-                let after = &path[idx + filter_val.len()..];
-                view! {
-                    <span>
-                        {before.to_string()}
-                        <mark class="tree-highlight">{matched.to_string()}</mark>
-                        {after.to_string()}
-                    </span>
-                }
-                .into_any()
-            } else {
-                view! { <span>{path.clone()}</span> }.into_any()
-            }
+            lower_path.find(&lower_filter).map(|idx| {
+                (
+                    path_for_highlight[..idx].to_string(),
+                    path_for_highlight[idx..idx + filter_val.len()].to_string(),
+                    path_for_highlight[idx + filter_val.len()..].to_string(),
+                )
+            })
         } else {
-            view! { <span>{path.clone()}</span> }.into_any()
-        };
-
+            None
+        }
+    };
     let loc_bar_style = format!("width: {}%", loc_pct);
 
     // Select appropriate icon
@@ -143,7 +136,17 @@ fn TreeNodeView(
     };
 
     view! {
-        <div class="tree-node">
+        <div
+            class="tree-node"
+            style:display=move || {
+                let filter_val = filter.get_untracked();
+                if node_matches(&node_for_visibility, &filter_val) {
+                    ""
+                } else {
+                    "none"
+                }
+            }
+        >
             <div
                 class="tree-row"
                 class:tree-row-dir=is_dir
@@ -171,7 +174,22 @@ fn TreeNodeView(
                             <Icon path=file_icon size="16" />
                         </span>
                     })}
-                    <span class="tree-path">{display_path}</span>
+                    <span class="tree-path">
+                        {move || {
+                            if let Some((before, matched, after)) = highlighted_path() {
+                                view! {
+                                    <span>
+                                        {before}
+                                        <mark class="tree-highlight">{matched}</mark>
+                                        {after}
+                                    </span>
+                                }
+                                .into_any()
+                            } else {
+                                view! { <span>{path_for_display.clone()}</span> }.into_any()
+                            }
+                        }}
+                    </span>
                 </div>
                 <div class="tree-right">
                     <div class="tree-loc-bar">

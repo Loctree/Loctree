@@ -157,7 +157,27 @@ fn has_project_marker(root: &Path) -> bool {
     MARKERS.iter().any(|marker| root.join(marker).is_file())
 }
 
-pub(crate) fn resolve_snapshot_root(root_list: &[PathBuf]) -> PathBuf {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum SnapshotRootStrategy {
+    Project,
+    Exact,
+}
+
+fn resolve_exact_snapshot_root(root_list: &[PathBuf]) -> PathBuf {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let root = root_list.first().cloned().unwrap_or(cwd);
+    let normalized = normalize_root_dir(&root);
+    normalized.canonicalize().unwrap_or(normalized)
+}
+
+pub(crate) fn resolve_snapshot_root_with_strategy(
+    root_list: &[PathBuf],
+    strategy: SnapshotRootStrategy,
+) -> PathBuf {
+    if strategy == SnapshotRootStrategy::Exact {
+        return resolve_exact_snapshot_root(root_list);
+    }
+
     let cwd = std::env::current_dir().unwrap_or_default();
     let roots: Vec<PathBuf> = if root_list.is_empty() {
         vec![cwd.clone()]
@@ -196,6 +216,10 @@ pub(crate) fn resolve_snapshot_root(root_list: &[PathBuf]) -> PathBuf {
     }
 
     find_git_root(&cwd).unwrap_or(cwd)
+}
+
+pub(crate) fn resolve_snapshot_root(root_list: &[PathBuf]) -> PathBuf {
+    resolve_snapshot_root_with_strategy(root_list, SnapshotRootStrategy::Project)
 }
 
 #[derive(Clone, Debug)]
@@ -1037,14 +1061,16 @@ impl Snapshot {
             }
         }
 
-        // Rebuild validated path from trusted root + validated relative path
-        let validated_path = PathBuf::from(canonical_root.as_os_str()).join(relative);
+        // canonical_legacy is already canonicalized and verified to be under canonical_root.
+        // Keep the validated path as-is to avoid rebuilding from potentially tainted pieces.
+        let validated_path = canonical_legacy;
 
         let cache_snapshot_path = Self::cache_path_for_legacy_snapshot(root, &validated_path);
         if cache_snapshot_path.exists() {
             return Ok(cache_snapshot_path);
         }
 
+        // nosemgrep:rust.actix.path-traversal.tainted-path.tainted-path -- SAFETY: validated_path is canonicalized and bounded to canonical_root via strip_prefix guard above
         let bytes = fs::read(&validated_path)?;
         if let Some(parent) = cache_snapshot_path.parent() {
             fs::create_dir_all(parent)?;
@@ -1630,6 +1656,20 @@ pub fn run_init_with_options(
     parsed: &ParsedArgs,
     quiet_summary: bool,
 ) -> io::Result<()> {
+    run_init_with_options_for_strategy(
+        root_list,
+        parsed,
+        quiet_summary,
+        SnapshotRootStrategy::Project,
+    )
+}
+
+pub(crate) fn run_init_with_options_for_strategy(
+    root_list: &[PathBuf],
+    parsed: &ParsedArgs,
+    quiet_summary: bool,
+    snapshot_strategy: SnapshotRootStrategy,
+) -> io::Result<()> {
     use crate::analyzer::coverage::{compute_command_gaps, normalize_cmd_name};
     use crate::analyzer::root_scan::{ScanConfig, scan_roots};
     use crate::analyzer::runner::default_analyzer_exts;
@@ -1641,7 +1681,7 @@ pub fn run_init_with_options(
 
     // Snapshot root defaults to the first provided root (common UX: keep artifacts near target),
     // falling back to CWD if multiple roots are provided.
-    let snapshot_root = resolve_snapshot_root(root_list);
+    let snapshot_root = resolve_snapshot_root_with_strategy(root_list, snapshot_strategy);
 
     // Validate at least one root was specified
     if root_list.is_empty() {
@@ -2059,6 +2099,7 @@ pub fn run_init_with_options(
             &scan_results,
             &parsed,
             Some(&snapshot.metadata),
+            None,
         ) {
             Ok(paths) => {
                 artifacts_spinner.finish_clear();
@@ -2097,13 +2138,16 @@ pub(crate) fn write_auto_artifacts(
     scan_results: &crate::analyzer::root_scan::ScanResults,
     parsed: &ParsedArgs,
     metadata_override: Option<&SnapshotMetadata>,
+    dist: Option<crate::analyzer::dist::DistResult>,
 ) -> io::Result<Vec<String>> {
     use crate::analyzer::coverage::{
         CommandUsage, compute_command_gaps_with_confidence, compute_unregistered_handlers,
     };
     use crate::analyzer::cycles::find_cycles_with_lazy;
     use crate::analyzer::dead_parrots::find_dead_exports;
-    use crate::analyzer::output::{RootArtifacts, process_root_context, write_report};
+    use crate::analyzer::output::{
+        RootArtifacts, attach_dist_to_sections, process_root_context, write_report,
+    };
     use crate::analyzer::pipelines::build_pipeline_summary;
     use crate::analyzer::sarif::{SarifInputs, generate_sarif_string};
     use crate::analyzer::scan::opt_globset;
@@ -2221,6 +2265,14 @@ pub(crate) fn write_auto_artifacts(
         if let Some(section) = report_section {
             report_sections.push(section);
         }
+    }
+
+    if let Some(ref dist_result) = dist {
+        attach_dist_to_sections(
+            &mut report_sections,
+            dist_result.clone(),
+            Path::new(&dist_result.src_dir),
+        );
     }
 
     write_report(&report_path, &report_sections, parsed.verbose)?;
@@ -2505,6 +2557,7 @@ pub(crate) fn write_auto_artifacts(
         scan_results,
         &minimal_snapshot,
         findings_config,
+        dist.clone(),
     );
     let findings_json = findings.to_json().map_err(io::Error::other)?;
     write_atomic(&findings_json_path, &findings_json)?;
@@ -2542,6 +2595,7 @@ pub(crate) fn write_auto_artifacts(
         &minimal_snapshot,
         findings_size_kb,
         agent_size_kb,
+        dist.as_ref(),
     );
     let manifest_json = manifest.to_json().map_err(io::Error::other)?;
     write_atomic(&manifest_json_path, &manifest_json)?;
@@ -3342,6 +3396,24 @@ mod cache_tests {
         let expected = subproject.canonicalize().expect("canonicalize subproject");
         let actual = resolved.canonicalize().expect("canonicalize resolved root");
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    #[serial]
+    fn resolve_snapshot_root_with_exact_strategy_keeps_requested_subtree() {
+        let _guard = EnvVarGuard::clear(CACHE_ENV);
+        let workspace = TempDir::new().expect("create temp workspace");
+        let src = workspace.path().join("apps/web/src");
+        std::fs::create_dir_all(&src).expect("create nested src dir");
+
+        run_git(workspace.path(), &["init"]);
+
+        let resolved = resolve_snapshot_root_with_strategy(
+            std::slice::from_ref(&src),
+            SnapshotRootStrategy::Exact,
+        );
+        let expected = src.canonicalize().expect("canonicalize src root");
+        assert_eq!(resolved, expected);
     }
 
     #[test]

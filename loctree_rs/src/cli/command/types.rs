@@ -25,6 +25,9 @@ pub enum Command {
     /// Search symbols/files/impact/similar.
     Find(FindOptions),
 
+    /// Emit the canonical findings artifact to stdout.
+    Findings(FindingsOptions),
+
     /// Detect unused exports / dead code.
     Dead(DeadOptions),
 

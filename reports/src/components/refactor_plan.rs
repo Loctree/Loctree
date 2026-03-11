@@ -1,6 +1,6 @@
 //! Refactor plan panel - architectural refactoring visualization.
 //!
-//! VibeCrafted with AI Agents (c)2026 Loctree Team
+//! Vibecrafted with AI Agents by VetCoders (c)2026 VetCoders
 
 use leptos::prelude::*;
 
@@ -16,17 +16,9 @@ pub fn RefactorPlan(plan: Option<RefactorPlanData>) -> impl IntoView {
         Some(data) => render_plan(data).into_any(),
         None => view! {
             <div class="panel refactor-empty">
-                <h3>"Refactor plan not generated yet"</h3>
-                <p class="muted">
-                    "No architectural migration data is available for this report section."
-                </p>
-                <div class="refactor-empty-command">
-                    <span class="refactor-empty-label">"Generate plan:"</span>
-                    <code>"loct plan src"</code>
-                </div>
-                <p class="muted refactor-empty-note">
-                    "Tip: run the command from the project root, then re-generate the report."
-                </p>
+                <p class="muted">"No refactor plan available. Run "</p>
+                <code>"loct plan &lt;directory&gt;"</code>
+                <p class="muted">" to generate architectural suggestions."</p>
             </div>
         }
         .into_any(),

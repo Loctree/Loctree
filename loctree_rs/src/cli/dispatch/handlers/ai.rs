@@ -272,7 +272,10 @@ pub fn handle_tagmap_command(opts: &TagmapOptions, global: &GlobalOptions) -> Di
         ));
     }
 
-    let limit = opts.limit.unwrap_or(20);
+    let limit = opts.limit.unwrap_or(usize::MAX);
+    let files_omitted = matching_files.len().saturating_sub(limit);
+    let crowd_omitted = crowd.members.len().saturating_sub(limit);
+    let dead_omitted = dead_for_keyword.len().saturating_sub(limit);
 
     // Output results
     if global.json {
@@ -280,6 +283,11 @@ pub fn handle_tagmap_command(opts: &TagmapOptions, global: &GlobalOptions) -> Di
             "keyword": opts.keyword,
             "files": {
                 "count": matching_files.len(),
+                "omitted_by_limit": if opts.limit.is_some() && files_omitted > 0 {
+                    Some(files_omitted)
+                } else {
+                    None
+                },
                 "items": matching_files.iter().take(limit).map(|f| {
                     serde_json::json!({
                         "path": f.path,
@@ -291,11 +299,21 @@ pub fn handle_tagmap_command(opts: &TagmapOptions, global: &GlobalOptions) -> Di
             "crowd": {
                 "pattern": crowd.pattern,
                 "members": crowd.members.len(),
+                "omitted_by_limit": if opts.limit.is_some() && crowd_omitted > 0 {
+                    Some(crowd_omitted)
+                } else {
+                    None
+                },
                 "score": crowd.score,
                 "issues": crowd.issues.len()
             },
             "dead_exports": {
                 "count": dead_for_keyword.len(),
+                "omitted_by_limit": if opts.limit.is_some() && dead_omitted > 0 {
+                    Some(dead_omitted)
+                } else {
+                    None
+                },
                 "items": dead_for_keyword.iter().take(limit).map(|d| {
                     serde_json::json!({
                         "file": d.file,
@@ -321,8 +339,8 @@ pub fn handle_tagmap_command(opts: &TagmapOptions, global: &GlobalOptions) -> Di
             for file in matching_files.iter().take(limit) {
                 println!("  {} ({} LOC, {})", file.path, file.loc, file.language);
             }
-            if matching_files.len() > limit {
-                println!("  ... and {} more", matching_files.len() - limit);
+            if opts.limit.is_some() && files_omitted > 0 {
+                println!("  {} additional file(s) omitted by --limit", files_omitted);
             }
         }
 
@@ -335,8 +353,11 @@ pub fn handle_tagmap_command(opts: &TagmapOptions, global: &GlobalOptions) -> Di
             for member in crowd.members.iter().take(limit) {
                 println!("  {} ({} importers)", member.file, member.importer_count);
             }
-            if crowd.members.len() > limit {
-                println!("  ... and {} more", crowd.members.len() - limit);
+            if opts.limit.is_some() && crowd_omitted > 0 {
+                println!(
+                    "  {} additional crowd member(s) omitted by --limit",
+                    crowd_omitted
+                );
             }
             if !crowd.issues.is_empty() {
                 println!(
@@ -354,8 +375,11 @@ pub fn handle_tagmap_command(opts: &TagmapOptions, global: &GlobalOptions) -> Di
             for dead in dead_for_keyword.iter().take(limit) {
                 println!("  {} in {} [{}]", dead.symbol, dead.file, dead.confidence);
             }
-            if dead_for_keyword.len() > limit {
-                println!("  ... and {} more", dead_for_keyword.len() - limit);
+            if opts.limit.is_some() && dead_omitted > 0 {
+                println!(
+                    "  {} additional dead export(s) omitted by --limit",
+                    dead_omitted
+                );
             }
         } else {
             println!("\nDEAD EXPORTS: (none)");
@@ -581,7 +605,7 @@ pub fn handle_sniff_command(opts: &SniffOptions, global: &GlobalOptions) -> Disp
     use std::path::Path;
 
     // Deprecation warning (goes to stderr, won't break piped output)
-    warn_deprecated("sniff", "loct --findings");
+    warn_deprecated("sniff", "loct findings");
 
     // Show spinner unless in quiet/json mode
     let spinner = if !global.quiet && !global.json {
@@ -724,7 +748,10 @@ pub fn handle_sniff_command(opts: &SniffOptions, global: &GlobalOptions) -> Disp
             }
 
             if twins_list.len() > 20 {
-                println!("   ... and {} more twin groups\n", twins_list.len() - 20);
+                println!(
+                    "   {} additional twin group(s) omitted in sniff summary; use `loct findings` for full truth\n",
+                    twins_list.len() - 20
+                );
             }
         }
 
@@ -756,13 +783,17 @@ pub fn handle_sniff_command(opts: &SniffOptions, global: &GlobalOptions) -> Disp
                     println!("   {} in {}:{}", entry.name, entry.file_path, entry.line);
                 }
                 if entries.len() > 3 {
-                    println!("   ... and {} more in {}", entries.len() - 3, file);
+                    println!(
+                        "   {} additional dead export(s) omitted for {} in sniff summary",
+                        entries.len() - 3,
+                        file
+                    );
                 }
             }
 
             if files.len() > 10 {
                 println!(
-                    "   ... and {} more files with dead exports",
+                    "   {} additional file(s) with dead exports omitted in sniff summary",
                     files.len() - 10
                 );
             }
@@ -782,13 +813,19 @@ pub fn handle_sniff_command(opts: &SniffOptions, global: &GlobalOptions) -> Disp
                     println!("   ├─ {}", member.file);
                 }
                 if crowd.members.len() > 5 {
-                    println!("   └─ ... and {} more", crowd.members.len() - 5);
+                    println!(
+                        "   └─ {} additional member(s) omitted in sniff summary",
+                        crowd.members.len() - 5
+                    );
                 }
                 println!();
             }
 
             if crowds_list.len() > 5 {
-                println!("   ... and {} more crowd groups\n", crowds_list.len() - 5);
+                println!(
+                    "   {} additional crowd group(s) omitted in sniff summary; use `loct findings` for full truth\n",
+                    crowds_list.len() - 5
+                );
             }
         }
 

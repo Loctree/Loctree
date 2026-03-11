@@ -1968,6 +1968,102 @@ pub fn handle_health_command(opts: &HealthOptions, global: &GlobalOptions) -> Di
     DispatchResult::Exit(0)
 }
 
+fn insert_audit_collection<T: serde::Serialize>(
+    section: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    items: &[T],
+    limit: Option<usize>,
+) {
+    let display_limit = limit.unwrap_or(usize::MAX);
+    section.insert(
+        key.to_string(),
+        serde_json::json!(items.iter().take(display_limit).collect::<Vec<_>>()),
+    );
+
+    if let Some(limit) = limit {
+        let omitted = items.len().saturating_sub(limit);
+        section.insert("limit".to_string(), serde_json::json!(limit));
+        section.insert("omitted".to_string(), serde_json::json!(omitted));
+        section.insert("truncated".to_string(), serde_json::json!(omitted > 0));
+    }
+}
+
+fn build_audit_json(
+    findings: &crate::analyzer::audit_report::AuditFindings,
+    limit: Option<usize>,
+) -> serde_json::Value {
+    use crate::analyzer::cycles::CycleCompilability;
+    use serde_json::{Map, Value, json};
+
+    let high_confidence = findings
+        .dead_exports
+        .iter()
+        .filter(|d| d.confidence == "high")
+        .count();
+    let low_confidence = findings.dead_exports.len() - high_confidence;
+    let high_risk_cycles = findings
+        .cycles
+        .iter()
+        .filter(|c| c.compilability == CycleCompilability::Breaking)
+        .count();
+    let structural_cycles = findings
+        .cycles
+        .iter()
+        .filter(|c| c.compilability == CycleCompilability::Structural)
+        .count();
+    let orphan_loc: usize = findings.orphan_files.iter().map(|f| f.loc).sum();
+
+    let mut cycles = Map::new();
+    cycles.insert("total".to_string(), json!(findings.cycles.len()));
+    cycles.insert("high_risk".to_string(), json!(high_risk_cycles));
+    cycles.insert("structural".to_string(), json!(structural_cycles));
+    insert_audit_collection(&mut cycles, "items", &findings.cycles, limit);
+
+    let mut dead_exports = Map::new();
+    dead_exports.insert("total".to_string(), json!(findings.dead_exports.len()));
+    dead_exports.insert("high_confidence".to_string(), json!(high_confidence));
+    dead_exports.insert("low_confidence".to_string(), json!(low_confidence));
+    insert_audit_collection(&mut dead_exports, "items", &findings.dead_exports, limit);
+
+    let mut twins = Map::new();
+    twins.insert("total".to_string(), json!(findings.twins.len()));
+    insert_audit_collection(&mut twins, "groups", &findings.twins, limit);
+
+    let mut orphan_files = Map::new();
+    orphan_files.insert("total".to_string(), json!(findings.orphan_files.len()));
+    orphan_files.insert("total_loc".to_string(), json!(orphan_loc));
+    insert_audit_collection(&mut orphan_files, "files", &findings.orphan_files, limit);
+
+    let mut shadow_exports = Map::new();
+    shadow_exports.insert("total".to_string(), json!(findings.shadow_exports.len()));
+    insert_audit_collection(
+        &mut shadow_exports,
+        "items",
+        &findings.shadow_exports,
+        limit,
+    );
+
+    let mut crowds = Map::new();
+    crowds.insert("total".to_string(), json!(findings.crowds.len()));
+    insert_audit_collection(&mut crowds, "clusters", &findings.crowds, limit);
+
+    Value::Object(Map::from_iter([
+        ("cycles".to_string(), Value::Object(cycles)),
+        ("dead_exports".to_string(), Value::Object(dead_exports)),
+        ("twins".to_string(), Value::Object(twins)),
+        ("orphan_files".to_string(), Value::Object(orphan_files)),
+        ("shadow_exports".to_string(), Value::Object(shadow_exports)),
+        ("crowds".to_string(), Value::Object(crowds)),
+        (
+            "summary".to_string(),
+            json!({
+                "total_files": findings.total_files,
+                "total_loc": findings.total_loc,
+            }),
+        ),
+    ]))
+}
+
 /// Handle the audit command - full codebase audit with actionable markdown report
 pub fn handle_audit_command(opts: &AuditOptions, global: &GlobalOptions) -> DispatchResult {
     use crate::analyzer::audit_report::{
@@ -2155,87 +2251,18 @@ pub fn handle_audit_command(opts: &AuditOptions, global: &GlobalOptions) -> Disp
         .iter()
         .filter(|d| d.confidence == "high")
         .count();
-    let low_confidence = findings.dead_exports.len() - high_confidence;
     let high_risk_cycles = findings
         .cycles
         .iter()
         .filter(|c| c.compilability == CycleCompilability::Breaking)
         .count();
-    let structural_cycles = findings
-        .cycles
-        .iter()
-        .filter(|c| c.compilability == CycleCompilability::Structural)
-        .count();
-    let orphan_loc: usize = findings.orphan_files.iter().map(|f| f.loc).sum();
 
     // Output results
     if global.json {
-        // Keep JSON output for --json flag (existing behavior)
-        let json = serde_json::json!({
-            "cycles": {
-                "total": findings.cycles.len(),
-                "high_risk": high_risk_cycles,
-                "structural": structural_cycles
-            },
-            "dead_exports": {
-                "total": findings.dead_exports.len(),
-                "high_confidence": high_confidence,
-                "low_confidence": low_confidence
-            },
-            "twins": {
-                "total": findings.twins.len(),
-                "groups": findings.twins.iter().take(10).map(|t| {
-                    serde_json::json!({
-                        "name": t.name,
-                        "locations": t.locations.len()
-                    })
-                }).collect::<Vec<_>>()
-            },
-            "orphan_files": {
-                "total": findings.orphan_files.len(),
-                "total_loc": orphan_loc,
-                "files": findings.orphan_files.iter().take(10).map(|f| {
-                    serde_json::json!({
-                        "path": f.path,
-                        "loc": f.loc
-                    })
-                }).collect::<Vec<_>>()
-            },
-            "shadow_exports": {
-                "total": findings.shadow_exports.len(),
-                "items": findings.shadow_exports.iter().take(10).map(|s| {
-                    serde_json::json!({
-                        "name": s.name,
-                        "total_locations": s.total_locations,
-                        "dead_locations": s.dead_locations
-                    })
-                }).collect::<Vec<_>>()
-            },
-            "crowds": {
-                "total": findings.crowds.len(),
-                "clusters": findings.crowds.iter().take(5).map(|c| {
-                    serde_json::json!({
-                        "pattern": c.pattern,
-                        "files": c.members.len()
-                    })
-                }).collect::<Vec<_>>()
-            },
-            "summary": {
-                "total_files": findings.total_files,
-                "total_loc": findings.total_loc
-            }
-        });
+        let json = build_audit_json(&findings, opts.limit);
         println!("{}", serde_json::to_string_pretty(&json).unwrap());
-    } else if opts.stdout {
-        // --stdout: output to terminal (legacy behavior)
-        let output = if opts.todos {
-            generate_todos(&findings, opts.limit)
-        } else {
-            generate_markdown_report(&findings, opts.limit)
-        };
-        print!("{}", output);
     } else {
-        // Default: write to file and open
+        // Audit markdown is artifact-only to avoid truncation in terminal/agent pipelines.
         let loctree_dir = crate::snapshot::Snapshot::artifacts_dir(root);
         if !loctree_dir.exists() {
             std::fs::create_dir_all(&loctree_dir).ok();
@@ -2847,4 +2874,60 @@ pub fn handle_plan_command(opts: &PlanOptions, global: &GlobalOptions) -> Dispat
     }
 
     DispatchResult::Exit(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_audit_json;
+    use crate::analyzer::audit_report::AuditFindings;
+    use crate::analyzer::dead_parrots::DeadExport;
+
+    fn dead_export(symbol: &str, line: usize) -> DeadExport {
+        DeadExport {
+            file: "src/lib.rs".into(),
+            symbol: symbol.into(),
+            line: Some(line),
+            confidence: "high".into(),
+            reason: "unused export".into(),
+            open_url: None,
+            is_test: false,
+        }
+    }
+
+    #[test]
+    fn test_audit_json_is_full_by_default() {
+        let findings = AuditFindings {
+            dead_exports: (0..3)
+                .map(|idx| dead_export(&format!("dead_{idx}"), idx + 1))
+                .collect(),
+            ..AuditFindings::default()
+        };
+
+        let json = build_audit_json(&findings, None);
+        let items = json["dead_exports"]["items"]
+            .as_array()
+            .expect("dead export items");
+
+        assert_eq!(items.len(), 3);
+        assert!(json["dead_exports"].get("truncated").is_none());
+    }
+
+    #[test]
+    fn test_audit_json_calls_out_explicit_limit() {
+        let findings = AuditFindings {
+            dead_exports: (0..3)
+                .map(|idx| dead_export(&format!("dead_{idx}"), idx + 1))
+                .collect(),
+            ..AuditFindings::default()
+        };
+
+        let json = build_audit_json(&findings, Some(2));
+        let items = json["dead_exports"]["items"]
+            .as_array()
+            .expect("dead export items");
+
+        assert_eq!(items.len(), 2);
+        assert_eq!(json["dead_exports"]["omitted"].as_u64(), Some(1));
+        assert_eq!(json["dead_exports"]["truncated"].as_bool(), Some(true));
+    }
 }

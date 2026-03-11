@@ -22,7 +22,7 @@ OPTIONS:
     --full-scan          Force full rescan (ignore cache)
     --scan-all           Scan all files including hidden/ignored
     --for-agent-feed     Output optimized format for AI agents (JSONL stream)
-    --agent-json         Emit a single agent bundle JSON (alias: loct agent)
+    --agent-json         Emit a single agent bundle JSON (full issue lists + ranked anchors)
     --no-duplicates      Hide duplicate export sections in CLI output
     --no-dynamic-imports Hide dynamic import sections in CLI output
     --help, -h           Show this help message
@@ -46,7 +46,8 @@ USAGE:
 
 DESCRIPTION:
     Runs the auto scan and emits a single JSON tuned for AI agents:
-    handlers, duplicates, dead exports, dynamic imports, cycles, and top files.
+    full handlers, duplicates, dead exports, dynamic imports, cycles, and lint findings,
+    plus prioritized quick wins and top files for context anchoring.
     The bundle is also saved to the artifacts dir (cache by default; set LOCT_CACHE_DIR to override).
 
 OPTIONS:
@@ -472,24 +473,52 @@ EXAMPLES:
     loct manifests
     loct manifests .";
 
-pub(super) const REPORT_HELP: &str = "loct report - Generate HTML/JSON reports
+pub(super) const REPORT_HELP: &str = "loct report - Generate HTML report + cached artifacts
 
 USAGE:
     loct report [OPTIONS] [PATHS...]
 
 DESCRIPTION:
-    Runs full analysis and emits HTML/JSON/SARIF reports.
+    Runs full analysis and writes the full HTML report plus cached artifacts
+    such as findings.json, agent.json, analysis.json, and report.sarif.
 
 OPTIONS:
     --output <FILE>      Output HTML path
     --serve              Serve report locally
     --port <N>           Port for --serve
-    --editor <NAME>      Editor integration (code/cursor/jetbrains)
+    --editor <NAME>      Editor integration (code/cursor/windsurf/jetbrains)
     --help, -h           Show this help message
 
 EXAMPLES:
+    loct report
     loct report --output report.html
     loct report --serve --port 4173";
+
+pub(super) const FINDINGS_HELP: &str = "loct findings - Emit findings JSON to stdout
+
+USAGE:
+    loct findings [OPTIONS] [PATHS...]
+
+DESCRIPTION:
+    Runs the full findings pipeline and prints the same issue payload that
+    powers findings.json, but directly to stdout for piping and automation.
+
+    Use --summary for the compact health/counts payload when you only need
+    top-line status in CI or scripts.
+
+OPTIONS:
+    --summary         Emit only the compact summary payload
+    --json            Output as JSON (default for this command)
+    --help, -h        Show this help message
+
+ARGUMENTS:
+    [PATHS...]        Root directories to scan (default: current directory)
+
+EXAMPLES:
+    loct findings
+    loct findings --summary
+    loct findings src/ > findings.json
+    loct findings --summary | jq '.health_score'";
 
 pub(super) const QUERY_HELP: &str = "loct query - Graph queries (who-imports, who-exports, etc.)
 
@@ -720,42 +749,50 @@ RELATED COMMANDS:
     loct suppress          Manage false positive suppressions
     loct find --dead       Search for specific dead symbols";
 
-pub(super) const DIST_HELP: &str = "loct dist - Analyze bundle distribution using source maps
+pub(super) const DIST_HELP: &str = "loct dist - Verify tree-shaking from production source maps
 
 USAGE:
-    loct dist --source-map <PATH> --src <DIR>
+    loct dist --src <DIR> --source-map <PATH> [--source-map <PATH> ...] [--report <PATH>]
 
 DESCRIPTION:
-    Compares source code exports with bundled JavaScript to find truly dead exports.
-    Uses source maps to detect code that was completely tree-shaken out by the bundler.
+    Simple mental model:
+    - Point loct at the source directory you own
+    - Point it at one or more production source maps or a dist/ directory
+    - loct builds a chunk matrix and ranks suspicious runtime classes
 
-    This is different from regular dead code detection:
-    - Regular: Finds exports with 0 imports in your source code
-    - Dist: Finds exports removed from the production bundle
+    Candidate classes:
+    - dead_in_all_chunks
+    - boot_path_only
+    - feature_local
+    - fake_lazy
+    - verify_first
 
-    Useful for:
-    - Validating tree-shaking effectiveness
-    - Finding code that can be safely removed
-    - Understanding bundle size optimizations
+    loct uses symbol or line evidence when a source map exposes it.
+    If a map does not, it falls back to file-level chunk coverage for that map.
+    The standard artifact set under `.loctree/` is refreshed as part of the run,
+    so bundle intelligence also lands in report.html, findings.json, agent.json,
+    and manifest.json.
 
 OPTIONS:
-    --source-map <PATH>    Path to source map file (e.g., dist/main.js.map)
-    --src <DIR>            Source directory to scan (e.g., src/)
-    --help, -h             Show this help message
+    --src <DIR>              Source directory to scan once (e.g., src/)
+    --source-map <PATH>      Production source map or directory to compare against
+                             Repeat for multi-entry or multi-bundle builds
+    --report <PATH>          Write the raw dist JSON result to a file
+    --help, -h               Show this help message
 
 EXAMPLES:
-    loct dist --source-map dist/main.js.map --src src/
-    loct dist --source-map build/app.js.map --src app/src/
+    loct dist --src src/ --source-map dist/main.js.map
+    loct dist --src src/ --source-map dist/
+    loct dist --src src/ --source-map dist/app.js.map --source-map dist/admin.js.map
+    loct dist --src src/ --source-map dist/main.js.map --report .loctree/dist-report.json
 
-OUTPUT (JSON):
-    {
-      \"sourceExports\": 500,
-      \"bundledExports\": 120,
-      \"deadExports\": [
-        { \"file\": \"src/utils.ts\", \"line\": 42, \"name\": \"unusedHelper\" }
-      ],
-      \"reduction\": \"76%\"
-    }";
+OUTPUT:
+    Default stdout: human summary
+    Add --json: machine-readable stdout
+    Add --report: save the JSON result to disk
+
+JSON adds chunk summaries, candidate counts, and ranked candidates while keeping
+the existing dead export fields stable.";
 
 pub(super) const COVERAGE_HELP: &str =
     "loct coverage - Analyze test coverage gaps (structural coverage)
@@ -1187,6 +1224,9 @@ DESCRIPTION:
 
 OPTIONS:
     --include-tests    Include test files in analysis (default: false)
+    --todos            Save an actionable todo checklist instead of the full audit report
+    --limit <N>        Intentionally truncate each section to N items (JSON marks omissions)
+    --no-open          Save report without opening it automatically
     --json             Output as JSON for programmatic use
     --help, -h         Show this help message
 
@@ -1197,9 +1237,16 @@ EXAMPLES:
     loct audit                     # Full audit of current directory
     loct audit --include-tests     # Include test files
     loct audit src/                # Audit specific directory
+    loct audit --todos             # Save a focused cleanup checklist
+    loct audit --limit 25          # Intentionally trim each section
     loct audit --json              # Machine-readable output for CI
 
 OUTPUT FORMAT:
+    Markdown report saved to the loct cache artifacts directory.
+    Terminal output shows a short summary plus the saved report path.
+    JSON output is full by default; when --limit is set, each section includes
+    explicit truncated/omitted metadata.
+
     Full Codebase Audit
 
     CYCLES (3 total)

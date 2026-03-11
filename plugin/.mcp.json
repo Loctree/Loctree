@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "loctree": {
-      "command": "loctree-mcp",
-      "args": [],
-      "env": {}
-    }
-  }
-}

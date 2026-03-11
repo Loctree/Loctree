@@ -5,7 +5,7 @@
 //! - jq-style queries (`.dead_parrots`, `.cycles`) are for power-users/CI
 //! - Only truly redundant aliases are deprecated:
 //!   - `zombie` → use `dead` (same output)
-//!   - `sniff` → use `--findings` (same output)
+//!   - `sniff` → use `loct findings` (same output)
 //!
 //! Removal of redundant commands planned for 0.9.0.
 

@@ -32,21 +32,6 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
     parsed.python_library = global.python_library;
     parsed.py_roots = global.py_roots.clone();
 
-    // Handle global --findings and --summary flags first
-    // These override normal command behavior to output findings to stdout
-    if global.findings {
-        parsed.mode = Mode::Findings;
-        parsed.output = OutputMode::Json;
-        parsed.root_list = vec![PathBuf::from(".")];
-        return parsed;
-    }
-    if global.summary_only_output {
-        parsed.mode = Mode::Summary;
-        parsed.output = OutputMode::Json;
-        parsed.root_list = vec![PathBuf::from(".")];
-        return parsed;
-    }
-
     // Convert command-specific options
     match cmd {
         Command::Auto(opts) => {
@@ -179,6 +164,21 @@ pub fn command_to_parsed_args(cmd: &Command, global: &GlobalOptions) -> ParsedAr
             parsed.search_lang = opts.lang.clone();
             parsed.search_limit = opts.limit;
             parsed.root_list = vec![PathBuf::from(".")];
+        }
+
+        Command::Findings(opts) => {
+            parsed.mode = if opts.summary {
+                Mode::Summary
+            } else {
+                Mode::Findings
+            };
+            parsed.output = OutputMode::Json;
+            parsed.root_list = if opts.roots.is_empty() {
+                vec![PathBuf::from(".")]
+            } else {
+                opts.roots.clone()
+            };
+            parsed.use_gitignore = true;
         }
 
         Command::Dead(opts) => {
@@ -870,6 +870,20 @@ mod tests {
         assert_eq!(parsed.summary_limit, 5);
         assert_eq!(parsed.loc_threshold, 500);
         assert!(parsed.show_hidden);
+    }
+
+    #[test]
+    fn test_parse_findings_command_to_parsed_args() {
+        let cmd = Command::Findings(FindingsOptions {
+            roots: vec![PathBuf::from("src")],
+            summary: true,
+        });
+        let global = GlobalOptions::default();
+        let parsed = command_to_parsed_args(&cmd, &global);
+
+        assert!(matches!(parsed.mode, Mode::Summary));
+        assert!(matches!(parsed.output, OutputMode::Json));
+        assert_eq!(parsed.root_list, vec![PathBuf::from("src")]);
     }
 
     #[test]

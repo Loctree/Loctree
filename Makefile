@@ -7,7 +7,6 @@
 .PHONY: version version-show version-check publish
 .PHONY: mcp-build mcp-install mcp-test
 .PHONY: ai-hooks ai-hooks-claude ai-hooks-codex ai-hooks-gemini git-hooks
-.PHONY: landing landing-dev landing-clean
 
 # Default target
 all: build
@@ -145,11 +144,6 @@ help:
 	@echo "  make mcp-install       - Install loctree-mcp"
 	@echo "  make mcp-test          - Test loctree-mcp via stdio"
 	@echo ""
-	@echo "Landing Page:"
-	@echo "  make landing           - Build for production (→ public_dist/)"
-	@echo "  make landing-dev       - Dev server with hot reload"
-	@echo "  make landing-clean     - Clean build artifacts"
-	@echo ""
 	@echo "AI CLI Integration:"
 	@echo "  make git-hooks         - Install git pre-push validation hook"
 	@echo "  make ai-hooks          - Interactive hook installer (Claude/Codex/Gemini)"
@@ -256,28 +250,6 @@ mcp-test:
 	@echo "Testing loctree-mcp..."
 	@echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"make-test","version":"1.0"}}}' \
 		| $(CARGO_BIN)/loctree-mcp 2>/dev/null | head -1 || echo "Test failed"
-
-# ============================================================================
-# Landing Page (Leptos/Trunk WASM)
-# ============================================================================
-
-# Build landing page for production (outputs to public_dist/)
-landing:
-	@echo "=== Building Loctree Landing Page ==="
-	@cd landing && trunk build --release
-	@rm -rf public_dist
-	@cp -r landing/dist public_dist
-	@echo "=== Build complete! Ready in public_dist/ ==="
-
-# Development server with hot reload
-landing-dev:
-	@echo "Starting landing page dev server..."
-	@cd landing && trunk serve --open
-
-# Clean landing build artifacts
-landing-clean:
-	@rm -rf landing/dist public_dist
-	@echo "Landing build artifacts cleaned"
 
 # ============================================================================
 # AI Hooks Installation (Claude, Codex, Gemini)

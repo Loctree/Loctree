@@ -4,9 +4,9 @@
 
 use super::{
     ActionPlanPanel, AiInsightsPanel, AiSummaryPanel, AnalysisSummary, AuditPanel, CascadesList,
-    Coverage, Crowds, Cycles, DeadCode, DuplicateExportsTable, DynamicImportsTable, GraphContainer,
-    HealthScoreGauge, HubFilesPanel, Pipelines, QuickCommandsPanel, RefactorPlan, TabContent,
-    TauriCommandCoverage, TreeView, Twins,
+    Coverage, Crowds, Cycles, DeadCode, DistPanel, DuplicateExportsTable, DynamicImportsTable,
+    GraphContainer, HealthScoreGauge, HubFilesPanel, Pipelines, QuickCommandsPanel, RefactorPlan,
+    TabContent, TauriCommandCoverage, TreeView, Twins,
 };
 use crate::types::ReportSection;
 use leptos::prelude::*;
@@ -44,6 +44,7 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
     let root_id_audit = root_id_value.clone();
     let root_id_dups = root_id_value.clone();
     let root_id_dynamic = root_id_value.clone();
+    let root_id_dist = root_id_value.clone();
     let root_id_commands = root_id_value.clone();
     let root_id_pipelines = root_id_value.clone();
     let open_base_pipelines = section.open_base.clone();
@@ -98,34 +99,32 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
                 <div class="header-title">
                     <h1>{short_path}</h1>
                     <p class="header-path" title=section.root.clone()>{section.root.clone()}</p>
-                    <div class="header-meta">
-                        {(!git_label.is_empty()).then(|| view! {
-                            <p class="header-meta-line" title="git branch @ commit">
-                                {git_label.clone()}
-                            </p>
-                        })}
-                        {(!generated_label.is_empty()).then(|| view! {
-                            <p class="header-meta-line" title="report generated at">
-                                {format!("Generated {}", generated_label)}
-                            </p>
-                        })}
-                        {(!schema_label.is_empty()).then(|| view! {
-                            <p class="header-meta-line" title="schema">
-                                {format!("Schema {}", schema_label)}
-                            </p>
-                        })}
-                    </div>
+                    {(!git_label.is_empty()).then(|| view! {
+                        <p class="header-path" style="margin-top:4px;color:var(--theme-text-tertiary)" title="git branch @ commit">
+                            {git_label.clone()}
+                        </p>
+                    })}
+                    {(!generated_label.is_empty()).then(|| view! {
+                        <p class="header-path" style="margin-top:4px;color:var(--theme-text-tertiary)" title="report generated at">
+                            {format!("Generated {}", generated_label)}
+                        </p>
+                    })}
+                    {(!schema_label.is_empty()).then(|| view! {
+                        <p class="header-path" style="color:var(--theme-text-tertiary)" title="schema">
+                            {format!("Schema {}", schema_label)}
+                        </p>
+                    })}
                 </div>
                 <div class="header-stats">
-                    <span class="stat-badge stat-badge-files">
+                    <span class="stat-badge">
                         <span class="stat-badge-value">{file_count}</span>
                         <span class="stat-badge-label">"files"</span>
                     </span>
-                    <span class="stat-badge stat-badge-loc">
+                    <span class="stat-badge">
                         <span class="stat-badge-value">{total_loc}</span>
                         <span class="stat-badge-label">"LOC"</span>
                     </span>
-                    <span class="stat-badge stat-badge-dups">
+                    <span class="stat-badge">
                         <span class="stat-badge-value">{duplicate_exports_count}</span>
                         <span class="stat-badge-label">"dups"</span>
                     </span>
@@ -195,6 +194,16 @@ pub fn ReportSectionView(section: ReportSection, active: bool, view_id: String) 
                         <DynamicImportsTable
                             imports=section.dynamic.clone()
                         />
+                    </div>
+                </TabContent>
+
+                <TabContent
+                    root_id=root_id_dist
+                    tab_name="dist"
+                    active=false
+                >
+                    <div class="content-container">
+                        <DistPanel dist=section.dist.clone() />
                     </div>
                 </TabContent>
 

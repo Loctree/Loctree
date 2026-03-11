@@ -22,7 +22,7 @@ React's `useEffect` hook is deceptively simple but notoriously easy to misuse. A
 
 ```bash
 # From your React project directory
-loct --findings
+loct findings
 
 # Output includes react_lint section:
 # {
@@ -341,7 +341,7 @@ Every finding was manually verified. **Zero false positives** in testing.
 | Memory overhead | Negligible |
 | Binary size impact | +~50KB |
 
-React lint runs as part of the standard `--findings` scan. No additional passes required.
+React lint runs as part of the standard `loct findings` scan. No additional passes required.
 
 ---
 

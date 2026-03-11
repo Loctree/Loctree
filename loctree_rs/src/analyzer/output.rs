@@ -17,6 +17,7 @@ use super::coverage_gaps::find_coverage_gaps;
 use super::crowd::detect_all_crowds_with_edges;
 use super::cycles;
 use super::dead_parrots::{DeadFilterConfig, find_dead_exports};
+use super::dist::DistResult;
 use super::for_ai::{
     HubFile as AiHubFile, PriorityTask as AiPriorityTask, build_priority_tasks, extract_quick_wins,
     find_hub_files,
@@ -26,7 +27,7 @@ use super::health_score::{HealthMetrics, calculate_health_score};
 use super::html::render_html_report;
 use super::insights::collect_ai_insights;
 use super::open_server::current_open_base;
-use super::report::{CommandBridge, HubFile, PriorityTask, TreeNode, TwinsData};
+use super::report::{AiInsight, CommandBridge, HubFile, PriorityTask, TreeNode, TwinsData};
 use super::root_scan::{RootContext, normalize_module_id};
 use super::scan::resolve_event_constants_across_files;
 use super::twins::{detect_exact_twins, find_dead_parrots};
@@ -86,6 +87,123 @@ fn build_tree(analyses: &[FileAnalysis], root_path: &std::path::Path) -> Vec<Tre
         .iter()
         .map(|(k, v)| finalize(Some(k.clone()), v))
         .collect()
+}
+
+fn build_dist_insight(dist: &DistResult) -> AiInsight {
+    let severity = if dist.tree_shaken_pct >= 40 {
+        "high"
+    } else if dist.tree_shaken_exports > 0 {
+        "medium"
+    } else {
+        "low"
+    };
+
+    let message = if dist.tree_shaken_exports == 0 {
+        format!(
+            "Bundle coverage is {}% across {} source map(s); every exported symbol from this scope makes it into at least one bundle.",
+            dist.coverage_pct, dist.source_maps
+        )
+    } else {
+        format!(
+            "Bundle coverage is {}% across {} source map(s). {} export(s) are fully tree-shaken out of the bundle surface across {} impacted file(s) using {}-level matching.",
+            dist.coverage_pct,
+            dist.source_maps,
+            dist.tree_shaken_exports,
+            dist.impacted_files.len(),
+            dist.analysis_level.as_str()
+        )
+    };
+
+    AiInsight {
+        title: "Bundle Distribution".to_string(),
+        severity: severity.to_string(),
+        message,
+    }
+}
+
+fn score_dist_section(section_root: &str, src_dir: &std::path::Path) -> Option<usize> {
+    let candidate = std::fs::canonicalize(section_root)
+        .unwrap_or_else(|_| std::path::PathBuf::from(section_root));
+    let requested = std::fs::canonicalize(src_dir).unwrap_or_else(|_| src_dir.to_path_buf());
+
+    if requested == candidate {
+        Some(usize::MAX)
+    } else if requested.starts_with(&candidate) {
+        Some(candidate.components().count())
+    } else if candidate.starts_with(&requested) {
+        Some(requested.components().count())
+    } else {
+        None
+    }
+}
+
+pub fn attach_dist_to_sections(
+    sections: &mut Vec<ReportSection>,
+    dist: DistResult,
+    src_dir: &std::path::Path,
+) {
+    let target_idx = sections
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, section)| {
+            score_dist_section(&section.root, src_dir).map(|score| (idx, score))
+        })
+        .max_by_key(|(_, score)| *score)
+        .map(|(idx, _)| idx)
+        .or_else(|| (!sections.is_empty()).then_some(0));
+
+    let insight = build_dist_insight(&dist);
+
+    if let Some(idx) = target_idx {
+        let section = &mut sections[idx];
+        if !section
+            .insights
+            .iter()
+            .any(|existing| existing.title == insight.title)
+        {
+            section.insights.insert(0, insight);
+        }
+        section.dist = Some(dist);
+        return;
+    }
+
+    sections.push(ReportSection {
+        insights: vec![insight],
+        root: src_dir.display().to_string(),
+        files_analyzed: 0,
+        total_loc: 0,
+        reexport_files_count: 0,
+        dynamic_imports_count: 0,
+        ranked_dups: Vec::new(),
+        cascades: Vec::new(),
+        circular_imports: Vec::new(),
+        lazy_circular_imports: Vec::new(),
+        dynamic: Vec::new(),
+        analyze_limit: 0,
+        generated_at: None,
+        schema_name: None,
+        schema_version: None,
+        missing_handlers: Vec::new(),
+        unregistered_handlers: Vec::new(),
+        unused_handlers: Vec::new(),
+        command_counts: (0, 0),
+        command_bridges: Vec::new(),
+        open_base: None,
+        tree: None,
+        graph: None,
+        graph_warning: None,
+        git_branch: None,
+        git_commit: None,
+        priority_tasks: Vec::new(),
+        hub_files: Vec::new(),
+        crowds: Vec::new(),
+        dead_exports: Vec::new(),
+        dist: Some(dist),
+        twins_data: None,
+        coverage_gaps: Vec::new(),
+        health_score: None,
+        refactor_plan: None,
+    });
 }
 
 /// Build edges for cycle detection even when graph collection is disabled.
@@ -1483,6 +1601,7 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
             hub_files: Vec::new(),
             crowds: crowds.clone(),
             dead_exports: dead_exports_for_report.clone(),
+            dist: None,
             twins_data: twins_data.clone(),
             coverage_gaps,
             health_score,
@@ -1587,15 +1706,29 @@ mod tests {
         ];
         let tree = build_tree(&analyses, Path::new("src"));
         // Expect top-level nodes include a.ts and nested/
-        let a = tree.iter().find(|n| n.path == "a.ts").unwrap();
+        let a = tree
+            .iter()
+            .find(|n| n.path == "a.ts")
+            .expect("top-level file node");
         assert_eq!(a.loc, 10);
         assert!(a.children.is_empty());
 
-        let nested = tree.iter().find(|n| n.path == "nested").unwrap();
+        let nested = tree
+            .iter()
+            .find(|n| n.path == "nested")
+            .expect("nested directory node");
         assert_eq!(nested.loc, 50); // 20 + 30
-        let b = nested.children.iter().find(|c| c.path == "b.ts").unwrap();
+        let b = nested
+            .children
+            .iter()
+            .find(|c| c.path == "b.ts")
+            .expect("nested file node");
         assert_eq!(b.loc, 20);
-        let deeper = nested.children.iter().find(|c| c.path == "deeper").unwrap();
+        let deeper = nested
+            .children
+            .iter()
+            .find(|c| c.path == "deeper")
+            .expect("deeper directory node");
         assert_eq!(deeper.path, "deeper");
         assert_eq!(deeper.loc, 30);
         assert_eq!(deeper.children.len(), 1);

@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use super::barrels::BarrelAnalysis;
 use super::crowd::types::Crowd;
 use super::dead_parrots::DeadExport;
+use super::dist::DistResult;
 use crate::refactor_plan::{Move, PlanStats, RefactorPhase, RefactorPlan, Shim};
 
 /// Confidence level for dead export and handler detection.
@@ -248,6 +249,9 @@ pub struct ReportSection {
     /// Dead exports (exported but never imported)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dead_exports: Vec<DeadExport>,
+    /// Bundle distribution analysis (source-map-backed tree-shaking view)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dist: Option<DistResult>,
     /// Twins analysis data (dead parrots, exact twins, barrel chaos)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub twins_data: Option<TwinsData>,

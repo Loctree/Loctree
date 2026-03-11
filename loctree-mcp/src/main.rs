@@ -36,10 +36,14 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tracing::{debug, info};
 
+use loctree::analyzer::crowd::detect_crowd_with_edges;
 use loctree::analyzer::cycles::find_cycles;
 use loctree::analyzer::dead_parrots::{DeadFilterConfig, find_dead_exports};
+use loctree::analyzer::pipelines::build_pipeline_summary;
+use loctree::analyzer::root_scan::scan_results_from_snapshot;
 use loctree::analyzer::search::run_search;
 use loctree::analyzer::twins::detect_exact_twins;
+use loctree::query::{query_where_symbol, query_who_imports};
 use loctree::snapshot::Snapshot;
 
 // ============================================================================
@@ -117,6 +121,9 @@ struct FindParams {
     project: String,
     /// Symbol name or regex pattern to search for
     name: String,
+    /// Search mode: "symbols" (default), "who-imports", "where-symbol", "tagmap", "crowd"
+    #[serde(default = "default_find_mode")]
+    mode: String,
     /// Maximum results to return (default: 50)
     #[serde(
         default = "default_limit",
@@ -140,6 +147,10 @@ fn default_true() -> bool {
 
 fn default_limit() -> usize {
     50
+}
+
+fn default_find_mode() -> String {
+    "symbols".to_string()
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -180,9 +191,12 @@ struct FollowParams {
     /// Project directory (default: current directory)
     #[serde(default = "default_project")]
     project: String,
-    /// What to follow: "dead", "cycles", "twins", "hotspots", or "all"
+    /// What to follow: "dead", "cycles", "twins", "hotspots", "trace", "commands", "events", "pipelines", or "all"
     #[serde(default = "default_follow_scope")]
     scope: String,
+    /// Handler name for trace scope (e.g., "toggle_assistant")
+    #[serde(default)]
+    handler: Option<String>,
     /// Max trails to return per scope (default: 10)
     #[serde(
         default = "default_follow_limit",
@@ -618,7 +632,7 @@ impl LoctreeServer {
     /// Find symbol definitions (supports multi-query: "foo|bar|baz")
     #[tool(
         name = "find",
-        description = "Find where a function/class/type is defined. Supports regex and multi-query (foo|bar). Also searches function parameters. USE THIS BEFORE creating anything new."
+        description = "Find symbols, trace imports, or explore features. Modes: 'symbols' (default) — symbol/param search with regex. 'who-imports' — what files import this file (reverse deps). 'where-symbol' — where is this symbol defined. 'tagmap' — unified keyword search (files + crowd + dead). 'crowd' — functional clustering around a keyword."
     )]
     async fn find(&self, Parameters(params): Parameters<FindParams>) -> String {
         let project = match Self::resolve_project(&params.project) {
@@ -631,6 +645,158 @@ impl LoctreeServer {
             Err(e) => return format!("Error loading project: {}", e),
         };
 
+        let mode = params.mode.to_lowercase();
+
+        // Mode: who-imports - reverse dependency query
+        if mode == "who-imports" {
+            let result = query_who_imports(&snapshot, &params.name);
+            return serde_json::to_string_pretty(&serde_json::json!({
+                "mode": "who-imports",
+                "query": params.name,
+                "project": project.display().to_string(),
+                "results": result.results.iter().map(|m| serde_json::json!({
+                    "file": m.file,
+                    "line": m.line,
+                    "context": m.context.clone()
+                })).collect::<Vec<_>>(),
+                "total": result.results.len()
+            }))
+            .unwrap_or_else(|e| format!("Serialization error: {}", e));
+        }
+
+        // Mode: where-symbol - symbol definition/export lookup
+        if mode == "where-symbol" {
+            let result = query_where_symbol(&snapshot, &params.name);
+            return serde_json::to_string_pretty(&serde_json::json!({
+                "mode": "where-symbol",
+                "query": params.name,
+                "project": project.display().to_string(),
+                "results": result.results.iter().map(|m| serde_json::json!({
+                    "file": m.file,
+                    "line": m.line,
+                    "context": m.context.clone()
+                })).collect::<Vec<_>>(),
+                "total": result.results.len()
+            }))
+            .unwrap_or_else(|e| format!("Serialization error: {}", e));
+        }
+
+        // Mode: crowd - functional clustering around keyword
+        if mode == "crowd" {
+            let crowd = detect_crowd_with_edges(&snapshot.files, &params.name, &snapshot.edges);
+            let members: Vec<_> = crowd
+                .members
+                .iter()
+                .take(params.limit)
+                .map(|m| {
+                    serde_json::json!({
+                        "file": m.file,
+                        "importer_count": m.importer_count,
+                        "reason": format!("{:?}", &m.match_reason),
+                        "similarity_scores": m.similarity_scores,
+                        "is_test": m.is_test
+                    })
+                })
+                .collect();
+
+            return serde_json::to_string_pretty(&serde_json::json!({
+                "mode": "crowd",
+                "query": params.name,
+                "project": project.display().to_string(),
+                "pattern": crowd.pattern,
+                "score": crowd.score,
+                "members": members,
+                "issues": crowd.issues.iter().map(|i| format!("{:?}", i)).collect::<Vec<_>>(),
+                "total": crowd.members.len()
+            }))
+            .unwrap_or_else(|e| format!("Serialization error: {}", e));
+        }
+
+        // Mode: tagmap - unified keyword search (files + crowd + dead)
+        if mode == "tagmap" {
+            let keyword = &params.name;
+            let keyword_lower = keyword.to_lowercase();
+
+            // 1) files matching keyword in path
+            let matching_files: Vec<_> = snapshot
+                .files
+                .iter()
+                .filter(|f| f.path.to_lowercase().contains(&keyword_lower))
+                .take(params.limit)
+                .map(|f| {
+                    serde_json::json!({
+                        "path": f.path,
+                        "loc": f.loc
+                    })
+                })
+                .collect();
+
+            // 2) crowd analysis
+            let crowd = detect_crowd_with_edges(&snapshot.files, keyword, &snapshot.edges);
+            let crowd_members: Vec<_> = crowd
+                .members
+                .iter()
+                .take(params.limit)
+                .map(|m| {
+                    serde_json::json!({
+                        "file": m.file,
+                        "importer_count": m.importer_count,
+                        "reason": format!("{:?}", &m.match_reason),
+                        "is_test": m.is_test
+                    })
+                })
+                .collect();
+
+            // 3) dead exports related to keyword
+            let config = DeadFilterConfig::default();
+            let dead = find_dead_exports(&snapshot.files, true, None, config);
+            let related_dead: Vec<_> = dead
+                .iter()
+                .filter(|d| {
+                    d.file.to_lowercase().contains(&keyword_lower)
+                        || d.symbol.to_lowercase().contains(&keyword_lower)
+                })
+                .take(params.limit)
+                .map(|d| {
+                    serde_json::json!({
+                        "file": d.file,
+                        "symbol": d.symbol,
+                        "confidence": d.confidence,
+                        "reason": d.reason
+                    })
+                })
+                .collect();
+
+            return serde_json::to_string_pretty(&serde_json::json!({
+                "mode": "tagmap",
+                "query": keyword,
+                "project": project.display().to_string(),
+                "files": {
+                    "count": matching_files.len(),
+                    "matches": matching_files
+                },
+                "crowd": {
+                    "score": crowd.score,
+                    "count": crowd_members.len(),
+                    "members": crowd_members
+                },
+                "dead": {
+                    "count": related_dead.len(),
+                    "matches": related_dead
+                }
+            }))
+            .unwrap_or_else(|e| format!("Serialization error: {}", e));
+        }
+
+        if mode != "symbols" {
+            return serde_json::json!({
+                "error": format!("Unsupported find mode: {}", params.mode),
+                "supported_modes": ["symbols", "who-imports", "where-symbol", "tagmap", "crowd"]
+            })
+            .to_string();
+        }
+
+        // Default mode: symbols (existing behavior)
         // Normalize query: split by whitespace and join with | for OR matching (like CLI)
         let query = if params.name.contains('|') {
             // Already has pipe - use as-is
@@ -1053,7 +1219,7 @@ impl LoctreeServer {
     /// Follow signals flagged by repo-view at field level
     #[tool(
         name = "follow",
-        description = "Pursue structural signals at field level. repo-view flags problems (dead exports, cycles, twins, hotspots) — follow gives you the details with actionable recommendations. Scopes: dead, cycles, twins, hotspots, all."
+        description = "Pursue structural signals at field level. Scopes: 'dead' — unused exports with nearest consumers. 'cycles' — circular imports with weakest link. 'twins' — duplicate exports. 'hotspots' — high-importer files. 'trace' — trace a Tauri/IPC handler end-to-end (requires handler param). 'commands' — Tauri FE<->BE handler coverage. 'events' — event emit/listen flow analysis. 'pipelines' — pipeline summary (events + commands + risks). 'all' — dead + cycles + twins + hotspots."
     )]
     async fn follow(&self, Parameters(params): Parameters<FollowParams>) -> String {
         let project = match Self::resolve_project(&params.project) {
@@ -1265,6 +1431,178 @@ impl LoctreeServer {
             );
         }
 
+        // Trace trail - trace a specific Tauri handler end-to-end
+        if scope == "trace" {
+            let handler_name = match params.handler.as_deref() {
+                Some(name) => name,
+                None => {
+                    return serde_json::json!({
+                        "error": "trace scope requires 'handler' parameter",
+                        "example": "follow(scope='trace', handler='toggle_assistant')",
+                        "hint": "Use commands scope first to see available handlers"
+                    })
+                    .to_string();
+                }
+            };
+
+            let handler_lower = handler_name.to_lowercase();
+            let matching: Vec<_> = snapshot
+                .command_bridges
+                .iter()
+                .filter(|b| b.name.to_lowercase().contains(&handler_lower))
+                .take(limit)
+                .map(|b| {
+                    serde_json::json!({
+                        "name": b.name,
+                        "has_handler": b.has_handler,
+                        "is_called": b.is_called,
+                        "backend": b.backend_handler.as_ref().map(|(f, l)| serde_json::json!({
+                            "file": f,
+                            "line": l
+                        })),
+                        "frontend_calls": b.frontend_calls.iter().map(|(f, l)| serde_json::json!({
+                            "file": f,
+                            "line": l
+                        })).collect::<Vec<_>>(),
+                        "status": if b.has_handler && b.is_called {
+                            "healthy"
+                        } else if !b.has_handler && b.is_called {
+                            "missing_handler"
+                        } else if b.has_handler && !b.is_called {
+                            "unused_handler"
+                        } else {
+                            "orphan"
+                        }
+                    })
+                })
+                .collect();
+
+            trails.insert(
+                "trace".to_string(),
+                serde_json::json!({
+                    "handler": handler_name,
+                    "total": matching.len(),
+                    "signals": matching
+                }),
+            );
+        }
+
+        // Commands trail - Tauri FE<->BE handler coverage
+        if scope == "commands" {
+            let total = snapshot.command_bridges.len();
+            let missing: Vec<_> = snapshot
+                .command_bridges
+                .iter()
+                .filter(|b| !b.has_handler && b.is_called)
+                .map(|b| {
+                    serde_json::json!({
+                        "name": b.name,
+                        "frontend_calls": b.frontend_calls.iter().map(|(f, l)| serde_json::json!({
+                            "file": f,
+                            "line": l
+                        })).collect::<Vec<_>>()
+                    })
+                })
+                .collect();
+            let unused: Vec<_> = snapshot
+                .command_bridges
+                .iter()
+                .filter(|b| b.has_handler && !b.is_called)
+                .map(|b| {
+                    serde_json::json!({
+                        "name": b.name,
+                        "backend": b.backend_handler.as_ref().map(|(f, l)| serde_json::json!({
+                            "file": f,
+                            "line": l
+                        }))
+                    })
+                })
+                .collect();
+            let matched = total.saturating_sub(missing.len() + unused.len());
+
+            trails.insert(
+                "commands".to_string(),
+                serde_json::json!({
+                    "total": total,
+                    "matched": matched,
+                    "missing_handlers": {
+                        "count": missing.len(),
+                        "signals": missing
+                    },
+                    "unused_handlers": {
+                        "count": unused.len(),
+                        "signals": unused
+                    }
+                }),
+            );
+        }
+
+        // Events trail - event emit/listen flow
+        if scope == "events" {
+            let ghosts: Vec<_> = snapshot
+                .event_bridges
+                .iter()
+                .filter(|e| e.listens.is_empty() || e.emits.is_empty())
+                .take(limit)
+                .map(|e| {
+                    let status = if e.emits.is_empty() {
+                        "listen_only"
+                    } else if e.listens.is_empty() {
+                        "emit_only"
+                    } else {
+                        "healthy"
+                    };
+
+                    serde_json::json!({
+                        "name": e.name,
+                        "status": status,
+                        "emits": e.emits.iter().map(|(f, l, k)| serde_json::json!({
+                            "file": f,
+                            "line": l,
+                            "kind": k
+                        })).collect::<Vec<_>>(),
+                        "listens": e.listens.iter().map(|(f, l)| serde_json::json!({
+                            "file": f,
+                            "line": l
+                        })).collect::<Vec<_>>(),
+                        "is_fe_sync": e.is_fe_sync,
+                        "same_file_sync": e.same_file_sync
+                    })
+                })
+                .collect();
+
+            let total_events = snapshot.event_bridges.len();
+            let ghost_count = snapshot
+                .event_bridges
+                .iter()
+                .filter(|e| e.listens.is_empty() || e.emits.is_empty())
+                .count();
+
+            trails.insert(
+                "events".to_string(),
+                serde_json::json!({
+                    "total": total_events,
+                    "ghost_events": ghost_count,
+                    "signals": ghosts
+                }),
+            );
+        }
+
+        // Pipelines trail - event/command/payload risks summary
+        if scope == "pipelines" {
+            let scan_results = scan_results_from_snapshot(&snapshot);
+            let summary = build_pipeline_summary(
+                &scan_results.global_analyses,
+                &None,
+                &None,
+                &scan_results.global_fe_commands,
+                &scan_results.global_be_commands,
+                &scan_results.global_fe_payloads,
+                &scan_results.global_be_payloads,
+            );
+            trails.insert("pipelines".to_string(), summary);
+        }
+
         let result = serde_json::json!({
             "project": project.display().to_string(),
             "scope": params.scope,
@@ -1302,11 +1640,11 @@ impl ServerHandler for LoctreeServer {
                  BASELINE TOOLS:\n\
                  - repo-view(project) - Start here. Overview: files, LOC, languages, health, top hubs.\n\
                  - slice(file) - Before modifying. File + dependencies + consumers in one call.\n\
-                 - find(name) - Before creating. Symbol search with regex support.\n\
+                 - find(name) - Before creating. Symbol search with regex. Modes: symbols, who-imports, where-symbol, tagmap, crowd.\n\
                  - impact(file) - Before deleting. Direct + transitive consumers (blast radius).\n\
                  - focus(directory) - Understand a module. Files, internal edges, external deps.\n\
                  - tree(project) - Directory structure with LOC counts.\n\
-                 - follow(scope) - Pursue signals: dead exports, cycles, twins, hotspots. Field-level detail.\n\n\
+                 - follow(scope) - Pursue signals: dead, cycles, twins, hotspots, trace, commands, events, pipelines.\n\n\
                  All tools accept 'project' parameter (default: current dir).\n\
                  First use auto-scans if no snapshot exists."
                     .into(),
@@ -1415,10 +1753,10 @@ async fn main() -> ExitCode {
             // Check if this is a broken pipe error (client disconnected)
             let err_str = format!("{:?}", e);
             if err_str.contains("Broken pipe") || err_str.contains("os error 32") {
-                eprintln!("[loctree-mcp] Client disconnected, shutting down");
+                safe_stderr_log("[loctree-mcp] Client disconnected, shutting down");
                 ExitCode::SUCCESS
             } else {
-                eprintln!("[loctree-mcp] Error: {:#}", e);
+                safe_stderr_log(&format!("[loctree-mcp] Error: {:#}", e));
                 ExitCode::FAILURE
             }
         }

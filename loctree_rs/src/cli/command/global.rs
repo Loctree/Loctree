@@ -41,10 +41,4 @@ pub struct GlobalOptions {
 
     /// Fail if snapshot is stale (different git HEAD) - for CI (--fail-stale)
     pub fail_stale: bool,
-
-    /// Output findings.json to stdout (--findings)
-    pub findings: bool,
-
-    /// Output summary only to stdout (--summary)
-    pub summary_only_output: bool,
 }

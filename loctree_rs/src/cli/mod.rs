@@ -74,6 +74,7 @@ pub use command::{
     DeadOptions,
     EventsOptions,
     FindOptions,
+    FindingsOptions,
     // Global options
     GlobalOptions,
     HelpOptions,

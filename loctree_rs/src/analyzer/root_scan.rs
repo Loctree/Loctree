@@ -6,7 +6,6 @@ use std::thread;
 
 use globset::GlobSet;
 use serde_json::json;
-use toml::Value;
 
 use crate::args::ParsedArgs;
 use crate::fs_utils::{GitIgnoreChecker, gather_files};
@@ -1709,7 +1708,7 @@ fn rank_duplicates(
     ranked
 }
 
-fn build_py_roots(root_canon: &Path, extra_roots: &[PathBuf]) -> Vec<PathBuf> {
+pub(crate) fn build_py_roots(root_canon: &Path, extra_roots: &[PathBuf]) -> Vec<PathBuf> {
     let mut roots: Vec<PathBuf> = Vec::new();
 
     // Always include project root
@@ -1728,7 +1727,7 @@ fn build_py_roots(root_canon: &Path, extra_roots: &[PathBuf]) -> Vec<PathBuf> {
     let pyproject = root_canon.join("pyproject.toml");
     if pyproject.exists()
         && let Ok(text) = std::fs::read_to_string(&pyproject)
-        && let Ok(val) = text.parse::<Value>()
+        && let Ok(val) = text.parse::<toml::Table>()
     {
         // tool.poetry.packages = [{ include = "...", from = "src" }]
         if let Some(packages) = val
