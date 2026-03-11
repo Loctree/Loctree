@@ -4,7 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
-## [0.9.0]
+## [0.8.16] - 2026-03-11
+
+### Changed
+- Synced the public workspace with `loctree-suite` for `loctree_rs`, `loctree-mcp`, and `reports`.
+- Aligned the public root workspace contract to `0.8.16` and `rmcp 0.17` while keeping suite-only crates out of this repo.
+
+### Fixed
+- Updated the `audit --stdout` e2e expectation to match the current CLI contract, which rejects stdout mode for markdown audits.
+- Excluded vendored/demo-only files from Semgrep so the security gate reflects real public-runtime risk.
 
 ## [0.8.15] - 2026-02-21
 

@@ -43,3 +43,13 @@ public_dist/index.html
 # ============================================================================
 
 loctree_rs/src/analyzer/assets/cytoscape.min.js
+loctree_rs/src/analyzer/assets/dagre.min.js
+
+# ============================================================================
+# DEMO / FIXTURE HTML
+# External script tags here are for local examples and parser fixtures, not
+# production pages. Semgrep's missing-integrity rule is noise on these files.
+# ============================================================================
+
+reports/src/twins_graph_example.html
+tools/fixtures/html-scripts/vue-style.html

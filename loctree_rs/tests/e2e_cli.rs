@@ -1446,8 +1446,10 @@ mod analysis_commands {
             .current_dir(&fixture)
             .args(["audit", "--stdout"])
             .assert()
-            .success()
-            .stdout(predicate::str::contains("Audit").or(predicate::str::contains("Health")));
+            .failure()
+            .stderr(predicate::str::contains(
+                "writes markdown reports to an artifact file only",
+            ));
     }
 
     // ----------------------------------------
