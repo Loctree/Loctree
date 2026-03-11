@@ -10,20 +10,15 @@ Get the loctree npm package published in 5 steps.
 
 ## Step 1: Verify GitHub Releases
 
-Ensure binaries exist at:
+Ensure release assets exist at:
 ```
-https://github.com/Loctree/Loctree/releases/tag/v0.8.11
+https://github.com/Loctree/Loctree/releases/tag/v0.8.16
 ```
 
 Required files:
-- `loctree-aarch64-apple-darwin`
-- `loctree-x86_64-apple-darwin`
-- `loctree-aarch64-unknown-linux-gnu`
-- `loctree-aarch64-unknown-linux-musl`
-- `loctree-x86_64-unknown-linux-gnu`
-- `loctree-x86_64-unknown-linux-musl`
-- `loctree-aarch64-pc-windows-msvc.exe`
-- `loctree-x86_64-pc-windows-msvc.exe`
+- `loctree-darwin-aarch64.tar.gz`
+- `loctree-linux-x86_64.tar.gz`
+- `loctree-windows-x86_64.exe.zip`
 
 ## Step 2: Generate Platform Packages
 
@@ -31,7 +26,7 @@ Required files:
 ./CREATE_PLATFORM_PACKAGES.sh
 ```
 
-This creates 8 platform-specific package directories.
+This creates the currently supported platform package directories.
 
 ## Step 3: Test Locally (Optional)
 
@@ -88,7 +83,7 @@ Wait 30-60 seconds for npm registry to propagate, then try again.
 
 ### "Binary download failed"
 
-Check that GitHub release v0.8.11 exists with all 8 binaries.
+Check that the GitHub release exists with the current supported assets.
 
 ### "Permission denied"
 

@@ -3,28 +3,7 @@
 
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-WORKSPACE_TOML="$ROOT_DIR/Cargo.toml"
-
-WORKSPACE_VERSION="$(
-  awk '
-    /^\[workspace\.package\]/ { in_ws=1; next }
-    in_ws && /^\[/ { in_ws=0 }
-    in_ws && /^version[[:space:]]*=/ {
-      gsub(/"/, "", $3)
-      print $3
-      exit
-    }
-  ' "$WORKSPACE_TOML"
-)"
-
-if [ -z "$WORKSPACE_VERSION" ]; then
-  echo "Error: failed to resolve workspace version from $WORKSPACE_TOML" >&2
-  exit 1
-fi
-
-VERSION=${1:-"$WORKSPACE_VERSION"}
+VERSION=${1:-"0.8.16"}
 DRY_RUN=${DRY_RUN:-false}
 
 echo "=== loctree npm Publishing Script ==="
@@ -90,7 +69,7 @@ echo ""
 # Step 2: Create platform packages
 echo "Step 2: Creating platform packages..."
 if [ -x ./CREATE_PLATFORM_PACKAGES.sh ]; then
-  ./CREATE_PLATFORM_PACKAGES.sh
+  ./CREATE_PLATFORM_PACKAGES.sh "$VERSION"
 else
   echo -e "${YELLOW}  ⚠ CREATE_PLATFORM_PACKAGES.sh not found or not executable${NC}"
 fi
@@ -101,12 +80,7 @@ echo "Step 3: Publishing platform packages..."
 
 PLATFORMS=(
   "darwin-arm64:@loctree/darwin-arm64"
-  "darwin-x64:@loctree/darwin-x64"
-  "linux-arm64-gnu:@loctree/linux-arm64-gnu"
-  "linux-arm64-musl:@loctree/linux-arm64-musl"
   "linux-x64-gnu:@loctree/linux-x64-gnu"
-  "linux-x64-musl:@loctree/linux-x64-musl"
-  "win32-arm64-msvc:@loctree/win32-arm64-msvc"
   "win32-x64-msvc:@loctree/win32-x64-msvc"
 )
 

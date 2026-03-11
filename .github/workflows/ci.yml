@@ -7,155 +7,49 @@ on:
     branches: [ main, develop ]
 
 jobs:
-  test:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+  linux:
+    name: Linux
+    runs-on: [self-hosted, Linux, X64, ops]
     steps:
       - uses: actions/checkout@v4
 
-      - name: Free disk space (Ubuntu)
-        if: runner.os == 'Linux'
+      - name: Install protoc
         run: |
-          echo "=== Disk space before cleanup ==="
-          df -h /
-          # Remove unused tools to free ~10GB
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
-          sudo apt-get clean
-          echo "=== Disk space after cleanup ==="
-          df -h /
+          if ! command -v protoc >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y protobuf-compiler
+          fi
 
-      - name: Cache npm
-        uses: actions/cache@v4
-        with:
-          path: ~/.npm
-          key: ${{ runner.os }}-node-nolock
-          restore-keys: |
-            ${{ runner.os }}-node-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Cache pip
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-noreqs
-          restore-keys: |
-            ${{ runner.os }}-pip-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Install Python deps
-        run: pip install --upgrade pip
-
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       - name: Rust fmt
-        run: cd loctree_rs && cargo fmt -- --check
+        run: cargo fmt --all -- --check
       - name: Rust clippy
-        run: cd loctree_rs && cargo clippy -- -D warnings
-      - name: Run rust unit tests
-        run: cd loctree_rs && cargo test
-      - name: Run rust integration tests (if present)
-        run: |
-          if [ -f tools/tests/loctree-rs.test.mjs ]; then
-            node tools/tests/loctree-rs.test.mjs
-          else
-            echo "Skipping: tools/tests/loctree-rs.test.mjs not found"
-          fi
-      - name: Run node unit tests (if present)
-        run: |
-          if [ -f tools/tests/test_loctree_node_unit.mjs ]; then
-            node tools/tests/test_loctree_node_unit.mjs
-          else
-            echo "Skipping: tools/tests/test_loctree_node_unit.mjs not found"
-          fi
-      - name: Run node integration tests (if present)
-        run: |
-          if [ -f tools/tests/loctree-node.test.mjs ]; then
-            node tools/tests/loctree-node.test.mjs
-          else
-            echo "Skipping: tools/tests/loctree-node.test.mjs not found"
-          fi
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Rust tests
+        run: cargo test --workspace
 
-      - name: Run python unit tests (if present)
-        run: |
-          if [ -f tools/tests/test_loctree_py_unit.py ]; then
-            python3 tools/tests/test_loctree_py_unit.py
-          else
-            echo "Skipping: tools/tests/test_loctree_py_unit.py not found"
-          fi
-      - name: Run python integration tests (if present)
-        run: |
-          if [ -f tools/tests/loctree-py.test.mjs ]; then
-            node tools/tests/loctree-py.test.mjs
-          else
-            echo "Skipping: tools/tests/loctree-py.test.mjs not found"
-          fi
-
-  coverage:
-    runs-on: ubuntu-latest
+  macos:
+    name: macOS
+    runs-on: [self-hosted, macOS, ARM64, dragon]
     steps:
       - uses: actions/checkout@v4
 
-      - name: Free disk space
+      - name: Install protoc
         run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
-          sudo apt-get clean
-
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ubuntu-cargo-coverage-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            ubuntu-cargo-coverage-
+          if ! command -v protoc >/dev/null 2>&1; then
+            brew install protobuf
+          fi
 
       - uses: dtolnay/rust-toolchain@stable
-
-      - name: Install cargo-tarpaulin
-        run: cargo install cargo-tarpaulin --locked
-
-      - name: Run Rust coverage
-        run: |
-          cd loctree_rs
-          cargo tarpaulin --out Xml --output-dir ../coverage --skip-clean --timeout 300
-        continue-on-error: true
-
-      - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          components: rustfmt, clippy
 
-      - name: Install Python coverage
-        run: pip install coverage
-
-      - name: Run Python coverage
-        run: |
-          coverage run --source=. --omit="tools/*,loctree_rs/*" -m pytest tools/tests/test_loctree_py_unit.py 2>/dev/null || \
-          coverage run --source=. --omit="tools/*,loctree_rs/*" tools/tests/test_loctree_py_unit.py
-          coverage report --fail-under=50 || echo "Python coverage below threshold (informational)"
-          coverage xml -o coverage/python-coverage.xml
-        continue-on-error: true
-
-      - name: Upload coverage artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-reports
-          path: coverage/
-          if-no-files-found: ignore
+      - name: Rust fmt
+        run: cargo fmt --all -- --check
+      - name: Rust clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Rust tests
+        run: cargo test --workspace

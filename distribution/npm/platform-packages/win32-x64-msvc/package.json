@@ -1,17 +1,17 @@
 {
-  "name": "@loctree/darwin-arm64",
+  "name": "@loctree/win32-x64-msvc",
   "version": "0.8.16",
-  "description": "loctree binary for macOS Apple Silicon (ARM64)",
-  "keywords": ["loctree", "darwin", "arm64"],
+  "description": "loctree binary for Windows x64",
+  "keywords": ["loctree", "win32", "x64"],
   "license": "MIT OR Apache-2.0",
-  "os": ["darwin"],
-  "cpu": ["arm64"],
+  "os": ["win32"],
+  "cpu": ["x64"],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Loctree/Loctree.git"
   },
   "files": [
-    "loctree",
+    "loctree.exe",
     "postinstall.js"
   ],
   "scripts": {

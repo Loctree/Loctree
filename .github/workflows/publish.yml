@@ -1,254 +1,152 @@
-name: Publish to crates.io
+name: Publish Releases
 
 on:
   push:
     tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'
-      - 'loctree-v[0-9]+.[0-9]+.[0-9]+'
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "loctree-v[0-9]+.[0-9]+.[0-9]+"
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  publish:
-    name: Publish
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      id-token: write  # Required for Trusted Publishing
+  verify-release:
+    name: Verify Release State
+    runs-on: [self-hosted, Linux, X64, ops]
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: |
-            loctree_rs
-            reports
-
       - name: Extract version from tag
         id: version
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
-
-          # Extract version number (strip 'v' or 'loctree-v' prefix)
           if [[ "$TAG" == loctree-v* ]]; then
             VERSION="${TAG#loctree-v}"
           else
             VERSION="${TAG#v}"
           fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-          # Get current versions from Cargo.toml
-          LOCTREE_VERSION=$(grep '^version' loctree_rs/Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
-          REPORTS_VERSION=$(grep '^version' reports/Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
-          echo "loctree_current=$LOCTREE_VERSION" >> $GITHUB_OUTPUT
-          echo "reports_current=$REPORTS_VERSION" >> $GITHUB_OUTPUT
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Release tag: $TAG"
+          echo "Release version: $VERSION"
 
-          echo "Tag: $TAG"
-          echo "Target version: $VERSION"
-          echo "Current loctree version: $LOCTREE_VERSION"
-          echo "Current report-leptos version: $REPORTS_VERSION"
-
-      - name: Check if version bump needed
-        id: bump
+      - name: Verify checked-in versions
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          LOCTREE_CURRENT="${{ steps.version.outputs.loctree_current }}"
+          TAG_VERSION="${{ steps.version.outputs.version }}"
+          WORKSPACE_VERSION=$(awk '
+            /^\[workspace.package\]$/ { in_section=1; next }
+            in_section && /^version = / { gsub(/"/, "", $3); print $3; exit }
+          ' Cargo.toml)
+          NPM_VERSION=$(node -p "require('./distribution/npm/package.json').version")
 
-          if [[ "$VERSION" == "$LOCTREE_CURRENT" ]]; then
-            echo "needs_bump=false" >> $GITHUB_OUTPUT
-            echo "Version already matches tag, no bump needed"
-          else
-            echo "needs_bump=true" >> $GITHUB_OUTPUT
-            echo "Version mismatch: Cargo.toml=$LOCTREE_CURRENT, tag=$VERSION"
+          echo "Workspace version: $WORKSPACE_VERSION"
+          echo "distribution/npm version: $NPM_VERSION"
+
+          if [[ "$WORKSPACE_VERSION" != "$TAG_VERSION" ]]; then
+            echo "Cargo workspace version does not match tag: $WORKSPACE_VERSION != $TAG_VERSION" >&2
+            exit 1
           fi
 
-      - name: Sync all crate versions
+          if [[ "$NPM_VERSION" != "$TAG_VERSION" ]]; then
+            echo "distribution/npm version does not match tag: $NPM_VERSION != $TAG_VERSION" >&2
+            exit 1
+          fi
+
+  publish-crates:
+    name: Publish Rust Crates
+    needs: verify-release
+    runs-on: [self-hosted, Linux, X64, ops]
+    env:
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Install protoc
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          V_VERSION="v$VERSION"
+          if ! command -v protoc >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y protobuf-compiler
+          fi
 
-          echo "=== Syncing all crates to version $VERSION ==="
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
-          # 1. loctree (main CLI)
-          echo "Updating loctree_rs/Cargo.toml..."
-          sed -i "s/^version = \"[0-9.]*\"/version = \"$VERSION\"/" loctree_rs/Cargo.toml
-
-          # 2. report-leptos (HTML renderer)
-          echo "Updating reports/Cargo.toml..."
-          sed -i "s/^version = \"[0-9.]*\"/version = \"$VERSION\"/" reports/Cargo.toml
-
-          # 3. landing (WASM landing page)
-          echo "Updating landing/Cargo.toml..."
-          sed -i "s/^version = \"[0-9.]*\"/version = \"$VERSION\"/" landing/Cargo.toml
-
-          # Also update landing source files with display version
-          echo "Updating landing source files..."
-          sed -i "s/pub const VERSION: &str = \"v[0-9.]*\";/pub const VERSION: \&str = \"$V_VERSION\";/" landing/src/sections/mod.rs
-          sed -i "s/v[0-9.]* | loctree.io/$V_VERSION | loctree.io/" landing/src/sections/easter_eggs.rs
-          sed -i "s/\"version\": \"[0-9.]*\"/\"version\": \"$VERSION\"/" landing/api/agent/index.json
-
-          # Update loctree's dependency on report-leptos to match
-          echo "Updating loctree dependency on report-leptos..."
-          sed -i "s/report-leptos = { version = \"[0-9.]*\"/report-leptos = { version = \"$VERSION\"/" loctree_rs/Cargo.toml
-
-          # Regenerate Cargo.lock
-          echo "Regenerating Cargo.lock..."
-          cd loctree_rs && cargo check --quiet 2>/dev/null || true && cd ..
-
-          echo "=== All crates synced to $VERSION ==="
-          echo "  - loctree: $VERSION"
-          echo "  - report-leptos: $VERSION"
-          echo "  - landing: $VERSION"
+      - name: Release quality gate
+        run: |
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
 
       - name: Publish report-leptos
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          cd reports
-
-          # Check if this version is already published
+          VERSION="${{ needs.verify-release.outputs.version }}"
           if cargo search report-leptos 2>/dev/null | grep -q "report-leptos = \"$VERSION\""; then
             echo "report-leptos $VERSION already published, skipping"
           else
-            echo "Publishing report-leptos $VERSION..."
-            cargo publish --no-verify
+            cargo publish -p report-leptos
           fi
 
       - name: Wait for crates.io index
-        run: |
-          echo "Waiting for crates.io index to update..."
-          sleep 30
+        run: sleep 30
 
       - name: Publish loctree
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          cd loctree_rs
-
-          # Check if already published
+          VERSION="${{ needs.verify-release.outputs.version }}"
           if cargo search loctree 2>/dev/null | grep -q "loctree = \"$VERSION\""; then
             echo "loctree $VERSION already published, skipping"
           else
-            echo "Publishing loctree $VERSION..."
-            cargo publish
+            cargo publish -p loctree
           fi
 
-      - name: Commit version sync (if changed)
+      - name: Wait for crates.io index
+        run: sleep 30
+
+      - name: Publish loctree-mcp
         run: |
-          if git diff --quiet; then
-            echo "No changes to commit"
+          VERSION="${{ needs.verify-release.outputs.version }}"
+          if cargo search loctree-mcp 2>/dev/null | grep -q "loctree-mcp = \"$VERSION\""; then
+            echo "loctree-mcp $VERSION already published, skipping"
           else
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add -A
-            git commit -m "chore: Sync all crates to v${{ steps.version.outputs.version }}"
-            git push origin HEAD:main || echo "Could not push to main, changes committed locally"
+            cargo publish -p loctree-mcp
           fi
 
-      - name: Generate changelog
-        id: changelog
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-
-          # Get previous tag
-          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
-
-          if [ -z "$PREV_TAG" ]; then
-            echo "No previous tag found, using all commits"
-            COMMITS=$(git log --oneline --no-merges | head -20)
-          else
-            echo "Generating changelog from $PREV_TAG to v$VERSION"
-            COMMITS=$(git log --oneline --no-merges "$PREV_TAG"..HEAD)
-          fi
-
-          # Categorize commits
-          FEATURES=$(echo "$COMMITS" | grep -iE "^[a-f0-9]+ (feat|add|new)" || true)
-          FIXES=$(echo "$COMMITS" | grep -iE "^[a-f0-9]+ (fix|bug|patch)" || true)
-          IMPROVEMENTS=$(echo "$COMMITS" | grep -iE "^[a-f0-9]+ (improve|enhance|update|refactor)" || true)
-          DOCS=$(echo "$COMMITS" | grep -iE "^[a-f0-9]+ (doc|readme)" || true)
-          CHORE=$(echo "$COMMITS" | grep -iE "^[a-f0-9]+ (chore|ci|build)" || true)
-
-          # Build changelog body
-          BODY="## What's Changed in v$VERSION\n\n"
-
-          if [ -n "$FEATURES" ]; then
-            BODY+="### ✨ New Features\n"
-            while IFS= read -r line; do
-              BODY+="- ${line#* }\n"
-            done <<< "$FEATURES"
-            BODY+="\n"
-          fi
-
-          if [ -n "$FIXES" ]; then
-            BODY+="### 🐛 Bug Fixes\n"
-            while IFS= read -r line; do
-              BODY+="- ${line#* }\n"
-            done <<< "$FIXES"
-            BODY+="\n"
-          fi
-
-          if [ -n "$IMPROVEMENTS" ]; then
-            BODY+="### 🔧 Improvements\n"
-            while IFS= read -r line; do
-              BODY+="- ${line#* }\n"
-            done <<< "$IMPROVEMENTS"
-            BODY+="\n"
-          fi
-
-          BODY+="### 📦 Installation\n"
-          BODY+="\`\`\`bash\ncargo install loctree\n\`\`\`\n\n"
-          BODY+="Or use the install script:\n"
-          BODY+="\`\`\`bash\ncargo install loctree\n\`\`\`\n"
-
-          # Save to file for the release action
-          echo -e "$BODY" > /tmp/release_notes.md
-          cat /tmp/release_notes.md
-
-          # Set output
-          echo "body<<EOF" >> $GITHUB_OUTPUT
-          cat /tmp/release_notes.md >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
-      - name: Create GitHub Release
+      - name: Create GitHub release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: loctree ${{ steps.version.outputs.version }}
-          body: ${{ steps.changelog.outputs.body }}
+          tag_name: ${{ needs.verify-release.outputs.tag }}
+          name: loctree ${{ needs.verify-release.outputs.version }}
           draft: false
           prerelease: false
+          body: |
+            ## loctree v${{ needs.verify-release.outputs.version }}
+
+            Installation:
+
+            ```bash
+            cargo install loctree
+            npm install -g loctree
+            brew tap Loctree/homebrew-loctree && brew install loctree
+            ```
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # Build binaries for multiple platforms
-  build-binaries:
-    name: Build ${{ matrix.target }}
-    needs: publish
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-            artifact: loctree-linux-x86_64
-          - target: x86_64-apple-darwin
-            os: macos-latest
-            artifact: loctree-darwin-x86_64
-          - target: aarch64-apple-darwin
-            os: macos-latest
-            artifact: loctree-darwin-aarch64
-          - target: x86_64-pc-windows-msvc
-            os: windows-latest
-            artifact: loctree-windows-x86_64.exe
-
+  build-linux:
+    name: Build Linux Artifact
+    needs: [verify-release, publish-crates]
+    runs-on: [self-hosted, Linux, X64, ops]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -258,45 +156,134 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: x86_64-unknown-linux-gnu
 
-      - name: Build release binary
+      - name: Build release binaries
+        run: cargo build -p loctree --release --target x86_64-unknown-linux-gnu
+
+      - name: Package Linux artifact
         run: |
-          cargo build -p loctree --release --target ${{ matrix.target }}
+          mkdir -p dist/linux-x86_64
+          cp target/x86_64-unknown-linux-gnu/release/loctree dist/linux-x86_64/loctree
+          cp target/x86_64-unknown-linux-gnu/release/loct dist/linux-x86_64/loct
+          chmod +x dist/linux-x86_64/loctree dist/linux-x86_64/loct
+          tar -czf loctree-linux-x86_64.tar.gz -C dist/linux-x86_64 loctree loct
 
-      - name: Prepare artifact (Unix)
-        if: runner.os != 'Windows'
-        run: |
-          mkdir -p dist
-          cp target/${{ matrix.target }}/release/loctree dist/loctree
-          cp target/${{ matrix.target }}/release/loct dist/loct
-          chmod +x dist/loctree dist/loct
-          tar -czvf ${{ matrix.artifact }}.tar.gz -C dist loctree loct
-
-      - name: Prepare artifact (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          mkdir dist
-          copy target\${{ matrix.target }}\release\loctree.exe dist\loctree.exe
-          copy target\${{ matrix.target }}\release\loct.exe dist\loct.exe
-          Compress-Archive -Path dist\* -DestinationPath ${{ matrix.artifact }}.zip
-
-      - name: Upload to Release
+      - name: Upload Linux release asset
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ github.ref_name }}
-          files: |
-            ${{ matrix.artifact }}.tar.gz
-            ${{ matrix.artifact }}.zip
-          fail_on_unmatched_files: false
+          tag_name: ${{ needs.verify-release.outputs.tag }}
+          files: loctree-linux-x86_64.tar.gz
+          fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # Publish to npm after all binaries are built
+  build-macos-arm64:
+    name: Build macOS ARM64 Artifact
+    needs: [verify-release, publish-crates]
+    runs-on: [self-hosted, macOS, ARM64, dragon]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Import macOS signing certificate
+        env:
+          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/loctree-build.keychain-db"
+          CERT_PATH="$RUNNER_TEMP/loctree-build-cert.p12"
+          CA_PATH="$RUNNER_TEMP/DeveloperIDG2CA.cer"
+
+          echo "$MACOS_CERT_P12_BASE64" | base64 --decode > "$CERT_PATH"
+          curl -fsSL "https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer" -o "$CA_PATH"
+          security create-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$CERT_PATH" -k "$KEYCHAIN" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security import "$CA_PATH" -k "$KEYCHAIN" -T /usr/bin/codesign -T /usr/bin/security >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" /Library/Keychains/System.keychain /System/Library/Keychains/SystemRootCertificates.keychain login.keychain-db
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$MACOS_KEYCHAIN_PASSWORD" "$KEYCHAIN"
+
+      - name: Build release binaries
+        run: cargo build -p loctree --release --target aarch64-apple-darwin
+
+      - name: Package macOS ARM64 artifact
+        env:
+          MACOS_DEVELOPER_ID_APPLICATION: ${{ secrets.MACOS_DEVELOPER_ID_APPLICATION }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          mkdir -p dist/darwin-aarch64
+          cp target/aarch64-apple-darwin/release/loctree dist/darwin-aarch64/loctree
+          cp target/aarch64-apple-darwin/release/loct dist/darwin-aarch64/loct
+          chmod +x dist/darwin-aarch64/loctree dist/darwin-aarch64/loct
+          bash distribution/macos/sign-and-notarize.sh dist/darwin-aarch64 loctree-darwin-aarch64-notarized.zip
+          tar -czf loctree-darwin-aarch64.tar.gz -C dist/darwin-aarch64 loctree loct
+
+      - name: Upload macOS ARM64 release assets
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.verify-release.outputs.tag }}
+          files: |
+            loctree-darwin-aarch64.tar.gz
+            loctree-darwin-aarch64-notarized.zip
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-windows:
+    name: Build Windows Artifact
+    needs: [verify-release, publish-crates]
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Build release binaries
+        run: cargo build -p loctree --release --target x86_64-pc-windows-msvc
+
+      - name: Package Windows artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item target\x86_64-pc-windows-msvc\release\loctree.exe dist\loctree.exe
+          Copy-Item target\x86_64-pc-windows-msvc\release\loct.exe dist\loct.exe
+          Compress-Archive -Path dist\* -DestinationPath loctree-windows-x86_64.exe.zip -Force
+
+      - name: Upload Windows release asset
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.verify-release.outputs.tag }}
+          files: loctree-windows-x86_64.exe.zip
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   publish-npm:
-    name: Publish to npm
-    needs: build-binaries
-    runs-on: ubuntu-latest
+    name: Publish npm Packages
+    needs:
+      - verify-release
+      - build-linux
+      - build-macos-arm64
+      - build-windows
+    runs-on: [self-hosted, Linux, X64, ops]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -306,25 +293,27 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          registry-url: 'https://registry.npmjs.org'
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
 
-      - name: Extract version from tag
-        id: version
+      - name: Refresh npm package versions
         run: |
-          TAG="${GITHUB_REF#refs/tags/}"
-          if [[ "$TAG" == loctree-v* ]]; then
-            VERSION="${TAG#loctree-v}"
-          else
-            VERSION="${TAG#v}"
-          fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          node distribution/npm/sync-version.mjs "${{ needs.verify-release.outputs.version }}"
+          cd distribution/npm
+          ./CREATE_PLATFORM_PACKAGES.sh "${{ needs.verify-release.outputs.version }}"
 
-      - name: Update package.json version
-        run: |
-          npm version ${{ steps.version.outputs.version }} --no-git-tag-version --allow-same-version
-
-      - name: Publish to npm
-        run: npm publish --access public
+      - name: Publish npm platform packages
+        working-directory: distribution/npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          for dir in platform-packages/*/; do
+            (cd "$dir" && npm publish --access public)
+          done
+          sleep 20
+
+      - name: Publish main npm package
+        working-directory: distribution/npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public

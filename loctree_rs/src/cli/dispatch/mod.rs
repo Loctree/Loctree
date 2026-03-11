@@ -1041,16 +1041,17 @@ mod tests {
 
     #[test]
     fn test_crowd_command_to_dispatch() {
+        let tmp = TempDir::new().expect("temp dir");
         let parsed_cmd = ParsedCommand::new(
             Command::Crowd(CrowdOptions {
                 pattern: Some("message".into()),
+                roots: vec![tmp.path().to_path_buf()],
                 ..Default::default()
             }),
             GlobalOptions::default(),
         );
-        // Just verify it doesn't panic and returns Exit (will fail without snapshot, but that's OK)
+        // Verify dispatch completes without scanning the live repo under the current working directory.
         let result = dispatch_command(&parsed_cmd);
-        // Should be Exit(1) because no snapshot exists in test env
         assert!(matches!(result, DispatchResult::Exit(_)));
     }
 }

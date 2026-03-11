@@ -18,7 +18,7 @@ permissions:
 jobs:
   semgrep:
     name: Scan
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, ops]
 
     steps:
       - name: Allow git in GitHub Actions workspace
@@ -28,7 +28,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Semgrep
-        run: python -m pip install --upgrade pip && pip install semgrep
+        run: python3 -m pip install --upgrade pip && python3 -m pip install semgrep
 
       - name: Run Semgrep
         run: semgrep scan --config auto --config p/rust --config p/typescript --sarif --output semgrep.sarif .
