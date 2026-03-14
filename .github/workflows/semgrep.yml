@@ -27,11 +27,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Semgrep
-        run: python3 -m pip install --upgrade pip && python3 -m pip install semgrep
+      - name: Ensure pipx
+        run: command -v pipx >/dev/null || python3 -m pip install --user pipx
 
       - name: Run Semgrep
-        run: semgrep scan --config auto --config p/rust --config p/typescript --sarif --output semgrep.sarif .
+        run: pipx run semgrep scan --config auto --config p/rust --config p/typescript --sarif --output semgrep.sarif .
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
 
