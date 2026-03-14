@@ -6,6 +6,9 @@ on:
       - "v[0-9]+.[0-9]+.[0-9]+"
       - "loctree-v[0-9]+.[0-9]+.[0-9]+"
 
+permissions:
+  contents: write
+
 env:
   CARGO_TERM_COLOR: always
 
