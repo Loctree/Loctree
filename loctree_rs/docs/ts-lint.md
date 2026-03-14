@@ -47,7 +47,7 @@ Output:
 ### Via `findings.json`
 
 ```bash
-loct --findings
+loct findings
 jq '.ts_lint' .loctree/findings.json
 ```
 

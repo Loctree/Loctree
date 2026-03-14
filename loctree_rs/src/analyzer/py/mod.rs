@@ -8,8 +8,7 @@
 //! - Dynamic code generation detection (exec/eval/compile)
 //! - Package metadata (typed packages, namespace packages)
 //!
-//! Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team
-//! Co-Authored-By: Maciej <void@div0.space> & Klaudiusz <the1st@whoai.am>
+//! VibeCrafted with AI Agents (c)2026 Loctree Team
 
 mod concurrency;
 mod decorators;

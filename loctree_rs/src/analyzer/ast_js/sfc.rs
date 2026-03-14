@@ -3,7 +3,7 @@
 //! This module handles extraction of script and template content from
 //! Svelte (.svelte) and Vue (.vue) Single File Components.
 //!
-//! Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team
+//! VibeCrafted with AI Agents (c)2026 Loctree Team
 
 use regex::Regex;
 

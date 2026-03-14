@@ -244,7 +244,7 @@ Dead parrots: 10-20 (actual dead code)
 ### Background Formatter Issue
 There is a VS Code + rust-analyzer running that auto-formats code on save. This causes changes to be reverted immediately. To work around this:
 
-1. Kill the `loctree_server` process if running
+1. Kill the loctree language server process if running
 2. Make all changes atomically in a script
 3. Run `cargo build` immediately after changes
 4. Or disable format-on-save in VS Code temporarily

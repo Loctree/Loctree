@@ -14,27 +14,22 @@ The main package lists all platform packages as `optionalDependencies`, so npm/p
 ## Prerequisites
 
 1. **npm account** with publish permissions
-2. **GitHub releases** with loctree binaries for all platforms
+2. **GitHub releases** with loctree assets for the supported npm platforms
 3. **Node.js 14+** installed locally
 
 ## Publishing Steps
 
 ### Step 1: Verify GitHub Releases
 
-Ensure the loctree Rust project has published release binaries for version `0.8.11` (or your target version) with these exact filenames:
+Ensure the loctree release has these assets for version `0.8.16` (or your target version):
 
 ```
-loctree-aarch64-apple-darwin           (macOS ARM64)
-loctree-x86_64-apple-darwin            (macOS Intel)
-loctree-aarch64-unknown-linux-gnu      (Linux ARM64 glibc)
-loctree-aarch64-unknown-linux-musl     (Linux ARM64 musl)
-loctree-x86_64-unknown-linux-gnu       (Linux x64 glibc)
-loctree-x86_64-unknown-linux-musl      (Linux x64 musl)
-loctree-aarch64-pc-windows-msvc.exe    (Windows ARM64)
-loctree-x86_64-pc-windows-msvc.exe     (Windows x64)
+loctree-darwin-aarch64.tar.gz
+loctree-linux-x86_64.tar.gz
+loctree-windows-x86_64.exe.zip
 ```
 
-Check: https://github.com/Loctree/Loctree/releases/tag/v0.8.11
+Check: https://github.com/Loctree/Loctree/releases/tag/v0.8.16
 
 ### Step 2: Create Platform-Specific Packages
 
@@ -48,12 +43,7 @@ This creates:
 ```
 platform-packages/
 ├── darwin-arm64/
-├── darwin-x64/
-├── linux-arm64-gnu/
-├── linux-arm64-musl/
 ├── linux-x64-gnu/
-├── linux-x64-musl/
-├── win32-arm64-msvc/
 └── win32-x64-msvc/
 ```
 
@@ -78,22 +68,7 @@ You MUST publish platform packages BEFORE the main package (because the main pac
 cd platform-packages/darwin-arm64
 npm publish --access public
 
-cd ../darwin-x64
-npm publish --access public
-
-cd ../linux-arm64-gnu
-npm publish --access public
-
-cd ../linux-arm64-musl
-npm publish --access public
-
 cd ../linux-x64-gnu
-npm publish --access public
-
-cd ../linux-x64-musl
-npm publish --access public
-
-cd ../win32-arm64-msvc
 npm publish --access public
 
 cd ../win32-x64-msvc
@@ -135,18 +110,15 @@ node -e "console.log(require('loctree').getBinaryPath())"
 
 ## Version Updates
 
-When releasing a new version (e.g., `0.6.15`):
+When releasing a new version:
 
-1. **Update all package.json files** (main + 8 platform packages):
+1. **Sync all package.json files**:
    ```bash
-   # Use sed or manually update version in:
-   # - package.json
-   # - platform-packages/*/package.json
+   node sync-version.mjs 0.8.16
+   ./CREATE_PLATFORM_PACKAGES.sh 0.8.16
    ```
 
-2. **Update VERSION in postinstall.js** (if using version-based URLs)
-
-3. **Re-publish platform packages first**, then the main package
+2. **Re-publish platform packages first**, then the main package
 
 ## Troubleshooting
 
@@ -158,9 +130,9 @@ When releasing a new version (e.g., `0.6.15`):
 
 ### Binary download failures
 
-- Verify GitHub release exists with correct tag: `v0.8.11` (note the `v` prefix)
-- Check binary filenames match the `BINARY_MAPPINGS` in `postinstall.js`
-- Test download URL manually: `curl -L https://github.com/Loctree/Loctree/releases/download/v0.8.11/loctree-x86_64-apple-darwin -o test`
+- Verify GitHub release exists with correct tag (note the `v` prefix)
+- Check asset filenames match the `BINARY_MAPPINGS` in `platform-packages/postinstall.js`
+- Test download URL manually: `curl -L https://github.com/Loctree/Loctree/releases/download/v0.8.16/loctree-darwin-aarch64.tar.gz -o test`
 
 ### optionalDependencies not installing
 
@@ -195,7 +167,7 @@ When a new version is released:
 ### Deprecating old versions
 
 ```bash
-npm deprecate loctree@0.6.13 "Please upgrade to 0.8.11"
+npm deprecate loctree@0.8.15 "Please upgrade to 0.8.16"
 ```
 
 ## Resources

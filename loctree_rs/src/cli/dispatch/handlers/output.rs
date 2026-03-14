@@ -3,12 +3,11 @@
 //! Handles: lint, dist
 
 use super::super::super::command::{DistOptions, LintOptions};
-use super::super::{DispatchResult, GlobalOptions, load_or_create_snapshot};
+use super::super::{DispatchResult, GlobalOptions, load_or_create_snapshot_for_roots};
 use crate::progress::Spinner;
 
 /// Handle the lint command - run linting checks
 pub fn handle_lint_command(opts: &LintOptions, global: &GlobalOptions) -> DispatchResult {
-    use std::path::Path;
     use std::path::PathBuf;
 
     use crate::analyzer::report::CommandGap;
@@ -23,14 +22,28 @@ pub fn handle_lint_command(opts: &LintOptions, global: &GlobalOptions) -> Dispat
         None
     };
 
-    // Load snapshot (auto-scan if missing)
-    let root = opts
-        .roots
-        .first()
-        .map(|p| p.as_path())
-        .unwrap_or(Path::new("."));
+    // Load snapshot (auto-scan if missing) using ALL provided roots.
+    // This is critical for Tauri projects where FE and BE roots are passed separately
+    // (e.g. `src` + `src-tauri/src`).
+    let roots: Vec<PathBuf> = if opts.roots.is_empty() {
+        vec![PathBuf::from(".")]
+    } else {
+        opts.roots.clone()
+    };
 
-    let snapshot = match load_or_create_snapshot(root, global) {
+    // Fail fast on invalid roots to avoid misleading "missing handlers" noise.
+    let missing_roots: Vec<&PathBuf> = roots.iter().filter(|p| !p.exists()).collect();
+    if !missing_roots.is_empty() {
+        if show_output {
+            eprintln!("[loct][lint] Invalid root path(s):");
+            for root in missing_roots {
+                eprintln!("  - {}", root.display());
+            }
+        }
+        return DispatchResult::Exit(2);
+    }
+
+    let snapshot = match load_or_create_snapshot_for_roots(&roots, global) {
         Ok(s) => s,
         Err(e) => {
             if let Some(s) = spinner {
@@ -323,7 +336,8 @@ pub fn handle_lint_command(opts: &LintOptions, global: &GlobalOptions) -> Dispat
 
 /// Handle the dist command - analyze bundle using source maps
 pub fn handle_dist_command(opts: &DistOptions, global: &GlobalOptions) -> DispatchResult {
-    use crate::analyzer::dist::analyze_distribution;
+    use crate::analyzer::dist::analyze_distribution_with_snapshot;
+    use crate::analyzer::root_scan::scan_results_from_snapshot;
 
     let spinner = if !global.quiet && !global.json {
         Some(Spinner::new("Analyzing bundle distribution..."))
@@ -331,16 +345,15 @@ pub fn handle_dist_command(opts: &DistOptions, global: &GlobalOptions) -> Dispat
         None
     };
 
-    let source_map_path = match &opts.source_map {
-        Some(p) => p.clone(),
-        None => {
-            if let Some(s) = spinner {
-                s.finish_error("--source-map is required");
-            } else {
-                eprintln!("[loct][error] --source-map is required");
-            }
-            return DispatchResult::Exit(1);
+    let source_map_paths = if opts.source_maps.is_empty() {
+        if let Some(s) = spinner {
+            s.finish_error("at least one --source-map is required");
+        } else {
+            eprintln!("[loct][error] at least one --source-map is required");
         }
+        return DispatchResult::Exit(1);
+    } else {
+        opts.source_maps.clone()
     };
 
     let src_path = match &opts.src {
@@ -355,52 +368,143 @@ pub fn handle_dist_command(opts: &DistOptions, global: &GlobalOptions) -> Dispat
         }
     };
 
-    // Run dist analysis (uses its own scanning, doesn't need snapshot)
-    match analyze_distribution(&source_map_path, &src_path) {
-        Ok(result) => {
-            if let Some(s) = spinner {
-                s.finish_success(&format!(
-                    "Found {} dead export(s) ({})",
-                    result.dead_exports.len(),
-                    result.reduction
-                ));
-            }
-
-            if global.json {
+    match analyze_distribution_with_snapshot(&source_map_paths, &src_path) {
+        Ok((result, snapshot)) => {
+            let serialized = if global.json || opts.report_path.is_some() {
                 match serde_json::to_string_pretty(&result) {
-                    Ok(json) => println!("{}", json),
+                    Ok(json) => Some(json),
                     Err(e) => {
                         eprintln!("[loct][error] Failed to serialize results: {}", e);
                         return DispatchResult::Exit(1);
                     }
                 }
             } else {
+                None
+            };
+
+            let snapshot_root =
+                crate::snapshot::resolve_snapshot_root(std::slice::from_ref(&src_path));
+            let scan_results = scan_results_from_snapshot(&snapshot);
+            let artifact_args = crate::args::ParsedArgs {
+                verbose: global.verbose,
+                library_mode: global.library_mode,
+                python_library: global.python_library,
+                ..Default::default()
+            };
+
+            if let Err(err) = crate::snapshot::write_auto_artifacts(
+                &snapshot_root,
+                std::slice::from_ref(&src_path),
+                &scan_results,
+                &artifact_args,
+                Some(&snapshot.metadata),
+                Some(result.clone()),
+            ) {
+                eprintln!(
+                    "[loct][warn] dist artifacts were not refreshed under {}: {}",
+                    crate::snapshot::Snapshot::artifacts_dir(&snapshot_root).display(),
+                    err
+                );
+            } else if !global.quiet {
+                eprintln!(
+                    "[loct][dist] refreshed report artifacts under {}",
+                    crate::snapshot::Snapshot::artifacts_dir(&snapshot_root).display()
+                );
+            }
+
+            if let Some(report_path) = &opts.report_path {
+                if let Some(parent) = report_path.parent()
+                    && let Err(e) = std::fs::create_dir_all(parent)
+                {
+                    eprintln!(
+                        "[loct][error] Failed to create report directory {}: {}",
+                        parent.display(),
+                        e
+                    );
+                    return DispatchResult::Exit(1);
+                }
+
+                if let Err(e) =
+                    std::fs::write(report_path, serialized.as_deref().unwrap_or_default())
+                {
+                    eprintln!(
+                        "[loct][error] Failed to write dist report {}: {}",
+                        report_path.display(),
+                        e
+                    );
+                    return DispatchResult::Exit(1);
+                }
+            }
+
+            if let Some(s) = spinner {
+                s.finish_success(&format!(
+                    "Ranked {} runtime candidate(s), {} dead export(s) across {} source map(s) ({})",
+                    result.candidates.len(),
+                    result.dead_exports.len(),
+                    result.source_maps,
+                    result.reduction
+                ));
+            }
+
+            if global.json {
+                println!("{}", serialized.as_deref().unwrap_or_default());
+            } else {
+                let boot_chunks = result
+                    .chunks
+                    .iter()
+                    .filter(|chunk| {
+                        matches!(chunk.role, crate::analyzer::dist::DistChunkRole::Boot)
+                    })
+                    .count();
+                let feature_chunks = result.chunks.len().saturating_sub(boot_chunks);
+
                 println!("Bundle Analysis:");
-                println!("  Source exports:  {}", result.source_exports);
+                println!("  Source maps:      {}", result.source_maps);
+                println!("  Source exports:   {}", result.source_exports);
                 println!("  Bundled exports: {}", result.bundled_exports);
                 println!("  Dead exports:    {}", result.dead_exports.len());
+                println!("  Runtime candidates: {}", result.candidates.len());
                 println!("  Reduction:       {}", result.reduction);
-                println!(
-                    "  Analysis level:  {}",
-                    if result.symbol_level {
-                        "symbol"
-                    } else {
-                        "file"
-                    }
-                );
+                println!("  Analysis level:  {}", result.analysis_level.as_str());
+                println!("  Bundle coverage: {}%", result.coverage_pct);
+                if !result.chunks.is_empty() {
+                    println!("  Boot chunks:     {}", boot_chunks);
+                    println!("  Feature chunks:  {}", feature_chunks);
+                }
+                if let Some(report_path) = &opts.report_path {
+                    println!("  Report:          {}", report_path.display());
+                }
                 println!();
 
-                if !result.dead_exports.is_empty() {
-                    println!("Dead Exports (not in bundle):");
-                    for export in result.dead_exports.iter().take(20) {
+                if !result.candidate_counts.is_empty() {
+                    println!("Candidate classes:");
+                    for (class_name, count) in &result.candidate_counts {
+                        println!("  {:<20} {}", class_name, count);
+                    }
+                    println!();
+                }
+
+                if !result.candidates.is_empty() {
+                    println!("Top runtime candidates:");
+                    for candidate in result.candidates.iter().take(20) {
                         println!(
-                            "  {} ({}) in {}:{}",
-                            export.name, export.kind, export.file, export.line
+                            "  [{}][{}] {} ({}) in {}:{}",
+                            candidate.class_name.as_str(),
+                            candidate.confidence.as_str(),
+                            candidate.name,
+                            candidate.kind,
+                            candidate.file,
+                            candidate.line
                         );
+                        if let Some(note) = candidate.notes.first() {
+                            println!("      {}", note);
+                        }
                     }
-                    if result.dead_exports.len() > 20 {
-                        println!("  ... and {} more", result.dead_exports.len() - 20);
+                    if result.candidates.len() > 20 {
+                        println!("  ... and {} more", result.candidates.len() - 20);
                     }
+                } else {
+                    println!("No runtime-local candidates found across analyzed chunks.");
                 }
             }
 

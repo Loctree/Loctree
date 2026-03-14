@@ -584,7 +584,7 @@ fn run_findings(
         example_globs: parsed.library_example_globs.clone(),
     };
 
-    let findings = Findings::produce(&scan_results, &snap, config);
+    let findings = Findings::produce(&scan_results, &snap, config, None);
 
     if summary_only {
         let summary = findings.summary_only();
@@ -712,82 +712,38 @@ fn run_search(root_list: &[PathBuf], parsed: &ParsedArgs) -> std::io::Result<()>
         out
     }
 
-    // Try to load snapshot first for zero-latency search
-    let default_root = PathBuf::from(".");
-    let root = root_list.first().unwrap_or(&default_root);
-    let analyses = match snapshot::Snapshot::load(root) {
-        Ok(snap) => snap.files,
+    // Load snapshot with staleness check — auto-rescan if commit changed or missing.
+    // Uses is_commit_stale() (not full is_stale()) to avoid rescanning on every dirty
+    // worktree — CLI users expect fast `loct find` during active editing. If dirty,
+    // the snapshot from last scan/commit is good enough; `loct scan` or --watch refresh it.
+    let snapshot_root = snapshot::resolve_snapshot_root(root_list);
+    let needs_scan = match snapshot::Snapshot::load(&snapshot_root) {
+        Ok(snap) if !snap.is_commit_stale(&snapshot_root) => None, // Same commit — use it
+        Ok(_stale) => {
+            eprintln!("[loct][find] Snapshot stale (commit changed), rescanning...");
+            Some(()) // Commit moved — rescan
+        }
         Err(_) => {
-            // No snapshot - fall back to full scan
-            use analyzer::root_scan::{ScanConfig, scan_roots};
-            use analyzer::scan::python_stdlib;
-
             eprintln!(
                 "[loct][find] No snapshot found, scanning (run `loct scan` for faster searches)"
             );
-
-            let extensions = parsed.extensions.clone().or_else(|| {
-                Some(
-                    ["ts", "tsx", "js", "jsx", "mjs", "cjs", "rs", "css", "py"]
-                        .iter()
-                        .map(|s| s.to_string())
-                        .collect(),
-                )
-            });
-
-            let py_stdlib = python_stdlib();
-            let loctree_config = root_list
-                .first()
-                .map(|r| LoctreeConfig::load(r))
-                .unwrap_or_default();
-            let custom_command_macros = loctree_config.tauri.command_macros;
-            let command_detection = analyzer::ast_js::CommandDetectionConfig::new(
-                &loctree_config.tauri.dom_exclusions,
-                &loctree_config.tauri.non_invoke_exclusions,
-                &loctree_config.tauri.invalid_command_names,
-            );
-
-            let scan_results = scan_roots(ScanConfig {
-                roots: root_list,
-                parsed,
-                extensions,
-                focus_set: &None,
-                exclude_set: &None,
-                ignore_exact: HashSet::new(),
-                ignore_prefixes: Vec::new(),
-                py_stdlib: &py_stdlib,
-                cached_analyses: None,
-                collect_edges: true,
-                custom_command_macros: &custom_command_macros,
-                command_detection,
-            })?;
-
-            // Save snapshot for future commands
-            let mut snap = snapshot::Snapshot::new(
-                root_list.iter().map(|p| p.display().to_string()).collect(),
-            );
-
-            for ctx in &scan_results.contexts {
-                snap.files.extend(ctx.analyses.clone());
-                for (from, to, label) in &ctx.graph_edges {
-                    snap.edges.push(snapshot::GraphEdge {
-                        from: from.clone(),
-                        to: to.clone(),
-                        label: label.clone(),
-                    });
-                }
-            }
-
-            snap.metadata.file_count = snap.files.len();
-            snap.metadata.total_loc = snap.files.iter().map(|f| f.loc).sum();
-            snap.metadata.languages = snap.files.iter().map(|f| f.language.clone()).collect();
-
-            if let Err(e) = snap.save(root) {
-                eprintln!("[loct][warn] Failed to save snapshot: {}", e);
-            }
-
-            scan_results.global_analyses
+            Some(()) // Missing — scan
         }
+    };
+    let analyses = if needs_scan.is_some() {
+        snapshot::run_init_with_options(root_list, parsed, true)?;
+        match snapshot::Snapshot::load(&snapshot_root) {
+            Ok(snap) => snap.files,
+            Err(e) => {
+                return Err(std::io::Error::other(format!(
+                    "Failed to load snapshot after scan: {}",
+                    e
+                )));
+            }
+        }
+    } else {
+        // Safe unwrap — we matched Ok(snap) above
+        snapshot::Snapshot::load(&snapshot_root)?.files
     };
 
     let symbol_only = parsed.search_symbol_only;

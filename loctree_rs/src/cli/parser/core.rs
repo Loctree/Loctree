@@ -16,14 +16,14 @@ use super::context_commands::{
 };
 use super::helpers::{SUBCOMMANDS, is_jq_filter, parse_color_mode, suggest_similar_command};
 use super::misc_commands::{
-    parse_audit_command, parse_crowd_command, parse_dist_command, parse_doctor_command,
-    parse_health_command, parse_help_command, parse_layoutmap_command, parse_plan_command,
-    parse_suppress_command, parse_tagmap_command, parse_zombie_command,
+    parse_audit_command, parse_cache_command, parse_crowd_command, parse_dist_command,
+    parse_doctor_command, parse_health_command, parse_help_command, parse_layoutmap_command,
+    parse_plan_command, parse_suppress_command, parse_tagmap_command, parse_zombie_command,
 };
 use super::output_commands::{
-    parse_diff_command, parse_info_command, parse_insights_command, parse_jq_query_command,
-    parse_lint_command, parse_manifests_command, parse_memex_command, parse_pipelines_command,
-    parse_report_command,
+    parse_diff_command, parse_findings_command, parse_info_command, parse_insights_command,
+    parse_jq_query_command, parse_lint_command, parse_manifests_command, parse_memex_command,
+    parse_pipelines_command, parse_report_command,
 };
 use super::scan_commands::{parse_auto_command, parse_scan_command, parse_tree_command};
 use super::tauri_commands::{parse_commands_command, parse_events_command, parse_routes_command};
@@ -34,6 +34,7 @@ use super::tauri_commands::{parse_commands_command, parse_events_command, parse_
 /// or if only global flags like --help/--version are present.
 pub fn uses_new_syntax(args: &[String]) -> bool {
     let mut i = 0;
+    let mut findings_alias = false;
     while i < args.len() {
         let arg = &args[i];
 
@@ -53,6 +54,9 @@ pub fn uses_new_syntax(args: &[String]) -> bool {
             || arg == "-v"
             || arg == "-q"
         {
+            if arg == "--findings" || arg == "--summary" {
+                findings_alias = true;
+            }
             i += 1;
             continue;
         }
@@ -84,6 +88,9 @@ pub fn uses_new_syntax(args: &[String]) -> bool {
             return false;
         }
         // First positional argument - check if it's a subcommand or jq filter
+        if findings_alias {
+            return true;
+        }
         return SUBCOMMANDS.contains(&arg.as_str()) || is_jq_filter(arg);
     }
     // No arguments = default to auto (new syntax)
@@ -110,6 +117,8 @@ pub fn parse_command(args: &[String]) -> Result<Option<ParsedCommand>, String> {
     let mut for_ai_alias = false;
     let mut watch_alias = false;
     let mut help_requested = false;
+    let mut legacy_findings_alias = false;
+    let mut legacy_summary_only = false;
 
     // Check for jq-style query before extracting global options
     // This allows: loct '.metadata' to work without conflicts
@@ -178,14 +187,34 @@ pub fn parse_command(args: &[String]) -> Result<Option<ParsedCommand>, String> {
                 global.fail_stale = true;
                 i += 1;
             }
-            "--findings" => {
-                global.findings = true;
-                i += 1;
-            }
-            "--summary" => {
-                global.summary_only_output = true;
-                i += 1;
-            }
+            "--findings" => match subcommand.as_deref() {
+                Some(_) => {
+                    return Err(
+                        "`--findings` is no longer a global flag. Use `loct findings`.".to_string(),
+                    );
+                }
+                None => {
+                    legacy_findings_alias = true;
+                    i += 1;
+                }
+            },
+            "--summary" => match subcommand.as_deref() {
+                Some("tree") | Some("findings") => {
+                    remaining_args.push(arg.clone());
+                    i += 1;
+                }
+                Some(_) => {
+                    return Err(
+                        "`--summary` is no longer a global flag. Use `loct findings --summary` for summary JSON, or keep `--summary` on `loct tree`."
+                            .to_string(),
+                    );
+                }
+                None => {
+                    legacy_findings_alias = true;
+                    legacy_summary_only = true;
+                    i += 1;
+                }
+            },
             "--py-root" => {
                 let value = args
                     .get(i + 1)
@@ -244,13 +273,59 @@ pub fn parse_command(args: &[String]) -> Result<Option<ParsedCommand>, String> {
         subcommand = Some("scan".to_string());
     }
 
+    if legacy_findings_alias && subcommand.is_some() {
+        return Err(
+            "`--findings` and bare `--summary` are no longer global output flags. Use `loct findings` or `loct findings --summary`."
+                .to_string(),
+        );
+    }
+
     if help_requested {
+        let help_command = if legacy_findings_alias {
+            Some("findings".to_string())
+        } else {
+            subcommand.clone()
+        };
         return Ok(Some(ParsedCommand::new(
             Command::Help(HelpOptions {
-                command: subcommand.clone(),
+                command: help_command,
                 ..Default::default()
             }),
             global,
+        )));
+    }
+
+    if legacy_findings_alias {
+        let mut alias_args = remaining_args.clone();
+        if legacy_summary_only {
+            alias_args.insert(0, "--summary".to_string());
+        }
+
+        let command = parse_findings_command(&alias_args)?;
+        let legacy_invocation = if args.is_empty() {
+            "loct".to_string()
+        } else {
+            format!("loct {}", args.join(" "))
+        };
+        let suggested_invocation = {
+            let mut parts = vec!["loct".to_string(), "findings".to_string()];
+            if legacy_summary_only {
+                parts.push("--summary".to_string());
+            }
+            parts.extend(
+                remaining_args
+                    .iter()
+                    .filter(|arg| !arg.starts_with('-'))
+                    .cloned(),
+            );
+            parts.join(" ")
+        };
+
+        return Ok(Some(ParsedCommand::from_legacy(
+            command,
+            global,
+            legacy_invocation,
+            suggested_invocation,
         )));
     }
 
@@ -271,6 +346,7 @@ pub fn parse_command(args: &[String]) -> Result<Option<ParsedCommand>, String> {
         Some("tree") => parse_tree_command(&remaining_args)?,
         Some("slice") | Some("s") => parse_slice_command(&remaining_args)?,
         Some("find") | Some("f") => parse_find_command(&remaining_args)?,
+        Some("findings") => parse_findings_command(&remaining_args)?,
         Some("dead") | Some("unused") | Some("d") => parse_dead_command(&remaining_args)?,
         Some("cycles") | Some("c") => parse_cycles_command(&remaining_args)?,
         Some("trace") => parse_trace_command(&remaining_args)?,
@@ -303,6 +379,7 @@ pub fn parse_command(args: &[String]) -> Result<Option<ParsedCommand>, String> {
         Some("audit") => parse_audit_command(&remaining_args)?,
         Some("doctor") => parse_doctor_command(&remaining_args)?,
         Some("plan") | Some("p") => parse_plan_command(&remaining_args)?,
+        Some("cache") => parse_cache_command(&remaining_args)?,
         Some(unknown) => {
             // Try to find a similar command using fuzzy matching
             let suggestion = suggest_similar_command(unknown);
@@ -349,6 +426,7 @@ mod tests {
         assert!(uses_new_syntax(&["--json".into(), "scan".into()]));
         assert!(uses_new_syntax(&["--watch".into()]));
         assert!(uses_new_syntax(&["--for-ai".into()]));
+        assert!(uses_new_syntax(&["--summary".into(), "src".into()]));
 
         // Legacy syntax
         assert!(!uses_new_syntax(&["--tree".into()]));
@@ -412,6 +490,19 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_findings_subcommand() {
+        let args = vec!["findings".into(), "--summary".into(), "src/".into()];
+        let result = parse_command(&args).unwrap().unwrap();
+        assert_eq!(result.command.name(), "findings");
+        if let Command::Findings(opts) = result.command {
+            assert!(opts.summary);
+            assert_eq!(opts.roots, vec![PathBuf::from("src/")]);
+        } else {
+            panic!("Expected Findings command");
+        }
+    }
+
+    #[test]
     fn test_parse_slice_command() {
         let args = vec!["slice".into(), "src/main.rs".into(), "--consumers".into()];
         let result = parse_command(&args).unwrap().unwrap();
@@ -455,6 +546,49 @@ mod tests {
         let result = parse_command(&args).unwrap().unwrap();
         assert!(result.global.json);
         assert_eq!(result.command.name(), "scan");
+    }
+
+    #[test]
+    fn test_parse_findings_legacy_alias() {
+        let args = vec!["--findings".into()];
+        let result = parse_command(&args).unwrap().unwrap();
+        assert!(result.from_legacy);
+        assert_eq!(result.suggested_invocation, Some("loct findings".into()));
+        assert_eq!(result.command.name(), "findings");
+    }
+
+    #[test]
+    fn test_parse_findings_legacy_alias_with_path() {
+        let args = vec!["--findings".into(), "src".into()];
+        let result = parse_command(&args).unwrap().unwrap();
+        assert!(result.from_legacy);
+        assert_eq!(
+            result.suggested_invocation,
+            Some("loct findings src".into())
+        );
+        if let Command::Findings(opts) = result.command {
+            assert!(!opts.summary);
+            assert_eq!(opts.roots, vec![PathBuf::from("src")]);
+        } else {
+            panic!("Expected Findings command");
+        }
+    }
+
+    #[test]
+    fn test_parse_summary_legacy_alias() {
+        let args = vec!["--summary".into(), "src".into()];
+        let result = parse_command(&args).unwrap().unwrap();
+        assert!(result.from_legacy);
+        assert_eq!(
+            result.suggested_invocation,
+            Some("loct findings --summary src".into())
+        );
+        if let Command::Findings(opts) = result.command {
+            assert!(opts.summary);
+            assert_eq!(opts.roots, vec![PathBuf::from("src")]);
+        } else {
+            panic!("Expected Findings command");
+        }
     }
 
     #[test]

@@ -4,7 +4,7 @@
 //! including lists of DOM APIs, non-invoke functions, and invalid command names
 //! that should be excluded from analysis.
 //!
-//! Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team
+//! VibeCrafted with AI Agents (c)2026 Loctree Team
 
 use std::collections::HashSet;
 

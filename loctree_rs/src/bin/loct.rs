@@ -42,6 +42,7 @@ Quick Start:\n  \
 Core Commands:\n  \
   auto              Full scan + findings (writes artifacts)\n  \
   doctor            Interactive diagnostics and quick-wins\n  \
+  findings          Emit canonical findings JSON\n  \
   slice <file>      Extract file + dependencies + consumers\n  \
   find <name>       Find symbol definitions\n  \
   trace <handler>   Debug Tauri handler pipeline\n  \
@@ -53,6 +54,7 @@ Analysis:\n  \
   health            Quick structural health check\n  \
   crowds            Find hub files (high import/export counts)\n\n\
 Output:\n  \
+  findings          Full findings JSON / summary JSON\n  \
   report            Generate HTML/JSON/SARIF reports\n  \
   --json            Machine-readable output\n  \
   --sarif           SARIF for GitHub Code Scanning\n\n\
@@ -63,6 +65,7 @@ Common:\n  \
 Examples:\n  \
   loct auto                                  # Full analysis\n  \
   loct slice src/main.rs --consumers         # Context for AI\n  \
+  loct findings --summary | jq '.health_score' # CI summary JSON\n  \
   loct dead --confidence high                # Find dead code\n  \
   loct report --html out.html --serve        # Interactive report\n  \
   loct doctor                                # Interactive fixes\n\n\

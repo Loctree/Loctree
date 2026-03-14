@@ -4,6 +4,59 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
+## [0.8.16] - 2026-03-11
+
+### Changed
+- Synced the public workspace with `loctree-suite` for `loctree_rs`, `loctree-mcp`, and `reports`.
+- Aligned the public root workspace contract to `0.8.16` and `rmcp 0.17` while keeping suite-only crates out of this repo.
+
+### Fixed
+- Updated the `audit --stdout` e2e expectation to match the current CLI contract, which rejects stdout mode for markdown audits.
+- Excluded vendored/demo-only files from Semgrep so the security gate reflects real public-runtime risk.
+
+## [0.8.15] - 2026-02-21
+
+### Added
+- **`follow` MCP tool** — 7th tool: pursue signals flagged by repo-view at field level. Scopes: dead exports, cycles, twins, hotspots.
+- **Claude Plugin structure** — `plugin/` directory with `.mcp.json`, skill, and marketplace metadata.
+- **`PERCEPTION.md`** — Perception-over-memory manifesto with supporting ADR, KPIs, and research in `docs/perception/`.
+- **Path traversal hardening** — `migrate_legacy_snapshot_to_cache` canonicalizes and validates paths within project root before filesystem read.
+
+### Changed
+- **Self-contained MCP server** — `loctree-mcp` no longer shells out to `loct` binary. All scanning and git operations use library API directly. Verified: `cargo install loctree-mcp` works standalone without `loct`.
+- **Watch subprocess removed** — background `loct scan --watch` replaced with on-demand staleness check via `is_snapshot_stale()`. Eliminates kernel panic risk from continuous I/O.
+- **Cache migration** — legacy `.loctree/{branch}@{commit}/` snapshots auto-migrate to global cache on load.
+- **Scope validation** — `dead` and `cycles` commands now pass all roots for accurate cross-root analysis.
+- **Branding sanitized** — removed personal emails, normalized to `Loctree Team`.
+
+### Fixed
+- Clippy `ptr_arg` warning in `snapshot.rs` (pre-existing).
+
+## [0.8.14] - 2026-02-14
+
+### Added
+- Global artifact cache via `LOCT_CACHE_DIR`; default artifact location moved from project-local `.loctree/` to OS cache directories (`~/Library/Caches/loctree/` on macOS, `~/.cache/loctree/` on Linux).
+- Deterministic project cache directories using SHA-256 project ID hashing.
+- Stable cache pointers via `latest/` symlink and `base_dir/*.json` pointer files for fast AI agent access.
+
+### Fixed
+- Artifact path rendering no longer prefixes absolute paths with `.//`.
+- `resolve_project()` in `loctree-mcp` now respects explicit `--project` without directory walk-up.
+- OXC `0.113` API adaptation for `Ident` comparison changes.
+- rmcp `0.15` API adaptation by adding the required `description` field to MCP `Implementation`.
+
+### Changed
+- Dependency updates: `oxc` `0.110 -> 0.113`, `rmcp` `0.12 -> 0.15`, `notify-debouncer-full` `0.6 -> 0.7`, and workspace `thiserror` alignment.
+- IDE docs updated with loctree-suite teaser banners for VSCode, Neovim, and LSP protocol pages.
+
+### Removed
+- Workspace and script references to deprecated `loctree-server` and `loctree-lsp` components.
+
+## [0.8.13] - 2026-02-13
+
+### Fixed
+- `scripts/version-bump.sh` now updates `[workspace.package] version` in root `Cargo.toml`.
+
 ## [0.8.12] - 2026-02-11
 
 ### Added
@@ -36,53 +89,9 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [0.8.9] - 2026-01-21
 
-### Added
-- add sys.modules monkey-patch detection
-- Add loctree-lsp crate and VSCode extension scaffold
-- Add health score gauge, audit tab & style unification
-- add clickable file links to Pipelines tab
-- v0.8.0 - auto-snapshot + dual license MIT/Apache-2.0
-- Add rmcp-mux launcher, configs, and documentation
-- Embedded blog system with markdown rendering
-- Add micro-animation to loct startup + rebrand to loct
-- add batch index CLI command
-
 ### Fixed
-- handle comments between #[tauri::command] and fn
+- handle comments between `#[tauri::command]` and `fn`
 - use libgit2 for upward git root discovery
-- clippy warnings in query.rs
-- respect suppressions in loct twins command
-- handle async def for route detection
-- multiline imports and __all__ duplicate detection
-- refactor Pipelines to vanilla JS for expand/filter/search
-- critical path rebasing + file existence validation
-- add Pipelines nav tab + remove memex from scripts and hooks
-- Add SLED_PATH env for multi-instance support
-- Use ASCII characters in deprecation warning
-
-## [0.8.9-dev] - 2026-01-20
-
-### Added
-- add sys.modules monkey-patch detection
-- Add loctree-lsp crate and VSCode extension scaffold
-- Add health score gauge, audit tab & style unification
-- add clickable file links to Pipelines tab
-- v0.8.0 - auto-snapshot + dual license MIT/Apache-2.0
-- Add rmcp-mux launcher, configs, and documentation
-- Embedded blog system with markdown rendering
-- Add micro-animation to loct startup + rebrand to loct
-- add batch index CLI command
-
-### Fixed
-- clippy warnings in query.rs
-- respect suppressions in loct twins command
-- handle async def for route detection
-- multiline imports and __all__ duplicate detection
-- refactor Pipelines to vanilla JS for expand/filter/search
-- critical path rebasing + file existence validation
-- add Pipelines nav tab + remove memex from scripts and hooks
-- Add SLED_PATH env for multi-instance support
-- Use ASCII characters in deprecation warning
 
 ## [0.8.8] - 2026-01-18
 
@@ -156,29 +165,6 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 - Use ASCII characters in deprecation warning
 
 ## [0.8.5-dev] - 2026-01-12
-
-### Added
-- add sys.modules monkey-patch detection
-- Add loctree-lsp crate and VSCode extension scaffold
-- Add health score gauge, audit tab & style unification
-- add clickable file links to Pipelines tab
-- v0.8.0 - auto-snapshot + dual license MIT/Apache-2.0
-- Add rmcp-mux launcher, configs, and documentation
-- Embedded blog system with markdown rendering
-- Add micro-animation to loct startup + rebrand to loct
-- add batch index CLI command
-
-### Fixed
-- respect suppressions in loct twins command
-- handle async def for route detection
-- multiline imports and __all__ duplicate detection
-- refactor Pipelines to vanilla JS for expand/filter/search
-- critical path rebasing + file existence validation
-- add Pipelines nav tab + remove memex from scripts and hooks
-- Add SLED_PATH env for multi-instance support
-- Use ASCII characters in deprecation warning
-
-## [0.8.4] - 2026-01-10
 
 ### Added
 - add sys.modules monkey-patch detection

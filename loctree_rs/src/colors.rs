@@ -3,7 +3,7 @@
 //! Provides ANSI color codes and semantic helpers for consistent
 //! colorized output across all loctree commands.
 //!
-//! Vibecrafted with AI Agents by VetCoders (c)2026 VetCoders
+//! VibeCrafted with AI Agents (c)2026 Loctree Team
 
 use std::io::IsTerminal;
 

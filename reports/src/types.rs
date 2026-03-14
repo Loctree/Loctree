@@ -34,6 +34,7 @@
 //! ```
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// Confidence level for dead export and handler detection.
 ///
@@ -813,6 +814,179 @@ pub struct DeadExport {
     pub is_test: bool,
 }
 
+/// Bundle distribution analysis derived from production source maps.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct DistReport {
+    /// Source directory that was compared against the bundle(s)
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(rename = "srcDir")]
+    pub src_dir: String,
+    /// Paths of source maps used for the analysis
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(rename = "sourceMapPaths")]
+    pub source_map_paths: Vec<String>,
+    /// Number of source maps included in the comparison
+    #[serde(rename = "sourceMaps")]
+    pub source_maps: usize,
+    /// Total exports discovered in source
+    #[serde(rename = "sourceExports")]
+    pub source_exports: usize,
+    /// Exports still present in at least one bundle
+    #[serde(rename = "bundledExports")]
+    pub bundled_exports: usize,
+    /// Exports fully tree-shaken out of the bundle surface
+    #[serde(rename = "deadExports")]
+    pub dead_exports: Vec<DistDeadExport>,
+    /// Human-friendly reduction percentage (legacy field kept for compatibility)
+    pub reduction: String,
+    /// True when every source map had symbol-level coverage
+    #[serde(rename = "symbolLevel")]
+    pub symbol_level: bool,
+    /// Analysis granularity: file, symbol, or mixed
+    #[serde(rename = "analysisLevel")]
+    pub analysis_level: DistAnalysisLevel,
+    /// Number of exports removed from the bundle surface
+    #[serde(rename = "treeShakenExports")]
+    pub tree_shaken_exports: usize,
+    /// Percentage of exports removed from the bundle surface
+    #[serde(rename = "treeShakenPct")]
+    pub tree_shaken_pct: usize,
+    /// Percentage of exports retained in at least one bundle
+    #[serde(rename = "coveragePct")]
+    pub coverage_pct: usize,
+    /// Per-file rollup for impacted files
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(rename = "impactedFiles")]
+    pub impacted_files: Vec<DistFileImpact>,
+    /// Candidate class counts derived from the chunk matrix
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[serde(rename = "candidateCounts")]
+    pub candidate_counts: BTreeMap<String, usize>,
+    /// Ranked runtime candidates derived from bundle/chunk coverage
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub candidates: Vec<DistCandidate>,
+}
+
+/// Per-file rollup for bundle distribution analysis.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct DistFileImpact {
+    /// Source file path
+    pub file: String,
+    /// Exports declared in the file
+    #[serde(rename = "sourceExports")]
+    pub source_exports: usize,
+    /// Exports retained in at least one bundle
+    #[serde(rename = "bundledExports")]
+    pub bundled_exports: usize,
+    /// Exports removed from the bundle surface
+    #[serde(rename = "treeShakenExports")]
+    pub tree_shaken_exports: usize,
+    /// Status: fully-shaken or partially-shaken
+    pub status: String,
+}
+
+/// Single export removed from all analyzed bundles.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct DistDeadExport {
+    /// File path containing the export
+    pub file: String,
+    /// Line number of the export
+    pub line: usize,
+    /// Exported symbol name
+    pub name: String,
+    /// Export kind (function, const, type, ...)
+    pub kind: String,
+}
+
+/// Ranked runtime candidate from the dist analyzer.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct DistCandidate {
+    /// File containing the export
+    pub file: String,
+    /// Line number of the export
+    pub line: usize,
+    /// Exported symbol name
+    pub name: String,
+    /// Export kind (function, const, type, ...)
+    pub kind: String,
+    /// Candidate class
+    #[serde(rename = "class")]
+    pub class_name: DistCandidateClass,
+    /// Confidence level
+    pub confidence: DistConfidence,
+    /// Ranking score from the analyzer
+    pub rank: usize,
+    /// Number of chunks where the export appears
+    #[serde(rename = "seenInChunks")]
+    pub seen_in_chunks: usize,
+    /// Number of boot chunks where the export appears
+    #[serde(rename = "bootChunks")]
+    pub boot_chunks: usize,
+    /// Number of feature chunks where the export appears
+    #[serde(rename = "featureChunks")]
+    pub feature_chunks: usize,
+    /// Human-readable chunk labels
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(rename = "chunkNames")]
+    pub chunk_names: Vec<String>,
+    /// Source modules that dynamically import this file
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(rename = "dynamicImporters")]
+    pub dynamic_importers: Vec<String>,
+    /// Source modules that statically import this file
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(rename = "staticImporters")]
+    pub static_importers: Vec<String>,
+    /// Analyzer notes
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
+}
+
+/// Candidate class emitted by the dist analyzer.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DistCandidateClass {
+    /// Export is absent from every analyzed chunk.
+    DeadInAllChunks,
+    /// Export only appears in boot-path chunks.
+    BootPathOnly,
+    /// Export only appears in feature chunks.
+    FeatureLocal,
+    /// Export is marked lazy in source but still shows up in boot chunks.
+    FakeLazy,
+    /// Export needs manual verification before deletion.
+    #[default]
+    VerifyFirst,
+}
+
+/// Confidence level for dist candidates.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DistConfidence {
+    /// Weak evidence; verify manually.
+    #[default]
+    Low,
+    /// Reasonable signal with some ambiguity.
+    Medium,
+    /// Strong signal with low ambiguity.
+    High,
+}
+
+/// Granularity of source-map coverage used by the distribution analysis.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DistAnalysisLevel {
+    /// File-level coverage only
+    #[default]
+    File,
+    /// Line-level coverage from source map mappings
+    Line,
+    /// Symbol-level coverage for every source map
+    Symbol,
+    /// Mixed file-level and symbol-level coverage
+    Mixed,
+}
+
 /// A gap in test coverage
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CoverageGap {
@@ -1141,6 +1315,9 @@ pub struct ReportSection {
     /// Dead exports (exported but never imported)
     #[serde(default)]
     pub dead_exports: Vec<DeadExport>,
+    /// Bundle distribution analysis (source-map-backed tree-shaking view)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dist: Option<DistReport>,
     /// Twins analysis (dead parrots, exact twins, barrel chaos)
     #[serde(default, alias = "twins_data")]
     pub twins: Option<TwinsData>,

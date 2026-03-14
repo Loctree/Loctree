@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "file": "client.js",
+  "sources": ["src/index.ts"],
+  "names": ["shared", "clientOnly"],
+  "mappings": "AAAAA,CAAAC"
+}

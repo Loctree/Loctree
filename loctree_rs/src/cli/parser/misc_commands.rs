@@ -6,8 +6,9 @@
 use std::path::PathBuf;
 
 use super::super::command::{
-    AuditOptions, Command, CrowdOptions, DistOptions, DoctorOptions, HealthOptions, HelpOptions,
-    LayoutmapOptions, PlanOptions, SuppressOptions, TagmapOptions, ZombieOptions,
+    AuditOptions, CacheAction, CacheOptions, Command, CrowdOptions, DistOptions, DoctorOptions,
+    HealthOptions, HelpOptions, LayoutmapOptions, PlanOptions, SuppressOptions, TagmapOptions,
+    ZombieOptions,
 };
 
 /// Parse `loct crowd [pattern] [options]` command - detect functional crowds.
@@ -244,24 +245,9 @@ EXAMPLES:
 pub(super) fn parse_dist_command(args: &[String]) -> Result<Command, String> {
     // Check for help flag first
     if args.iter().any(|a| a == "--help" || a == "-h") {
-        return Err("loct dist - Analyze bundle distribution using source maps
-
-USAGE:
-    loct dist --source-map <PATH> --src <DIR>
-
-DESCRIPTION:
-    Compares source code exports with bundled JavaScript to find truly dead exports.
-    Uses source maps to detect code that was completely tree-shaken out by the bundler.
-
-OPTIONS:
-    --source-map <PATH>    Path to source map file (e.g., dist/main.js.map)
-    --src <DIR>            Source directory to scan (e.g., src/)
-    --help, -h             Show this help message
-
-EXAMPLES:
-    loct dist --source-map dist/main.js.map --src src/
-    loct dist --source-map build/app.js.map --src app/src/"
-            .to_string());
+        if let Some(help) = Command::format_command_help("dist") {
+            return Err(help.to_string());
+        }
     }
 
     let mut opts = DistOptions::default();
@@ -274,7 +260,7 @@ EXAMPLES:
                 let value = args
                     .get(i + 1)
                     .ok_or_else(|| "--source-map requires a path".to_string())?;
-                opts.source_map = Some(PathBuf::from(value));
+                opts.source_maps.push(PathBuf::from(value));
                 i += 2;
             }
             "--src" => {
@@ -284,15 +270,22 @@ EXAMPLES:
                 opts.src = Some(PathBuf::from(value));
                 i += 2;
             }
+            "--report" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--report requires a file path".to_string())?;
+                opts.report_path = Some(PathBuf::from(value));
+                i += 2;
+            }
             _ if !arg.starts_with('-') => {
-                // Positional: first is source-map, second is src
-                if opts.source_map.is_none() {
-                    opts.source_map = Some(PathBuf::from(arg));
+                // Legacy positional shorthand: first is source-map input, second is src
+                if opts.source_maps.is_empty() {
+                    opts.source_maps.push(PathBuf::from(arg));
                 } else if opts.src.is_none() {
                     opts.src = Some(PathBuf::from(arg));
                 } else {
                     return Err(format!(
-                        "Unexpected argument '{}'. dist takes --source-map and --src.",
+                        "Unexpected argument '{}'. dist takes --src, repeated --source-map, and optional --report.",
                         arg
                     ));
                 }
@@ -304,16 +297,16 @@ EXAMPLES:
         }
     }
 
-    if opts.source_map.is_none() {
+    if opts.source_maps.is_empty() {
         return Err(
-            "'dist' command requires --source-map <path>. Usage: loct dist --source-map dist/main.js.map --src src/"
+            "'dist' command requires at least one --source-map <path>. Usage: loct dist --src src/ --source-map dist/ or loct dist --src src/ --source-map dist/main.js.map --source-map dist/chunks/"
                 .to_string(),
         );
     }
 
     if opts.src.is_none() {
         return Err(
-            "'dist' command requires --src <dir>. Usage: loct dist --source-map dist/main.js.map --src src/"
+            "'dist' command requires --src <dir>. Usage: loct dist --src src/ --source-map dist/main.js.map"
                 .to_string(),
         );
     }
@@ -476,20 +469,23 @@ pub(super) fn parse_audit_command(args: &[String]) -> Result<Command, String> {
             "--limit" => {
                 i += 1;
                 if i < args.len() {
-                    opts.limit = args[i]
-                        .parse()
-                        .map_err(|_| format!("Invalid limit value: {}", args[i]))?;
+                    opts.limit = Some(
+                        args[i]
+                            .parse()
+                            .map_err(|_| format!("Invalid limit value: {}", args[i]))?,
+                    );
                     i += 1;
                 } else {
                     return Err("--limit requires a numeric value".to_string());
                 }
             }
+            "--stdout" => {
+                return Err(
+                    "`loct audit` writes markdown reports to an artifact file only. Use `--json` for stdout-oriented automation.".to_string(),
+                );
+            }
             "--no-open" => {
                 opts.no_open = true;
-                i += 1;
-            }
-            "--stdout" => {
-                opts.stdout = true;
                 i += 1;
             }
             _ => {
@@ -657,6 +653,82 @@ pub(super) fn parse_plan_command(args: &[String]) -> Result<Command, String> {
     Ok(Command::Plan(opts))
 }
 
+/// Parse `loct cache <list|clean> [options]` command.
+pub(super) fn parse_cache_command(args: &[String]) -> Result<Command, String> {
+    if args.iter().any(|a| a == "--help" || a == "-h") || args.is_empty() {
+        return Err("loct cache - Manage snapshot cache
+
+USAGE:
+    loct cache <SUBCOMMAND> [OPTIONS]
+
+SUBCOMMANDS:
+    list                   List cached projects with sizes and ages
+    clean                  Remove cached snapshots
+
+CLEAN OPTIONS:
+    --project <DIR>        Only clean cache for a specific project
+    --older-than <DAYS>d   Only remove entries older than N days (e.g., 7d, 30d)
+    --force, -f            Skip confirmation prompt
+
+EXAMPLES:
+    loct cache list                        # Show all cached projects
+    loct cache clean                       # Remove all (with confirmation)
+    loct cache clean --force               # Remove all without asking
+    loct cache clean --project .           # Clean cache for current project
+    loct cache clean --older-than 30d      # Remove entries older than 30 days"
+            .to_string());
+    }
+
+    let sub = args[0].as_str();
+    let sub_args = &args[1..];
+
+    match sub {
+        "list" | "ls" => Ok(Command::Cache(CacheOptions {
+            action: CacheAction::List,
+        })),
+        "clean" | "rm" | "purge" => {
+            let mut project = None;
+            let mut older_than = None;
+            let mut force = false;
+            let mut i = 0;
+            while i < sub_args.len() {
+                match sub_args[i].as_str() {
+                    "--project" | "-p" => {
+                        i += 1;
+                        if i >= sub_args.len() {
+                            return Err("--project requires a directory argument".to_string());
+                        }
+                        project = Some(PathBuf::from(&sub_args[i]));
+                    }
+                    "--older-than" => {
+                        i += 1;
+                        if i >= sub_args.len() {
+                            return Err(
+                                "--older-than requires a duration (e.g., 7d, 30d)".to_string()
+                            );
+                        }
+                        older_than = Some(sub_args[i].clone());
+                    }
+                    "--force" | "-f" => force = true,
+                    other => return Err(format!("Unknown cache clean option: {}", other)),
+                }
+                i += 1;
+            }
+            Ok(Command::Cache(CacheOptions {
+                action: CacheAction::Clean {
+                    project,
+                    older_than,
+                    force,
+                },
+            }))
+        }
+        other => Err(format!(
+            "Unknown cache subcommand '{}'. Use 'list' or 'clean'.",
+            other
+        )),
+    }
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -668,7 +740,7 @@ mod tests {
     #[test]
     fn test_parse_crowd_command() {
         let args = vec!["message".into()];
-        let result = parse_crowd_command(&args).unwrap();
+        let result = parse_crowd_command(&args).expect("parse crowd command");
         if let Command::Crowd(opts) = result {
             assert_eq!(opts.pattern, Some("message".into()));
         } else {
@@ -679,7 +751,7 @@ mod tests {
     #[test]
     fn test_parse_crowd_auto_detect() {
         let args = vec!["--auto".into()];
-        let result = parse_crowd_command(&args).unwrap();
+        let result = parse_crowd_command(&args).expect("parse crowd auto command");
         if let Command::Crowd(opts) = result {
             assert!(opts.auto_detect);
             assert!(opts.pattern.is_none());
@@ -691,7 +763,7 @@ mod tests {
     #[test]
     fn test_parse_tagmap_command() {
         let args = vec!["patient".into()];
-        let result = parse_tagmap_command(&args).unwrap();
+        let result = parse_tagmap_command(&args).expect("parse tagmap command");
         if let Command::Tagmap(opts) = result {
             assert_eq!(opts.keyword, "patient");
         } else {
@@ -702,7 +774,7 @@ mod tests {
     #[test]
     fn test_parse_suppress_list() {
         let args = vec!["--list".into()];
-        let result = parse_suppress_command(&args).unwrap();
+        let result = parse_suppress_command(&args).expect("parse suppress command");
         if let Command::Suppress(opts) = result {
             assert!(opts.list);
         } else {
@@ -713,7 +785,7 @@ mod tests {
     #[test]
     fn test_parse_help_command() {
         let args = vec!["scan".into()];
-        let result = parse_help_command(&args).unwrap();
+        let result = parse_help_command(&args).expect("parse help command");
         if let Command::Help(opts) = result {
             assert_eq!(opts.command, Some("scan".into()));
         } else {
@@ -722,13 +794,69 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_cache_list() {
+        let args = vec!["list".into()];
+        let result = parse_cache_command(&args).expect("parse cache list command");
+        assert!(matches!(
+            result,
+            Command::Cache(CacheOptions {
+                action: CacheAction::List
+            })
+        ));
+    }
+
+    #[test]
+    fn test_parse_cache_clean() {
+        let args: Vec<String> = vec!["clean".into(), "--force".into()];
+        let result = parse_cache_command(&args).expect("parse cache clean command");
+        if let Command::Cache(CacheOptions {
+            action: CacheAction::Clean { force, .. },
+        }) = result
+        {
+            assert!(force);
+        } else {
+            panic!("Expected Cache Clean command");
+        }
+    }
+
+    #[test]
     fn test_parse_health_command() {
         let args = vec!["--include-tests".into()];
-        let result = parse_health_command(&args).unwrap();
+        let result = parse_health_command(&args).expect("parse health command");
         if let Command::Health(opts) = result {
             assert!(opts.include_tests);
         } else {
             panic!("Expected Health command");
         }
+    }
+
+    #[test]
+    fn test_parse_audit_command_defaults_to_full_report() {
+        let args: Vec<String> = vec![];
+        let result = parse_audit_command(&args).expect("parse audit command");
+        if let Command::Audit(opts) = result {
+            assert_eq!(opts.limit, None);
+            assert!(!opts.todos);
+        } else {
+            panic!("Expected Audit command");
+        }
+    }
+
+    #[test]
+    fn test_parse_audit_command_accepts_explicit_limit() {
+        let args = vec!["--limit".into(), "7".into()];
+        let result = parse_audit_command(&args).expect("parse audit command with limit");
+        if let Command::Audit(opts) = result {
+            assert_eq!(opts.limit, Some(7));
+        } else {
+            panic!("Expected Audit command");
+        }
+    }
+
+    #[test]
+    fn test_parse_audit_command_rejects_stdout() {
+        let args = vec!["--stdout".into()];
+        let err = parse_audit_command(&args).expect_err("audit should reject stdout");
+        assert!(err.contains("writes markdown reports to an artifact file only"));
     }
 }

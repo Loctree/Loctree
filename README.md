@@ -196,4 +196,4 @@ MIT OR Apache-2.0. See [LICENSE-MIT](LICENSE-MIT) and [LICENSE-APACHE](LICENSE-A
 
 ---
 
-VibeCrafted with AI Agents (c)2025-2026 VetCoders
+VibeCrafted with AI Agents (c)2026 Loctree Team

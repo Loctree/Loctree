@@ -41,6 +41,7 @@ pub const SNAPSHOT_FILE: &str = "snapshot.json";
 
 /// Environment variable to override the cache base directory.
 const LOCT_CACHE_DIR_ENV: &str = "LOCT_CACHE_DIR";
+const LEGACY_MIGRATION_MARKER: &str = ".snapshot-migrated-to-cache";
 
 /// Returns the global cache base directory for loctree artifacts.
 ///
@@ -133,7 +134,7 @@ fn normalize_root_dir(root: &Path) -> PathBuf {
 }
 
 fn has_project_marker(root: &Path) -> bool {
-    const MARKERS: [&str; 11] = [
+    const MARKERS: [&str; 16] = [
         "Cargo.toml",
         "package.json",
         "pyproject.toml",
@@ -145,11 +146,38 @@ fn has_project_marker(root: &Path) -> bool {
         "build.gradle",
         "build.gradle.kts",
         "composer.json",
+        // Python projects without pyproject.toml
+        "requirements.txt",
+        "setup.py",
+        "setup.cfg",
+        // Common project root markers
+        "Makefile",
+        "pubspec.yaml",
     ];
     MARKERS.iter().any(|marker| root.join(marker).is_file())
 }
 
-pub(crate) fn resolve_snapshot_root(root_list: &[PathBuf]) -> PathBuf {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum SnapshotRootStrategy {
+    Project,
+    Exact,
+}
+
+fn resolve_exact_snapshot_root(root_list: &[PathBuf]) -> PathBuf {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let root = root_list.first().cloned().unwrap_or(cwd);
+    let normalized = normalize_root_dir(&root);
+    normalized.canonicalize().unwrap_or(normalized)
+}
+
+pub(crate) fn resolve_snapshot_root_with_strategy(
+    root_list: &[PathBuf],
+    strategy: SnapshotRootStrategy,
+) -> PathBuf {
+    if strategy == SnapshotRootStrategy::Exact {
+        return resolve_exact_snapshot_root(root_list);
+    }
+
     let cwd = std::env::current_dir().unwrap_or_default();
     let roots: Vec<PathBuf> = if root_list.is_empty() {
         vec![cwd.clone()]
@@ -166,6 +194,17 @@ pub(crate) fn resolve_snapshot_root(root_list: &[PathBuf]) -> PathBuf {
         return roots[0].clone();
     }
 
+    // Prefer git root — the most reliable project boundary. Checked before
+    // find_loctree_root to avoid walking past .git into unrelated parent caches
+    // (e.g. a stale cache entry at "/" would trap all non-marker projects).
+    if let Some(first_git) = roots.first().and_then(|root| find_git_root(root))
+        && roots
+            .iter()
+            .all(|root| find_git_root(root).as_ref() == Some(&first_git))
+    {
+        return first_git;
+    }
+
     let mut loctree_roots: Vec<PathBuf> = roots
         .iter()
         .filter_map(|root| Snapshot::find_loctree_root(root))
@@ -176,15 +215,11 @@ pub(crate) fn resolve_snapshot_root(root_list: &[PathBuf]) -> PathBuf {
         return first;
     }
 
-    if let Some(first_git) = roots.first().and_then(|root| find_git_root(root))
-        && roots
-            .iter()
-            .all(|root| find_git_root(root).as_ref() == Some(&first_git))
-    {
-        return first_git;
-    }
-
     find_git_root(&cwd).unwrap_or(cwd)
+}
+
+pub(crate) fn resolve_snapshot_root(root_list: &[PathBuf]) -> PathBuf {
+    resolve_snapshot_root_with_strategy(root_list, SnapshotRootStrategy::Project)
 }
 
 #[derive(Clone, Debug)]
@@ -914,20 +949,150 @@ impl Snapshot {
         Self::git_context_for(&std::env::current_dir().unwrap_or_default())
     }
 
-    fn candidate_snapshot_paths(root: &Path) -> Vec<PathBuf> {
+    fn cache_snapshot_paths(root: &Path) -> Vec<PathBuf> {
         let cache_dir = project_cache_dir(root);
         let mut paths = Vec::new();
         if let Some(seg) = Self::git_context_for(root).scan_id {
-            // Primary: global cache with branch@sha
-            paths.push(cache_dir.join(&seg).join(SNAPSHOT_FILE));
-            // Legacy: project-local with branch@sha
-            paths.push(root.join(SNAPSHOT_DIR).join(seg).join(SNAPSHOT_FILE));
+            paths.push(cache_dir.join(seg).join(SNAPSHOT_FILE));
         }
-        // Legacy: project-local flat
-        paths.push(root.join(SNAPSHOT_DIR).join(SNAPSHOT_FILE));
-        // Global cache flat (no git context)
+        // Cache flat fallback (non-git or pre-git-layout artifacts)
         paths.push(cache_dir.join(SNAPSHOT_FILE));
         paths
+    }
+
+    fn legacy_snapshot_paths(root: &Path) -> Vec<PathBuf> {
+        let mut paths = Vec::new();
+        if let Some(seg) = Self::git_context_for(root).scan_id {
+            paths.push(root.join(SNAPSHOT_DIR).join(seg).join(SNAPSHOT_FILE));
+        }
+        paths.push(root.join(SNAPSHOT_DIR).join(SNAPSHOT_FILE));
+        paths
+    }
+
+    fn candidate_snapshot_paths(root: &Path) -> Vec<PathBuf> {
+        // Always prefer cache paths over legacy project-local paths.
+        let mut paths = Self::cache_snapshot_paths(root);
+        paths.extend(Self::legacy_snapshot_paths(root));
+        paths
+    }
+
+    fn first_existing_path(paths: &[PathBuf]) -> Option<PathBuf> {
+        paths.iter().find(|p| p.exists()).cloned()
+    }
+
+    fn newest_snapshot_path(snapshots: &mut [(PathBuf, std::time::SystemTime)]) -> Option<PathBuf> {
+        snapshots.sort_by(|a, b| b.1.cmp(&a.1));
+        snapshots.first().map(|(path, _)| path.clone())
+    }
+
+    fn warn_dual_snapshot_sources(cache_path: &Path, legacy_path: &Path) {
+        eprintln!(
+            "[loctree][warn] Both cache and legacy snapshots found; using cache: {} (legacy ignored: {})",
+            cache_path.display(),
+            legacy_path.display()
+        );
+    }
+
+    fn cache_path_for_legacy_snapshot(root: &Path, legacy_snapshot_path: &Path) -> PathBuf {
+        let legacy_base = root.join(SNAPSHOT_DIR);
+        let cache_dir = project_cache_dir(root);
+        if let Ok(relative) = legacy_snapshot_path.strip_prefix(&legacy_base)
+            && relative.ends_with(Path::new(SNAPSHOT_FILE))
+        {
+            return cache_dir.join(relative);
+        }
+        Self::snapshot_path(root)
+    }
+
+    fn write_legacy_migration_marker(
+        root: &Path,
+        legacy_snapshot_path: &Path,
+        cache_snapshot_path: &Path,
+    ) -> io::Result<()> {
+        let legacy_dir = root.join(SNAPSHOT_DIR);
+        fs::create_dir_all(&legacy_dir)?;
+        let marker_path = legacy_dir.join(LEGACY_MIGRATION_MARKER);
+        if marker_path.exists() {
+            return Ok(());
+        }
+        let marker_contents = format!(
+            "legacy_snapshot={}\ncache_snapshot={}\n",
+            legacy_snapshot_path.display(),
+            cache_snapshot_path.display()
+        );
+        write_atomic(&marker_path, marker_contents)
+    }
+
+    /// Reads the legacy snapshot file and copies it to the global cache directory.
+    ///
+    /// Safety: `legacy_snapshot_path` is validated via canonicalization and
+    /// `starts_with` to ensure it resides within `root`. The validated path
+    /// is rebuilt from its canonical components before any filesystem read.
+    fn migrate_legacy_snapshot_to_cache(
+        root: &Path,
+        legacy_snapshot_path: &Path,
+    ) -> io::Result<PathBuf> {
+        // Canonicalize both paths to resolve symlinks and ".." components
+        let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+        let canonical_legacy = legacy_snapshot_path
+            .canonicalize()
+            .unwrap_or_else(|_| legacy_snapshot_path.to_path_buf());
+
+        // Extract the relative portion within the project root
+        let relative = canonical_legacy
+            .strip_prefix(&canonical_root)
+            .map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    format!(
+                        "Legacy snapshot path escapes project root: {}",
+                        legacy_snapshot_path.display()
+                    ),
+                )
+            })?;
+
+        // Reject any path component that attempts traversal
+        for component in relative.components() {
+            if let std::path::Component::ParentDir = component {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "Path traversal detected in snapshot path",
+                ));
+            }
+        }
+
+        // canonical_legacy is already canonicalized and verified to be under canonical_root.
+        // Keep the validated path as-is to avoid rebuilding from potentially tainted pieces.
+        let validated_path = canonical_legacy;
+
+        let cache_snapshot_path = Self::cache_path_for_legacy_snapshot(root, &validated_path);
+        if cache_snapshot_path.exists() {
+            return Ok(cache_snapshot_path);
+        }
+
+        // nosemgrep:rust.actix.path-traversal.tainted-path.tainted-path -- SAFETY: validated_path is canonicalized and bounded to canonical_root via strip_prefix guard above
+        let bytes = fs::read(&validated_path)?;
+        if let Some(parent) = cache_snapshot_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        write_atomic(&cache_snapshot_path, bytes)?;
+
+        if let Err(err) =
+            Self::write_legacy_migration_marker(root, legacy_snapshot_path, &cache_snapshot_path)
+        {
+            eprintln!(
+                "[loctree][warn] Snapshot migrated but failed to write migration marker: {}",
+                err
+            );
+        }
+
+        eprintln!(
+            "[loctree][info] Migrated legacy snapshot to cache: {} -> {}",
+            legacy_snapshot_path.display(),
+            cache_snapshot_path.display()
+        );
+
+        Ok(cache_snapshot_path)
     }
 
     /// Get the snapshot file path for a given root (writes go here).
@@ -1041,8 +1206,12 @@ impl Snapshot {
     /// A directory is considered a root if it has a `.loctree/` config dir
     /// (user-editable files like config.toml, suppressions.toml) OR if its
     /// global cache directory contains at least one snapshot.
+    ///
+    /// Stops at git boundaries: once we pass a `.git` directory without finding
+    /// a loctree root, we don't continue into unrelated parent directories.
     pub fn find_loctree_root(start: &Path) -> Option<PathBuf> {
         let mut current = start.canonicalize().ok()?;
+        let mut passed_git = false;
         loop {
             // Check for .loctree config dir (config.toml, suppressions.toml, .loctreeignore)
             if current.join(SNAPSHOT_DIR).exists() {
@@ -1052,6 +1221,14 @@ impl Snapshot {
             let cache = project_cache_dir(&current);
             if cache.is_dir() && Self::cache_has_snapshot(&cache) {
                 return Some(current);
+            }
+            // Track git boundaries — don't walk past a .git into unrelated parents
+            if current.join(".git").exists() {
+                if passed_git {
+                    // Already passed one git root, don't walk into another project
+                    return None;
+                }
+                passed_git = true;
             }
             match current.parent() {
                 Some(parent) if parent != current => current = parent.to_path_buf(),
@@ -1147,28 +1324,47 @@ impl Snapshot {
     }
 
     /// Find latest snapshot starting from a given root directory.
-    /// Searches both global cache and legacy project-local `.loctree/` directory.
+    /// Prefers global cache as source of truth and falls back to legacy `.loctree/` only if needed.
     pub fn find_latest_snapshot_in(root: &Path) -> Result<PathBuf, String> {
-        let mut snapshots: Vec<(PathBuf, std::time::SystemTime)> = Vec::new();
-
         let effective_root =
             Self::find_loctree_root(root).unwrap_or_else(|| normalize_root_dir(root));
 
+        let mut cache_snapshots: Vec<(PathBuf, std::time::SystemTime)> = Vec::new();
+        let mut legacy_snapshots: Vec<(PathBuf, std::time::SystemTime)> = Vec::new();
+
         // Search global cache directory for this project (effective root, not CWD)
         let cache_dir = project_cache_dir(&effective_root);
-        Self::collect_snapshots_from_dir(&cache_dir, &mut snapshots);
+        Self::collect_snapshots_from_dir(&cache_dir, &mut cache_snapshots);
 
         // Search legacy project-local .loctree/ directory
         let legacy_dir = effective_root.join(SNAPSHOT_DIR);
-        Self::collect_snapshots_from_dir(&legacy_dir, &mut snapshots);
+        Self::collect_snapshots_from_dir(&legacy_dir, &mut legacy_snapshots);
 
-        if snapshots.is_empty() {
-            return Err("No snapshot found. Run `loct scan` first to create one.".to_string());
+        let cache_latest = Self::newest_snapshot_path(&mut cache_snapshots);
+        let legacy_latest = Self::newest_snapshot_path(&mut legacy_snapshots);
+
+        match (cache_latest, legacy_latest) {
+            (Some(cache_path), Some(legacy_path)) => {
+                Self::warn_dual_snapshot_sources(&cache_path, &legacy_path);
+                Ok(cache_path)
+            }
+            (Some(cache_path), None) => Ok(cache_path),
+            (None, Some(legacy_path)) => {
+                match Self::migrate_legacy_snapshot_to_cache(&effective_root, &legacy_path) {
+                    Ok(migrated) => Ok(migrated),
+                    Err(err) => {
+                        eprintln!(
+                            "[loctree][warn] Failed to migrate legacy snapshot to cache, using legacy path: {}",
+                            err
+                        );
+                        Ok(legacy_path)
+                    }
+                }
+            }
+            (None, None) => {
+                Err("No snapshot found. Run `loct scan` first to create one.".to_string())
+            }
         }
-
-        // Sort by mtime (newest first) and return the most recent
-        snapshots.sort_by(|a, b| b.1.cmp(&a.1));
-        Ok(snapshots.into_iter().next().unwrap().0)
     }
 
     /// Collect all snapshot.json files from a directory (flat + subdirs).
@@ -1199,36 +1395,50 @@ impl Snapshot {
         }
     }
 
-    /// Save snapshot to disk
-    pub fn save(&self, root: &Path) -> io::Result<()> {
-        // If a snapshot already exists for the same branch/commit AND worktree is clean,
-        // skip rewriting (no changes since last commit = same code).
-        // But if worktree is dirty, ALWAYS save fresh snapshot (user is actively working).
-        if let (Some(commit), Some(branch), Ok(existing)) = (
-            self.metadata.git_commit.as_ref(),
-            self.metadata.git_branch.as_ref(),
-            Self::load(root),
-        ) && existing.metadata.git_commit.as_ref() == Some(commit)
-            && existing.metadata.git_branch.as_ref() == Some(branch)
-        {
-            let mut existing_roots = existing.metadata.roots.clone();
-            let mut current_roots = self.metadata.roots.clone();
-            existing_roots.sort();
-            current_roots.sort();
-            let same_roots = existing_roots == current_roots;
-            let dirty = is_git_dirty(root).unwrap_or(false);
-            if !dirty && same_roots {
-                // Clean worktree + same commit = skip (nothing changed)
-                crate::progress::info(&format!(
-                    "Snapshot {}@{} up-to-date, skipping",
-                    branch,
-                    &commit[..7.min(commit.len())]
-                ));
-                return Ok(());
+    /// Check if the git HEAD has moved since this snapshot was created.
+    ///
+    /// This is a lightweight check (commit hash comparison only).
+    /// Returns `false` for non-git directories.
+    pub fn is_commit_stale(&self, root: &Path) -> bool {
+        if let Some(snapshot_commit) = &self.metadata.git_commit {
+            if let Ok(repo) = crate::git::GitRepo::discover(root) {
+                if let Ok(current_commit) = repo.head_commit() {
+                    // Snapshot stores short hash, head_commit() returns full —
+                    // prefix comparison handles both directions.
+                    let is_same = current_commit.starts_with(snapshot_commit)
+                        || snapshot_commit.starts_with(&current_commit);
+                    return !is_same;
+                }
             }
-            // Dirty worktree = continue and save fresh snapshot
         }
+        false
+    }
 
+    /// Check if this snapshot is stale relative to the current repository state.
+    ///
+    /// A snapshot is considered stale if:
+    /// - Git HEAD has moved since the snapshot was created (commit mismatch)
+    /// - The worktree has uncommitted changes (dirty worktree)
+    ///
+    /// Use `is_commit_stale()` for a cheaper check that ignores dirty worktree
+    /// (suitable for CLI commands where rescanning on every dirty state is too aggressive).
+    ///
+    /// Returns `false` for non-git directories (no staleness concept without VCS).
+    pub fn is_stale(&self, root: &Path) -> bool {
+        if self.is_commit_stale(root) {
+            return true;
+        }
+        // Check dirty worktree: uncommitted changes mean snapshot may not
+        // reflect the files on disk (the common refactoring scenario).
+        is_git_dirty(root).unwrap_or(false)
+    }
+
+    /// Save snapshot to disk.
+    ///
+    /// Always writes — the previous "skip if same commit" optimization was removed
+    /// because it caused stale snapshots to persist through refactoring workflows
+    /// (the core use case for loctree). Atomic writes keep this fast enough.
+    pub fn save(&self, root: &Path) -> io::Result<()> {
         let snapshot_path = Self::snapshot_path(root);
         if let Some(dir) = snapshot_path.parent() {
             fs::create_dir_all(dir)?;
@@ -1247,17 +1457,30 @@ impl Snapshot {
 
     /// Load snapshot from disk (used by VS2 slice module)
     pub fn load(root: &Path) -> io::Result<Self> {
-        let mut snapshot_path = None;
-        for candidate in Self::candidate_snapshot_paths(root) {
-            if candidate.exists() {
-                snapshot_path = Some(candidate);
-                break;
-            }
-        }
+        let cache_candidates = Self::cache_snapshot_paths(root);
+        let legacy_candidates = Self::legacy_snapshot_paths(root);
+        let cache_snapshot = Self::first_existing_path(&cache_candidates);
+        let legacy_snapshot = Self::first_existing_path(&legacy_candidates);
 
-        let snapshot_path = match snapshot_path {
-            Some(p) => p,
-            None => {
+        let snapshot_path = match (cache_snapshot, legacy_snapshot) {
+            (Some(cache_path), Some(legacy_path)) => {
+                Self::warn_dual_snapshot_sources(&cache_path, &legacy_path);
+                cache_path
+            }
+            (Some(cache_path), None) => cache_path,
+            (None, Some(legacy_path)) => {
+                match Self::migrate_legacy_snapshot_to_cache(root, &legacy_path) {
+                    Ok(migrated) => migrated,
+                    Err(err) => {
+                        eprintln!(
+                            "[loctree][warn] Failed to migrate legacy snapshot to cache, using legacy path: {}",
+                            err
+                        );
+                        legacy_path
+                    }
+                }
+            }
+            (None, None) => {
                 let primary = Self::snapshot_path(root);
                 return Err(io::Error::new(
                     io::ErrorKind::NotFound,
@@ -1410,7 +1633,9 @@ impl Snapshot {
 }
 
 /// Best-effort check for uncommitted changes in the working tree
-fn is_git_dirty(root: &Path) -> Option<bool> {
+/// Check if the git worktree has uncommitted changes.
+/// Returns `Some(true)` if dirty, `Some(false)` if clean, `None` if not a git repo.
+pub fn is_git_dirty(root: &Path) -> Option<bool> {
     let output = Command::new("git")
         .arg("status")
         .arg("--porcelain")
@@ -1431,6 +1656,20 @@ pub fn run_init_with_options(
     parsed: &ParsedArgs,
     quiet_summary: bool,
 ) -> io::Result<()> {
+    run_init_with_options_for_strategy(
+        root_list,
+        parsed,
+        quiet_summary,
+        SnapshotRootStrategy::Project,
+    )
+}
+
+pub(crate) fn run_init_with_options_for_strategy(
+    root_list: &[PathBuf],
+    parsed: &ParsedArgs,
+    quiet_summary: bool,
+    snapshot_strategy: SnapshotRootStrategy,
+) -> io::Result<()> {
     use crate::analyzer::coverage::{compute_command_gaps, normalize_cmd_name};
     use crate::analyzer::root_scan::{ScanConfig, scan_roots};
     use crate::analyzer::runner::default_analyzer_exts;
@@ -1442,7 +1681,7 @@ pub fn run_init_with_options(
 
     // Snapshot root defaults to the first provided root (common UX: keep artifacts near target),
     // falling back to CWD if multiple roots are provided.
-    let snapshot_root = resolve_snapshot_root(root_list);
+    let snapshot_root = resolve_snapshot_root_with_strategy(root_list, snapshot_strategy);
 
     // Validate at least one root was specified
     if root_list.is_empty() {
@@ -1452,11 +1691,24 @@ pub fn run_init_with_options(
         ));
     }
 
-    // Try to load existing snapshot for incremental scanning
-    let cached_analyses: Option<HashMap<String, FileAnalysis>> =
-        if !parsed.full_scan && Snapshot::exists(&snapshot_root) {
-            match Snapshot::load(&snapshot_root) {
-                Ok(old_snapshot) => {
+    // Try to load existing snapshot for incremental scanning.
+    // Only reuse cached analyses if the old snapshot is from the same git branch —
+    // cross-branch cache reuse can contaminate results (different file contents,
+    // same mtimes after branch switch).
+    let cached_analyses: Option<HashMap<String, FileAnalysis>> = if !parsed.full_scan
+        && Snapshot::exists(&snapshot_root)
+    {
+        match Snapshot::load(&snapshot_root) {
+            Ok(old_snapshot) => {
+                // Validate git context: only reuse cache from same branch.
+                // After branch switch, files may differ despite same mtimes.
+                let current_ctx = Snapshot::git_context_for(&snapshot_root);
+                let same_branch = match (&old_snapshot.metadata.git_branch, &current_ctx.branch) {
+                    (Some(old_b), Some(cur_b)) => old_b == cur_b,
+                    (None, None) => true, // Non-git: always reuse
+                    _ => false,
+                };
+                if same_branch {
                     if parsed.verbose {
                         eprintln!(
                             "[loctree][incremental] Loaded existing snapshot ({} files cached)",
@@ -1464,20 +1716,30 @@ pub fn run_init_with_options(
                         );
                     }
                     Some(old_snapshot.cached_analyses())
-                }
-                Err(e) => {
+                } else {
                     if parsed.verbose {
                         eprintln!(
-                            "[loctree][warn] Could not load snapshot for incremental: {}",
-                            e
+                            "[loctree][incremental] Branch changed ({} → {}), full rescan",
+                            old_snapshot.metadata.git_branch.as_deref().unwrap_or("?"),
+                            current_ctx.branch.as_deref().unwrap_or("?"),
                         );
                     }
                     None
                 }
             }
-        } else {
-            None
-        };
+            Err(e) => {
+                if parsed.verbose {
+                    eprintln!(
+                        "[loctree][warn] Could not load snapshot for incremental: {}",
+                        e
+                    );
+                }
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     // Log scan mode for clarity (especially in CI)
     let scan_mode = if parsed.full_scan {
@@ -1837,6 +2099,7 @@ pub fn run_init_with_options(
             &scan_results,
             &parsed,
             Some(&snapshot.metadata),
+            None,
         ) {
             Ok(paths) => {
                 artifacts_spinner.finish_clear();
@@ -1875,13 +2138,16 @@ pub(crate) fn write_auto_artifacts(
     scan_results: &crate::analyzer::root_scan::ScanResults,
     parsed: &ParsedArgs,
     metadata_override: Option<&SnapshotMetadata>,
+    dist: Option<crate::analyzer::dist::DistResult>,
 ) -> io::Result<Vec<String>> {
     use crate::analyzer::coverage::{
         CommandUsage, compute_command_gaps_with_confidence, compute_unregistered_handlers,
     };
     use crate::analyzer::cycles::find_cycles_with_lazy;
     use crate::analyzer::dead_parrots::find_dead_exports;
-    use crate::analyzer::output::{RootArtifacts, process_root_context, write_report};
+    use crate::analyzer::output::{
+        RootArtifacts, attach_dist_to_sections, process_root_context, write_report,
+    };
     use crate::analyzer::pipelines::build_pipeline_summary;
     use crate::analyzer::sarif::{SarifInputs, generate_sarif_string};
     use crate::analyzer::scan::opt_globset;
@@ -2001,14 +2267,22 @@ pub(crate) fn write_auto_artifacts(
         }
     }
 
+    if let Some(ref dist_result) = dist {
+        attach_dist_to_sections(
+            &mut report_sections,
+            dist_result.clone(),
+            Path::new(&dist_result.src_dir),
+        );
+    }
+
     write_report(&report_path, &report_sections, parsed.verbose)?;
-    created.push(format!(
-        "./{}",
+    created.push(
         report_path
-            .strip_prefix(snapshot_root)
+            .strip_prefix(&loctree_dir)
             .unwrap_or(&report_path)
             .display()
-    ));
+            .to_string(),
+    );
 
     let all_graph_edges: Vec<_> = scan_results
         .contexts
@@ -2024,13 +2298,13 @@ pub(crate) fn write_auto_artifacts(
         }))
         .map_err(io::Error::other)?,
     )?;
-    created.push(format!(
-        "./{}",
+    created.push(
         circular_json_path
-            .strip_prefix(snapshot_root)
+            .strip_prefix(&loctree_dir)
             .unwrap_or(&circular_json_path)
             .display()
-    ));
+            .to_string(),
+    );
 
     let race_items: Vec<_> = scan_results
         .global_analyses
@@ -2052,13 +2326,13 @@ pub(crate) fn write_auto_artifacts(
         &races_json_path,
         serde_json::to_string_pretty(&race_items).map_err(io::Error::other)?,
     )?;
-    created.push(format!(
-        "./{}",
+    created.push(
         races_json_path
-            .strip_prefix(snapshot_root)
+            .strip_prefix(&loctree_dir)
             .unwrap_or(&races_json_path)
             .display()
-    ));
+            .to_string(),
+    );
 
     let mut languages: Vec<String> = scan_results
         .contexts
@@ -2111,13 +2385,13 @@ pub(crate) fn write_auto_artifacts(
         &analysis_json_path,
         serde_json::to_string_pretty(&bundle).map_err(io::Error::other)?,
     )?;
-    created.push(format!(
-        "./{}",
+    created.push(
         analysis_json_path
-            .strip_prefix(snapshot_root)
+            .strip_prefix(&loctree_dir)
             .unwrap_or(&analysis_json_path)
             .display()
-    ));
+            .to_string(),
+    );
 
     // Generate SARIF report for CI integration
     let all_ranked_dups: Vec<_> = scan_results
@@ -2180,13 +2454,13 @@ pub(crate) fn write_auto_artifacts(
     })
     .map_err(|err| io::Error::other(format!("Failed to serialize SARIF: {err}")))?;
     write_atomic(&sarif_path, sarif_content)?;
-    created.push(format!(
-        "./{}",
+    created.push(
         sarif_path
-            .strip_prefix(snapshot_root)
+            .strip_prefix(&loctree_dir)
             .unwrap_or(&sarif_path)
             .display()
-    ));
+            .to_string(),
+    );
 
     // Save dead exports to standalone JSON for easy access
     let dead_json_path = loctree_dir.join("dead.json");
@@ -2206,13 +2480,13 @@ pub(crate) fn write_auto_artifacts(
         &dead_json_path,
         serde_json::to_string_pretty(&dead_json).map_err(io::Error::other)?,
     )?;
-    created.push(format!(
-        "./{}",
+    created.push(
         dead_json_path
-            .strip_prefix(snapshot_root)
+            .strip_prefix(&loctree_dir)
             .unwrap_or(&dead_json_path)
             .display()
-    ));
+            .to_string(),
+    );
 
     // Save command handlers coverage to standalone JSON
     let handlers_json_path = loctree_dir.join("handlers.json");
@@ -2263,13 +2537,13 @@ pub(crate) fn write_auto_artifacts(
         &handlers_json_path,
         serde_json::to_string_pretty(&handlers_json).map_err(io::Error::other)?,
     )?;
-    created.push(format!(
-        "./{}",
+    created.push(
         handlers_json_path
-            .strip_prefix(snapshot_root)
+            .strip_prefix(&loctree_dir)
             .unwrap_or(&handlers_json_path)
             .display()
-    ));
+            .to_string(),
+    );
 
     // Save findings.json - consolidated issue report
     let findings_json_path = loctree_dir.join("findings.json");
@@ -2283,16 +2557,17 @@ pub(crate) fn write_auto_artifacts(
         scan_results,
         &minimal_snapshot,
         findings_config,
+        dist.clone(),
     );
     let findings_json = findings.to_json().map_err(io::Error::other)?;
     write_atomic(&findings_json_path, &findings_json)?;
-    created.push(format!(
-        "./{}",
+    created.push(
         findings_json_path
-            .strip_prefix(snapshot_root)
+            .strip_prefix(&loctree_dir)
             .unwrap_or(&findings_json_path)
             .display()
-    ));
+            .to_string(),
+    );
 
     // Save agent.json - AI-optimized bundle (used by CI and agent tooling)
     let agent_json_path = loctree_dir.join("agent.json");
@@ -2304,13 +2579,13 @@ pub(crate) fn write_auto_artifacts(
     );
     let agent_json = serde_json::to_vec_pretty(&agent_report).map_err(io::Error::other)?;
     write_atomic(&agent_json_path, &agent_json)?;
-    created.push(format!(
-        "./{}",
+    created.push(
         agent_json_path
-            .strip_prefix(snapshot_root)
+            .strip_prefix(&loctree_dir)
             .unwrap_or(&agent_json_path)
             .display()
-    ));
+            .to_string(),
+    );
 
     // Save manifest.json - index of artifacts for AI agents
     let manifest_json_path = loctree_dir.join("manifest.json");
@@ -2320,16 +2595,17 @@ pub(crate) fn write_auto_artifacts(
         &minimal_snapshot,
         findings_size_kb,
         agent_size_kb,
+        dist.as_ref(),
     );
     let manifest_json = manifest.to_json().map_err(io::Error::other)?;
     write_atomic(&manifest_json_path, &manifest_json)?;
-    created.push(format!(
-        "./{}",
+    created.push(
         manifest_json_path
-            .strip_prefix(snapshot_root)
+            .strip_prefix(&loctree_dir)
             .unwrap_or(&manifest_json_path)
             .display()
-    ));
+            .to_string(),
+    );
 
     // Now that the full artifact set exists, refresh stable pointers (base_dir/*.json + base_dir/latest/).
     // Snapshot::save() runs this before auto artifacts are generated, so we do it again here.
@@ -2695,6 +2971,7 @@ mod tests {
     fn test_find_latest_snapshot_picks_newest_by_mtime() {
         let tmp = TempDir::new().expect("create temp dir");
         let loctree_dir = tmp.path().join(SNAPSHOT_DIR);
+        let _cleanup = DirGuard::new(project_cache_dir(tmp.path()));
 
         // Create two branch@sha subdirectories with snapshots
         let old_dir = loctree_dir.join("main@old123");
@@ -2768,6 +3045,7 @@ mod tests {
     fn test_find_latest_snapshot_legacy_path() {
         let tmp = TempDir::new().expect("create temp dir");
         let loctree_dir = tmp.path().join(SNAPSHOT_DIR);
+        let _cleanup = DirGuard::new(project_cache_dir(tmp.path()));
 
         // Create legacy snapshot at .loctree/snapshot.json (not in subdirectory)
         std::fs::create_dir_all(&loctree_dir).expect("create .loctree dir");
@@ -2781,10 +3059,16 @@ mod tests {
         let result = Snapshot::find_latest_snapshot_in(tmp.path());
 
         assert!(result.is_ok());
-        // Compare canonicalized paths to handle /private/var vs /var on macOS
+        // Legacy path should be migrated to cache and returned from there.
         let found = result.unwrap().canonicalize().unwrap_or_default();
-        let expected = legacy_path.canonicalize().unwrap_or_default();
+        let expected = Snapshot::snapshot_path(tmp.path())
+            .canonicalize()
+            .unwrap_or_default();
         assert_eq!(found, expected);
+        assert!(
+            legacy_path.exists(),
+            "legacy source remains for compatibility"
+        );
     }
 
     #[test]
@@ -2807,6 +3091,464 @@ mod tests {
         // Compare canonicalized paths to handle /private/var vs /var on macOS
         let found = found.canonicalize().unwrap_or(found);
         let expected = expected.canonicalize().unwrap_or(expected);
+        assert_eq!(found, expected);
+    }
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+    use serial_test::serial;
+    use sha2::{Digest, Sha256};
+    use std::ffi::OsString;
+    use std::process::Command;
+    use tempfile::TempDir;
+
+    const CACHE_ENV: &str = "LOCT_CACHE_DIR";
+
+    #[derive(Debug)]
+    struct EnvVarGuard {
+        key: &'static str,
+        original: Option<OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set_path(key: &'static str, value: &Path) -> Self {
+            let guard = Self {
+                key,
+                original: std::env::var_os(key),
+            };
+            set_env_var(key, value.as_os_str());
+            guard
+        }
+
+        fn clear(key: &'static str) -> Self {
+            let guard = Self {
+                key,
+                original: std::env::var_os(key),
+            };
+            remove_env_var(key);
+            guard
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match &self.original {
+                Some(value) => set_env_var(self.key, value),
+                None => remove_env_var(self.key),
+            }
+        }
+    }
+
+    #[allow(unused_unsafe)]
+    fn set_env_var<K: AsRef<std::ffi::OsStr>, V: AsRef<std::ffi::OsStr>>(key: K, value: V) {
+        unsafe {
+            std::env::set_var(key, value);
+        }
+    }
+
+    #[allow(unused_unsafe)]
+    fn remove_env_var<K: AsRef<std::ffi::OsStr>>(key: K) {
+        unsafe {
+            std::env::remove_var(key);
+        }
+    }
+
+    fn expected_project_id(root: &Path) -> String {
+        let canonical = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+        let mut hasher = Sha256::new();
+        hasher.update(canonical.to_string_lossy().as_bytes());
+        format!("{:x}", hasher.finalize())
+            .chars()
+            .take(16)
+            .collect::<String>()
+    }
+
+    fn display_artifact_path(artifact: &Path, loctree_dir: &Path) -> String {
+        artifact
+            .strip_prefix(loctree_dir)
+            .unwrap_or(artifact)
+            .display()
+            .to_string()
+    }
+
+    fn run_git(repo: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(repo)
+            .output()
+            .unwrap_or_else(|e| panic!("failed to run git {:?}: {e}", args));
+        assert!(
+            output.status.success(),
+            "git {:?} failed.\nstdout: {}\nstderr: {}",
+            args,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn git_stdout(repo: &Path, args: &[&str]) -> String {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(repo)
+            .output()
+            .unwrap_or_else(|e| panic!("failed to run git {:?}: {e}", args));
+        assert!(
+            output.status.success(),
+            "git {:?} failed.\nstdout: {}\nstderr: {}",
+            args,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    #[test]
+    #[serial]
+    fn cache_base_dir_uses_loct_cache_dir_override() {
+        let tmp = TempDir::new().expect("create temp dir");
+        let custom = tmp.path().join("custom-cache");
+        let _guard = EnvVarGuard::set_path(CACHE_ENV, &custom);
+
+        let actual = cache_base_dir();
+        assert_eq!(actual, custom);
+        assert!(actual.is_absolute(), "cache base should be absolute");
+    }
+
+    #[test]
+    #[serial]
+    fn cache_base_dir_defaults_to_platform_cache_dir() {
+        let _guard = EnvVarGuard::clear(CACHE_ENV);
+
+        let actual = cache_base_dir();
+        let expected = dirs::cache_dir()
+            .map(|path| path.join("loctree"))
+            .unwrap_or_else(|| PathBuf::from(SNAPSHOT_DIR));
+
+        assert_eq!(actual, expected);
+        if dirs::cache_dir().is_some() {
+            assert!(
+                actual.is_absolute(),
+                "platform cache dir should be absolute"
+            );
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn project_cache_dir_uses_expected_sha256_id() {
+        let _guard = EnvVarGuard::clear(CACHE_ENV);
+        let project = TempDir::new().expect("create temp project dir");
+
+        let expected_id = expected_project_id(project.path());
+        let actual = project_cache_dir(project.path());
+
+        assert_eq!(actual, cache_base_dir().join("projects").join(&expected_id));
+        assert_eq!(expected_id.len(), 16);
+        assert!(expected_id.chars().all(|ch| ch.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    #[serial]
+    fn project_cache_dir_honors_absolute_cache_override_structure() {
+        let tmp = TempDir::new().expect("create temp dir");
+        let custom_base = tmp.path().join("global-cache");
+        let _guard = EnvVarGuard::set_path(CACHE_ENV, &custom_base);
+        let project = TempDir::new().expect("create temp project dir");
+
+        let expected_id = expected_project_id(project.path());
+        let actual = project_cache_dir(project.path());
+        let expected = custom_base.join("projects").join(expected_id);
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    #[serial]
+    fn project_cache_dir_differs_for_different_roots() {
+        let _guard = EnvVarGuard::clear(CACHE_ENV);
+        let project_a = TempDir::new().expect("create temp dir A");
+        let project_b = TempDir::new().expect("create temp dir B");
+
+        let cache_a = project_cache_dir(project_a.path());
+        let cache_b = project_cache_dir(project_b.path());
+
+        let id_a = cache_a
+            .file_name()
+            .expect("cache dir should have id segment")
+            .to_string_lossy()
+            .to_string();
+        let id_b = cache_b
+            .file_name()
+            .expect("cache dir should have id segment")
+            .to_string_lossy()
+            .to_string();
+
+        assert_ne!(id_a, id_b);
+    }
+
+    #[test]
+    #[serial]
+    fn project_cache_dir_is_stable_for_same_root() {
+        let _guard = EnvVarGuard::clear(CACHE_ENV);
+        let project = TempDir::new().expect("create temp project dir");
+
+        let first = project_cache_dir(project.path());
+        let second = project_cache_dir(project.path());
+
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    #[serial]
+    fn project_cache_dir_normalizes_trailing_slash() {
+        let _guard = EnvVarGuard::clear(CACHE_ENV);
+        let project = TempDir::new().expect("create temp project dir");
+        let canonical = project
+            .path()
+            .canonicalize()
+            .expect("canonicalize project path");
+        let with_trailing_slash = PathBuf::from(format!("{}/", canonical.display()));
+
+        let without_slash = project_cache_dir(&canonical);
+        let with_slash = project_cache_dir(&with_trailing_slash);
+
+        assert_eq!(without_slash, with_slash);
+    }
+
+    #[test]
+    #[serial]
+    fn artifacts_dir_for_non_git_root_matches_project_cache_dir() {
+        let _guard = EnvVarGuard::clear(CACHE_ENV);
+        let project = TempDir::new().expect("create temp project dir");
+
+        let artifacts = Snapshot::artifacts_dir(project.path());
+        let cache = project_cache_dir(project.path());
+
+        assert_eq!(artifacts, cache);
+    }
+
+    #[test]
+    #[serial]
+    fn artifacts_dir_sanitizes_branch_in_scan_segment() {
+        let _guard = EnvVarGuard::clear(CACHE_ENV);
+        let repo = TempDir::new().expect("create temp repo");
+        let root = repo.path();
+        std::fs::write(root.join("README.md"), "init").expect("write seed file");
+
+        run_git(root, &["init"]);
+        run_git(root, &["config", "user.email", "test@example.com"]);
+        run_git(root, &["config", "user.name", "Test User"]);
+        run_git(root, &["add", "."]);
+        run_git(root, &["commit", "-m", "init"]);
+        run_git(root, &["checkout", "-b", "release/v0.8.13"]);
+
+        let commit = git_stdout(root, &["rev-parse", "--short", "HEAD"]);
+        let artifacts = Snapshot::artifacts_dir(root);
+        let scan_segment = artifacts
+            .file_name()
+            .expect("artifacts dir should end with scan segment")
+            .to_string_lossy()
+            .to_string();
+
+        assert_eq!(scan_segment, format!("release_v0.8.13@{commit}"));
+    }
+
+    #[test]
+    fn artifact_display_is_relative_without_dot_prefix() {
+        let loctree_dir = PathBuf::from("/tmp/cache/loctree/projects/abc/main@1234");
+        let artifact = loctree_dir.join("report.html");
+
+        let display = display_artifact_path(&artifact, &loctree_dir);
+
+        assert_eq!(display, "report.html");
+        assert!(!display.starts_with("./"));
+        assert!(!display.contains(".//"));
+        assert!(!Path::new(&display).is_absolute());
+    }
+
+    #[test]
+    fn artifact_display_falls_back_to_absolute_when_strip_prefix_fails() {
+        let loctree_dir = PathBuf::from("/tmp/cache/loctree/projects/abc/main@1234");
+        let artifact = PathBuf::from("/tmp/other/path/report.html");
+
+        let display = display_artifact_path(&artifact, &loctree_dir);
+
+        assert_eq!(display, artifact.display().to_string());
+        assert!(!display.starts_with("./"));
+        assert!(!display.contains(".//"));
+        assert!(Path::new(&display).is_absolute());
+    }
+
+    #[test]
+    #[serial]
+    fn resolve_snapshot_root_does_not_walk_up_past_explicit_project_marker() {
+        let _guard = EnvVarGuard::clear(CACHE_ENV);
+        let workspace = TempDir::new().expect("create temp workspace");
+        let subproject = workspace.path().join("apps/web");
+        std::fs::create_dir_all(&subproject).expect("create nested project");
+        std::fs::write(subproject.join("package.json"), "{}").expect("write package.json");
+
+        run_git(workspace.path(), &["init"]);
+
+        let resolved = resolve_snapshot_root(std::slice::from_ref(&subproject));
+        let expected = subproject.canonicalize().expect("canonicalize subproject");
+        let actual = resolved.canonicalize().expect("canonicalize resolved root");
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    #[serial]
+    fn resolve_snapshot_root_with_exact_strategy_keeps_requested_subtree() {
+        let _guard = EnvVarGuard::clear(CACHE_ENV);
+        let workspace = TempDir::new().expect("create temp workspace");
+        let src = workspace.path().join("apps/web/src");
+        std::fs::create_dir_all(&src).expect("create nested src dir");
+
+        run_git(workspace.path(), &["init"]);
+
+        let resolved = resolve_snapshot_root_with_strategy(
+            std::slice::from_ref(&src),
+            SnapshotRootStrategy::Exact,
+        );
+        let expected = src.canonicalize().expect("canonicalize src root");
+        assert_eq!(resolved, expected);
+    }
+
+    #[test]
+    #[serial]
+    fn load_prefers_cache_when_both_cache_and_legacy_exist() {
+        let cache_root = TempDir::new().expect("create temp cache dir");
+        let _guard = EnvVarGuard::set_path(CACHE_ENV, cache_root.path());
+        let project = TempDir::new().expect("create temp project dir");
+
+        let cache_path = Snapshot::snapshot_path(project.path());
+        std::fs::create_dir_all(
+            cache_path
+                .parent()
+                .expect("cache snapshot path must have parent"),
+        )
+        .expect("create cache snapshot parent");
+        let cache_snapshot = Snapshot::new(vec!["cache-source".to_string()]);
+        std::fs::write(
+            &cache_path,
+            serde_json::to_string_pretty(&cache_snapshot).expect("serialize cache snapshot"),
+        )
+        .expect("write cache snapshot");
+
+        let legacy_path = project.path().join(SNAPSHOT_DIR).join(SNAPSHOT_FILE);
+        std::fs::create_dir_all(
+            legacy_path
+                .parent()
+                .expect("legacy snapshot path must have parent"),
+        )
+        .expect("create legacy snapshot parent");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        let legacy_snapshot = Snapshot::new(vec!["legacy-source".to_string()]);
+        std::fs::write(
+            &legacy_path,
+            serde_json::to_string_pretty(&legacy_snapshot).expect("serialize legacy snapshot"),
+        )
+        .expect("write legacy snapshot");
+
+        let loaded = Snapshot::load(project.path()).expect("load snapshot");
+        assert_eq!(loaded.metadata.roots, vec!["cache-source".to_string()]);
+
+        let marker_path = project
+            .path()
+            .join(SNAPSHOT_DIR)
+            .join(LEGACY_MIGRATION_MARKER);
+        assert!(
+            !marker_path.exists(),
+            "marker should not be written when cache already exists"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn load_migrates_legacy_snapshot_to_cache_with_marker() {
+        let cache_root = TempDir::new().expect("create temp cache dir");
+        let _guard = EnvVarGuard::set_path(CACHE_ENV, cache_root.path());
+        let project = TempDir::new().expect("create temp project dir");
+
+        let legacy_path = project.path().join(SNAPSHOT_DIR).join(SNAPSHOT_FILE);
+        std::fs::create_dir_all(
+            legacy_path
+                .parent()
+                .expect("legacy snapshot path must have parent"),
+        )
+        .expect("create legacy snapshot parent");
+        let legacy_snapshot = Snapshot::new(vec!["legacy-source".to_string()]);
+        std::fs::write(
+            &legacy_path,
+            serde_json::to_string_pretty(&legacy_snapshot).expect("serialize legacy snapshot"),
+        )
+        .expect("write legacy snapshot");
+
+        let loaded = Snapshot::load(project.path()).expect("load migrated snapshot");
+        assert_eq!(loaded.metadata.roots, vec!["legacy-source".to_string()]);
+
+        let cache_path = Snapshot::snapshot_path(project.path());
+        assert!(cache_path.exists(), "cache snapshot should be created");
+
+        let marker_path = project
+            .path()
+            .join(SNAPSHOT_DIR)
+            .join(LEGACY_MIGRATION_MARKER);
+        assert!(marker_path.exists(), "migration marker should be created");
+        let marker = std::fs::read_to_string(&marker_path).expect("read migration marker");
+        assert!(marker.contains("legacy_snapshot="));
+        assert!(marker.contains("cache_snapshot="));
+
+        std::fs::remove_file(&legacy_path).expect("remove legacy snapshot");
+        let loaded_again = Snapshot::load(project.path()).expect("load from cache after migration");
+        assert_eq!(
+            loaded_again.metadata.roots,
+            vec!["legacy-source".to_string()]
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn find_latest_snapshot_prefers_cache_even_when_legacy_is_newer() {
+        let cache_root = TempDir::new().expect("create temp cache dir");
+        let _guard = EnvVarGuard::set_path(CACHE_ENV, cache_root.path());
+        let project = TempDir::new().expect("create temp project dir");
+
+        let cache_path = Snapshot::snapshot_path(project.path());
+        std::fs::create_dir_all(
+            cache_path
+                .parent()
+                .expect("cache snapshot path must have parent"),
+        )
+        .expect("create cache snapshot parent");
+        let cache_snapshot = Snapshot::new(vec!["cache-source".to_string()]);
+        std::fs::write(
+            &cache_path,
+            serde_json::to_string_pretty(&cache_snapshot).expect("serialize cache snapshot"),
+        )
+        .expect("write cache snapshot");
+
+        let legacy_path = project.path().join(SNAPSHOT_DIR).join(SNAPSHOT_FILE);
+        std::fs::create_dir_all(
+            legacy_path
+                .parent()
+                .expect("legacy snapshot path must have parent"),
+        )
+        .expect("create legacy snapshot parent");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        let legacy_snapshot = Snapshot::new(vec!["legacy-source".to_string()]);
+        std::fs::write(
+            &legacy_path,
+            serde_json::to_string_pretty(&legacy_snapshot).expect("serialize legacy snapshot"),
+        )
+        .expect("write legacy snapshot");
+
+        let found =
+            Snapshot::find_latest_snapshot_in(project.path()).expect("find latest snapshot");
+        let found = found.canonicalize().unwrap_or(found);
+        let expected = cache_path.canonicalize().unwrap_or(cache_path);
         assert_eq!(found, expected);
     }
 }

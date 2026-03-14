@@ -74,8 +74,24 @@ fn CoverageTable(
     medium_count: usize,
     low_count: usize,
 ) -> impl IntoView {
+    // State for severity filter
+    let (filter_severity, set_filter_severity) = signal::<Option<Severity>>(None);
+
+    // Filtered list based on severity
+    let filtered = move || {
+        if let Some(sev) = filter_severity.get() {
+            coverage_gaps
+                .iter()
+                .filter(|g| g.severity == sev)
+                .cloned()
+                .collect::<Vec<_>>()
+        } else {
+            coverage_gaps.clone()
+        }
+    };
+
     view! {
-        <div class="coverage-summary" data-coverage-default-filter="all">
+        <div class="coverage-summary">
             <p class="muted">
                 {format!(
                     "{} coverage gap{} found: {} critical, {} high, {} medium, {} low",
@@ -90,8 +106,9 @@ fn CoverageTable(
 
             <div class="filter-buttons" style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
                 <button
-                    class="filter-btn active"
-                    data-coverage-filter="all"
+                    class="filter-btn"
+                    class:active=move || filter_severity.get().is_none()
+                    on:click=move |_| set_filter_severity.set(None)
                 >
                     "All (" {total_count} ")"
                 </button>
@@ -99,7 +116,8 @@ fn CoverageTable(
                     view! {
                         <button
                             class="filter-btn severity-critical"
-                            data-coverage-filter="critical"
+                            class:active=move || filter_severity.get() == Some(Severity::Critical)
+                            on:click=move |_| set_filter_severity.set(Some(Severity::Critical))
                         >
                             "Critical (" {critical_count} ")"
                         </button>
@@ -111,7 +129,8 @@ fn CoverageTable(
                     view! {
                         <button
                             class="filter-btn severity-high"
-                            data-coverage-filter="high"
+                            class:active=move || filter_severity.get() == Some(Severity::High)
+                            on:click=move |_| set_filter_severity.set(Some(Severity::High))
                         >
                             "High (" {high_count} ")"
                         </button>
@@ -123,7 +142,8 @@ fn CoverageTable(
                     view! {
                         <button
                             class="filter-btn severity-medium"
-                            data-coverage-filter="medium"
+                            class:active=move || filter_severity.get() == Some(Severity::Medium)
+                            on:click=move |_| set_filter_severity.set(Some(Severity::Medium))
                         >
                             "Medium (" {medium_count} ")"
                         </button>
@@ -135,7 +155,8 @@ fn CoverageTable(
                     view! {
                         <button
                             class="filter-btn severity-low"
-                            data-coverage-filter="low"
+                            class:active=move || filter_severity.get() == Some(Severity::Low)
+                            on:click=move |_| set_filter_severity.set(Some(Severity::Low))
                         >
                             "Low (" {low_count} ")"
                         </button>
@@ -157,18 +178,12 @@ fn CoverageTable(
                 </tr>
             </thead>
             <tbody>
-                {coverage_gaps.into_iter().map(|gap| {
+                {move || filtered().into_iter().map(|gap| {
                     let severity_class = match gap.severity {
                         Severity::Critical => "severity-critical",
                         Severity::High => "severity-high",
                         Severity::Medium => "severity-medium",
                         Severity::Low => "severity-low",
-                    };
-                    let severity_slug = match gap.severity {
-                        Severity::Critical => "critical",
-                        Severity::High => "high",
-                        Severity::Medium => "medium",
-                        Severity::Low => "low",
                     };
 
                     let severity_text = match gap.severity {
@@ -186,7 +201,7 @@ fn CoverageTable(
                     };
 
                     view! {
-                        <tr class=severity_class data-coverage-severity=severity_slug>
+                        <tr class=severity_class>
                             <td class="symbol-cell">
                                 <code>{gap.target.clone()}</code>
                             </td>

@@ -221,4 +221,4 @@ Ready for production use on codebases up to 500k+ LOC.
 
 ---
 
-Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team
+VibeCrafted with AI Agents (c)2026 Loctree Team

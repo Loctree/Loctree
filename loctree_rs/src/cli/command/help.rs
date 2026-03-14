@@ -1,7 +1,6 @@
 //! Help text generation for CLI commands.
 //!
-//! Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team
-//! Co-Authored-By: Maciej <void@div0.space> & Klaudiusz <the1st@whoai.am>
+//! VibeCrafted with AI Agents (c)2026 Loctree Team
 
 use super::help_texts::*;
 use super::types::Command;
@@ -27,6 +26,7 @@ impl Command {
             Command::Info(_) => "info",
             Command::Lint(_) => "lint",
             Command::Report(_) => "report",
+            Command::Findings(_) => "findings",
             Command::Help(_) => "help",
             Command::Version => "version",
             Command::Query(_) => "query",
@@ -49,6 +49,7 @@ impl Command {
             Command::Audit(_) => "audit",
             Command::Doctor(_) => "doctor",
             Command::Plan(_) => "plan",
+            Command::Cache(_) => "cache",
         }
     }
 
@@ -70,7 +71,8 @@ impl Command {
             Command::Manifests(_) => "Show manifest summaries (package.json/Cargo.toml)",
             Command::Info(_) => "Show snapshot metadata and project info",
             Command::Lint(_) => "Structural lint/policy checks",
-            Command::Report(_) => "Generate HTML/JSON reports",
+            Command::Report(_) => "Generate HTML report + cached artifacts",
+            Command::Findings(_) => "Emit the canonical findings artifact for agents and CI",
             Command::Help(_) => "Show help for commands",
             Command::Version => "Show version information",
             Command::Query(_) => "Query snapshot data (who-imports, where-symbol, component-of)",
@@ -81,7 +83,7 @@ impl Command {
             Command::Twins(_) => "Show symbol registry and dead parrots (0 imports)",
             Command::Suppress(_) => "Manage false positive suppressions",
             Command::Routes(_) => "List backend/web routes (FastAPI/Flask)",
-            Command::Dist(_) => "Analyze bundle distribution using source maps",
+            Command::Dist(_) => "Verify tree-shaking from production source maps",
             Command::Coverage(_) => "Analyze test coverage gaps (structural coverage)",
             Command::Sniff(_) => "Sniff for code smells (twins + dead parrots + crowds)",
             Command::JqQuery(_) => "Query snapshot with jq-style filters (loct '.filter')",
@@ -94,6 +96,7 @@ impl Command {
             Command::Audit(_) => "Full audit (cycles + dead + twins + zombie + crowds)",
             Command::Doctor(_) => "Interactive diagnostics with actionable recommendations",
             Command::Plan(_) => "Generate architectural refactoring plan",
+            Command::Cache(_) => "Manage snapshot cache (list, clean)",
         }
     }
 
@@ -120,8 +123,8 @@ impl Command {
 
         help.push_str("OUTPUT (stdout, pipe-friendly):\n");
         help.push_str("  loct --for-ai         AI context bundle\n");
-        help.push_str("  loct --findings       All issues\n");
-        help.push_str("  loct --summary        Health score + counts only\n\n");
+        help.push_str("  loct findings         Full findings JSON\n");
+        help.push_str("  loct findings --summary Health score + counts only\n\n");
 
         help.push_str("ALIASES:\n");
         help.push_str("  loct h                = health (quick sanity check)\n");
@@ -151,8 +154,6 @@ impl Command {
         help.push_str("    --fresh          Force rescan even if snapshot exists\n");
         help.push_str("    --no-scan        Fail if no snapshot (don't auto-scan)\n");
         help.push_str("    --fail-stale     Fail if snapshot is stale (CI mode)\n");
-        help.push_str("    --findings       Output findings.json to stdout\n");
-        help.push_str("    --summary        Output summary only to stdout\n");
         help.push_str("    --py-root <path> Additional Python package root for imports\n");
         help.push_str("    --help           Show this help\n");
         help.push_str("    --version        Show version\n\n");
@@ -162,7 +163,13 @@ impl Command {
         help.push_str("  loct cycles           Circular imports\n");
         help.push_str("  loct twins            Dead parrots + duplicates\n");
         help.push_str("  loct health           Quick health check\n");
+        help.push_str("  loct findings         Full findings JSON\n");
+        help.push_str("  loct dist             Verify tree-shaking from source maps\n");
         help.push_str("  loct audit            Full codebase audit\n\n");
+
+        help.push_str("WORKFLOWS:\n");
+        help.push_str("  loct doctor           Triage findings with recommendations\n");
+        help.push_str("  loct report           Full HTML report + cached artifacts\n\n");
 
         help.push_str("INSTANT (<100ms):\n");
         help.push_str("  loct focus <dir>      Directory context\n");
@@ -175,7 +182,7 @@ impl Command {
         help.push_str("  loct impact <file>    What breaks if changed\n\n");
 
         help.push_str("MORE:\n");
-        help.push_str("  loct --help-full      All 27 commands\n");
+        help.push_str("  loct --help-full      All commands\n");
         help.push_str("  loct <cmd> --help     Per-command help\n");
         help.push_str("  loct --help-legacy    Deprecated flag migration\n");
 
@@ -202,6 +209,7 @@ impl Command {
             "info" => Some(INFO_HELP),
             "lint" => Some(LINT_HELP),
             "report" => Some(REPORT_HELP),
+            "findings" => Some(FINDINGS_HELP),
             "query" => Some(QUERY_HELP),
             "impact" => Some(IMPACT_HELP),
             "diff" => Some(DIFF_HELP),
@@ -253,6 +261,7 @@ impl Command {
             ("manifests", "Manifest summaries (package.json/Cargo.toml)"),
             ("coverage", "Test coverage gaps (structural)"),
             ("health", "Quick health check (cycles + dead + twins)"),
+            ("findings", "Full findings JSON or summary for pipes/CI"),
             ("slice <file>", "Context for a file (deps + consumers)"),
             ("impact <file>", "What breaks if you modify this file"),
             ("query <type>", "Graph queries (who-imports, where-symbol)"),
@@ -284,7 +293,7 @@ impl Command {
         let framework_cmds = [
             ("trace <handler>", "Trace Tauri handler end-to-end"),
             ("routes", "List FastAPI/Flask routes"),
-            ("dist", "Bundle analysis via source maps"),
+            ("dist", "Verify tree-shaking from one or more source maps"),
             ("layoutmap", "CSS z-index/position/grid analysis"),
         ];
         for (cmd, desc) in framework_cmds {
@@ -312,7 +321,8 @@ impl Command {
             ("scan", "Build/update snapshot (supports --watch)"),
             ("tree", "Directory tree with LOC counts"),
             ("find <pattern>", "Search symbols/files with regex"),
-            ("report", "Generate HTML/JSON reports"),
+            ("findings", "Emit findings JSON to stdout"),
+            ("report", "Generate HTML report + cached artifacts"),
             ("lint", "Structural lint and policy checks"),
         ];
         for (cmd, desc) in core_cmds {
@@ -357,6 +367,7 @@ impl Command {
         help.push_str("  # Quick analysis\n");
         help.push_str("  loct                       # Scan repo, create artifacts\n");
         help.push_str("  loct health                # Quick health check\n");
+        help.push_str("  loct findings --summary    # Summary JSON for CI\n");
         help.push_str("  loct hotspots              # Find hub files (47ms!)\n\n");
 
         help.push_str("  # Deep analysis\n");
@@ -366,6 +377,7 @@ impl Command {
 
         help.push_str("  # AI integration\n");
         help.push_str("  loct slice src/main.rs --json | claude\n");
+        help.push_str("  loct findings > findings.json\n");
         help.push_str("  loct --for-ai > context.json\n\n");
 
         help.push_str("  # CI integration\n");
@@ -392,6 +404,8 @@ impl Command {
         help.push_str("loct -A --entrypoints    -> loct lint --entrypoints\n");
         help.push_str("loct -A --symbol NAME    -> loct find --symbol NAME\n");
         help.push_str("loct -A --impact FILE    -> loct find --impact FILE\n");
+        help.push_str("loct --findings          -> loct findings\n");
+        help.push_str("loct --summary           -> loct findings --summary\n");
         help.push_str("loct --for-ai            -> loct auto --agent-json\n");
         help.push_str("loct slice PATH          -> loct slice PATH (unchanged)\n");
 
@@ -428,6 +442,7 @@ mod tests {
         let help = Command::format_help();
         assert!(help.contains("slice"));
         assert!(help.contains("find"));
+        assert!(help.contains("findings"));
     }
 
     #[test]
@@ -442,6 +457,8 @@ mod tests {
     fn test_command_specific_help_exists() {
         let tree_help = Command::format_command_help("tree").unwrap();
         assert!(tree_help.contains("loct tree"));
+        let findings_help = Command::format_command_help("findings").unwrap();
+        assert!(findings_help.contains("loct findings"));
         assert!(Command::format_command_help("unknown").is_none());
     }
 }

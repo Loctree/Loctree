@@ -57,9 +57,9 @@ pub enum Mode {
     Trace,
     /// AI-optimized JSON output with quick wins and slice references.
     ForAi,
-    /// Output findings.json to stdout (--findings flag)
+    /// Output the canonical findings artifact to stdout.
     Findings,
-    /// Output summary only to stdout (--summary flag)
+    /// Output findings summary only to stdout.
     Summary,
     /// Git awareness - temporal knowledge from repository history.
     Git(GitSubcommand),

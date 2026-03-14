@@ -19,7 +19,7 @@
 //! - `exports`: Export declaration handling
 //! - `calls`: Call expression and dynamic import handling
 //!
-//! Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team
+//! VibeCrafted with AI Agents (c)2026 Loctree Team
 
 mod calls;
 mod config;

@@ -1,12 +1,13 @@
-//! Parsers for output/reporting commands: report, info, lint, diff, memex, jq_query.
+//! Parsers for output/reporting commands: report, findings, info, lint, diff, memex, jq_query.
 //!
 //! These commands generate reports, output analysis results, and support different formats.
 
 use std::path::PathBuf;
 
 use super::super::command::{
-    Command, DiffOptions, GlobalOptions, HelpOptions, InfoOptions, InsightsOptions, JqQueryOptions,
-    LintOptions, ManifestsOptions, MemexOptions, ParsedCommand, PipelinesOptions, ReportOptions,
+    Command, DiffOptions, FindingsOptions, GlobalOptions, HelpOptions, InfoOptions,
+    InsightsOptions, JqQueryOptions, LintOptions, ManifestsOptions, MemexOptions, ParsedCommand,
+    PipelinesOptions, ReportOptions,
 };
 use super::helpers::is_jq_filter;
 
@@ -258,25 +259,83 @@ EXAMPLES:
     Ok(Command::Manifests(opts))
 }
 
-/// Parse `loct report [options]` command - generate HTML/JSON reports.
+/// Parse `loct findings [options]` command - emit canonical findings JSON.
+pub(super) fn parse_findings_command(args: &[String]) -> Result<Command, String> {
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        return Err("loct findings - Emit the canonical findings artifact
+
+USAGE:
+    loct findings [OPTIONS] [PATHS...]
+
+DESCRIPTION:
+    Writes the canonical findings artifact to stdout as JSON.
+    This is the machine-truth surface for dead code, cycles, duplicates,
+    entrypoint drift, quick wins, and related health signals.
+
+OPTIONS:
+    --summary          Emit health score + counts only
+    --help, -h         Show this help message
+
+ARGUMENTS:
+    [PATHS...]         Root directories to analyze (default: current directory)
+
+EXAMPLES:
+    loct findings
+    loct findings --summary
+    loct findings . | jq '.dead_parrots | length'"
+            .to_string());
+    }
+
+    let mut opts = FindingsOptions::default();
+    let mut i = 0;
+
+    while i < args.len() {
+        let arg = &args[i];
+        match arg.as_str() {
+            "--summary" => {
+                opts.summary = true;
+                i += 1;
+            }
+            _ if !arg.starts_with('-') => {
+                opts.roots.push(PathBuf::from(arg));
+                i += 1;
+            }
+            _ => {
+                return Err(format!("Unknown option '{}' for 'findings' command.", arg));
+            }
+        }
+    }
+
+    if opts.roots.is_empty() {
+        opts.roots.push(PathBuf::from("."));
+    }
+
+    Ok(Command::Findings(opts))
+}
+
+/// Parse `loct report [options]` command - generate HTML report + cached artifacts.
 pub(super) fn parse_report_command(args: &[String]) -> Result<Command, String> {
     // Check for help flag first
     if args.iter().any(|a| a == "--help" || a == "-h") {
-        return Err("loct report - Generate HTML/JSON reports
+        return Err("loct report - Generate HTML report + cached artifacts
 
 USAGE:
     loct report [OPTIONS] [PATHS...]
 
+DESCRIPTION:
+    Runs full analysis and writes the full HTML report plus cached artifacts
+    such as findings.json, agent.json, analysis.json, and report.sarif.
+
 OPTIONS:
-    --format <FORMAT>    Output format: html (default) or json
-    --output, -o <FILE>  Write report to file (default: auto-generate name)
+    --output, -o <FILE>  Write HTML report to file (default: auto-generate name)
     --serve              Start HTTP server to view report
     --port <PORT>        Server port (default: 8080, with --serve)
-    --editor <EDITOR>    Editor for click-to-open (vscode, cursor, etc.)
+    --editor <EDITOR>    Editor for click-to-open (code, cursor, windsurf, jetbrains)
     --help, -h           Show this help message
 
 EXAMPLES:
     loct report
+    loct report --output report.html
     loct report --serve"
             .to_string());
     }
@@ -288,11 +347,9 @@ EXAMPLES:
         let arg = &args[i];
         match arg.as_str() {
             "--format" => {
-                let value = args
-                    .get(i + 1)
-                    .ok_or_else(|| "--format requires a value (html, json)".to_string())?;
-                opts.format = Some(value.clone());
-                i += 2;
+                return Err(
+                    "`loct report --format` is not supported. `loct report` writes HTML plus cached artifacts; use `loct findings` or the saved JSON artifacts for machine-readable output.".to_string(),
+                );
             }
             "--output" | "-o" => {
                 let value = args
@@ -612,6 +669,25 @@ mod tests {
             assert_eq!(opts.port, Some(9000));
         } else {
             panic!("Expected Report command");
+        }
+    }
+
+    #[test]
+    fn test_parse_report_command_rejects_format_flag() {
+        let args = vec!["--format".into(), "json".into()];
+        let err = parse_report_command(&args).expect_err("report should reject --format");
+        assert!(err.contains("loct findings"));
+    }
+
+    #[test]
+    fn test_parse_findings_command() {
+        let args = vec!["--summary".into(), "src/".into()];
+        let result = parse_findings_command(&args).unwrap();
+        if let Command::Findings(opts) = result {
+            assert!(opts.summary);
+            assert_eq!(opts.roots, vec![PathBuf::from("src/")]);
+        } else {
+            panic!("Expected Findings command");
         }
     }
 

@@ -59,12 +59,11 @@ fn DeadCodeTable(
     total_count: usize,
     high_confidence_count: usize,
 ) -> impl IntoView {
-    // State for filter toggle
+    // Pure SSR report: checkbox state is rendered once, no hydration runtime.
     let (show_high_only, set_show_high_only) = signal(false);
 
-    // Filtered list based on toggle
     let filtered = move || {
-        if show_high_only.get() {
+        if show_high_only.get_untracked() {
             dead_exports
                 .iter()
                 .filter(|e| e.confidence == "very-high")
@@ -89,7 +88,7 @@ fn DeadCodeTable(
             <label class="filter-toggle">
                 <input
                     type="checkbox"
-                    checked=show_high_only
+                    prop:checked=move || show_high_only.get_untracked()
                     on:change=move |_| set_show_high_only.update(|v| *v = !*v)
                 />
                 "Show very high confidence only"

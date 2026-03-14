@@ -1,7 +1,6 @@
 //! Per-command option structs for all CLI commands.
 //!
-//! Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team
-//! Co-Authored-By: Maciej <void@div0.space> & Klaudiusz <the1st@whoai.am>
+//! VibeCrafted with AI Agents (c)2026 Loctree Team
 
 use std::path::PathBuf;
 
@@ -134,6 +133,16 @@ pub struct FindOptions {
 
     /// Maximum results to return (default: 200)
     pub limit: Option<usize>,
+}
+
+/// Options for the `findings` command.
+#[derive(Debug, Clone, Default)]
+pub struct FindingsOptions {
+    /// Root directories to analyze
+    pub roots: Vec<PathBuf>,
+
+    /// Emit summary-only JSON instead of the full findings artifact
+    pub summary: bool,
 }
 
 /// Options for the `dead` command.
@@ -357,9 +366,6 @@ pub struct ReportOptions {
     /// Root directories to report on
     pub roots: Vec<PathBuf>,
 
-    /// Output format (html, json)
-    pub format: Option<String>,
-
     /// Output file path
     pub output: Option<PathBuf>,
 
@@ -515,11 +521,14 @@ pub struct SuppressOptions {
 /// Analyzes bundle distribution using source maps.
 #[derive(Debug, Clone, Default)]
 pub struct DistOptions {
-    /// Path to source map file (.js.map)
-    pub source_map: Option<PathBuf>,
+    /// Source map inputs (.map files or directories to auto-discover under)
+    pub source_maps: Vec<PathBuf>,
 
     /// Source directory to scan for exports
     pub src: Option<PathBuf>,
+
+    /// Optional path to write the JSON report
+    pub report_path: Option<PathBuf>,
 }
 
 /// Options for the `sniff` command.
@@ -661,7 +670,7 @@ pub struct HealthOptions {
 
 /// Options for the `audit` command.
 /// Full audit combining all structural analyses into one actionable markdown report.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct AuditOptions {
     /// Root directories to analyze
     pub roots: Vec<PathBuf>,
@@ -672,29 +681,12 @@ pub struct AuditOptions {
     /// Output as actionable todo checklist (default: false)
     pub todos: bool,
 
-    /// Maximum items per category (default: 20)
-    pub limit: usize,
+    /// Optional maximum items per category; unset means full report
+    pub limit: Option<usize>,
 
     /// Don't auto-open the report file (default: false)
     pub no_open: bool,
-
-    /// Output to stdout instead of file (default: false)
-    pub stdout: bool,
 }
-
-impl Default for AuditOptions {
-    fn default() -> Self {
-        Self {
-            roots: Vec::new(),
-            include_tests: false,
-            todos: false,
-            limit: 20,
-            no_open: false,
-            stdout: false,
-        }
-    }
-}
-
 /// Options for the `doctor` command.
 /// Interactive diagnostics with categorized findings and suggested suppressions.
 #[derive(Debug, Clone, Default)]
@@ -758,6 +750,28 @@ pub struct HelpOptions {
 
     /// Show full help (new + legacy)
     pub full: bool,
+}
+
+/// Cache subcommand action.
+#[derive(Debug, Clone)]
+pub enum CacheAction {
+    /// List all cached projects with sizes and ages
+    List,
+    /// Clean cache: all projects, or a specific one, or stale entries
+    Clean {
+        /// Only clean cache for a specific project directory
+        project: Option<PathBuf>,
+        /// Only clean entries older than this duration (e.g., "7d", "30d")
+        older_than: Option<String>,
+        /// Skip confirmation prompt
+        force: bool,
+    },
+}
+
+/// Options for the `cache` command.
+#[derive(Debug, Clone)]
+pub struct CacheOptions {
+    pub action: CacheAction,
 }
 
 /// Query kind for the `query` command.

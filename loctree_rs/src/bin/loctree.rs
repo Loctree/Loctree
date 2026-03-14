@@ -57,6 +57,7 @@ Migration Guide:\n  \
 New Features in `loct`:\n  \
   loct auto              Full scan + findings (cached artifacts; set LOCT_CACHE_DIR to override)\n  \
   loct doctor            Interactive diagnostics\n  \
+  loct findings          Canonical findings JSON\n  \
   loct dead              Find unused exports\n  \
   loct cycles            Find circular imports\n  \
   loct twins             Find duplicate symbols\n  \

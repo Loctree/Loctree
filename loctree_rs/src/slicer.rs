@@ -290,6 +290,10 @@ impl HolographicSlice {
             let mut all_consumers = HashSet::new();
             let mut to_visit: VecDeque<String> = VecDeque::new();
             let mut visited_for_consumers = HashSet::new();
+            let is_target_consumer = |consumer_path: &str| {
+                consumer_path == target_path_norm.as_str()
+                    || strip_extension(consumer_path) == target_stripped.as_str()
+            };
 
             // Start with direct consumers
             let direct_consumers: Vec<String> = imported_by
@@ -301,6 +305,9 @@ impl HolographicSlice {
                 .collect();
 
             for consumer in direct_consumers {
+                if is_target_consumer(&consumer) {
+                    continue;
+                }
                 all_consumers.insert(consumer.clone());
                 to_visit.push_back(consumer);
             }
@@ -335,6 +342,9 @@ impl HolographicSlice {
                         .collect();
 
                     for consumer in barrel_consumers {
+                        if is_target_consumer(&consumer) {
+                            continue;
+                        }
                         if all_consumers.insert(consumer.clone()) {
                             to_visit.push_back(consumer);
                         }
@@ -344,6 +354,9 @@ impl HolographicSlice {
 
             // Convert consumer paths to SliceFile objects
             for consumer_path in all_consumers {
+                if is_target_consumer(&consumer_path) {
+                    continue;
+                }
                 let file = snapshot
                     .files
                     .iter()
@@ -897,6 +910,79 @@ mod tests {
         assert_eq!(deser.target, "src/main.rs");
         assert_eq!(deser.core.len(), 1);
         assert_eq!(deser.stats.core_loc, 100);
+    }
+
+    #[test]
+    fn test_slice_consumers_excludes_self_reference() {
+        let snapshot = Snapshot {
+            metadata: SnapshotMetadata {
+                schema_version: crate::snapshot::SNAPSHOT_SCHEMA_VERSION.to_string(),
+                generated_at: "2025-01-01T00:00:00Z".to_string(),
+                roots: vec!["/test".to_string()],
+                languages: ["rust".to_string()].into_iter().collect(),
+                file_count: 2,
+                total_loc: 150,
+                scan_duration_ms: 100,
+                resolver_config: None,
+                manifest_summary: Vec::new(),
+                entrypoints: Vec::new(),
+                entrypoint_drift: crate::snapshot::EntrypointDriftSummary::default(),
+                git_repo: None,
+                git_branch: None,
+                git_commit: None,
+                git_scan_id: None,
+            },
+            files: vec![
+                FileAnalysis {
+                    path: "src/codex.rs".to_string(),
+                    loc: 100,
+                    language: "rust".to_string(),
+                    ..FileAnalysis::new("src/codex.rs".to_string())
+                },
+                FileAnalysis {
+                    path: "src/user.rs".to_string(),
+                    loc: 50,
+                    language: "rust".to_string(),
+                    ..FileAnalysis::new("src/user.rs".to_string())
+                },
+            ],
+            edges: vec![
+                GraphEdge {
+                    from: "src/codex.rs".to_string(),
+                    to: "src/codex.rs".to_string(),
+                    label: "import".to_string(),
+                },
+                GraphEdge {
+                    from: "src/user.rs".to_string(),
+                    to: "src/codex.rs".to_string(),
+                    label: "import".to_string(),
+                },
+            ],
+            export_index: Default::default(),
+            command_bridges: vec![],
+            event_bridges: vec![],
+            barrels: vec![],
+        };
+
+        let config = SliceConfig {
+            include_consumers: true,
+            ..Default::default()
+        };
+
+        let slice = HolographicSlice::from_path(&snapshot, "src/codex.rs", &config)
+            .expect("slice src/codex.rs with consumers");
+
+        assert!(
+            slice.deps.is_empty(),
+            "target self-import should not appear in deps"
+        );
+        let consumer_paths: Vec<_> = slice.consumers.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(slice.consumers.len(), 1);
+        assert!(consumer_paths.contains(&"src/user.rs"));
+        assert!(
+            !consumer_paths.contains(&"src/codex.rs"),
+            "target file must not appear as its own consumer"
+        );
     }
 
     #[test]

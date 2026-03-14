@@ -22,7 +22,7 @@ Memory leaks in JavaScript/TypeScript are insidious - they don't crash immediate
 
 ```bash
 # From your project directory
-loct --findings
+loct findings
 
 # Output includes memory_lint section:
 # {
@@ -320,7 +320,7 @@ fi
 | Memory overhead | Negligible |
 | Binary size impact | +~20KB |
 
-Memory lint runs as part of the standard `--findings` scan. No additional passes required.
+Memory lint runs as part of the standard `loct findings` scan. No additional passes required.
 
 ---
 

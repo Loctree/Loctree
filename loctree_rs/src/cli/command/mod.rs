@@ -10,8 +10,7 @@
 //! - `help_texts`: Static help text constants
 //! - `parsed`: ParsedCommand result type
 //!
-//! Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team
-//! Co-Authored-By: Maciej <void@div0.space> & Klaudiusz <the1st@whoai.am>
+//! VibeCrafted with AI Agents (c)2026 Loctree Team
 
 mod global;
 mod help;
@@ -23,13 +22,13 @@ mod types;
 // Re-export the main types at the module level
 pub use global::GlobalOptions;
 pub use options::{
-    AuditOptions, AutoOptions, CommandsOptions, CoverageOptions, CrowdOptions, CyclesOptions,
-    DeadOptions, DiffOptions, DistOptions, DoctorOptions, EventsOptions, FindOptions, FocusOptions,
-    HealthOptions, HelpOptions, HotspotsOptions, ImpactCommandOptions, InfoOptions,
-    InsightsOptions, JqQueryOptions, LayoutmapOptions, LintOptions, ManifestsOptions, MemexOptions,
-    PipelinesOptions, PlanOptions, QueryKind, QueryOptions, ReportOptions, RoutesOptions,
-    ScanOptions, SliceOptions, SniffOptions, SuppressOptions, TagmapOptions, TraceOptions,
-    TreeOptions, TwinsOptions, ZombieOptions,
+    AuditOptions, AutoOptions, CacheAction, CacheOptions, CommandsOptions, CoverageOptions,
+    CrowdOptions, CyclesOptions, DeadOptions, DiffOptions, DistOptions, DoctorOptions,
+    EventsOptions, FindOptions, FindingsOptions, FocusOptions, HealthOptions, HelpOptions,
+    HotspotsOptions, ImpactCommandOptions, InfoOptions, InsightsOptions, JqQueryOptions,
+    LayoutmapOptions, LintOptions, ManifestsOptions, MemexOptions, PipelinesOptions, PlanOptions,
+    QueryKind, QueryOptions, ReportOptions, RoutesOptions, ScanOptions, SliceOptions, SniffOptions,
+    SuppressOptions, TagmapOptions, TraceOptions, TreeOptions, TwinsOptions, ZombieOptions,
 };
 pub use parsed::ParsedCommand;
 pub use types::Command;

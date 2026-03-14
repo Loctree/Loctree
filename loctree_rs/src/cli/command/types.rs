@@ -1,7 +1,6 @@
 //! Command enum definition for the CLI interface.
 //!
-//! Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team
-//! Co-Authored-By: Maciej <void@div0.space> & Klaudiusz <the1st@whoai.am>
+//! VibeCrafted with AI Agents (c)2026 Loctree Team
 
 use super::options::*;
 
@@ -25,6 +24,9 @@ pub enum Command {
 
     /// Search symbols/files/impact/similar.
     Find(FindOptions),
+
+    /// Emit the canonical findings artifact to stdout.
+    Findings(FindingsOptions),
 
     /// Detect unused exports / dead code.
     Dead(DeadOptions),
@@ -127,6 +129,9 @@ pub enum Command {
 
     /// Generate architectural refactoring plan based on module analysis.
     Plan(PlanOptions),
+
+    /// Manage snapshot cache (list, clean).
+    Cache(CacheOptions),
 }
 
 impl Default for Command {

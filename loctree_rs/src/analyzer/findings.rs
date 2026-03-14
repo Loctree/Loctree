@@ -18,6 +18,7 @@ use crate::analyzer::cycles::{ClassifiedCycle, find_cycles_with_lazy};
 use crate::analyzer::dead_parrots::{
     DeadExport, DeadFilterConfig, ShadowExport, find_dead_exports,
 };
+use crate::analyzer::dist::DistResult;
 use crate::analyzer::health_score::{HealthMetrics, calculate_health_score};
 use crate::analyzer::memory_lint::{MemoryLintIssue, MemoryLintSummary, lint_memory_file};
 use crate::analyzer::react_lint::{ReactLintIssue, ReactLintSummary, analyze_react_file};
@@ -29,6 +30,8 @@ use crate::analyzer::twins::{
 };
 use crate::snapshot::{EntrypointDriftSummary, Snapshot};
 use crate::types::FileAnalysis;
+
+const MAX_FINDINGS_QUICK_WINS: usize = 10;
 
 /// Complete findings artifact (`findings.json` in the artifacts dir).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -74,12 +77,16 @@ pub struct Findings {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub memory_lint: Vec<MemoryLintIssue>,
 
-    /// Quick wins: actionable suggestions with highest impact
+    /// Prioritized quick-win shortlist; full truth stays in the issue arrays above.
     pub quick_wins: Vec<QuickWin>,
 
     /// Drift between declared manifest roots and code entrypoints
     #[serde(default, skip_serializing_if = "EntrypointDriftSummary::is_empty")]
     pub entrypoint_drift: EntrypointDriftSummary,
+
+    /// Bundle distribution analysis from source maps
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dist: Option<DistResult>,
 }
 
 /// Summary of all findings for quick health check
@@ -110,6 +117,29 @@ pub struct FindingsSummary {
     /// Memory lint issues summary
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory_lint: Option<MemoryLintSummary>,
+    /// Bundle distribution summary
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dist: Option<FindingsDistSummary>,
+}
+
+/// Summary of bundle distribution analysis for quick checks.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FindingsDistSummary {
+    /// Number of source maps used for analysis
+    #[serde(rename = "sourceMaps")]
+    pub source_maps: usize,
+    /// Number of exports removed from the bundle surface
+    #[serde(rename = "treeShakenExports")]
+    pub tree_shaken_exports: usize,
+    /// Bundle coverage percentage
+    #[serde(rename = "coveragePct")]
+    pub coverage_pct: usize,
+    /// Files impacted by tree-shaking
+    #[serde(rename = "impactedFiles")]
+    pub impacted_files: usize,
+    /// Analysis granularity: file, symbol, or mixed
+    #[serde(rename = "analysisLevel")]
+    pub analysis_level: String,
 }
 
 /// Cycle counts by classification
@@ -209,6 +239,7 @@ impl Findings {
         scan_results: &ScanResults,
         snapshot: &Snapshot,
         config: FindingsConfig,
+        dist: Option<DistResult>,
     ) -> Self {
         let version = env!("CARGO_PKG_VERSION").to_string();
         let generated_at = time::OffsetDateTime::now_utc()
@@ -406,6 +437,7 @@ impl Findings {
             twins_dead_parrots,
             twins_same_lang_count,
             cascade_imports,
+            dist.as_ref(),
         );
 
         Findings {
@@ -423,6 +455,7 @@ impl Findings {
             memory_lint,
             quick_wins,
             entrypoint_drift: snapshot.metadata.entrypoint_drift.clone(),
+            dist,
         }
     }
 
@@ -431,7 +464,7 @@ impl Findings {
         serde_json::to_string_pretty(self)
     }
 
-    /// Get summary only (for --summary flag)
+    /// Get summary only (for `loct findings --summary`)
     pub fn summary_only(&self) -> FindingsSummary {
         self.summary.clone()
     }
@@ -641,8 +674,9 @@ fn generate_quick_wins(
 
     // Missing barrels
     for chaos in barrel_chaos {
-        if chaos.chaos_type == "missing_barrel" && !chaos.paths.is_empty() {
-            let dir = chaos.paths.first().unwrap();
+        if chaos.chaos_type == "missing_barrel"
+            && let Some(dir) = chaos.paths.first()
+        {
             wins.push(QuickWin {
                 action: "create_barrel".to_string(),
                 file: format!("{}/index.ts", dir),
@@ -694,8 +728,8 @@ fn generate_quick_wins(
         }
     }
 
-    // Limit to top 10 quick wins
-    wins.truncate(10);
+    // Quick wins stay intentionally short; the full findings remain in the artifact.
+    wins.truncate(MAX_FINDINGS_QUICK_WINS);
     wins
 }
 
@@ -714,6 +748,7 @@ fn calculate_summary(
     twins_dead_parrots: usize,
     twins_same_language: usize,
     cascade_imports: usize,
+    dist: Option<&DistResult>,
 ) -> FindingsSummary {
     let files = analyses.len();
     let loc: usize = analyses.iter().map(|a| a.loc).sum();
@@ -774,6 +809,14 @@ fn calculate_summary(
         Some(crate::analyzer::memory_lint::calculate_summary(memory_lint))
     };
 
+    let dist_summary = dist.map(|dist| FindingsDistSummary {
+        source_maps: dist.source_maps,
+        tree_shaken_exports: dist.tree_shaken_exports,
+        coverage_pct: dist.coverage_pct,
+        impacted_files: dist.impacted_files.len(),
+        analysis_level: dist.analysis_level.as_str().to_string(),
+    });
+
     FindingsSummary {
         files,
         loc,
@@ -786,6 +829,7 @@ fn calculate_summary(
         react_lint: react_lint_summary,
         ts_lint: ts_lint_summary,
         memory_lint: memory_lint_summary,
+        dist: dist_summary,
     }
 }
 
@@ -813,6 +857,10 @@ pub struct Manifest {
 
     /// Example queries for quick start
     pub examples: Vec<ManifestExample>,
+
+    /// Optional dist/report surface metadata
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dist: Option<ManifestDist>,
 }
 
 /// Project metadata in manifest
@@ -867,9 +915,31 @@ pub struct ManifestExample {
     pub cmd: String,
 }
 
+/// Dist/report surface summary exposed in the manifest.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ManifestDist {
+    /// Source directory analyzed for bundle coverage
+    #[serde(rename = "srcDir")]
+    pub src_dir: String,
+    /// Analysis granularity: file, symbol, or mixed
+    #[serde(rename = "analysisLevel")]
+    pub analysis_level: String,
+    /// Number of exports removed from the bundle surface
+    #[serde(rename = "treeShakenExports")]
+    pub tree_shaken_exports: usize,
+    /// Bundle coverage percentage
+    #[serde(rename = "coveragePct")]
+    pub coverage_pct: usize,
+}
+
 impl Manifest {
     /// Produce manifest from snapshot metadata
-    pub fn produce(snapshot: &Snapshot, findings_size_kb: usize, agent_size_kb: usize) -> Self {
+    pub fn produce(
+        snapshot: &Snapshot,
+        findings_size_kb: usize,
+        agent_size_kb: usize,
+        dist: Option<&DistResult>,
+    ) -> Self {
         let version = env!("CARGO_PKG_VERSION").to_string();
         let generated_at = time::OffsetDateTime::now_utc()
             .format(&time::format_description::well_known::Iso8601::DEFAULT)
@@ -899,16 +969,36 @@ impl Manifest {
             },
             findings: ArtifactInfo {
                 size_kb: findings_size_kb,
-                purpose: "All detected issues - dead code, cycles, duplicates".to_string(),
-                query_with: vec![
-                    "loct --findings".to_string(),
-                    "loct '.dead_parrots'".to_string(),
-                ],
+                purpose: if dist.is_some() {
+                    "All detected issues plus bundle distribution insights".to_string()
+                } else {
+                    "All detected issues - dead code, cycles, duplicates".to_string()
+                },
+                query_with: {
+                    let mut queries = vec![
+                        "loct findings".to_string(),
+                        "loct '.dead_parrots'".to_string(),
+                    ];
+                    if dist.is_some() {
+                        queries.push("loct '.dist'".to_string());
+                    }
+                    queries
+                },
             },
             agent: ArtifactInfo {
                 size_kb: agent_size_kb,
-                purpose: "AI-optimized context bundle".to_string(),
-                query_with: vec!["loct --for-ai".to_string()],
+                purpose: if dist.is_some() {
+                    "AI-optimized context bundle with bundle distribution".to_string()
+                } else {
+                    "AI-optimized context bundle".to_string()
+                },
+                query_with: {
+                    let mut queries = vec!["loct --for-ai".to_string()];
+                    if dist.is_some() {
+                        queries.push("loct '.bundle.dist'".to_string());
+                    }
+                    queries
+                },
             },
         };
 
@@ -943,6 +1033,24 @@ impl Manifest {
                 cmd: "loct '.cycles | length'".to_string(),
             },
         ];
+        let mut examples = examples;
+        if dist.is_some() {
+            examples.push(ManifestExample {
+                task: "Show bundle coverage".to_string(),
+                cmd: "loct '.dist.coveragePct'".to_string(),
+            });
+            examples.push(ManifestExample {
+                task: "List tree-shaken exports".to_string(),
+                cmd: "loct '.dist.deadExports'".to_string(),
+            });
+        }
+
+        let dist_summary = dist.map(|dist| ManifestDist {
+            src_dir: dist.src_dir.clone(),
+            analysis_level: dist.analysis_level.as_str().to_string(),
+            tree_shaken_exports: dist.tree_shaken_exports,
+            coverage_pct: dist.coverage_pct,
+        });
 
         Manifest {
             loctree: version,
@@ -951,6 +1059,7 @@ impl Manifest {
             artifacts,
             commands,
             examples,
+            dist: dist_summary,
         }
     }
 
@@ -981,7 +1090,7 @@ mod tests {
             reason: "Unused export".to_string(),
             saves_loc: Some(100),
         };
-        let json = serde_json::to_string(&win).unwrap();
+        let json = serde_json::to_string(&win).expect("serialize quick win");
         assert!(json.contains("delete"));
         assert!(json.contains("src/dead.ts"));
         assert!(json.contains("100"));
@@ -1006,8 +1115,9 @@ mod tests {
             react_lint: None,
             ts_lint: None,
             memory_lint: None,
+            dist: None,
         };
-        let json = serde_json::to_string_pretty(&summary).unwrap();
+        let json = serde_json::to_string_pretty(&summary).expect("serialize summary");
         assert!(json.contains("\"health_score\": 85"));
         assert!(json.contains("\"breaking\": 0"));
     }
@@ -1015,9 +1125,9 @@ mod tests {
     #[test]
     fn test_suggest_cycle_break() {
         let nodes = vec!["a.ts".to_string(), "b.ts".to_string(), "c.ts".to_string()];
-        let suggestion = suggest_cycle_break(&nodes);
-        assert!(suggestion.is_some());
-        assert!(suggestion.unwrap().contains("Break at:"));
+        let suggestion =
+            suggest_cycle_break(&nodes).expect("non-empty cycle should suggest a break");
+        assert!(suggestion.contains("Break at:"));
     }
 
     #[test]

@@ -1,5 +1,5 @@
 # Semgrep ignore patterns
-# Created by M&K (c)2026 VetCoders
+# (c)2026 Loctree Team
 
 # ============================================================================
 # STATIC HTML TEMPLATES
@@ -36,3 +36,20 @@ loctree_rs/tests/
 # ============================================================================
 
 public_dist/index.html
+
+# ============================================================================
+# VENDORED MINIFIED LIBRARIES
+# Third-party code we don't control. Findings are upstream responsibility.
+# ============================================================================
+
+loctree_rs/src/analyzer/assets/cytoscape.min.js
+loctree_rs/src/analyzer/assets/dagre.min.js
+
+# ============================================================================
+# DEMO / FIXTURE HTML
+# External script tags here are for local examples and parser fixtures, not
+# production pages. Semgrep's missing-integrity rule is noise on these files.
+# ============================================================================
+
+reports/src/twins_graph_example.html
+tools/fixtures/html-scripts/vue-style.html

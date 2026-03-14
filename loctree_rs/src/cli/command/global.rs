@@ -1,7 +1,6 @@
 //! Global options shared across all CLI commands.
 //!
-//! Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team
-//! Co-Authored-By: Maciej <void@div0.space> & Klaudiusz <the1st@whoai.am>
+//! VibeCrafted with AI Agents (c)2026 Loctree Team
 
 use std::path::PathBuf;
 
@@ -42,10 +41,4 @@ pub struct GlobalOptions {
 
     /// Fail if snapshot is stale (different git HEAD) - for CI (--fail-stale)
     pub fail_stale: bool,
-
-    /// Output findings.json to stdout (--findings)
-    pub findings: bool,
-
-    /// Output summary only to stdout (--summary)
-    pub summary_only_output: bool,
 }

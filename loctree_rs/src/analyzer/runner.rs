@@ -344,6 +344,7 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             &scan_results,
             &parsed,
             None,
+            None,
         ) {
             Ok(paths) => {
                 if !paths.is_empty() {

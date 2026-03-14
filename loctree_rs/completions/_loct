@@ -21,6 +21,7 @@ _loct() {
         'routes:Analyze routes'
         'info:Show project info'
         'lint:Run linter checks'
+        'findings:Emit findings JSON'
         'report:Generate HTML report'
         'help:Show help'
         'query:Quick queries (who-imports, where-symbol)'
@@ -174,6 +175,13 @@ _loct() {
                         '--sarif[SARIF output]' \
                         '--json[JSON output]' \
                         '--root[Project root]:path:_files -/'
+                    ;;
+                findings)
+                    _arguments \
+                        '--summary[Emit health score and counts only]' \
+                        '--json[JSON output]' \
+                        '--root[Project root]:path:_files -/' \
+                        '*:path:_files -/'
                     ;;
                 report)
                     _arguments \

@@ -7,12 +7,7 @@ const { existsSync } = require('fs');
 // Platform mapping to package names
 const PLATFORMS = {
   'darwin-arm64': '@loctree/darwin-arm64',
-  'darwin-x64': '@loctree/darwin-x64',
-  'linux-arm64-gnu': '@loctree/linux-arm64-gnu',
-  'linux-arm64-musl': '@loctree/linux-arm64-musl',
   'linux-x64-gnu': '@loctree/linux-x64-gnu',
-  'linux-x64-musl': '@loctree/linux-x64-musl',
-  'win32-arm64-msvc': '@loctree/win32-arm64-msvc',
   'win32-x64-msvc': '@loctree/win32-x64-msvc',
 };
 

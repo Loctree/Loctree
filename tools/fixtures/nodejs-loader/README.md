@@ -51,5 +51,4 @@ loct dead --path tools/fixtures/nodejs-loader
 
 Expected output: 0 dead exports (all hooks are runtime-invoked)
 
-Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team
-Co-Authored-By: [Maciej](void@div0.space) & [Klaudiusz](the1st@whoai.am)
+VibeCrafted with AI Agents (c)2026 Loctree Team

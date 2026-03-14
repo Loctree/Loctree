@@ -1,11 +1,12 @@
 //! End-to-End CLI Tests for loctree
 //!
 //! Following TDD principles - tests define expected behavior.
-//! Vibecrafted with AI Agents by VetCoders (c)2025 VetCoders
+//! VibeCrafted with AI Agents (c)2026 Loctree Team
 
 use assert_cmd::Command;
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
+use serde_json::Value;
 use std::path::PathBuf;
 use tempfile::TempDir;
 
@@ -273,6 +274,9 @@ mod analyzer_mode {
     #[test]
     fn analyzes_impact() {
         let fixture = fixtures_path().join("simple_ts");
+
+        // Refresh the snapshot first so self-hosted runners don't reuse stale cache state.
+        loctree().current_dir(&fixture).assert().success();
 
         loctree()
             .current_dir(&fixture)
@@ -833,6 +837,7 @@ mod watch_mode {
 
 fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dst)?;
+    // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path -- test helper copies controlled fixture trees into temp dirs
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;
         let ty = entry.file_type()?;
@@ -853,6 +858,7 @@ fn copy_dir_excluding(
     exclude: &str,
 ) -> std::io::Result<()> {
     std::fs::create_dir_all(dst)?;
+    // nosemgrep: rust.actix.path-traversal.tainted-path.tainted-path -- test helper copies controlled fixture trees into temp dirs
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;
         if entry.file_name() == exclude {
@@ -869,10 +875,25 @@ fn copy_dir_excluding(
     Ok(())
 }
 
+fn run_git(repo: &std::path::Path, args: &[&str]) {
+    let output = std::process::Command::new("git")
+        .args(args)
+        .current_dir(repo)
+        .output()
+        .unwrap_or_else(|e| panic!("failed to run git {:?}: {e}", args));
+    assert!(
+        output.status.success(),
+        "git {:?} failed.\nstdout: {}\nstderr: {}",
+        args,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 // ============================================
 // Instant Commands Tests (<100ms)
 // ============================================
-// Vibecrafted with AI Agents by VetCoders (c)2026 VetCoders
+// VibeCrafted with AI Agents (c)2026 Loctree Team
 
 mod instant_commands {
     use super::*;
@@ -1184,7 +1205,7 @@ mod instant_commands {
 // ============================================
 // Analysis Commands Tests
 // ============================================
-// Vibecrafted with AI Agents by VetCoders (c)2026 VetCoders
+// VibeCrafted with AI Agents (c)2026 Loctree Team
 
 mod analysis_commands {
     use super::*;
@@ -1428,8 +1449,10 @@ mod analysis_commands {
             .current_dir(&fixture)
             .args(["audit", "--stdout"])
             .assert()
-            .success()
-            .stdout(predicate::str::contains("Audit").or(predicate::str::contains("Health")));
+            .failure()
+            .stderr(predicate::str::contains(
+                "writes markdown reports to an artifact file only",
+            ));
     }
 
     // ----------------------------------------
@@ -1610,7 +1633,7 @@ mod analysis_commands {
 // ============================================
 // Management & Core Workflow Commands Tests
 // ============================================
-// Vibecrafted with AI Agents by VetCoders (c)2026 VetCoders
+// VibeCrafted with AI Agents (c)2026 Loctree Team
 
 mod management_commands {
     use super::*;
@@ -1925,7 +1948,7 @@ mod management_commands {
         let fixture = fixtures_path().join("simple_ts");
 
         // --fail should work (exit code depends on findings)
-        loctree()
+        let _ = loctree()
             .current_dir(&fixture)
             .args(["lint", "--fail"])
             .assert(); // Don't check success/failure - depends on findings
@@ -1949,7 +1972,7 @@ mod management_commands {
 // ============================================
 // Framework-Specific Command Tests
 // ============================================
-// Vibecrafted with AI Agents by VetCoders (c)2026 VetCoders
+// VibeCrafted with AI Agents (c)2026 Loctree Team
 
 mod framework_commands {
     use super::*;
@@ -2075,8 +2098,10 @@ def get_user(user_id: int):
         let combined = String::from_utf8_lossy(&output.stdout).to_string()
             + &String::from_utf8_lossy(&output.stderr);
         assert!(
-            combined.contains("dist") || combined.contains("source") || combined.contains("map"),
-            "Help should mention dist/source/map: {}",
+            combined.contains("one or more production source maps")
+                && combined.contains("--source-map")
+                && combined.contains("--report"),
+            "Help should explain the dist mental model and report option: {}",
             combined
         );
     }
@@ -2094,7 +2119,8 @@ def get_user(user_id: int):
             .assert()
             .failure()
             .stderr(
-                predicate::str::contains("source-map").or(predicate::str::contains("required")),
+                predicate::str::contains("source-map")
+                    .and(predicate::str::contains("at least one")),
             );
     }
 
@@ -2131,7 +2157,8 @@ def get_user(user_id: int):
             .assert()
             .failure()
             .stderr(
-                predicate::str::contains("not found")
+                predicate::str::contains("does not exist")
+                    .or(predicate::str::contains("not found"))
                     .or(predicate::str::contains("Failed"))
                     .or(predicate::str::contains("error")),
             );
@@ -2159,8 +2186,7 @@ def get_user(user_id: int):
     }
 
     #[test]
-    fn dist_with_minimal_valid_source_map() {
-        // Test with a minimal but valid source map structure
+    fn dist_falls_back_to_line_level_when_symbol_names_are_unavailable() {
         let temp = TempDir::new().unwrap();
         std::fs::create_dir_all(temp.path().join("src")).unwrap();
         std::fs::write(
@@ -2180,16 +2206,360 @@ def get_user(user_id: int):
         }"#;
         std::fs::write(temp.path().join("main.js.map"), source_map).unwrap();
 
+        let output = loctree()
+            .current_dir(temp.path())
+            .args([
+                "dist",
+                "--source-map",
+                "main.js.map",
+                "--src",
+                "src/",
+                "--json",
+            ])
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "dist should succeed with line-level fallback: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(report["analysisLevel"], "line");
+        assert_eq!(report["symbolLevel"], false);
+        assert_eq!(
+            report["deadExports"]
+                .as_array()
+                .map(|exports| exports.len()),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn dist_aggregates_multiple_source_maps() {
+        let temp = TempDir::new().unwrap();
+        let fixture = fixtures_path().join("dist_multi_map");
+        copy_dir_all(&fixture, temp.path()).unwrap();
+
+        let output = loctree()
+            .current_dir(temp.path())
+            .args([
+                "dist",
+                "--src",
+                "src/",
+                "--source-map",
+                "dist/client.js.map",
+                "--source-map",
+                "dist/admin.js.map",
+                "--json",
+            ])
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "multi-map dist should succeed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let dead_exports = report["deadExports"].as_array().unwrap();
+        let dead_names: Vec<_> = dead_exports
+            .iter()
+            .filter_map(|entry| entry.get("name").and_then(|value| value.as_str()))
+            .collect();
+
+        assert_eq!(report["sourceMaps"], 2);
+        assert_eq!(report["analysisLevel"], "symbol");
+        assert!(dead_names.contains(&"dead"));
+        assert!(!dead_names.contains(&"shared"));
+        assert!(!dead_names.contains(&"clientOnly"));
+        assert!(!dead_names.contains(&"adminOnly"));
+    }
+
+    #[test]
+    fn dist_directory_discovery_classifies_runtime_candidates() {
+        let temp = TempDir::new().unwrap();
+        std::fs::create_dir_all(temp.path().join("src")).unwrap();
+        std::fs::create_dir_all(temp.path().join("dist")).unwrap();
+
+        std::fs::write(
+            temp.path().join("src/index.ts"),
+            r#"
+import { bootOnly } from "./boot";
+import { lazyThing } from "./lazy";
+
+export async function loadLazy() {
+    return import("./lazy");
+}
+
+export async function loadFeature() {
+    return import("./feature");
+}
+
+export const app = bootOnly + lazyThing;
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            temp.path().join("src/boot.ts"),
+            "export const bootOnly = 1;",
+        )
+        .unwrap();
+        std::fs::write(
+            temp.path().join("src/lazy.ts"),
+            "export const lazyThing = 2;",
+        )
+        .unwrap();
+        std::fs::write(
+            temp.path().join("src/feature.ts"),
+            "export const featureOnly = 3;",
+        )
+        .unwrap();
+        std::fs::write(
+            temp.path().join("src/dead.ts"),
+            "export const deadThing = 4;",
+        )
+        .unwrap();
+        std::fs::write(
+            temp.path().join("src/verify.ts"),
+            "export const verifyThing = 5;",
+        )
+        .unwrap();
+
+        let boot_map = r#"{
+            "version": 3,
+            "file": "main.js",
+            "sources": ["src/index.ts", "src/boot.ts", "src/lazy.ts", "src/verify.ts"],
+            "names": [],
+            "mappings": ""
+        }"#;
+        let feature_map = r#"{
+            "version": 3,
+            "file": "feature.js",
+            "sources": ["src/feature.ts", "src/verify.ts"],
+            "names": [],
+            "mappings": ""
+        }"#;
+        std::fs::write(temp.path().join("dist/main.js.map"), boot_map).unwrap();
+        std::fs::write(temp.path().join("dist/feature.js.map"), feature_map).unwrap();
+
+        let output = loctree()
+            .current_dir(temp.path())
+            .args(["dist", "--src", "src/", "--source-map", "dist/", "--json"])
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "dist directory discovery should succeed:\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(report["sourceMaps"], 2);
+        assert_eq!(report["candidateCounts"]["dead_in_all_chunks"], 1);
+        assert_eq!(report["candidateCounts"]["boot_path_only"], 1);
+        assert_eq!(report["candidateCounts"]["feature_local"], 1);
+        assert_eq!(report["candidateCounts"]["fake_lazy"], 1);
+        assert_eq!(report["candidateCounts"]["verify_first"], 1);
+
+        let candidates = report["candidates"].as_array().unwrap();
+        assert!(candidates.iter().any(|candidate| {
+            candidate["class"] == "dead_in_all_chunks" && candidate["name"] == "deadThing"
+        }));
+        assert!(candidates.iter().any(|candidate| {
+            candidate["class"] == "boot_path_only" && candidate["name"] == "bootOnly"
+        }));
+        assert!(candidates.iter().any(|candidate| {
+            candidate["class"] == "feature_local" && candidate["name"] == "featureOnly"
+        }));
+        assert!(candidates.iter().any(|candidate| {
+            candidate["class"] == "fake_lazy" && candidate["name"] == "lazyThing"
+        }));
+        assert!(candidates.iter().any(|candidate| {
+            candidate["class"] == "verify_first" && candidate["name"] == "verifyThing"
+        }));
+    }
+
+    #[test]
+    fn dist_writes_json_report() {
+        let temp = TempDir::new().unwrap();
+        let fixture = fixtures_path().join("dist_multi_map");
+        copy_dir_all(&fixture, temp.path()).unwrap();
+
+        let report_path = temp.path().join(".loctree/dist-report.json");
+
         loctree()
             .current_dir(temp.path())
-            .args(["dist", "--source-map", "main.js.map", "--src", "src/"])
+            .args([
+                "dist",
+                "--src",
+                "src/",
+                "--source-map",
+                "dist/client.js.map",
+                "--source-map",
+                "dist/admin.js.map",
+                "--report",
+                report_path.to_str().unwrap(),
+            ])
             .assert()
             .success()
             .stdout(
-                predicate::str::contains("Bundle")
-                    .or(predicate::str::contains("export"))
-                    .or(predicate::str::contains("Analysis")),
+                predicate::str::contains("Report:")
+                    .and(predicate::str::contains(".loctree/dist-report.json")),
             );
+
+        let report_contents = std::fs::read_to_string(&report_path).unwrap();
+        let report: Value = serde_json::from_str(&report_contents).unwrap();
+        assert_eq!(report["sourceMaps"], 2);
+        assert_eq!(report["analysisLevel"], "symbol");
+        assert!(
+            report["deadExports"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|entry| entry["name"] == "dead")
+        );
+    }
+
+    #[test]
+    fn dist_uses_explicit_src_scope_instead_of_repo_root_snapshot() {
+        let temp = TempDir::new().unwrap();
+        let cache = TempDir::new().unwrap();
+        std::fs::create_dir_all(temp.path().join("src")).unwrap();
+        std::fs::write(
+            temp.path().join("src/index.ts"),
+            "export const live = 'world';",
+        )
+        .unwrap();
+        std::fs::write(temp.path().join("other.ts"), "export const repoOnly = 1;").unwrap();
+
+        let source_map = r#"{
+            "version": 3,
+            "file": "main.js",
+            "sources": ["src/index.ts"],
+            "sourcesContent": ["export const live = 'world';"],
+            "names": [],
+            "mappings": "AAAA"
+        }"#;
+        std::fs::write(temp.path().join("main.js.map"), source_map).unwrap();
+
+        loctree()
+            .current_dir(temp.path())
+            .env("LOCT_CACHE_DIR", cache.path())
+            .assert()
+            .success();
+
+        let output = loctree()
+            .current_dir(temp.path())
+            .env("LOCT_CACHE_DIR", cache.path())
+            .args([
+                "dist",
+                "--source-map",
+                "main.js.map",
+                "--src",
+                "src/",
+                "--json",
+            ])
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "dist failed.\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(report["sourceExports"], 1);
+        assert_eq!(report["bundledExports"], 1);
+        assert_eq!(
+            report["deadExports"]
+                .as_array()
+                .map(|exports| exports.len()),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn dist_refreshes_stale_strict_src_snapshot() {
+        let temp = TempDir::new().unwrap();
+        let cache = TempDir::new().unwrap();
+        std::fs::create_dir_all(temp.path().join("src")).unwrap();
+        std::fs::write(temp.path().join("src/index.ts"), "export const live = 1;").unwrap();
+
+        let source_map = r#"{
+            "version": 3,
+            "file": "main.js",
+            "sources": ["src/index.ts"],
+            "sourcesContent": ["export const live = 1;"],
+            "names": [],
+            "mappings": "AAAA"
+        }"#;
+        std::fs::write(temp.path().join("main.js.map"), source_map).unwrap();
+
+        run_git(temp.path(), &["init"]);
+        run_git(temp.path(), &["config", "user.email", "test@example.com"]);
+        run_git(temp.path(), &["config", "user.name", "Test User"]);
+        run_git(temp.path(), &["add", "."]);
+        run_git(temp.path(), &["commit", "-m", "init"]);
+
+        let first = loctree()
+            .current_dir(temp.path())
+            .env("LOCT_CACHE_DIR", cache.path())
+            .args([
+                "dist",
+                "--source-map",
+                "main.js.map",
+                "--src",
+                "src/",
+                "--json",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            first.status.success(),
+            "initial dist failed.\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&first.stdout),
+            String::from_utf8_lossy(&first.stderr)
+        );
+
+        std::fs::write(temp.path().join("src/new.ts"), "export const stray = 1;").unwrap();
+
+        let second = loctree()
+            .current_dir(temp.path())
+            .env("LOCT_CACHE_DIR", cache.path())
+            .args([
+                "dist",
+                "--source-map",
+                "main.js.map",
+                "--src",
+                "src/",
+                "--json",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            second.status.success(),
+            "second dist failed.\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&second.stdout),
+            String::from_utf8_lossy(&second.stderr)
+        );
+
+        let report: Value = serde_json::from_slice(&second.stdout).unwrap();
+        assert_eq!(report["sourceExports"], 2);
+        assert_eq!(report["bundledExports"], 1);
+
+        let dead_exports = report["deadExports"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(dead_exports.len(), 1);
+        assert_eq!(dead_exports[0]["file"].as_str(), Some("new.ts"));
     }
 
     // ----------------------------------------

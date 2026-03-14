@@ -4,8 +4,8 @@
 
 use super::{
     ICON_ARROWS_CLOCKWISE, ICON_CLIPBOARD_LIST, ICON_COPY, ICON_FLASK, ICON_GHOST, ICON_GRAPH,
-    ICON_LIGHTNING, ICON_PLUG, ICON_SQUARES_FOUR, ICON_TREE_STRUCTURE, ICON_TWINS, ICON_USERS,
-    Icon, ReportSectionView,
+    ICON_LIGHTNING, ICON_PACKAGE, ICON_PLUG, ICON_SQUARES_FOUR, ICON_TREE_STRUCTURE, ICON_TWINS,
+    ICON_USERS, Icon, ReportSectionView,
 };
 use crate::JsAssets;
 use crate::styles::{CSP, REPORT_CSS};
@@ -24,6 +24,8 @@ pub fn ReportDocument(
     #[prop(default = false)]
     has_tauri: bool,
 ) -> impl IntoView {
+    let has_dist = sections.iter().any(|section| section.dist.is_some());
+
     view! {
         <html>
             <head>
@@ -70,6 +72,16 @@ pub fn ReportDocument(
                                 <Icon path=ICON_LIGHTNING class="icon-sm" />
                                 "Dynamic imports"
                             </button>
+                            {if has_dist {
+                                view! {
+                                    <button class="nav-item" data-tab="dist">
+                                        <Icon path=ICON_PACKAGE class="icon-sm" />
+                                        "Bundles"
+                                    </button>
+                                }.into_any()
+                            } else {
+                                view! { "" }.into_any()
+                            }}
                             {if has_tauri {
                                 view! {
                                     <button class="nav-item" data-tab="commands">
@@ -124,7 +136,7 @@ pub fn ReportDocument(
                                 <span id="test-toggle-text">"Hide Tests"</span>
                             </button>
                             <div style="margin-top: 8px; font-size: 11px;">
-                                "loctree v0.8.12"
+                                "loctree v0.8.16"
                                 <br />
                                 <span style="color:var(--theme-text-tertiary)">"Snapshot"</span>
                             </div>
@@ -233,34 +245,29 @@ const APP_SCRIPT: &str = r#"
       themeToggle.addEventListener('click', toggleTheme);
   }
 
-  const activateTab = (tabName) => {
-      if (!tabName) return;
-
-      // Update Sidebar buttons
-      document.querySelectorAll('.sidebar-nav .nav-item').forEach(b => {
-          b.classList.toggle('active', b.dataset.tab === tabName);
-      });
-
-      // Update all tab panels across all sections
-      document.querySelectorAll('.tab-panel').forEach(p => {
-          const isActive = p.dataset.tabName === tabName;
-          p.classList.toggle('active', isActive);
-
-          if (isActive && tabName === 'graph') {
-              window.dispatchEvent(new Event('resize'));
-          }
-      });
-
-      // Also update header tab-bar buttons if present (for visual sync)
-      document.querySelectorAll('.tab-bar .tab-btn').forEach(b => {
-          b.classList.toggle('active', b.dataset.tab === tabName);
-      });
-  };
-
   // 1. Sidebar Navigation (Tab Switching)
   document.querySelectorAll('.sidebar-nav .nav-item[data-tab]').forEach(btn => {
       btn.addEventListener('click', () => {
-          activateTab(btn.dataset.tab);
+          const tabName = btn.dataset.tab;
+
+          // Update Sidebar buttons
+          document.querySelectorAll('.sidebar-nav .nav-item').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+
+          // Update all tab panels across all sections
+          document.querySelectorAll('.tab-panel').forEach(p => {
+              const isActive = p.dataset.tabName === tabName;
+              p.classList.toggle('active', isActive);
+
+              if (isActive && tabName === 'graph') {
+                  window.dispatchEvent(new Event('resize'));
+              }
+          });
+
+          // Also update header tab-bar buttons if present (for visual sync)
+          document.querySelectorAll('.tab-bar .tab-btn').forEach(b => {
+              b.classList.toggle('active', b.dataset.tab === tabName);
+          });
       });
   });
 
@@ -360,38 +367,6 @@ const APP_SCRIPT: &str = r#"
               card.style.display = show ? '' : 'none';
           });
       });
-  });
-
-  // 3d2. Coverage Filter Buttons - filter coverage rows by severity
-  document.querySelectorAll('.coverage-summary').forEach(summary => {
-      const buttons = summary.querySelectorAll('[data-coverage-filter]');
-      const panel = summary.closest('.panel');
-      const table = panel ? panel.querySelector('.coverage-table') : null;
-      const rows = table ? table.querySelectorAll('tbody tr[data-coverage-severity]') : [];
-
-      if (!buttons.length || !rows.length) return;
-
-      const applyFilter = (filter) => {
-          const current = filter || 'all';
-
-          rows.forEach(row => {
-              const sev = row.dataset.coverageSeverity || '';
-              const show = current === 'all' || sev === current;
-              row.style.display = show ? '' : 'none';
-          });
-
-          buttons.forEach(btn => {
-              btn.classList.toggle('active', (btn.dataset.coverageFilter || 'all') === current);
-          });
-      };
-
-      buttons.forEach(btn => {
-          btn.addEventListener('click', () => {
-              applyFilter(btn.dataset.coverageFilter || 'all');
-          });
-      });
-
-      applyFilter(summary.dataset.coverageDefaultFilter || 'all');
   });
 
   // 3e. Pipeline Search - filter cards by name
@@ -525,17 +500,6 @@ const APP_SCRIPT: &str = r#"
     toggleTestsBtn.addEventListener('click', () => {
       const currentlyHidden = localStorage.getItem('loctree-hide-tests') === 'true';
       updateTestsVisibility(!currentlyHidden);
-
-      // Open Coverage tab when user asks to show/hide tests
-      activateTab('coverage');
-
-      // Scroll to coverage section for quick access
-      const coverageSection = document.querySelector('.coverage-summary');
-      if (coverageSection) {
-        coverageSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      } else {
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      }
     });
   }
 })();

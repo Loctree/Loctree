@@ -5,13 +5,14 @@
 //! - Navigate via slice references
 //! - Get actionable quick wins
 //!
-//! Vibecrafted with AI Agents by VetCoders (c)2025 VetCoders
+//! VibeCrafted with AI Agents (c)2026 Loctree Team
 
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 
 use super::barrels::analyze_barrel_chaos;
 use super::dead_parrots::{DeadFilterConfig, find_dead_exports};
+use super::dist::DistResult;
 use super::health_score::{HealthMetrics, calculate_health_score};
 use super::memory_lint::lint_memory_file;
 use super::report::{Confidence, DupSeverity, RankedDup, ReportSection};
@@ -20,6 +21,10 @@ use super::ts_lint::lint_ts_file;
 use super::twins::{TwinCategory, categorize_twin, find_dead_parrots};
 use crate::snapshot::Snapshot;
 use crate::types::{FileAnalysis, SignatureUse, SignatureUseKind};
+
+const MAX_PRIORITY_TASKS: usize = 10;
+const MAX_HUB_FILES: usize = 10;
+const MAX_LARGEST_FILES: usize = 25;
 
 /// Top-level AI summary - the entry point for agents
 #[derive(Serialize)]
@@ -32,13 +37,13 @@ pub struct ForAiReport {
     pub summary: ForAiSummary,
     /// Per-root section references (link to slices)
     pub sections: Vec<ForAiSectionRef>,
-    /// Immediate actionable items
+    /// Immediate actionable shortlist for the first pass, ordered by priority.
     pub quick_wins: Vec<QuickWin>,
     /// Top actionable tasks with explicit verification commands
     pub priority_tasks: Vec<PriorityTask>,
-    /// Files with most connections (good context anchors)
+    /// Highest-connectivity context anchors, ranked rather than exhaustive.
     pub hub_files: Vec<HubFile>,
-    /// Agent-ready bundle with condensed lists (handlers, dupes, dead, dynamic, cycles)
+    /// Agent-ready bundle with full issue lists plus ranked context anchors.
     pub bundle: AgentBundle,
 }
 
@@ -147,12 +152,15 @@ pub struct AgentBundle {
     pub duplicates: Vec<AgentDuplicate>,
     pub dead_exports: Vec<AgentDeadExport>,
     pub dynamic_imports: Vec<AgentDynamicImport>,
+    /// Largest files by LOC, intentionally ranked as context anchors.
     pub largest_files: Vec<AgentFile>,
     pub cycles: Vec<AgentCycle>,
-    /// TypeScript lint issues (any types, ts-ignore)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dist: Option<DistResult>,
+    /// All detected TypeScript lint issues (any types, ts-ignore, etc.).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ts_lint: Vec<AgentTsLintIssue>,
-    /// Memory leak issues (subscriptions, intervals, caches)
+    /// All detected memory leak issues (subscriptions, intervals, caches).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub memory_lint: Vec<AgentMemoryLintIssue>,
 }
@@ -283,7 +291,7 @@ pub fn generate_for_ai_report(
 pub(crate) fn build_priority_tasks(quick_wins: &[QuickWin]) -> Vec<PriorityTask> {
     quick_wins
         .iter()
-        .take(10)
+        .take(MAX_PRIORITY_TASKS)
         .map(|w| {
             let risk = match w.kind.as_str() {
                 "missing_handler" | "unregistered_handler" => "high",
@@ -554,6 +562,7 @@ fn build_agent_bundle(
     analyses: &[FileAnalysis],
 ) -> AgentBundle {
     let handlers = build_handler_groups(sections);
+    let dist = sections.iter().find_map(|section| section.dist.clone());
 
     let mut all_dups: Vec<RankedDup> = sections
         .iter()
@@ -564,7 +573,6 @@ fn build_agent_bundle(
     let duplicates = all_dups
         .into_iter()
         .filter(|d| seen_dup.insert((d.name.clone(), d.canonical.clone())))
-        .take(20)
         .map(|d| AgentDuplicate {
             name: d.name,
             canonical: d.canonical,
@@ -580,7 +588,6 @@ fn build_agent_bundle(
         .iter()
         .flat_map(|s| s.dead_exports.clone())
         .filter(|d| seen_dead.insert((d.file.clone(), d.symbol.clone())))
-        .take(50)
         .map(|d| AgentDeadExport {
             symbol: d.symbol,
             file: d.file,
@@ -619,7 +626,7 @@ fn build_agent_bundle(
         })
         .collect();
     largest_files.sort_by(|a, b| b.loc.cmp(&a.loc).then(a.path.cmp(&b.path)));
-    largest_files.truncate(25);
+    largest_files.truncate(MAX_LARGEST_FILES);
 
     let cycles = build_agent_cycles(sections);
 
@@ -652,8 +659,6 @@ fn build_agent_bundle(
                 Vec::new()
             }
         })
-        .filter(|i| i.severity == "high") // Only high severity for quick wins
-        .take(50) // Limit output size
         .collect();
 
     // Memory lint - scan JS/TS files for memory leak patterns
@@ -684,8 +689,6 @@ fn build_agent_bundle(
                 Vec::new()
             }
         })
-        .filter(|i| i.severity == "high") // Only high severity for quick wins
-        .take(30) // Limit output size
         .collect();
 
     AgentBundle {
@@ -695,6 +698,7 @@ fn build_agent_bundle(
         dynamic_imports,
         largest_files,
         cycles,
+        dist,
         ts_lint,
         memory_lint,
     }
@@ -1312,7 +1316,7 @@ pub(crate) fn find_hub_files(analyses: &[FileAnalysis]) -> Vec<HubFile> {
 
     scored
         .into_iter()
-        .take(10)
+        .take(MAX_HUB_FILES)
         .filter(|(_, _, _, _, _, score)| *score > 5)
         .map(
             |(a, imports_count, exports_count, importers_count, commands_count, _)| HubFile {
@@ -1337,6 +1341,7 @@ pub fn print_for_ai_json(report: &ForAiReport) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::analyzer::dead_parrots::DeadExport;
     use crate::analyzer::report::{CommandGap, DupLocation, DupSeverity, RankedDup};
     use crate::types::{
         CommandRef, ExportSymbol, ImportEntry, ImportKind, ImportResolutionKind, ImportSymbol,
@@ -1386,10 +1391,44 @@ mod tests {
             hub_files: vec![],
             crowds: vec![],
             dead_exports: vec![],
+            dist: None,
             twins_data: None,
             coverage_gaps: vec![],
             health_score: None,
             refactor_plan: None,
+        }
+    }
+
+    fn mock_dead_export(symbol: &str, file: &str, line: usize) -> DeadExport {
+        DeadExport {
+            file: file.to_string(),
+            symbol: symbol.to_string(),
+            line: Some(line),
+            confidence: "high".to_string(),
+            reason: "unused export".to_string(),
+            open_url: None,
+            is_test: false,
+        }
+    }
+
+    fn mock_ranked_dup(name: &str, canonical: &str, canonical_line: usize) -> RankedDup {
+        RankedDup {
+            name: name.to_string(),
+            files: vec![canonical.to_string(), format!("{canonical}.dup")],
+            locations: vec![DupLocation {
+                file: canonical.to_string(),
+                line: Some(canonical_line),
+            }],
+            score: 50,
+            prod_count: 2,
+            dev_count: 0,
+            canonical: canonical.to_string(),
+            canonical_line: Some(canonical_line),
+            refactors: vec![],
+            severity: DupSeverity::CrossCrate,
+            is_cross_lang: false,
+            packages: vec!["pkg".to_string()],
+            reason: "duplicate symbol".to_string(),
         }
     }
 
@@ -1626,6 +1665,31 @@ mod tests {
         assert_eq!(report.summary.files_analyzed, 5);
         assert_eq!(report.summary.total_loc, 150);
         assert_eq!(report.sections.len(), 1);
+    }
+
+    #[test]
+    fn test_agent_bundle_keeps_full_issue_lists() {
+        let mut section = mock_section("src", 5);
+        section.dead_exports = (0..60)
+            .map(|idx| {
+                mock_dead_export(
+                    &format!("dead_{idx}"),
+                    &format!("src/file_{idx}.ts"),
+                    idx + 1,
+                )
+            })
+            .collect();
+        section.ranked_dups = (0..25)
+            .map(|idx| {
+                mock_ranked_dup(&format!("dup_{idx}"), &format!("src/dup_{idx}.ts"), idx + 1)
+            })
+            .collect();
+
+        let analyses = vec![mock_file("src/a.ts", 100), mock_file("src/b.ts", 50)];
+        let report = generate_for_ai_report("/project", &[section], &analyses, None);
+
+        assert_eq!(report.bundle.dead_exports.len(), 60);
+        assert_eq!(report.bundle.duplicates.len(), 25);
     }
 
     #[test]

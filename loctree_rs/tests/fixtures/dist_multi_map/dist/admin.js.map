@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "file": "admin.js",
+  "sources": ["src/index.ts"],
+  "names": ["shared", "adminOnly"],
+  "mappings": "AAAAA,CAAAC"
+}

@@ -24,7 +24,7 @@ loctree_rs/tarpaulin-report.json
 !/README.md
 !/CHANGELOG.md
 !/CONTRIBUTING.md
-!/replit.md
+!/SECURITY.md
 
 # Local patch/diff artifacts
 *.patch

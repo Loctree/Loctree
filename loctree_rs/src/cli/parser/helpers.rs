@@ -19,6 +19,7 @@ pub(crate) const SUBCOMMANDS: &[&str] = &[
     "s", // alias for slice
     "find",
     "f", // alias for find
+    "findings",
     "dead",
     "d", // alias for dead
     "unused",
@@ -59,6 +60,7 @@ pub(crate) const SUBCOMMANDS: &[&str] = &[
     "doctor",
     "plan",
     "p", // alias for plan
+    "cache",
 ];
 
 /// Check if an argument looks like a new-style subcommand.
@@ -143,6 +145,7 @@ mod tests {
         assert!(is_subcommand("tree"));
         assert!(is_subcommand("slice"));
         assert!(is_subcommand("dead"));
+        assert!(is_subcommand("findings"));
         assert!(is_subcommand("trace"));
         assert!(!is_subcommand("--tree"));
         assert!(!is_subcommand("-A"));

@@ -1,7 +1,6 @@
 //! Python standard library set and thread-safe constructor patterns.
 //!
-//! Vibecrafted with AI Agents by VetCoders (c)2025 The Loctree Team
-//! Co-Authored-By: Maciej <void@div0.space> & Klaudiusz <the1st@whoai.am>
+//! VibeCrafted with AI Agents (c)2026 Loctree Team
 
 use std::collections::HashSet;
 use std::sync::OnceLock;

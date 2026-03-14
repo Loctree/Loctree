@@ -1,7 +1,6 @@
 use std::path::Path;
 
 use serde_json::Value as JsonValue;
-use toml::Value as TomlValue;
 
 use crate::snapshot::{
     CargoBinSummary, CargoTomlSummary, ManifestEntry, ManifestSummary, PackageJsonSummary,
@@ -166,8 +165,7 @@ fn summarize_cargo_toml(root: &Path) -> Option<CargoTomlSummary> {
         return None;
     }
     let content = std::fs::read_to_string(&path).ok()?;
-    let toml: TomlValue = content.parse().ok()?;
-    let table = toml.as_table()?;
+    let table: toml::Table = content.parse().ok()?;
 
     let mut summary = CargoTomlSummary::default();
 
@@ -270,8 +268,7 @@ fn summarize_pyproject_toml(root: &Path) -> Option<PyProjectSummary> {
         return None;
     }
     let content = std::fs::read_to_string(&path).ok()?;
-    let toml: TomlValue = content.parse().ok()?;
-    let table = toml.as_table()?;
+    let table: toml::Table = content.parse().ok()?;
 
     let mut scripts = Vec::new();
     let mut entry_points = Vec::new();
