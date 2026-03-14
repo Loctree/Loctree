@@ -275,6 +275,9 @@ mod analyzer_mode {
     fn analyzes_impact() {
         let fixture = fixtures_path().join("simple_ts");
 
+        // Refresh the snapshot first so self-hosted runners don't reuse stale cache state.
+        loctree().current_dir(&fixture).assert().success();
+
         loctree()
             .current_dir(&fixture)
             .args(["-A", "--impact", "src/utils/greeting.ts"])
