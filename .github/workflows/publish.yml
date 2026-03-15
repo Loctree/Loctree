@@ -95,36 +95,39 @@ jobs:
 
       - name: Publish report-leptos
         run: |
-          VERSION="${{ needs.verify-release.outputs.version }}"
-          if cargo search report-leptos 2>/dev/null | grep -q "report-leptos = \"$VERSION\""; then
-            echo "report-leptos $VERSION already published, skipping"
-          else
-            cargo publish -p report-leptos
-          fi
+          cargo publish -p report-leptos 2>&1 || {
+            if cargo search report-leptos 2>/dev/null | grep -q '"${{ needs.verify-release.outputs.version }}"'; then
+              echo "report-leptos already at ${{ needs.verify-release.outputs.version }}, continuing"
+            else
+              exit 1
+            fi
+          }
 
       - name: Wait for crates.io index
         run: sleep 30
 
       - name: Publish loctree
         run: |
-          VERSION="${{ needs.verify-release.outputs.version }}"
-          if cargo search loctree 2>/dev/null | grep -q "loctree = \"$VERSION\""; then
-            echo "loctree $VERSION already published, skipping"
-          else
-            cargo publish -p loctree
-          fi
+          cargo publish -p loctree 2>&1 || {
+            if cargo search loctree 2>/dev/null | grep -q '"${{ needs.verify-release.outputs.version }}"'; then
+              echo "loctree already at ${{ needs.verify-release.outputs.version }}, continuing"
+            else
+              exit 1
+            fi
+          }
 
       - name: Wait for crates.io index
         run: sleep 30
 
       - name: Publish loctree-mcp
         run: |
-          VERSION="${{ needs.verify-release.outputs.version }}"
-          if cargo search loctree-mcp 2>/dev/null | grep -q "loctree-mcp = \"$VERSION\""; then
-            echo "loctree-mcp $VERSION already published, skipping"
-          else
-            cargo publish -p loctree-mcp
-          fi
+          cargo publish -p loctree-mcp 2>&1 || {
+            if cargo search loctree-mcp 2>/dev/null | grep -q '"${{ needs.verify-release.outputs.version }}"'; then
+              echo "loctree-mcp already at ${{ needs.verify-release.outputs.version }}, continuing"
+            else
+              exit 1
+            fi
+          }
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v1
