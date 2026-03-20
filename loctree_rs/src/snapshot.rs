@@ -127,10 +127,12 @@ fn find_git_root(start: &Path) -> Option<PathBuf> {
 }
 
 fn normalize_root_dir(root: &Path) -> PathBuf {
-    if root.is_file() {
-        return root.parent().unwrap_or(root).to_path_buf();
-    }
-    root.to_path_buf()
+    let base = if root.is_file() {
+        root.parent().unwrap_or(root).to_path_buf()
+    } else {
+        root.to_path_buf()
+    };
+    base.canonicalize().unwrap_or(base)
 }
 
 fn has_project_marker(root: &Path) -> bool {
