@@ -686,10 +686,16 @@ pub(crate) fn load_or_create_snapshot_for_roots(
         }
     }
 
-    // Create minimal ParsedArgs for scan, propagating output mode
+    // Create minimal ParsedArgs for scan, propagating output mode.
+    // Load .loctignore so auto-rescan respects the same ignore patterns as explicit scan.
+    let ignore_patterns = roots
+        .first()
+        .map(|r| crate::fs_utils::load_loctreeignore(r))
+        .unwrap_or_default();
     let parsed = ParsedArgs {
         verbose: global.verbose,
         use_gitignore: true,
+        ignore_patterns,
         output: if global.json {
             OutputMode::Json
         } else {
@@ -737,7 +743,8 @@ pub(crate) fn load_or_create_snapshot(
     root: &std::path::Path,
     global: &GlobalOptions,
 ) -> std::io::Result<crate::snapshot::Snapshot> {
-    let root_list = vec![root.to_path_buf()];
+    let canonical = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let root_list = vec![canonical];
     load_or_create_snapshot_for_roots(&root_list, global)
 }
 
