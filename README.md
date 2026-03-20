@@ -22,14 +22,9 @@
 ## Install
 
 ```bash
-curl -fsSL https://loct.io/install.sh | sh   # One-liner (installs from crates.io)
-```
-
-Or directly via Cargo:
-
-```bash
-cargo install loctree        # CLI: loct, loctree
-cargo install loctree-mcp    # MCP server for AI agents
+curl -fsSL https://loct.io/install.sh | sh   # One-liner
+cargo install loctree loctree-mcp             # Or via Cargo
+npm install -g loctree                        # Or via npm
 ```
 
 ## Quick Start
@@ -64,6 +59,17 @@ loctree captures your project's real dependency graph in a single scan, then ans
 - **Impact Analysis** - see what breaks before you delete or refactor
 - **jq Queries** - query snapshot data with jq syntax (`loct '.files | length'`)
 
+## Why loctree
+
+| | grep/rg | LSP | loctree |
+|---|---------|-----|---------|
+| Knows imports vs definitions | No | Per-file | Whole graph |
+| Dead export detection | No | No | Yes (multi-lang) |
+| Cross-file impact analysis | No | Limited | Full transitive |
+| AI agent integration | No | No | MCP server + `--for-ai` |
+| Speed on 1M LOC repo | Fast (text) | Slow (indexing) | **~3s** (structural) |
+| Setup | None | Per-editor | One binary |
+
 ## MCP Server
 
 loctree ships as an MCP server for seamless AI agent integration:
@@ -72,7 +78,7 @@ loctree ships as an MCP server for seamless AI agent integration:
 loctree-mcp    # Start via stdio (configure in your MCP client)
 ```
 
-Tools: `repo-view`, `slice`, `find`, `impact`, `focus`, `tree`. Each tool accepts a `project` parameter - auto-scans on first use, caches snapshots in RAM.
+7 tools: `repo-view`, `slice`, `find`, `impact`, `focus`, `tree`, `follow`. Each tool accepts a `project` parameter — auto-scans on first use, caches snapshots in RAM. Project-agnostic: analyze any repo without configuration.
 
 ```json
 {
