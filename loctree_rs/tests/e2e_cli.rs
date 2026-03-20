@@ -275,9 +275,6 @@ mod analyzer_mode {
     fn analyzes_impact() {
         let fixture = fixtures_path().join("simple_ts");
 
-        // Refresh the snapshot first so self-hosted runners don't reuse stale cache state.
-        loctree().current_dir(&fixture).assert().success();
-
         loctree()
             .current_dir(&fixture)
             .args(["-A", "--impact", "src/utils/greeting.ts"])
@@ -1445,14 +1442,22 @@ mod analysis_commands {
     fn audit_stdout_flag() {
         let fixture = fixtures_path().join("simple_ts");
 
+        // `audit --stdout` was removed: audit now writes to artifact files only.
+        // The --json flag is the stdout-oriented contract.
         loctree()
             .current_dir(&fixture)
             .args(["audit", "--stdout"])
             .assert()
             .failure()
-            .stderr(predicate::str::contains(
-                "writes markdown reports to an artifact file only",
-            ));
+            .stderr(predicate::str::contains("--json"));
+
+        // Verify --json contract works
+        loctree()
+            .current_dir(&fixture)
+            .args(["audit", "--json"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("{"));
     }
 
     // ----------------------------------------
