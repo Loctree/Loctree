@@ -231,6 +231,7 @@ impl Command {
             "doctor" => Some(DOCTOR_HELP),
             "jq" => Some(JQ_HELP),
             "plan" | "p" => Some(PLAN_HELP),
+            "cache" => Some(CACHE_HELP),
             _ => None,
         }
     }
@@ -306,6 +307,7 @@ impl Command {
         let mgmt_cmds = [
             ("doctor", "Interactive diagnostics with recommendations"),
             ("suppress", "Manage false positive suppressions"),
+            ("cache", "Manage snapshot cache (list, clean)"),
             ("diff", "Compare snapshots between branches/commits"),
             ("memex", "Index analysis into AI memory (vector DB)"),
         ];

@@ -1417,3 +1417,29 @@ RELATED COMMANDS:
     loct focus <dir>     Holographic context for a directory
     loct cycles          Detect circular imports
     loct audit           Full codebase audit";
+
+pub(super) const CACHE_HELP: &str = "loct cache - Manage snapshot cache
+
+USAGE:
+    loct cache <SUBCOMMAND> [OPTIONS]
+
+DESCRIPTION:
+    List and clean snapshot caches. Each project gets a cached snapshot
+    in the global cache directory (~/Library/Caches/loctree/ on macOS,
+    $XDG_CACHE_HOME/loctree/ on Linux).
+
+SUBCOMMANDS:
+    list                   List cached projects with sizes and ages
+    clean                  Remove cached snapshots
+
+CLEAN OPTIONS:
+    --project <DIR>        Only clean cache for a specific project
+    --older-than <DAYS>d   Only remove entries older than N days (e.g., 7d, 30d)
+    --force, -f            Skip confirmation prompt
+
+EXAMPLES:
+    loct cache list                        # Show all cached projects
+    loct cache clean                       # Remove all (with confirmation)
+    loct cache clean --force               # Remove all without asking
+    loct cache clean --project .           # Clean cache for current project
+    loct cache clean --older-than 30d      # Remove entries older than 30 days";
