@@ -5,20 +5,20 @@ Get the loctree npm package published in 5 steps.
 ## Prerequisites
 
 - npm account (`npm login`)
-- loctree Rust binaries published to GitHub releases
+- loct Rust binaries published to GitHub releases
 - Node.js 14+ installed
 
 ## Step 1: Verify GitHub Releases
 
 Ensure release assets exist at:
 ```
-https://github.com/Loctree/Loctree/releases/tag/v0.8.16
+https://github.com/Loctree/loct/releases/tag/v0.8.16
 ```
 
 Required files:
-- `loctree-darwin-aarch64.tar.gz`
-- `loctree-linux-x86_64.tar.gz`
-- `loctree-windows-x86_64.exe.zip`
+- `loct-darwin-aarch64.tar.gz`
+- `loct-linux-x86_64.tar.gz`
+- `loct-windows-x86_64.exe.zip`
 
 ## Step 2: Generate Platform Packages
 
@@ -33,7 +33,7 @@ This creates the currently supported platform package directories.
 ```bash
 cd platform-packages/darwin-arm64
 npm install
-./loctree --version
+./loct --version
 ```
 
 ## Step 4: Publish
@@ -63,7 +63,7 @@ mkdir /tmp/test-loctree
 cd /tmp/test-loctree
 npm init -y
 npm install loctree
-npx loctree --version
+npx loct --version
 ```
 
 ## Done!
@@ -72,7 +72,7 @@ Your package is now published and ready to use:
 
 ```bash
 npm install loctree
-npx loctree --help
+npx loct --help
 ```
 
 ## Troubleshooting

@@ -1,145 +1,52 @@
-# Homebrew Automation Setup
+# Homebrew Tap Setup
 
-Quick reference for setting up automated Homebrew formula updates.
+Loctree now ships through two custom taps, not through `homebrew-core`:
 
-## TL;DR
+- `Loctree/homebrew-cli` → `brew install loctree/cli/loct`
+- `Loctree/homebrew-mcp` → `brew install loctree/mcp/loctree-mcp`
 
-1. **Create GitHub Personal Access Token**
-   - Go to: https://github.com/settings/tokens/new
-   - Name: `Homebrew Formula Bot - loctree`
-   - Scopes: `repo` + `workflow`
-   - Generate and copy token
+## One-Time Bootstrap
 
-2. **Add Secret to Repository**
-   - Go to: https://github.com/Loctree/Loctree-suite/settings/secrets/actions
-   - New secret: `HOMEBREW_GITHUB_API_TOKEN`
-   - Paste token
-   - Save
+1. Create the target repositories on GitHub:
+   - `Loctree/homebrew-cli`
+   - `Loctree/homebrew-mcp`
 
-3. **Done!**
-   - Next release will automatically create a Homebrew PR
-   - Monitor: https://github.com/Homebrew/homebrew-core/pulls
+2. Create a GitHub token with write access to:
+   - `Loctree/loct`
+   - `Loctree/loctree-mcp`
+   - `Loctree/homebrew-cli`
+   - `Loctree/homebrew-mcp`
 
-## Important Notes
+3. Store it in `Loctree/Loctree` as:
+   - `HOMEBREW_GITHUB_API_TOKEN`
 
-### First-Time Submission
+## Runtime Contract
 
-The automation updates *existing* formulas. For the initial submission to Homebrew:
+`homebrew-release.yml` runs after the monorepo release is published.
 
-**Option A: Automated (when ready)**
-```bash
-# Just create a release - the workflow handles everything
-git tag v0.7.0
-git push origin v0.7.0
-```
+It:
 
-**Option B: Manual submission**
-```bash
-# Use the helper script
-./scripts/prepare-homebrew-formula.sh 0.7.0
+1. Downloads the published tarballs from `Loctree/loct` and `Loctree/loctree-mcp`.
+2. Calculates SHA256 checksums for each supported Homebrew target.
+3. Renders the tap formulas via `scripts/render-homebrew-formula.sh`.
+4. Commits the updated formulas into the tap repos.
 
-# Test locally
-brew install --build-from-source ./Formula/loctree.rb
-brew test loctree
-brew audit --strict loctree
+## Supported Homebrew Targets
 
-# Submit to homebrew-core
-brew bump-formula-pr loctree \
-  --url=https://crates.io/api/v1/crates/loctree/0.7.0/download \
-  --sha256=<from-script-output>
-```
+- macOS Apple Silicon
+- macOS Intel
+- Linux x86_64
 
-### When to Submit to Homebrew
+## Local Smoke Test
 
-Consider submitting when:
-- ✅ Version is stable (v0.7.0+ or v1.0.0)
-- ✅ CI passes consistently
-- ✅ Documentation is complete
-- ✅ Tests are comprehensive
-- ✅ Ready for broader adoption
-
-Don't submit too early - Homebrew maintainers prefer stable releases.
-
-## Files Created
-
-1. **`.github/workflows/homebrew-release.yml`**
-   - Automated workflow triggered on GitHub releases
-   - Calculates SHA256 from crates.io tarball
-   - Creates PR to Homebrew/homebrew-core
-
-2. **`Formula/loctree.rb`**
-   - Reference Homebrew formula template
-   - Use for local testing and initial submission
-
-3. **`scripts/prepare-homebrew-formula.sh`**
-   - Helper script to calculate SHA256 and update formula
-   - Run before manual submission
-
-4. **`docs/HOMEBREW_RELEASE.md`**
-   - Complete documentation of the process
-   - Troubleshooting guide
-   - Integration details
-
-## Workflow Integration
-
-```
-Developer creates release (v0.7.0)
-  ↓
-publish.yml workflow runs
-  ├─ Publishes to crates.io
-  ├─ Builds binaries
-  └─ Creates GitHub release
-      ↓
-homebrew-release.yml triggers (on release.published)
-  ├─ Extracts version from tag
-  ├─ Downloads tarball from crates.io
-  ├─ Calculates SHA256
-  └─ Creates PR to Homebrew/homebrew-core
-      ↓
-Homebrew CI validates the formula
-  ↓
-Maintainers review and merge
-  ↓
-Users install: brew install loctree
-```
-
-## Testing the Workflow
-
-### Dry Run (Manual Trigger)
-
-1. Go to: https://github.com/Loctree/Loctree-suite/actions/workflows/homebrew-release.yml
-2. Click "Run workflow"
-3. Enter version: `0.6.8`
-4. Click "Run workflow"
-5. Monitor execution
-
-### Production Run (Real Release)
+After a tap sync lands, install from the tap:
 
 ```bash
-# Create and push tag (triggers both workflows)
-git tag v0.7.0
-git push origin v0.7.0
-
-# Watch workflows
-# - publish.yml: https://github.com/Loctree/Loctree-suite/actions/workflows/publish.yml
-# - homebrew-release.yml: https://github.com/Loctree/Loctree-suite/actions/workflows/homebrew-release.yml
+brew install loctree/cli/loct
+brew install loctree/mcp/loctree-mcp
 ```
 
-## Security
+## Important
 
-- ✅ Token stored in GitHub Secrets (encrypted)
-- ✅ Token scoped to minimum required permissions
-- ✅ Workflow runs in isolated environment
-- ✅ No secrets exposed in logs
-
-**Token Rotation**: Recommended every 6-12 months
-
-## Support
-
-- **Automation issues**: Open issue in this repo
-- **Formula issues**: https://github.com/Homebrew/homebrew-core/issues
-- **Installation help**: https://docs.brew.sh/Troubleshooting
-
-## Full Documentation
-
-See: [docs/HOMEBREW_RELEASE.md](../docs/HOMEBREW_RELEASE.md)
+Do not maintain formula versions manually in the tap repos.
+The monorepo release workflow is the only source of truth.

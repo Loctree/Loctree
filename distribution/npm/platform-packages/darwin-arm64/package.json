@@ -1,17 +1,25 @@
 {
   "name": "@loctree/darwin-arm64",
   "version": "0.8.16",
-  "description": "loctree binary for macOS Apple Silicon (ARM64)",
-  "keywords": ["loctree", "darwin", "arm64"],
+  "description": "loct binary for macOS Apple Silicon (ARM64)",
+  "keywords": [
+    "loctree",
+    "darwin",
+    "arm64"
+  ],
   "license": "MIT OR Apache-2.0",
-  "os": ["darwin"],
-  "cpu": ["arm64"],
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Loctree/Loctree.git"
   },
   "files": [
-    "loctree",
+    "loct",
     "postinstall.js"
   ],
   "scripts": {

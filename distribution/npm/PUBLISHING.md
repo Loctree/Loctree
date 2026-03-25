@@ -14,22 +14,22 @@ The main package lists all platform packages as `optionalDependencies`, so npm/p
 ## Prerequisites
 
 1. **npm account** with publish permissions
-2. **GitHub releases** with loctree assets for the supported npm platforms
+2. **GitHub releases** with loct assets for the supported npm platforms
 3. **Node.js 14+** installed locally
 
 ## Publishing Steps
 
 ### Step 1: Verify GitHub Releases
 
-Ensure the loctree release has these assets for version `0.8.16` (or your target version):
+Ensure the loct release has these assets for version `0.8.16` (or your target version):
 
 ```
-loctree-darwin-aarch64.tar.gz
-loctree-linux-x86_64.tar.gz
-loctree-windows-x86_64.exe.zip
+loct-darwin-aarch64.tar.gz
+loct-linux-x86_64.tar.gz
+loct-windows-x86_64.exe.zip
 ```
 
-Check: https://github.com/Loctree/Loctree/releases/tag/v0.8.16
+Check: https://github.com/Loctree/loct/releases/tag/v0.8.16
 
 ### Step 2: Create Platform-Specific Packages
 
@@ -55,8 +55,8 @@ Before publishing, test that the download mechanism works:
 cd platform-packages/darwin-arm64
 npm install
 # Should download the binary from GitHub releases
-ls -lh loctree
-./loctree --version
+ls -lh loct
+./loct --version
 ```
 
 ### Step 4: Publish Platform Packages
@@ -104,7 +104,7 @@ npm init -y
 npm install loctree
 
 # Verify binary works
-npx loctree --version
+npx loct --version
 node -e "console.log(require('loctree').getBinaryPath())"
 ```
 
@@ -132,7 +132,7 @@ When releasing a new version:
 
 - Verify GitHub release exists with correct tag (note the `v` prefix)
 - Check asset filenames match the `BINARY_MAPPINGS` in `platform-packages/postinstall.js`
-- Test download URL manually: `curl -L https://github.com/Loctree/Loctree/releases/download/v0.8.16/loctree-darwin-aarch64.tar.gz -o test`
+- Test download URL manually: `curl -L https://github.com/Loctree/loct/releases/download/v0.8.16/loct-darwin-aarch64.tar.gz -o test`
 
 ### optionalDependencies not installing
 
@@ -155,7 +155,7 @@ This increases package sizes but eliminates download dependencies.
 
 ### Sync with Rust releases
 
-Monitor https://github.com/Loctree/Loctree/releases for new versions.
+Monitor https://github.com/Loctree/loct/releases for new versions.
 
 When a new version is released:
 1. Update all version numbers

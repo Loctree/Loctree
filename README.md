@@ -25,6 +25,8 @@
 curl -fsSL https://loct.io/install.sh | sh   # One-liner
 cargo install loctree loctree-mcp             # Or via Cargo
 npm install -g loctree                        # Or via npm
+brew install loctree/cli/loct                 # CLI via Homebrew tap
+brew install loctree/mcp/loctree-mcp          # MCP via Homebrew tap
 ```
 
 ## Quick Start

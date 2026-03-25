@@ -51,8 +51,8 @@ cargo install loctree loctree-mcp rmcp-memex rmcp-mux
 ### 2. Homebrew (macOS/Linux)
 
 ```bash
-# Coming soon - Homebrew formula is planned but not yet available
-# brew install loctree
+brew install loctree/cli/loct
+brew install loctree/mcp/loctree-mcp
 ```
 
 ### 3. From Source

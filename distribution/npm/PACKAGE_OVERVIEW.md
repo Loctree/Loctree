@@ -5,6 +5,7 @@
 ## Shape
 
 - main package: `loctree`
+- command alias: `loct`
 - platform packages:
   - `@loctree/darwin-arm64`
   - `@loctree/linux-x64-gnu`
@@ -12,7 +13,7 @@
 
 The main package depends on those platform packages through
 `optionalDependencies`. Each platform package downloads the matching GitHub
-release asset during install.
+release asset from `Loctree/loct` during install.
 
 ## Why this shape
 

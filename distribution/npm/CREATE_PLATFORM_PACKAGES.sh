@@ -21,7 +21,7 @@ for platform_spec in "${PLATFORMS[@]}"; do
 {
   "name": "@loctree/$platform",
   "version": "$VERSION",
-  "description": "loctree binary for $desc",
+  "description": "loct binary for $desc",
   "keywords": ["loctree", "$os", "$cpu"],
   "license": "MIT OR Apache-2.0",
   "os": ["$os"],
@@ -31,7 +31,7 @@ for platform_spec in "${PLATFORMS[@]}"; do
     "url": "git+https://github.com/Loctree/Loctree.git"
   },
   "files": [
-    "loctree$([ "$os" = "win32" ] && echo ".exe" || echo "")",
+    "loct$([ "$os" = "win32" ] && echo ".exe" || echo "")",
     "postinstall.js"
   ],
   "scripts": {

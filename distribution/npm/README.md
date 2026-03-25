@@ -4,7 +4,8 @@ Structural code intelligence for AI agents.
 
 This package is the canonical npm distribution surface for Loctree. It installs
 the matching platform package, which then downloads the corresponding GitHub
-release asset for your machine.
+release asset for your machine from the `Loctree/loct` thin release repo while
+keeping the source of truth in `Loctree/Loctree`.
 
 ## Supported npm targets
 
@@ -31,10 +32,10 @@ npm install -g loctree
 ## CLI examples
 
 ```bash
-npx loctree .
-npx loctree health
-npx loctree slice src/App.tsx --consumers
-npx loctree report --serve --port 4173
+npx loct .
+npx loct health
+npx loct slice src/App.tsx --consumers
+npx loct report --serve --port 4173
 ```
 
 ## What you get
@@ -55,6 +56,7 @@ If installation fails:
 
 ## Links
 
-- Repo: https://github.com/Loctree/Loctree
+- Source: https://github.com/Loctree/Loctree
+- CLI releases: https://github.com/Loctree/loct/releases
 - Docs: https://docs.rs/loctree
 - Website: https://loct.io

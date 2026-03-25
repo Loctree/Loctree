@@ -1,7 +1,0 @@
-{
-  "repo": "Loctree/loctree",
-  "targets": ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu"],
-  "binary": "loctree",
-  "artifact_name": "loctree",
-  "tap": "Loctree/homebrew-loctree"
-}

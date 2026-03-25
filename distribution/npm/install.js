@@ -72,11 +72,11 @@ function validateInstallation() {
   }
 
   // Check if the platform-specific package was installed
-  const binaryName = process.platform === 'win32' ? 'loctree.exe' : 'loctree';
+  const binaryName = process.platform === 'win32' ? 'loct.exe' : 'loct';
   const binaryPath = join(__dirname, 'node_modules', packageName, binaryName);
 
   if (!existsSync(binaryPath)) {
-    console.warn(`Warning: loctree binary not found at ${binaryPath}`);
+    console.warn(`Warning: loct binary not found at ${binaryPath}`);
     console.warn('This may happen if optionalDependencies are disabled.');
     console.warn('The package may not work correctly.');
     return;
@@ -86,12 +86,12 @@ function validateInstallation() {
   try {
     const result = spawnSync(binaryPath, ['--version'], { encoding: 'utf8' });
     if (result.status === 0) {
-      console.log(`loctree binary installed successfully: ${result.stdout.trim()}`);
+      console.log(`loct binary installed successfully: ${result.stdout.trim()}`);
     } else {
-      console.warn(`Warning: loctree binary may not be working correctly`);
+      console.warn(`Warning: loct binary may not be working correctly`);
     }
   } catch (err) {
-    console.warn(`Warning: Could not verify loctree binary: ${err.message}`);
+    console.warn(`Warning: Could not verify loct binary: ${err.message}`);
   }
 }
 

@@ -1,17 +1,25 @@
 {
   "name": "@loctree/win32-x64-msvc",
   "version": "0.8.16",
-  "description": "loctree binary for Windows x64",
-  "keywords": ["loctree", "win32", "x64"],
+  "description": "loct binary for Windows x64",
+  "keywords": [
+    "loctree",
+    "win32",
+    "x64"
+  ],
   "license": "MIT OR Apache-2.0",
-  "os": ["win32"],
-  "cpu": ["x64"],
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Loctree/Loctree.git"
   },
   "files": [
-    "loctree.exe",
+    "loct.exe",
     "postinstall.js"
   ],
   "scripts": {

@@ -1,15 +1,16 @@
 # GitHub Actions Workflows
 
-This directory contains automated workflows for the loctree project.
+This directory contains the release, CI, and automation workflows for the
+Loctree monorepo.
 
 ## Active Workflows
 
-### Release & Publishing
+### Release & Distribution
 
 | Workflow | Trigger | Purpose | Status |
 |----------|---------|---------|--------|
-| **publish.yml** | Tag push (`v*`) | Publish crates, build release assets, publish npm, create GitHub release | ✅ Active |
-| **homebrew-release.yml** | GitHub release published | Sync Homebrew formula to `Loctree/homebrew-loctree` | ✅ Active |
+| **publish.yml** | Tag push (`v*`, `loctree-v*`) | Publish crates, build CLI + MCP binaries, push assets into thin repos, publish npm, then create the monorepo release | ✅ Active |
+| **homebrew-release.yml** | Monorepo release published / manual dispatch | Render formulas and sync custom taps `Loctree/homebrew-cli` + `Loctree/homebrew-mcp` | ✅ Active |
 
 ### CI & Quality
 
@@ -27,11 +28,23 @@ This directory contains automated workflows for the loctree project.
 | **gemini-*.yml** | Issues, PR comments | Gemini AI triage and review | ✅ Active |
 | **codex-auto-fix.yml** | PR comments | Automated code fixes | ✅ Active |
 
-## Setup Required
+## Release Shape
 
-### Release Secrets
+The monorepo is the build and orchestration source of truth.
 
-The release pipeline expects these repository secrets in `Loctree/Loctree`:
+User-facing binary distribution is split into thin repos:
+
+- CLI assets: `Loctree/loct`
+- MCP assets: `Loctree/loctree-mcp`
+- Homebrew tap for CLI: `Loctree/homebrew-cli`
+- Homebrew tap for MCP: `Loctree/homebrew-mcp`
+
+This keeps `Loctree/Loctree` focused on code, CI, and release choreography while
+the thin repos stay narrowly scoped to distribution.
+
+## Required Secrets
+
+The release pipeline expects these secrets in `Loctree/Loctree`:
 
 - `CARGO_REGISTRY_TOKEN`
 - `NPM_TOKEN`
@@ -40,49 +53,44 @@ The release pipeline expects these repository secrets in `Loctree/Loctree`:
 - `MACOS_CERT_PASSWORD`
 - `MACOS_KEYCHAIN_PASSWORD`
 - `MACOS_DEVELOPER_ID_APPLICATION`
-- `APPLE_ID`
-- `APPLE_TEAM_ID`
-- `APPLE_APP_SPECIFIC_PASSWORD`
+- `APPLE_API_KEY_BASE64`
+- `APPLE_API_KEY_ID`
+- `APPLE_API_ISSUER_ID`
 
-Self-hosted runners are currently expected to be available under:
+`HOMEBREW_GITHUB_API_TOKEN` must be able to write releases to:
 
-- `[self-hosted, macOS, ARM64, dragon]`
-- `[self-hosted, Linux, X64, ops]`
+- `Loctree/loct`
+- `Loctree/loctree-mcp`
+- `Loctree/homebrew-cli`
+- `Loctree/homebrew-mcp`
 
-macOS release notes:
+## Release Entry Point
 
-- The signing import step hydrates the Apple `DeveloperIDG2CA.cer` intermediate that matches the current `MACOS_CERT_P12_BASE64` chain.
-- Public releases currently ship macOS Apple Silicon artifacts only. We intentionally do not build a `darwin-x64` target in this repo.
-
-## Release Process
-
-When you push a version tag, multiple workflows are triggered automatically:
+The canonical human entry point stays the same:
 
 ```bash
-git tag v0.7.0
-git push origin v0.7.0
+make version TYPE=minor TAG=1 PUSH=1
 ```
 
-**Workflow sequence:**
-1. `publish.yml` runs first
-   - Verifies checked-in versions match the tag
-   - Publishes `report-leptos`, `loctree`, and `loctree-mcp`
-   - Builds release assets on self-hosted Linux/macOS plus hosted Windows
-   - Publishes npm from `distribution/npm`
-   - Creates GitHub release
-2. `homebrew-release.yml` triggers on release
-   - Syncs the formula into `Loctree/homebrew-loctree`
+That tag push triggers the publish pipeline. The workflow then:
 
-**Timeline**: ~10-15 minutes from tag push to Homebrew PR creation
+1. Verifies workspace and npm versions match the tag.
+2. Publishes `report-leptos`, `loctree`, and `loctree-mcp`.
+3. Builds signed binaries for CLI and MCP.
+4. Uploads assets into `Loctree/loct` and `Loctree/loctree-mcp`.
+5. Publishes npm packages from `distribution/npm`.
+6. Creates the monorepo release.
+7. Triggers tap sync into `Loctree/homebrew-cli` and `Loctree/homebrew-mcp`.
 
 ## Monitoring
 
-- **Workflow runs**: https://github.com/Loctree/Loctree/actions
-- **Homebrew PRs**: https://github.com/Loctree/homebrew-loctree/pulls
-- **Release status**: https://github.com/Loctree/Loctree/releases
+- Monorepo actions: https://github.com/Loctree/Loctree/actions
+- CLI releases: https://github.com/Loctree/loct/releases
+- MCP releases: https://github.com/Loctree/loctree-mcp/releases
+- CLI tap: https://github.com/Loctree/homebrew-cli
+- MCP tap: https://github.com/Loctree/homebrew-mcp
 
-## Documentation
+## Bootstrap Note
 
-- [HOMEBREW_SETUP.md](HOMEBREW_SETUP.md) - Quick setup guide for Homebrew automation
-- [../docs/HOMEBREW_RELEASE.md](../docs/HOMEBREW_RELEASE.md) - Complete Homebrew documentation
-- [../CONTRIBUTING.md](../CONTRIBUTING.md) - General contribution guidelines
+Before the first release on this architecture, create the four thin repos above.
+The workflows assume they already exist and will fail fast if they do not.

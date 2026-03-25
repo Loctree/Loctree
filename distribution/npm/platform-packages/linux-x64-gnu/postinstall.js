@@ -15,29 +15,29 @@ const { execSync } = require('child_process');
 const streamPipeline = promisify(pipeline);
 
 // Configuration
-const GITHUB_REPO = 'Loctree/Loctree';
+const GITHUB_REPO = 'Loctree/loct';
 const VERSION = require('./package.json').version;
 
 // Platform-specific release assets currently shipped by CI
 const BINARY_MAPPINGS = {
   '@loctree/darwin-arm64': {
-    file: 'loctree-darwin-aarch64.tar.gz',
-    target: 'loctree',
+    file: 'loct-darwin-aarch64.tar.gz',
+    target: 'loct',
   },
   '@loctree/linux-x64-gnu': {
-    file: 'loctree-linux-x86_64.tar.gz',
-    target: 'loctree',
+    file: 'loct-linux-x86_64.tar.gz',
+    target: 'loct',
   },
   '@loctree/win32-x64-msvc': {
-    file: 'loctree-windows-x86_64.exe.zip',
-    target: 'loctree.exe',
+    file: 'loct-windows-x86_64.exe.zip',
+    target: 'loct.exe',
   },
 };
 
 async function downloadFile(url, destPath) {
   return new Promise((resolve, reject) => {
     https.get(url, {
-      headers: { 'User-Agent': 'loctree-npm-installer' },
+      headers: { 'User-Agent': 'loct-npm-installer' },
       followRedirect: true,
     }, (response) => {
       // Handle redirects
@@ -78,7 +78,7 @@ async function install() {
     return;
   }
 
-  console.log(`Downloading loctree release asset from ${downloadUrl}...`);
+  console.log(`Downloading loct release asset from ${downloadUrl}...`);
 
   try {
     await downloadFile(downloadUrl, archivePath);
@@ -105,15 +105,15 @@ async function install() {
       chmodSync(targetPath, 0o755);
     }
 
-    console.log(`Successfully installed loctree binary to ${targetPath}`);
+    console.log(`Successfully installed loct binary to ${targetPath}`);
   } catch (error) {
-    console.error(`Failed to download loctree binary: ${error.message}`);
+    console.error(`Failed to download loct binary: ${error.message}`);
     console.error(`URL: ${downloadUrl}`);
     console.error('');
     console.error('Possible solutions:');
     console.error('1. Check your internet connection');
     console.error('2. Verify the release exists on GitHub');
-    console.error('3. Install loctree manually from: https://github.com/Loctree/Loctree/releases');
+    console.error('3. Install loct manually from: https://github.com/Loctree/loct/releases');
     process.exit(1);
   }
 }
