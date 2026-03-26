@@ -1,6 +1,6 @@
-# Loctree Suite - Installation Guide
+# Loctree - Installation Guide
 
-Complete installation guide for the loctree-suite monorepo.
+Complete installation guide for the public Loctree OSS workspace.
 
 ## Quick Start
 
@@ -21,7 +21,7 @@ make install
 | Binary | Crate | Description |
 |--------|-------|-------------|
 | `loct` | loctree | Primary CLI - fast, agent-optimized |
-| `loctree` | loctree | Full CLI (deprecated in v0.9.0, use `loct`) |
+| `loctree` | loctree | Compatibility alias for `loct` |
 
 ### MCP Servers
 
@@ -54,6 +54,10 @@ cargo install loctree loctree-mcp rmcp-memex rmcp-mux
 brew install loctree/cli/loct
 brew install loctree/mcp/loctree-mcp
 ```
+
+Use one global channel per machine. If you already installed Loctree globally
+via Homebrew, avoid `npm install -g loctree` on the same setup unless you first
+remove the existing global binaries.
 
 ### 3. From Source
 
@@ -88,7 +92,7 @@ cargo test --workspace
 
 ## Dependencies
 
-### Core (loctree, loct)
+### Core (loctree crate, `loct` CLI)
 
 No external dependencies. Pure Rust.
 
@@ -113,7 +117,7 @@ make setup-protoc
 ## Workspace Structure
 
 ```
-loctree-suite/
+Loctree/
 ├── loctree_rs/          # Core library + CLI (loct, loctree)
 ├── loctree-mcp/         # MCP server for loctree
 ├── rmcp-memex/          # RAG/memory MCP server
@@ -177,6 +181,7 @@ See `docs/dev/.TL_DR/00_mcp_quickstart.md` for complete setup guide.
 ```bash
 # Check versions
 loct --version
+loctree --version
 loctree-mcp --version
 rmcp_memex --version
 rmcp-mux --version
@@ -191,7 +196,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | loctree-mcp
 ## Makefile Targets
 
 ```bash
-make install        # Install core (loct, loctree)
+make install        # Install core (loct + compatibility alias)
 make install-all    # Install everything including MCP servers
 make build          # Build all crates (release)
 make build-core     # Build only core (no protobuf)

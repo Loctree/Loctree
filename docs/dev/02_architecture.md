@@ -1,18 +1,18 @@
-# Loctree Suite - Architecture
+# Loctree - Architecture
 
-Technical architecture of the loctree-suite monorepo.
+Technical architecture of the public Loctree OSS workspace.
 
 ## Workspace Overview
 
 ```
-loctree-suite/                    # Cargo workspace root
+Loctree/                         # Cargo workspace root
 ├── Cargo.toml                    # Workspace manifest
 ├── Makefile                      # Build automation
 │
 ├── loctree_rs/                   # Core library + CLI
 │   ├── src/lib.rs                # Public API
-│   ├── src/bin/loct.rs           # Agent-optimized CLI
-│   └── src/bin/loctree.rs        # Full CLI (deprecated)
+│   ├── src/bin/loct.rs           # Canonical CLI
+│   └── src/bin/loctree.rs        # Compatibility alias
 │
 ├── loctree-mcp/                  # MCP server
 │   └── src/main.rs               # stdio MCP transport
@@ -79,8 +79,8 @@ Core static analysis library:
 - Code duplication (twins) analysis
 
 **Binaries**:
-- `loct` - Agent-optimized CLI with artifact persistence
-- `loctree` - Full CLI (deprecated in v0.9.0)
+- `loct` - Canonical CLI with artifact persistence
+- `loctree` - Compatibility alias for `loct`
 
 **Key modules**:
 ```

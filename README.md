@@ -32,6 +32,7 @@ brew install loctree/mcp/loctree-mcp          # MCP via Homebrew tap
 ## Quick Start
 
 Artifacts are stored in your OS cache dir by default (override via `LOCT_CACHE_DIR`).
+`loct` is the canonical CLI command. `loctree` remains available as a quiet compatibility alias.
 
 ```bash
 loct                              # Scan project, write cached artifacts

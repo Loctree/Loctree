@@ -2,7 +2,7 @@
 name = "loctree"
 version.workspace = true
 edition.workspace = true
-default-run = "loctree"
+default-run = "loct"
 authors.workspace = true
 description = "Structural code intelligence for AI agents. Scan once, query everything."
 license.workspace = true

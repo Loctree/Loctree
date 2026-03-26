@@ -1,6 +1,6 @@
-# Loctree Suite - Developer Documentation
+# Loctree - Developer Documentation
 
-Technical documentation for developers and contributors.
+Technical documentation for developers and contributors working on the public OSS line.
 
 ## Contents
 
@@ -38,7 +38,7 @@ make install
 | Binary | Purpose |
 |--------|---------|
 | `loct` | Primary CLI (recommended) |
-| `loctree` | Full CLI (deprecated v0.9.0) |
+| `loctree` | Compatibility alias for `loct` |
 | `loctree-mcp` | MCP server |
 | `rmcp_memex` | Memory/RAG server |
 | `rmcp-mux` | MCP multiplexer (single process manages all servers) |

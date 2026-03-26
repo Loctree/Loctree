@@ -3,7 +3,7 @@
 AI-oriented codebase analyzer for detecting dead code, circular imports, and generating dependency graphs.
 
 **Current version:** 0.8.16
-**CLI command:** `loct` (old `loctree` is deprecated)
+**CLI command:** `loct` (with `loctree` kept as a compatibility alias)
 
 ---
 

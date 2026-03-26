@@ -7,6 +7,9 @@ the matching platform package, which then downloads the corresponding GitHub
 release asset for your machine from the `Loctree/loct` thin release repo while
 keeping the source of truth in `Loctree/Loctree`.
 
+`loct` is the canonical CLI command. `loctree` may still exist as a compatibility
+alias on some install channels, but new docs and examples use `loct`.
+
 ## Supported npm targets
 
 - macOS Apple Silicon: `@loctree/darwin-arm64`
@@ -28,6 +31,16 @@ For global CLI usage:
 ```bash
 npm install -g loctree
 ```
+
+Then run:
+
+```bash
+loct --help
+```
+
+If you already installed Loctree globally via Homebrew, do not mix `brew` and
+`npm -g` for the same machine-level CLI. Pick one global channel or remove the
+existing binary first.
 
 ## CLI examples
 

@@ -1,6 +1,6 @@
-# Loctree Suite - CLI Reference
+# Loctree - CLI Reference
 
-Complete reference for all binaries in loctree-suite.
+Complete reference for the public Loctree CLI surface.
 
 ## loct
 
@@ -95,17 +95,10 @@ loct report --open     # Open in browser
 
 ## loctree
 
-Full CLI with all features. **Deprecated** - use `loct` instead.
+Compatibility alias for `loct`.
 
-Shows deprecation warning:
-```
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃  DEPRECATED: `loctree` will be removed in v0.9.0                  ┃
-┃  Use `loct` instead - it has all features + agent optimizations  ┃
-┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
-```
-
-Same commands as `loct`.
+Use it when you want older scripts or terminal muscle memory to keep working
+without changing behavior. All commands and flags are the same as `loct`.
 
 ---
 

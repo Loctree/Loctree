@@ -1,8 +1,8 @@
 //! Shared CLI entry point for both `loct` and `loctree` binaries.
 //!
 //! This module contains all the dispatch logic and mode handlers so that
-//! both binaries can share a single implementation. The `loctree` binary
-//! adds a deprecation warning and delegates here.
+//! both binaries can share a single implementation. `loct` is the canonical
+//! command; `loctree` is the compatibility alias that delegates here.
 
 use std::fs;
 use std::path::PathBuf;
@@ -17,7 +17,7 @@ use crate::{OutputMode, analyzer, detect, diff, fs_utils, git, slicer, snapshot,
 pub struct EntryOptions {
     /// Name shown in `--version` output (e.g. "loctree" or "loct").
     pub binary_name: &'static str,
-    /// If true, show deprecation banner before dispatch.
+    /// Reserved for binary-specific compatibility behavior.
     pub deprecated: bool,
     /// If true, show the animated startup banner on `Init` mode.
     pub show_banner: bool,
