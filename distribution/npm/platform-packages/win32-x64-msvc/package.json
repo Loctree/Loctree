@@ -1,6 +1,6 @@
 {
   "name": "@loctree/win32-x64-msvc",
-  "version": "0.8.16",
+  "version": "0.8.17",
   "description": "loct binary for Windows x64",
   "keywords": [
     "loctree",

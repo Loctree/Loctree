@@ -1,6 +1,6 @@
 {
   "name": "@loctree/linux-x64-gnu",
-  "version": "0.8.16",
+  "version": "0.8.17",
   "description": "loct binary for Linux x64 (glibc)",
   "keywords": [
     "loctree",

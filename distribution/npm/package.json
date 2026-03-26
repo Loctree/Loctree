@@ -1,6 +1,6 @@
 {
   "name": "loctree",
-  "version": "0.8.16",
+  "version": "0.8.17",
   "description": "Structural code intelligence for AI agents. Dead exports, circular imports, dependency graphs, reports, and MCP-ready analysis.",
   "keywords": [
     "static-analysis",
@@ -45,8 +45,8 @@
     "node": ">=14.0.0"
   },
   "optionalDependencies": {
-    "@loctree/darwin-arm64": "0.8.16",
-    "@loctree/linux-x64-gnu": "0.8.16",
-    "@loctree/win32-x64-msvc": "0.8.16"
+    "@loctree/darwin-arm64": "0.8.17",
+    "@loctree/linux-x64-gnu": "0.8.17",
+    "@loctree/win32-x64-msvc": "0.8.17"
   }
 }
