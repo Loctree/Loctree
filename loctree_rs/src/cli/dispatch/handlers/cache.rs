@@ -1,10 +1,15 @@
 //! Handler for `loct cache` commands (list, clean).
 
+use std::cmp::Ordering;
+use std::collections::BTreeSet;
 use std::fs;
+use std::path::Path;
 use std::time::SystemTime;
 
 use crate::cli::command::{CacheAction, CacheOptions};
-use crate::snapshot::{cache_base_dir, project_cache_dir};
+use crate::snapshot::{SnapshotMetadata, cache_base_dir, project_cache_dir};
+use serde::Deserialize;
+use time::{OffsetDateTime, format_description::well_known::Iso8601};
 
 use super::super::DispatchResult;
 
@@ -38,7 +43,7 @@ fn handle_list() -> DispatchResult {
     };
 
     let mut total_size: u64 = 0;
-    let mut rows: Vec<CacheEntry> = Vec::new();
+    let mut rows: Vec<CacheBucketRow> = Vec::new();
 
     for entry in entries.flatten() {
         let path = entry.path();
@@ -46,22 +51,18 @@ fn handle_list() -> DispatchResult {
             continue;
         }
 
-        let id = entry.file_name().to_string_lossy().to_string();
-        let size = dir_size(&path);
-        let age = dir_age(&path);
-        let project_path = read_project_root(&path);
-
-        total_size += size;
-        rows.push(CacheEntry {
-            id,
-            project_path,
-            size,
-            age,
-        });
+        let bucket_id = entry.file_name().to_string_lossy().to_string();
+        let row = collect_cache_bucket_row(&bucket_id, &path);
+        total_size += row.size_bytes;
+        rows.push(row);
     }
 
-    // Sort by size descending — biggest caches first
-    rows.sort_by(|a, b| b.size.cmp(&a.size));
+    rows.sort_by(|a, b| {
+        b.size_bytes
+            .cmp(&a.size_bytes)
+            .then_with(|| a.org_repo.cmp(&b.org_repo))
+            .then_with(|| a.project_path.cmp(&b.project_path))
+    });
 
     if rows.is_empty() {
         println!("No cached projects found.");
@@ -71,23 +72,24 @@ fn handle_list() -> DispatchResult {
 
     println!("Cache: {}", projects_dir.display());
     println!();
+    println!("Org/Repo | Path | Cache size MB | Meta");
+    println!("--- | --- | --- | ---");
 
-    for entry in &rows {
-        let name = entry.project_path.as_deref().unwrap_or("(unknown project)");
+    for row in &rows {
         println!(
-            "  {} {:>10}  {}  {}",
-            &entry.id[..8],
-            format_size(entry.size),
-            entry.age,
-            name,
+            "{} | {} | {:.2} | {}",
+            row.org_repo,
+            row.project_path,
+            size_in_mb(row.size_bytes),
+            row.meta,
         );
     }
 
     println!();
     println!(
-        "  {} project(s), {} total",
+        "{} cache bucket(s), {:.2} MB total",
         rows.len(),
-        format_size(total_size),
+        size_in_mb(total_size),
     );
 
     DispatchResult::Exit(0)
@@ -220,30 +222,306 @@ fn handle_clean(
     DispatchResult::Exit(0)
 }
 
-struct CacheEntry {
-    id: String,
-    project_path: Option<String>,
-    size: u64,
-    age: String,
+#[derive(Debug, PartialEq, Eq)]
+struct CacheBucketRow {
+    org_repo: String,
+    project_path: String,
+    size_bytes: u64,
+    meta: String,
 }
 
-/// Read the project root path from snapshot metadata in a cache directory.
-fn read_project_root(cache_dir: &std::path::Path) -> Option<String> {
-    // Look for snapshot.json and read metadata.roots[0]
-    let snapshot_file = cache_dir.join("snapshot.json");
-    if !snapshot_file.exists() {
+#[derive(Clone, Debug)]
+struct CacheSnapshotRecord {
+    metadata: SnapshotMetadata,
+    modified_at: SystemTime,
+    is_latest_pointer: bool,
+}
+
+#[derive(Debug, Default)]
+struct CacheBucketStats {
+    size_bytes: u64,
+    snapshots: Vec<CacheSnapshotRecord>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct SnapshotMetadataEnvelope {
+    #[serde(default)]
+    metadata: SnapshotMetadata,
+}
+
+fn collect_cache_bucket_row(bucket_id: &str, bucket_dir: &Path) -> CacheBucketRow {
+    let stats = collect_cache_bucket_stats(bucket_dir);
+    let snapshots = effective_bucket_snapshots(&stats.snapshots);
+    let project_path =
+        select_project_path(&snapshots).unwrap_or_else(|| "(unknown path)".to_string());
+    let org_repo = resolve_org_repo_label(&snapshots, bucket_id, &project_path);
+    let meta = format_cache_meta(&snapshots);
+
+    CacheBucketRow {
+        org_repo,
+        project_path,
+        size_bytes: stats.size_bytes,
+        meta,
+    }
+}
+
+fn collect_cache_bucket_stats(bucket_dir: &Path) -> CacheBucketStats {
+    let mut size_bytes = 0;
+    let mut snapshots = Vec::new();
+
+    for entry in walkdir::WalkDir::new(bucket_dir).into_iter().flatten() {
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+
+        if !metadata.is_file() {
+            continue;
+        }
+
+        size_bytes += metadata.len();
+
+        if entry.file_name().to_str() != Some("snapshot.json") {
+            continue;
+        }
+
+        let modified_at = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+        if let Some(snapshot) = read_snapshot_record(entry.path(), bucket_dir, modified_at) {
+            snapshots.push(snapshot);
+        }
+    }
+
+    CacheBucketStats {
+        size_bytes,
+        snapshots,
+    }
+}
+
+fn read_snapshot_record(
+    snapshot_path: &Path,
+    bucket_dir: &Path,
+    modified_at: SystemTime,
+) -> Option<CacheSnapshotRecord> {
+    let bytes = fs::read(snapshot_path).ok()?;
+    let envelope: SnapshotMetadataEnvelope = serde_json::from_slice(&bytes).ok()?;
+    let is_latest_pointer = snapshot_path
+        .parent()
+        .and_then(Path::file_name)
+        .and_then(|segment| segment.to_str())
+        == Some("latest")
+        && snapshot_path
+            .parent()
+            .and_then(Path::parent)
+            .is_some_and(|parent| parent == bucket_dir);
+
+    Some(CacheSnapshotRecord {
+        metadata: envelope.metadata,
+        modified_at,
+        is_latest_pointer,
+    })
+}
+
+fn effective_bucket_snapshots(snapshots: &[CacheSnapshotRecord]) -> Vec<&CacheSnapshotRecord> {
+    let actual: Vec<_> = snapshots
+        .iter()
+        .filter(|snapshot| !snapshot.is_latest_pointer)
+        .collect();
+    if actual.is_empty() {
+        snapshots.iter().collect()
+    } else {
+        actual
+    }
+}
+
+fn select_project_path(snapshots: &[&CacheSnapshotRecord]) -> Option<String> {
+    snapshots
+        .iter()
+        .flat_map(|snapshot| snapshot.metadata.roots.iter())
+        .map(|root| root.trim())
+        .filter(|root| !root.is_empty())
+        .map(str::to_string)
+        .min_by(compare_root_display)
+}
+
+fn compare_root_display(left: &String, right: &String) -> Ordering {
+    path_depth(left)
+        .cmp(&path_depth(right))
+        .then_with(|| left.len().cmp(&right.len()))
+        .then_with(|| left.cmp(right))
+}
+
+fn path_depth(path: &str) -> usize {
+    Path::new(path).components().count()
+}
+
+fn resolve_org_repo_label(
+    snapshots: &[&CacheSnapshotRecord],
+    bucket_id: &str,
+    project_path: &str,
+) -> String {
+    snapshots
+        .iter()
+        .filter_map(|snapshot| option_str(&snapshot.metadata.git_owner_repo))
+        .max_by(|left, right| compare_option_str(left, right))
+        .map(str::to_string)
+        .or_else(|| {
+            snapshots
+                .iter()
+                .filter_map(|snapshot| option_str(&snapshot.metadata.git_repo))
+                .max_by(|left, right| compare_option_str(left, right))
+                .map(|repo| format!("unknown/{repo}"))
+        })
+        .or_else(|| fallback_local_org_repo(project_path))
+        .unwrap_or_else(|| format!("unknown/{bucket_id}"))
+}
+
+fn fallback_local_org_repo(project_path: &str) -> Option<String> {
+    if project_path == "(unknown path)" {
         return None;
     }
-    // Read just enough to extract roots — use a lightweight partial parse
-    let content = fs::read_to_string(&snapshot_file).ok()?;
-    // Parse just the metadata.roots field
-    let val: serde_json::Value = serde_json::from_str(&content).ok()?;
-    val.get("metadata")?
-        .get("roots")?
-        .as_array()?
-        .first()?
-        .as_str()
-        .map(|s| s.to_string())
+
+    let repo_name = Path::new(project_path)
+        .file_name()
+        .and_then(|segment| segment.to_str())
+        .map(str::trim)
+        .filter(|segment| !segment.is_empty())?;
+
+    Some(format!("local/{repo_name}"))
+}
+
+fn format_cache_meta(snapshots: &[&CacheSnapshotRecord]) -> String {
+    if snapshots.is_empty() {
+        return "scans 0; latest unknown; schema unknown".to_string();
+    }
+
+    let root_count = distinct_non_empty_values(
+        snapshots
+            .iter()
+            .flat_map(|snapshot| snapshot.metadata.roots.iter())
+            .map(|root| root.as_str()),
+    )
+    .len();
+    let branch_count = distinct_non_empty_values(
+        snapshots
+            .iter()
+            .filter_map(|snapshot| option_str(&snapshot.metadata.git_branch)),
+    )
+    .len();
+    let schemas = distinct_non_empty_values(
+        snapshots
+            .iter()
+            .filter_map(|snapshot| non_empty_str(snapshot.metadata.schema_version.as_str())),
+    );
+    let latest = snapshots
+        .iter()
+        .copied()
+        .max_by(|a, b| compare_snapshot_records(a, b))
+        .expect("snapshots is non-empty");
+
+    let mut parts = vec![format!("scans {}", snapshots.len())];
+    if root_count > 1 {
+        parts.push(format!("roots {root_count}"));
+    }
+    if branch_count > 1 {
+        parts.push(format!("branches {branch_count}"));
+    }
+    parts.push(format!("latest {}", latest_timestamp(latest)));
+    if let Some(reference) = format_git_reference(latest) {
+        parts.push(format!("ref {reference}"));
+    }
+    parts.push(format_schema_meta(&schemas, latest));
+
+    parts.join("; ")
+}
+
+fn distinct_non_empty_values<'a>(values: impl IntoIterator<Item = &'a str>) -> BTreeSet<&'a str> {
+    values
+        .into_iter()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .collect()
+}
+
+fn compare_snapshot_records(left: &CacheSnapshotRecord, right: &CacheSnapshotRecord) -> Ordering {
+    left.modified_at
+        .cmp(&right.modified_at)
+        .then_with(|| {
+            non_empty_str(left.metadata.generated_at.as_str())
+                .cmp(&non_empty_str(right.metadata.generated_at.as_str()))
+        })
+        .then_with(|| {
+            option_str(&left.metadata.git_scan_id).cmp(&option_str(&right.metadata.git_scan_id))
+        })
+        .then_with(|| {
+            select_first_root(left.metadata.roots.as_slice())
+                .cmp(&select_first_root(right.metadata.roots.as_slice()))
+        })
+}
+
+fn select_first_root(roots: &[String]) -> Option<&str> {
+    roots
+        .iter()
+        .map(String::as_str)
+        .map(str::trim)
+        .find(|root| !root.is_empty())
+}
+
+fn latest_timestamp(snapshot: &CacheSnapshotRecord) -> String {
+    non_empty_str(snapshot.metadata.generated_at.as_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| format_system_time(snapshot.modified_at))
+}
+
+fn format_system_time(timestamp: SystemTime) -> String {
+    OffsetDateTime::from(timestamp)
+        .format(&Iso8601::DEFAULT)
+        .unwrap_or_else(|_| "unknown".to_string())
+}
+
+fn format_git_reference(snapshot: &CacheSnapshotRecord) -> Option<String> {
+    match (
+        option_str(&snapshot.metadata.git_branch),
+        option_str(&snapshot.metadata.git_commit),
+    ) {
+        (Some(branch), Some(commit)) => Some(format!("{branch}@{commit}")),
+        (Some(branch), None) => Some(branch.to_string()),
+        (None, Some(commit)) => Some(commit.to_string()),
+        (None, None) => None,
+    }
+}
+
+fn format_schema_meta(schemas: &BTreeSet<&str>, latest_snapshot: &CacheSnapshotRecord) -> String {
+    match schemas.len() {
+        0 => "schema unknown".to_string(),
+        1 => format!("schema {}", schemas.iter().next().expect("single schema")),
+        count => {
+            let latest_schema = non_empty_str(latest_snapshot.metadata.schema_version.as_str())
+                .unwrap_or("unknown");
+            format!("schema {latest_schema} (+{} more)", count - 1)
+        }
+    }
+}
+
+fn non_empty_str(value: &str) -> Option<&str> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
+}
+
+fn option_str(value: &Option<String>) -> Option<&str> {
+    value
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn compare_option_str(left: &str, right: &str) -> Ordering {
+    path_depth(left)
+        .cmp(&path_depth(right))
+        .then_with(|| left.len().cmp(&right.len()))
+        .then_with(|| left.cmp(right))
 }
 
 /// Calculate total size of a directory recursively.
@@ -257,30 +535,8 @@ fn dir_size(path: &std::path::Path) -> u64 {
         .sum()
 }
 
-/// Get human-readable age of a directory (based on most recent modification).
-fn dir_age(path: &std::path::Path) -> String {
-    let newest = walkdir::WalkDir::new(path)
-        .into_iter()
-        .flatten()
-        .filter_map(|e| e.metadata().ok().and_then(|m| m.modified().ok()))
-        .max();
-
-    match newest {
-        Some(time) => {
-            let elapsed = SystemTime::now().duration_since(time).unwrap_or_default();
-            let secs = elapsed.as_secs();
-            if secs < 60 {
-                "just now".to_string()
-            } else if secs < 3600 {
-                format!("{}m ago", secs / 60)
-            } else if secs < 86400 {
-                format!("{}h ago", secs / 3600)
-            } else {
-                format!("{}d ago", secs / 86400)
-            }
-        }
-        None => "unknown".to_string(),
-    }
+fn size_in_mb(bytes: u64) -> f64 {
+    bytes as f64 / (1024.0 * 1024.0)
 }
 
 fn format_size(bytes: u64) -> String {
@@ -307,6 +563,35 @@ fn parse_duration_days(s: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
+
+    fn snapshot_record(
+        roots: &[&str],
+        generated_at: Option<&str>,
+        owner_repo: Option<&str>,
+        repo: Option<&str>,
+        branch: Option<&str>,
+        commit: Option<&str>,
+        schema: Option<&str>,
+        modified_at: SystemTime,
+        is_latest_pointer: bool,
+    ) -> CacheSnapshotRecord {
+        CacheSnapshotRecord {
+            metadata: SnapshotMetadata {
+                schema_version: schema.unwrap_or_default().to_string(),
+                generated_at: generated_at.unwrap_or_default().to_string(),
+                roots: roots.iter().map(|root| root.to_string()).collect(),
+                git_repo: repo.map(str::to_string),
+                git_owner_repo: owner_repo.map(str::to_string),
+                git_branch: branch.map(str::to_string),
+                git_commit: commit.map(str::to_string),
+                git_scan_id: None,
+                ..SnapshotMetadata::default()
+            },
+            modified_at,
+            is_latest_pointer,
+        }
+    }
 
     #[test]
     fn test_format_size() {
@@ -324,5 +609,116 @@ mod tests {
         assert_eq!(parse_duration_days("1d"), Some(86400));
         assert_eq!(parse_duration_days("30"), Some(30 * 86400));
         assert_eq!(parse_duration_days("abc"), None);
+    }
+
+    #[test]
+    fn test_select_project_path_prefers_shortest_root() {
+        let now = SystemTime::UNIX_EPOCH;
+        let primary = snapshot_record(
+            &["/tmp/demo"],
+            Some("2026-03-31T16:18:00Z"),
+            Some("VetCoders/demo"),
+            Some("demo"),
+            Some("main"),
+            Some("abc123"),
+            Some("0.9.0"),
+            now,
+            false,
+        );
+        let nested = snapshot_record(
+            &["/tmp/demo/src"],
+            Some("2026-03-31T16:19:00Z"),
+            Some("VetCoders/demo"),
+            Some("demo"),
+            Some("feature"),
+            Some("def456"),
+            Some("0.9.0"),
+            now,
+            false,
+        );
+
+        let snapshots = vec![&primary, &nested];
+        assert_eq!(
+            select_project_path(&snapshots),
+            Some("/tmp/demo".to_string())
+        );
+    }
+
+    #[test]
+    fn test_resolve_org_repo_label_uses_local_fallback_for_non_git_bucket() {
+        let snapshot = snapshot_record(
+            &["/tmp/local-project"],
+            Some("2026-03-31T16:18:00Z"),
+            None,
+            None,
+            None,
+            None,
+            Some("0.9.0"),
+            SystemTime::UNIX_EPOCH,
+            false,
+        );
+        let snapshots = vec![&snapshot];
+
+        assert_eq!(
+            resolve_org_repo_label(&snapshots, "abc123deadbeef00", "/tmp/local-project"),
+            "local/local-project"
+        );
+    }
+
+    #[test]
+    fn test_format_cache_meta_skips_latest_pointer_duplicates() {
+        let older = snapshot_record(
+            &["/tmp/demo"],
+            Some("2026-03-30T12:00:00Z"),
+            Some("VetCoders/demo"),
+            Some("demo"),
+            Some("main"),
+            Some("aaa111"),
+            Some("0.9.0"),
+            SystemTime::UNIX_EPOCH,
+            false,
+        );
+        let newer = snapshot_record(
+            &["/tmp/demo"],
+            Some("2026-03-31T12:00:00Z"),
+            Some("VetCoders/demo"),
+            Some("demo"),
+            Some("feature"),
+            Some("bbb222"),
+            Some("0.9.0"),
+            SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(10),
+            false,
+        );
+        let latest_pointer = snapshot_record(
+            &["/tmp/demo"],
+            Some("2026-03-31T12:00:00Z"),
+            Some("VetCoders/demo"),
+            Some("demo"),
+            Some("feature"),
+            Some("bbb222"),
+            Some("0.9.0"),
+            SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(20),
+            true,
+        );
+
+        let snapshots = [older, newer, latest_pointer];
+        let effective = effective_bucket_snapshots(&snapshots);
+        assert_eq!(
+            format_cache_meta(&effective),
+            "scans 2; branches 2; latest 2026-03-31T12:00:00Z; ref feature@bbb222; schema 0.9.0"
+        );
+    }
+
+    #[test]
+    fn test_collect_cache_bucket_row_falls_back_without_snapshot_metadata() {
+        let temp = TempDir::new().expect("create temp bucket");
+        fs::write(temp.path().join("artifact.bin"), b"cache-bytes").expect("write artifact");
+
+        let row = collect_cache_bucket_row("feedfacecafebeef", temp.path());
+
+        assert_eq!(row.org_repo, "unknown/feedfacecafebeef");
+        assert_eq!(row.project_path, "(unknown path)");
+        assert_eq!(row.meta, "scans 0; latest unknown; schema unknown");
+        assert!(row.size_bytes > 0);
     }
 }

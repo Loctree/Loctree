@@ -532,13 +532,72 @@ fn compute_entrypoint_drift(
     drift
 }
 
+/// Parse `owner/repo` from a git remote URL.
+///
+/// Handles common shapes:
+/// - HTTPS: `https://github.com/owner/repo.git`
+/// - SSH:   `git@github.com:owner/repo.git`
+/// - Plain: `github.com/owner/repo`
+///
+/// Returns `None` for URLs that don't contain an `owner/repo` pair.
+pub fn parse_owner_repo(url: &str) -> Option<String> {
+    let url = url.trim();
+    if url.is_empty() {
+        return None;
+    }
+
+    // Normalize: strip trailing `.git`
+    let url = url.strip_suffix(".git").unwrap_or(url);
+
+    // SSH style: git@host:owner/repo
+    if let Some(after_colon) = url.strip_prefix("git@").and_then(|rest| {
+        // Find the colon that separates host from path
+        rest.find(':').map(|i| &rest[i + 1..])
+    }) {
+        let parts: Vec<&str> = after_colon.split('/').collect();
+        if parts.len() >= 2 {
+            return Some(format!(
+                "{}/{}",
+                parts[parts.len() - 2],
+                parts[parts.len() - 1]
+            ));
+        }
+        return None;
+    }
+
+    // HTTPS / plain style: ...host/owner/repo
+    let segments: Vec<&str> = url.split('/').collect();
+    if segments.len() >= 2 {
+        let repo = segments[segments.len() - 1];
+        let owner = segments[segments.len() - 2];
+        // Guard: owner shouldn't be a protocol or empty
+        if !owner.is_empty() && !owner.contains(':') {
+            return Some(format!("{owner}/{repo}"));
+        }
+    }
+
+    None
+}
+
+/// Extract just the repo name (last path segment) from a git remote URL.
+fn parse_repo_name(url: &str) -> Option<String> {
+    let url = url.trim();
+    url.rsplit('/')
+        .next()
+        .or_else(|| url.rsplit(':').next())
+        .map(|s| s.trim_end_matches(".git").to_string())
+        .filter(|s| !s.is_empty())
+}
+
 /// Git workspace context for artifact isolation.
 ///
 /// Used to store snapshots per branch@commit (e.g., `.loctree/main@abc123/snapshot.json`).
 #[derive(Clone, Debug)]
 pub struct GitContext {
-    /// Repository name (extracted from remote origin).
+    /// Repository name (extracted from remote origin — last segment only).
     pub repo: Option<String>,
+    /// Full `owner/repo` identifier derived from git remote origin.
+    pub owner_repo: Option<String>,
     /// Current branch name.
     pub branch: Option<String>,
     /// Short commit hash.
@@ -583,9 +642,14 @@ pub struct SnapshotMetadata {
     /// Drift between declared manifest roots and code entrypoints
     #[serde(default)]
     pub entrypoint_drift: EntrypointDriftSummary,
-    /// Git repository name (extracted from remote origin)
+    /// Git repository name (extracted from remote origin — last segment only).
+    /// Kept for backward compatibility with older snapshots.
     #[serde(default)]
     pub git_repo: Option<String>,
+    /// Full `owner/repo` identifier derived from git remote origin URL.
+    /// New in v0.8.17. Missing in older snapshots (defaults to `None`).
+    #[serde(default)]
+    pub git_owner_repo: Option<String>,
     /// Git branch name
     #[serde(default)]
     pub git_branch: Option<String>,
@@ -845,6 +909,7 @@ impl Snapshot {
                 entrypoints: Vec::new(),
                 entrypoint_drift: EntrypointDriftSummary::default(),
                 git_repo: git_info.repo,
+                git_owner_repo: git_info.owner_repo,
                 git_branch: git_info.branch,
                 git_commit: git_info.commit,
                 git_scan_id: git_info.scan_id,
@@ -858,21 +923,29 @@ impl Snapshot {
         }
     }
 
-    /// Get git repository info (repo name, branch, commit) for given root.
+    /// Get git repository info (repo name, owner/repo, branch, commit) for given root.
     ///
     /// Uses libgit2's repository discovery to properly find the git root,
     /// even when called from a deeply nested subdirectory. This fixes issues
     /// where git commands would fail if `root` wasn't directly inside a git repo.
-    fn get_git_info(root: &Path) -> (Option<String>, Option<String>, Option<String>) {
+    /// Returns `(repo_name, owner_repo, branch, commit)`.
+    fn get_git_info(
+        root: &Path,
+    ) -> (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) {
         use std::process::{Command, Stdio};
 
         // Find the actual git root (searches upward from root)
         let git_root = match crate::git::find_git_root(root) {
             Some(r) => r,
-            None => return (None, None, None), // Not a git repository
+            None => return (None, None, None, None),
         };
 
-        let repo = Command::new("git")
+        let remote_url = Command::new("git")
             .args(["remote", "get-url", "origin"])
             .current_dir(&git_root)
             .stderr(Stdio::null())
@@ -880,18 +953,17 @@ impl Snapshot {
             .ok()
             .and_then(|o| {
                 if o.status.success() {
-                    String::from_utf8(o.stdout).ok()
+                    String::from_utf8(o.stdout)
+                        .ok()
+                        .map(|s| s.trim().to_string())
                 } else {
                     None
                 }
-            })
-            .and_then(|url| {
-                url.trim()
-                    .rsplit('/')
-                    .next()
-                    .or_else(|| url.trim().rsplit(':').next())
-                    .map(|s| s.trim_end_matches(".git").to_string())
             });
+
+        let repo = remote_url.as_deref().and_then(parse_repo_name);
+        let owner_repo = remote_url.as_deref().and_then(parse_owner_repo);
+
         let branch = Command::new("git")
             .args(["rev-parse", "--abbrev-ref", "HEAD"])
             .current_dir(&git_root)
@@ -922,7 +994,7 @@ impl Snapshot {
                     None
                 }
             });
-        (repo, branch, commit)
+        (repo, owner_repo, branch, commit)
     }
 
     /// Sanitise branch/commit for filesystem path segments
@@ -930,9 +1002,9 @@ impl Snapshot {
         value.replace(['/', '\\', ' ', ':'], "_").trim().to_string()
     }
 
-    /// Build git context for given root (repo, branch, commit, scan_id)
+    /// Build git context for given root (repo, owner_repo, branch, commit, scan_id)
     pub fn git_context_for(root: &Path) -> GitContext {
-        let (repo, branch, commit) = Self::get_git_info(root);
+        let (repo, owner_repo, branch, commit) = Self::get_git_info(root);
         let scan_id = branch.as_ref().map(|b| {
             let base = Self::sanitize_ref(b);
             commit.as_ref().map_or(base.clone(), |c| {
@@ -941,6 +1013,7 @@ impl Snapshot {
         });
         GitContext {
             repo,
+            owner_repo,
             branch,
             commit,
             scan_id,
@@ -2887,6 +2960,7 @@ mod tests {
             entrypoints: Vec::new(),
             entrypoint_drift: EntrypointDriftSummary::default(),
             git_repo: None,
+            git_owner_repo: None,
             git_branch: None,
             git_commit: None,
             git_scan_id: None,
@@ -3509,6 +3583,110 @@ mod cache_tests {
             loaded_again.metadata.roots,
             vec!["legacy-source".to_string()]
         );
+    }
+
+    // ── parse_owner_repo tests ──────────────────────────────────
+
+    #[test]
+    fn snapshot_parse_owner_repo_https() {
+        assert_eq!(
+            parse_owner_repo("https://github.com/polyversai/loctree.git"),
+            Some("polyversai/loctree".to_string()),
+        );
+        assert_eq!(
+            parse_owner_repo("https://github.com/polyversai/loctree"),
+            Some("polyversai/loctree".to_string()),
+        );
+    }
+
+    #[test]
+    fn snapshot_parse_owner_repo_ssh() {
+        assert_eq!(
+            parse_owner_repo("git@github.com:polyversai/loctree.git"),
+            Some("polyversai/loctree".to_string()),
+        );
+        assert_eq!(
+            parse_owner_repo("git@gitlab.example.com:org/sub-repo.git"),
+            Some("org/sub-repo".to_string()),
+        );
+    }
+
+    #[test]
+    fn snapshot_parse_owner_repo_edge_cases() {
+        // Empty / whitespace
+        assert_eq!(parse_owner_repo(""), None);
+        assert_eq!(parse_owner_repo("   "), None);
+
+        // No path segments → None (bare hostname)
+        assert_eq!(parse_owner_repo("localhost"), None);
+    }
+
+    #[test]
+    fn snapshot_parse_repo_name_extracts_last_segment() {
+        assert_eq!(
+            parse_repo_name("https://github.com/polyversai/loctree.git"),
+            Some("loctree".to_string()),
+        );
+        assert_eq!(
+            parse_repo_name("git@github.com:polyversai/loctree.git"),
+            Some("loctree".to_string()),
+        );
+    }
+
+    // ── backward-compat serde roundtrip ───────────────────────
+
+    #[test]
+    fn snapshot_metadata_backward_compat_old_json_missing_owner_repo() {
+        // Simulates loading a snapshot saved before git_owner_repo existed.
+        let old_json = r#"{
+            "schema_version": "0.8.16",
+            "generated_at": "2025-06-01T00:00:00Z",
+            "roots": ["src"],
+            "languages": [],
+            "file_count": 5,
+            "total_loc": 500,
+            "scan_duration_ms": 100,
+            "git_repo": "loctree",
+            "git_branch": "main",
+            "git_commit": "abc1234",
+            "git_scan_id": "main@abc1234"
+        }"#;
+
+        let meta: SnapshotMetadata =
+            serde_json::from_str(old_json).expect("deserialize old snapshot");
+        assert_eq!(meta.git_repo, Some("loctree".to_string()));
+        assert_eq!(meta.git_owner_repo, None); // graceful default
+        assert_eq!(meta.git_branch, Some("main".to_string()));
+    }
+
+    #[test]
+    fn snapshot_metadata_roundtrip_with_owner_repo() {
+        let meta = SnapshotMetadata {
+            schema_version: SNAPSHOT_SCHEMA_VERSION.to_string(),
+            generated_at: "2026-03-31T00:00:00Z".to_string(),
+            roots: vec!["src".to_string()],
+            languages: HashSet::from(["rust".to_string()]),
+            file_count: 42,
+            total_loc: 5000,
+            scan_duration_ms: 200,
+            resolver_config: None,
+            manifest_summary: Vec::new(),
+            entrypoints: Vec::new(),
+            entrypoint_drift: EntrypointDriftSummary::default(),
+            git_repo: Some("loctree".to_string()),
+            git_owner_repo: Some("polyversai/loctree".to_string()),
+            git_branch: Some("main".to_string()),
+            git_commit: Some("d6ecd24".to_string()),
+            git_scan_id: Some("main@d6ecd24".to_string()),
+        };
+
+        let json = serde_json::to_string_pretty(&meta).expect("serialize");
+        let deser: SnapshotMetadata = serde_json::from_str(&json).expect("deserialize");
+
+        assert_eq!(deser.git_repo, Some("loctree".to_string()));
+        assert_eq!(deser.git_owner_repo, Some("polyversai/loctree".to_string()));
+        assert_eq!(deser.git_branch, Some("main".to_string()));
+        assert_eq!(deser.git_commit, Some("d6ecd24".to_string()));
     }
 
     #[test]

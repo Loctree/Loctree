@@ -825,6 +825,7 @@ mod tests {
             command_detection: CommandDetectionConfig::default(),
             git_context: snapshot::GitContext {
                 repo: None,
+                owner_repo: None,
                 branch: None,
                 commit: None,
                 scan_id: None,
@@ -874,6 +875,7 @@ mod tests {
             command_detection: CommandDetectionConfig::default(),
             git_context: snapshot::GitContext {
                 repo: None,
+                owner_repo: None,
                 branch: None,
                 commit: None,
                 scan_id: None,
@@ -931,6 +933,7 @@ mod tests {
             command_detection: CommandDetectionConfig::default(),
             git_context: snapshot::GitContext {
                 repo: None,
+                owner_repo: None,
                 branch: None,
                 commit: None,
                 scan_id: None,
@@ -984,6 +987,7 @@ mod tests {
             command_detection: CommandDetectionConfig::default(),
             git_context: snapshot::GitContext {
                 repo: None,
+                owner_repo: None,
                 branch: None,
                 commit: None,
                 scan_id: None,

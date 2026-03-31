@@ -25,6 +25,11 @@ fn loctree() -> Command {
     cargo_bin_cmd!("loctree")
 }
 
+/// Get a command pointing to the loct binary
+fn loct() -> Command {
+    cargo_bin_cmd!("loct")
+}
+
 // ============================================
 // Basic CLI Tests
 // ============================================
@@ -1642,6 +1647,14 @@ mod analysis_commands {
 
 mod management_commands {
     use super::*;
+    use serde_json::json;
+
+    fn write_cache_snapshot(path: &std::path::Path, metadata: serde_json::Value) {
+        std::fs::create_dir_all(path.parent().expect("snapshot parent")).expect("create dir");
+        let body = serde_json::to_vec_pretty(&json!({ "metadata": metadata }))
+            .expect("serialize snapshot");
+        std::fs::write(path, body).expect("write snapshot");
+    }
 
     // ----------------------------------------
     // Doctor Command Tests
@@ -1727,6 +1740,146 @@ mod management_commands {
                     .or(predicate::str::contains("memory"))
                     .or(predicate::str::contains("vector")),
             );
+    }
+
+    // ----------------------------------------
+    // Cache Command Tests
+    // ----------------------------------------
+
+    #[test]
+    fn cache_list_groups_multiscan_bucket_by_repo() {
+        let cache = TempDir::new().unwrap();
+        let bucket = cache.path().join("projects").join("bucket1234567890ab");
+        let repo_root = cache.path().join("demo-repo");
+        let nested_root = repo_root.join("src");
+
+        write_cache_snapshot(
+            &bucket.join("main@aaa111").join("snapshot.json"),
+            json!({
+                "schema_version": "0.9.0",
+                "generated_at": "2026-03-30T12:00:00Z",
+                "roots": [repo_root.display().to_string()],
+                "git_owner_repo": "VetCoders/Loctree",
+                "git_repo": "Loctree",
+                "git_branch": "main",
+                "git_commit": "aaa111"
+            }),
+        );
+        write_cache_snapshot(
+            &bucket.join("feature@bbb222").join("snapshot.json"),
+            json!({
+                "schema_version": "0.9.0",
+                "generated_at": "2026-03-31T12:00:00Z",
+                "roots": [nested_root.display().to_string()],
+                "git_owner_repo": "VetCoders/Loctree",
+                "git_repo": "Loctree",
+                "git_branch": "feature",
+                "git_commit": "bbb222"
+            }),
+        );
+        write_cache_snapshot(
+            &bucket.join("latest").join("snapshot.json"),
+            json!({
+                "schema_version": "0.9.0",
+                "generated_at": "2026-03-31T12:00:00Z",
+                "roots": [nested_root.display().to_string()],
+                "git_owner_repo": "VetCoders/Loctree",
+                "git_repo": "Loctree",
+                "git_branch": "feature",
+                "git_commit": "bbb222"
+            }),
+        );
+        std::fs::write(
+            bucket.join("feature@bbb222").join("analysis.json"),
+            b"analysis",
+        )
+        .unwrap();
+        std::fs::write(bucket.join("latest").join("manifest.json"), b"manifest").unwrap();
+
+        let output = loct()
+            .env("LOCT_CACHE_DIR", cache.path())
+            .args(["cache", "list"])
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "cache list failed.\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("Org/Repo | Path | Cache size MB | Meta"));
+        assert!(stdout.contains(&format!("VetCoders/Loctree | {} |", repo_root.display())));
+        assert!(stdout.contains("scans 2"));
+        assert!(stdout.contains("roots 2"));
+        assert!(stdout.contains("branches 2"));
+        assert!(stdout.contains("ref feature@bbb222"));
+        assert!(stdout.contains("schema 0.9.0"));
+    }
+
+    #[test]
+    fn cache_list_uses_local_fallback_for_non_git_bucket() {
+        let cache = TempDir::new().unwrap();
+        let bucket = cache.path().join("projects").join("bucketfedcba098765");
+        let project_root = cache.path().join("local-project");
+
+        write_cache_snapshot(
+            &bucket.join("snapshot.json"),
+            json!({
+                "schema_version": "0.9.0",
+                "generated_at": "2026-03-31T09:00:00Z",
+                "roots": [project_root.display().to_string()]
+            }),
+        );
+
+        let output = loct()
+            .env("LOCT_CACHE_DIR", cache.path())
+            .args(["cache", "list"])
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "cache list failed.\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains(&format!(
+            "local/local-project | {} |",
+            project_root.display()
+        )));
+        assert!(stdout.contains("scans 1"));
+        assert!(stdout.contains("schema 0.9.0"));
+    }
+
+    #[test]
+    fn cache_list_uses_unknown_fallback_when_metadata_is_missing() {
+        let cache = TempDir::new().unwrap();
+        let bucket_id = "feedfacecafebeef";
+        let bucket = cache.path().join("projects").join(bucket_id);
+        std::fs::create_dir_all(&bucket).unwrap();
+        std::fs::write(bucket.join("artifact.bin"), b"cache-bytes").unwrap();
+
+        let output = loct()
+            .env("LOCT_CACHE_DIR", cache.path())
+            .args(["cache", "list"])
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "cache list failed.\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains(&format!("unknown/{bucket_id} | (unknown path) |")));
+        assert!(stdout.contains("scans 0; latest unknown; schema unknown"));
     }
 
     // ----------------------------------------

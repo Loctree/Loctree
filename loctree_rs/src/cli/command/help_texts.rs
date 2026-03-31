@@ -1429,7 +1429,7 @@ DESCRIPTION:
     $XDG_CACHE_HOME/loctree/ on Linux).
 
 SUBCOMMANDS:
-    list                   List cached projects with sizes and ages
+    list                   List cached buckets grouped by repo, path, size, and scan metadata
     clean                  Remove cached snapshots
 
 CLEAN OPTIONS:
@@ -1438,7 +1438,7 @@ CLEAN OPTIONS:
     --force, -f            Skip confirmation prompt
 
 EXAMPLES:
-    loct cache list                        # Show all cached projects
+    loct cache list                        # Show grouped cached buckets
     loct cache clean                       # Remove all (with confirmation)
     loct cache clean --force               # Remove all without asking
     loct cache clean --project .           # Clean cache for current project
