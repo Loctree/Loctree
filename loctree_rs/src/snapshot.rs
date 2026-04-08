@@ -2221,7 +2221,7 @@ pub(crate) fn write_auto_artifacts(
     use crate::analyzer::cycles::find_cycles_with_lazy;
     use crate::analyzer::dead_parrots::find_dead_exports;
     use crate::analyzer::output::{
-        RootArtifacts, attach_dist_to_sections, process_root_context, write_report,
+        GlobalContext, RootArtifacts, attach_dist_to_sections, process_root_context, write_report,
     };
     use crate::analyzer::pipelines::build_pipeline_summary;
     use crate::analyzer::sarif::{SarifInputs, generate_sarif_string};
@@ -2325,16 +2325,18 @@ pub(crate) fn write_auto_artifacts(
             idx,
             ctx,
             &analysis_args,
-            &scan_results.global_fe_commands,
-            &scan_results.global_be_commands,
-            &global_missing_handlers,
-            &global_unregistered_handlers,
-            &global_unused_handlers,
-            &pipeline_summary,
-            Some(&git_ctx),
-            SCHEMA_NAME,
-            SCHEMA_VERSION,
-            &scan_results.global_analyses,
+            &GlobalContext {
+                fe_commands: &scan_results.global_fe_commands,
+                be_commands: &scan_results.global_be_commands,
+                missing_handlers: &global_missing_handlers,
+                unregistered_handlers: &global_unregistered_handlers,
+                unused_handlers: &global_unused_handlers,
+                pipeline_summary: &pipeline_summary,
+                git: Some(&git_ctx),
+                schema_name: SCHEMA_NAME,
+                schema_version: SCHEMA_VERSION,
+                analyses: &scan_results.global_analyses,
+            },
         );
         json_results.extend(json_items);
         if let Some(section) = report_section {
@@ -3217,14 +3219,12 @@ mod cache_tests {
         }
     }
 
-    #[allow(unused_unsafe)]
     fn set_env_var<K: AsRef<std::ffi::OsStr>, V: AsRef<std::ffi::OsStr>>(key: K, value: V) {
         unsafe {
             std::env::set_var(key, value);
         }
     }
 
-    #[allow(unused_unsafe)]
     fn remove_env_var<K: AsRef<std::ffi::OsStr>>(key: K) {
         unsafe {
             std::env::remove_var(key);

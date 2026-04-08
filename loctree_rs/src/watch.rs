@@ -21,7 +21,7 @@ use crate::analyzer::resolvers::{
     TsPathResolver, resolve_js_relative, resolve_python_absolute, resolve_python_relative,
 };
 use crate::analyzer::runner::default_analyzer_exts;
-use crate::analyzer::scan::{analyze_file, python_stdlib};
+use crate::analyzer::scan::{AnalyzeContext, analyze_file, python_stdlib};
 use crate::args::ParsedArgs;
 use crate::config::LoctreeConfig;
 use crate::fs_utils::GitIgnoreChecker;
@@ -370,17 +370,17 @@ fn patch_snapshot(
         }
 
         // Re-analyze the file
-        let analysis = match analyze_file(
-            path,
-            &infra.root_canon,
-            infra.extensions.as_ref(),
-            infra.ts_resolver.as_ref(),
-            &infra.py_roots,
-            &infra.py_stdlib,
-            parsed_args.symbol.as_deref(),
-            &infra.custom_command_macros,
-            &infra.command_detection,
-        ) {
+        let analyze_ctx = AnalyzeContext {
+            root_canon: &infra.root_canon,
+            extensions: infra.extensions.as_ref(),
+            ts_resolver: infra.ts_resolver.as_ref(),
+            py_roots: &infra.py_roots,
+            py_stdlib: &infra.py_stdlib,
+            symbol: parsed_args.symbol.as_deref(),
+            custom_command_macros: &infra.custom_command_macros,
+            command_cfg: &infra.command_detection,
+        };
+        let analysis = match analyze_file(path, &analyze_ctx) {
             Ok(mut a) => {
                 // Set mtime + size for future cache hits
                 if let Ok(metadata) = std::fs::metadata(path) {

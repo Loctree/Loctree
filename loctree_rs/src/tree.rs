@@ -64,20 +64,22 @@ const BUILD_ARTIFACT_DIRS: &[&str] = &[
     ".serverless",
 ];
 
-#[allow(clippy::too_many_arguments, clippy::only_used_in_recursion)]
+struct WalkContext<'a> {
+    options: &'a Options,
+    root_canon: &'a Path,
+    git_checker: Option<&'a GitIgnoreChecker>,
+}
+
 fn walk(
     dir: &Path,
-    options: &Options,
+    ctx: &WalkContext,
     prefix_parts: &mut Vec<bool>,
     collectors: &mut Collectors,
     depth: usize,
-    root: &Path,
-    root_canon: &Path,
-    git_checker: Option<&GitIgnoreChecker>,
     visited: &mut HashSet<PathBuf>,
 ) -> io::Result<bool> {
     let dir_canon = dir.canonicalize()?;
-    if !dir_canon.starts_with(root_canon) {
+    if !dir_canon.starts_with(ctx.root_canon) {
         return Ok(false);
     }
     if !visited.insert(dir_canon.clone()) {
@@ -91,7 +93,7 @@ fn walk(
             let name = entry.file_name();
             let name_str = name.to_string_lossy();
             let is_hidden = name_str.starts_with('.');
-            options.show_hidden || !is_hidden || is_allowed_hidden(&name_str)
+            ctx.options.show_hidden || !is_hidden || is_allowed_hidden(&name_str)
         })
         .collect();
 
@@ -117,12 +119,12 @@ fn walk(
         let relative = path
             .canonicalize()
             .unwrap_or_else(|_| path.clone())
-            .strip_prefix(root_canon)
+            .strip_prefix(ctx.root_canon)
             .unwrap_or(&path)
             .to_path_buf();
 
         // Handle --find-artifacts mode: find build artifact directories
-        if options.find_artifacts {
+        if ctx.options.find_artifacts {
             let is_dir = path.is_dir();
             // Skip files - we only care about directories
             if !is_dir {
@@ -150,19 +152,9 @@ fn walk(
                 continue;
             }
             // Not an artifact - recurse to find artifacts inside
-            if options.max_depth.is_none_or(|max| depth < max) {
+            if ctx.options.max_depth.is_none_or(|max| depth < max) {
                 prefix_parts.push(!is_last);
-                let child_has = walk(
-                    &path,
-                    options,
-                    prefix_parts,
-                    collectors,
-                    depth + 1,
-                    root,
-                    root_canon,
-                    git_checker,
-                    visited,
-                )?;
+                let child_has = walk(&path, ctx, prefix_parts, collectors, depth + 1, visited)?;
                 prefix_parts.pop();
                 if child_has {
                     any_included = true;
@@ -172,33 +164,24 @@ fn walk(
         }
 
         // Handle --show-ignored mode: show ONLY gitignored files
-        if options.show_ignored {
+        if ctx.options.show_ignored {
             // In show_ignored mode, we want to show files that ARE ignored
             // Check if this file is ignored by gitignore
-            let is_gitignored = git_checker
+            let is_gitignored = ctx
+                .git_checker
                 .map(|checker| checker.is_ignored(&path))
                 .unwrap_or(false);
             // Skip files that are NOT ignored (we only want ignored files)
             if !is_gitignored {
                 // But still recurse into directories to find ignored files within
-                if path.is_dir() && options.max_depth.is_none_or(|max| depth < max) {
+                if path.is_dir() && ctx.options.max_depth.is_none_or(|max| depth < max) {
                     prefix_parts.push(!is_last);
-                    let _ = walk(
-                        &path,
-                        options,
-                        prefix_parts,
-                        collectors,
-                        depth + 1,
-                        root,
-                        root_canon,
-                        git_checker,
-                        visited,
-                    );
+                    let _ = walk(&path, ctx, prefix_parts, collectors, depth + 1, visited);
                     prefix_parts.pop();
                 }
                 continue;
             }
-        } else if should_ignore(&path, options, git_checker) {
+        } else if should_ignore(&path, ctx.options, ctx.git_checker) {
             // Normal mode: skip ignored files
             continue;
         }
@@ -213,7 +196,8 @@ fn walk(
                 .and_then(|ext| ext.to_str())
                 .unwrap_or("")
                 .to_lowercase();
-            let matches_ext = options
+            let matches_ext = ctx
+                .options
                 .extensions
                 .as_ref()
                 .is_none_or(|set| set.contains(&ext));
@@ -223,7 +207,7 @@ fn walk(
                     collectors.stats.files += 1;
                     collectors.stats.files_with_loc += 1;
                     collectors.stats.total_loc += value;
-                    if value >= options.loc_threshold {
+                    if value >= ctx.options.loc_threshold {
                         let relative_display = if relative.as_os_str().is_empty() {
                             name.clone()
                         } else {
@@ -244,24 +228,14 @@ fn walk(
         } else {
             relative.to_string_lossy().to_string()
         };
-        let is_large = loc.is_some_and(|v| v >= options.loc_threshold);
+        let is_large = loc.is_some_and(|v| v >= ctx.options.loc_threshold);
 
-        if is_dir && options.max_depth.is_none_or(|max| depth < max) {
+        if is_dir && ctx.options.max_depth.is_none_or(|max| depth < max) {
             // Save position BEFORE recursing so we can insert directory entry
             // before its children (not after, which causes inverted hierarchy)
             let insert_pos = collectors.entries.len();
             prefix_parts.push(!is_last);
-            let child_has = walk(
-                &path,
-                options,
-                prefix_parts,
-                collectors,
-                depth + 1,
-                root,
-                root_canon,
-                git_checker,
-                visited,
-            )?;
+            let child_has = walk(&path, ctx, prefix_parts, collectors, depth + 1, visited)?;
             prefix_parts.pop();
             if child_has {
                 collectors.stats.directories += 1;
@@ -354,15 +328,17 @@ pub fn run_tree(root_list: &[PathBuf], parsed: &crate::args::ParsedArgs) -> io::
             stats: &mut stats,
         };
 
+        let walk_ctx = WalkContext {
+            options: &root_options,
+            root_canon: &root_canon,
+            git_checker: git_checker.as_ref(),
+        };
         walk(
             root_path,
-            &root_options,
+            &walk_ctx,
             &mut prefix_parts,
             &mut collectors,
             0,
-            root_path,
-            &root_canon,
-            git_checker.as_ref(),
             &mut visited,
         )?;
 

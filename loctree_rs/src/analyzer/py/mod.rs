@@ -237,42 +237,49 @@ fn collect_symbol_usages_from_lines(
     usages
 }
 
+/// Bundled context for [`process_from_import`] to stay under the 7-argument
+/// clippy limit while keeping the call sites readable.
+struct FromImportContext<'a> {
+    module: &'a str,
+    names_clean: &'a str,
+    path: &'a Path,
+    root: &'a Path,
+    py_roots: &'a [PathBuf],
+    extensions: Option<&'a HashSet<String>>,
+    stdlib: &'a HashSet<String>,
+    is_type_checking: bool,
+    is_lazy: bool,
+    line_num: usize,
+    is_package_init: bool,
+}
+
 /// Process a `from X import Y, Z` statement and update analysis.
 ///
 /// This is extracted to handle both single-line and multiline imports uniformly.
-#[allow(clippy::too_many_arguments)]
-fn process_from_import(
-    module: &str,
-    names_clean: &str,
-    path: &Path,
-    root: &Path,
-    py_roots: &[PathBuf],
-    extensions: Option<&HashSet<String>>,
-    stdlib: &HashSet<String>,
-    is_type_checking: bool,
-    is_lazy: bool,
-    _indent: usize,
-    line_num: usize,
-    is_package_init: bool,
-    analysis: &mut FileAnalysis,
-) {
-    let module = module.trim().trim_end_matches('.');
+fn process_from_import(ctx: &FromImportContext<'_>, analysis: &mut FileAnalysis) {
+    let module = ctx.module.trim().trim_end_matches('.');
     if module.is_empty() {
         return;
     }
 
     let mut entry = ImportEntry::new(module.to_string(), ImportKind::Static);
-    entry.line = Some(line_num);
-    let (resolved, resolution) =
-        resolve_python_import(module, path, root, py_roots, extensions, stdlib);
+    entry.line = Some(ctx.line_num);
+    let (resolved, resolution) = resolve_python_import(
+        module,
+        ctx.path,
+        ctx.root,
+        ctx.py_roots,
+        ctx.extensions,
+        ctx.stdlib,
+    );
     entry.resolution = resolution;
     entry.resolved_path = resolved.clone();
-    entry.is_type_checking = is_type_checking;
-    entry.is_lazy = is_lazy;
-    entry.source_raw = format!("from {} import {}", module, names_clean);
+    entry.is_type_checking = ctx.is_type_checking;
+    entry.is_lazy = ctx.is_lazy;
+    entry.source_raw = format!("from {} import {}", module, ctx.names_clean);
 
-    if names_clean != "*" {
-        for sym in names_clean.split(',') {
+    if ctx.names_clean != "*" {
+        for sym in ctx.names_clean.split(',') {
             let sym = sym.trim();
             if sym.is_empty() {
                 continue;
@@ -294,9 +301,9 @@ fn process_from_import(
     // Python package API re-export pattern:
     // __init__.py often re-exports names via `from .mod import Foo as Bar`.
     // Treat these as re-exports (not fresh definitions) to reduce duplicate/dead noise.
-    if is_package_init && names_clean != "*" {
+    if ctx.is_package_init && ctx.names_clean != "*" {
         let mut name_pairs: Vec<(String, String)> = Vec::new();
-        for sym in names_clean.split(',') {
+        for sym in ctx.names_clean.split(',') {
             let sym = sym.trim();
             if sym.is_empty() {
                 continue;
@@ -314,7 +321,7 @@ fn process_from_import(
                 exported.to_string(),
                 "reexport",
                 "named",
-                Some(line_num),
+                Some(ctx.line_num),
             ));
         }
 
@@ -327,13 +334,13 @@ fn process_from_import(
         }
     }
 
-    if names_clean == "*" {
+    if ctx.names_clean == "*" {
         let mut entry = ReexportEntry {
             source: module.to_string(),
             kind: ReexportKind::Star,
             resolved: resolved.clone(),
         };
-        if let Some(names) = read_all_from_resolved(&resolved, root) {
+        if let Some(names) = read_all_from_resolved(&resolved, ctx.root) {
             for name in &names {
                 analysis
                     .exports
@@ -492,19 +499,21 @@ pub(crate) fn analyze_py_file(
                 pending_multiline_from = None;
 
                 // Process the import
+                let joined = symbols_clone.join(", ");
                 process_from_import(
-                    &module_clone,
-                    &symbols_clone.join(", "),
-                    path,
-                    root,
-                    py_roots,
-                    extensions,
-                    stdlib,
-                    is_type_checking,
-                    is_lazy,
-                    indent,
-                    start_line_val,
-                    is_package_init,
+                    &FromImportContext {
+                        module: &module_clone,
+                        names_clean: &joined,
+                        path,
+                        root,
+                        py_roots,
+                        extensions,
+                        stdlib,
+                        is_type_checking,
+                        is_lazy,
+                        line_num: start_line_val,
+                        is_package_init,
+                    },
                     &mut analysis,
                 );
             }
@@ -567,18 +576,19 @@ pub(crate) fn analyze_py_file(
                 let names_clean = names_raw_trimmed.trim_matches('(').trim_matches(')');
                 let names_clean = names_clean.split('#').next().unwrap_or("").trim();
                 process_from_import(
-                    module,
-                    names_clean,
-                    path,
-                    root,
-                    py_roots,
-                    extensions,
-                    stdlib,
-                    in_type_checking,
-                    indent > 0,
-                    indent,
-                    line_num,
-                    is_package_init,
+                    &FromImportContext {
+                        module,
+                        names_clean,
+                        path,
+                        root,
+                        py_roots,
+                        extensions,
+                        stdlib,
+                        is_type_checking: in_type_checking,
+                        is_lazy: indent > 0,
+                        line_num,
+                        is_package_init,
+                    },
                     &mut analysis,
                 );
             }

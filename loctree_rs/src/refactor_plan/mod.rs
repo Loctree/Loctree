@@ -375,59 +375,44 @@ pub fn detect_cyclic_groups(snapshot: &Snapshot, files: &[String]) -> Vec<Vec<St
     }
 
     // Tarjan's SCC algorithm
-    let mut index_counter = 0;
-    let mut stack: Vec<&str> = Vec::new();
-    let mut on_stack: HashSet<&str> = HashSet::new();
-    let mut index: HashMap<&str, usize> = HashMap::new();
-    let mut lowlink: HashMap<&str, usize> = HashMap::new();
-    let mut sccs: Vec<Vec<String>> = Vec::new();
+    struct TarjanState<'a> {
+        adjacency: HashMap<&'a str, Vec<&'a str>>,
+        index_counter: usize,
+        stack: Vec<&'a str>,
+        on_stack: HashSet<&'a str>,
+        index: HashMap<&'a str, usize>,
+        lowlink: HashMap<&'a str, usize>,
+        sccs: Vec<Vec<String>>,
+    }
 
-    #[allow(clippy::too_many_arguments)]
-    fn strongconnect<'a>(
-        v: &'a str,
-        adjacency: &HashMap<&'a str, Vec<&'a str>>,
-        index_counter: &mut usize,
-        stack: &mut Vec<&'a str>,
-        on_stack: &mut HashSet<&'a str>,
-        index: &mut HashMap<&'a str, usize>,
-        lowlink: &mut HashMap<&'a str, usize>,
-        sccs: &mut Vec<Vec<String>>,
-    ) {
-        index.insert(v, *index_counter);
-        lowlink.insert(v, *index_counter);
-        *index_counter += 1;
-        stack.push(v);
-        on_stack.insert(v);
+    fn strongconnect<'a>(v: &'a str, state: &mut TarjanState<'a>) {
+        state.index.insert(v, state.index_counter);
+        state.lowlink.insert(v, state.index_counter);
+        state.index_counter += 1;
+        state.stack.push(v);
+        state.on_stack.insert(v);
 
-        if let Some(neighbors) = adjacency.get(v) {
-            for &w in neighbors {
-                if !index.contains_key(w) {
-                    strongconnect(
-                        w,
-                        adjacency,
-                        index_counter,
-                        stack,
-                        on_stack,
-                        index,
-                        lowlink,
-                        sccs,
-                    );
-                    let w_lowlink = *lowlink.get(w).unwrap();
-                    let v_lowlink = lowlink.get_mut(v).unwrap();
+        if let Some(neighbors) = state.adjacency.get(v) {
+            let neighbors: Vec<&'a str> = neighbors.clone();
+            for w in neighbors {
+                if !state.index.contains_key(w) {
+                    strongconnect(w, state);
+                    let w_lowlink = *state.lowlink.get(w).unwrap();
+                    let v_lowlink = state.lowlink.get_mut(v).unwrap();
                     *v_lowlink = (*v_lowlink).min(w_lowlink);
-                } else if on_stack.contains(w) {
-                    let w_index = *index.get(w).unwrap();
-                    let v_lowlink = lowlink.get_mut(v).unwrap();
+                } else if state.on_stack.contains(w) {
+                    let w_index = *state.index.get(w).unwrap();
+                    let v_lowlink = state.lowlink.get_mut(v).unwrap();
                     *v_lowlink = (*v_lowlink).min(w_index);
                 }
             }
         }
 
-        if lowlink.get(v) == index.get(v) {
+        if state.lowlink.get(v) == state.index.get(v) {
             let mut scc: Vec<String> = Vec::new();
             loop {
-                let w = stack.pop().unwrap();
-                on_stack.remove(w);
+                let w = state.stack.pop().unwrap();
+                state.on_stack.remove(w);
                 scc.push(w.to_string());
                 if w == v {
                     break;
@@ -435,27 +420,28 @@ pub fn detect_cyclic_groups(snapshot: &Snapshot, files: &[String]) -> Vec<Vec<St
             }
             // Only include SCCs with more than 1 node (actual cycles)
             if scc.len() > 1 {
-                sccs.push(scc);
+                state.sccs.push(scc);
             }
         }
     }
 
+    let mut state = TarjanState {
+        adjacency,
+        index_counter: 0,
+        stack: Vec::new(),
+        on_stack: HashSet::new(),
+        index: HashMap::new(),
+        lowlink: HashMap::new(),
+        sccs: Vec::new(),
+    };
+
     for file in files {
-        if !index.contains_key(file.as_str()) {
-            strongconnect(
-                file.as_str(),
-                &adjacency,
-                &mut index_counter,
-                &mut stack,
-                &mut on_stack,
-                &mut index,
-                &mut lowlink,
-                &mut sccs,
-            );
+        if !state.index.contains_key(file.as_str()) {
+            strongconnect(file.as_str(), &mut state);
         }
     }
 
-    sccs
+    state.sccs
 }
 
 // ============================================================================

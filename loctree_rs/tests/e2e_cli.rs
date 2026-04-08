@@ -1882,6 +1882,110 @@ mod management_commands {
         assert!(stdout.contains("scans 0; latest unknown; schema unknown"));
     }
 
+    #[test]
+    fn cache_clean_without_force_shows_confirmation() {
+        let cache = TempDir::new().unwrap();
+        let bucket = cache.path().join("projects").join("bucket_clean_test01");
+        std::fs::create_dir_all(&bucket).unwrap();
+        std::fs::write(bucket.join("snapshot.json"), b"{}").unwrap();
+
+        let output = loct()
+            .env("LOCT_CACHE_DIR", cache.path())
+            .args(["cache", "clean"])
+            .output()
+            .unwrap();
+
+        assert!(
+            !output.status.success(),
+            "cache clean without --force should fail.\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("Use --force"),
+            "stderr should mention --force.\nstderr: {}",
+            stderr
+        );
+
+        assert!(
+            bucket.exists(),
+            "cache bucket should not be removed without --force"
+        );
+    }
+
+    #[test]
+    fn cache_clean_force_removes_all_buckets() {
+        let cache = TempDir::new().unwrap();
+        let projects_dir = cache.path().join("projects");
+        let bucket_a = projects_dir.join("bucket_clean_a_1234");
+        let bucket_b = projects_dir.join("bucket_clean_b_5678");
+
+        std::fs::create_dir_all(&bucket_a).unwrap();
+        std::fs::write(bucket_a.join("snapshot.json"), b"{}").unwrap();
+        std::fs::create_dir_all(&bucket_b).unwrap();
+        std::fs::write(bucket_b.join("snapshot.json"), b"{}").unwrap();
+
+        let output = loct()
+            .env("LOCT_CACHE_DIR", cache.path())
+            .args(["cache", "clean", "--force"])
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "cache clean --force should succeed.\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("Cleaned 2 project(s)"),
+            "should report 2 cleaned projects.\nstdout: {}",
+            stdout
+        );
+
+        assert!(!bucket_a.exists(), "bucket_a should be removed");
+        assert!(!bucket_b.exists(), "bucket_b should be removed");
+    }
+
+    #[test]
+    fn cache_clean_older_than_skips_recent_entries() {
+        let cache = TempDir::new().unwrap();
+        let projects_dir = cache.path().join("projects");
+        let bucket = projects_dir.join("bucket_clean_recent1");
+
+        std::fs::create_dir_all(&bucket).unwrap();
+        std::fs::write(bucket.join("snapshot.json"), b"{}").unwrap();
+
+        let output = loct()
+            .env("LOCT_CACHE_DIR", cache.path())
+            .args(["cache", "clean", "--older-than", "9999d", "--force"])
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "cache clean --older-than should succeed.\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("Nothing to clean"),
+            "recent entries should not match 9999d threshold.\nstdout: {}",
+            stdout
+        );
+
+        assert!(
+            bucket.exists(),
+            "recent bucket should not be removed by age filter"
+        );
+    }
+
     // ----------------------------------------
     // Auto Command Tests
     // ----------------------------------------

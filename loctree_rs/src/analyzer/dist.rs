@@ -124,7 +124,6 @@ pub enum DistCandidateClass {
     VerifyFirst,
 }
 
-#[allow(dead_code)]
 impl DistCandidateClass {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -156,7 +155,6 @@ pub enum DistConfidence {
     High,
 }
 
-#[allow(dead_code)]
 impl DistConfidence {
     pub fn as_str(self) -> &'static str {
         match self {
@@ -227,17 +225,7 @@ pub struct DistCandidate {
     pub notes: Vec<String>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Default)]
-struct MapCoverage {
-    bundled_sources: HashSet<String>,
-    symbol_covered_sources: HashSet<String>,
-    bundled_symbols: HashSet<String>,
-    has_symbol_level: bool,
-}
-
-#[derive(Debug, Default)]
-#[allow(dead_code)]
 struct FileIndex {
     paths: Vec<String>,
     exact: HashMap<String, Vec<String>>,
@@ -246,14 +234,12 @@ struct FileIndex {
 }
 
 #[derive(Debug, Default)]
-#[allow(dead_code)]
 struct ImportEvidence {
     dynamic_importers: HashMap<String, Vec<String>>,
     static_importers: HashMap<String, Vec<String>>,
 }
 
 #[derive(Debug)]
-#[allow(dead_code)]
 struct ChunkCoverage {
     path: PathBuf,
     label: String,
@@ -267,14 +253,12 @@ struct ChunkCoverage {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-#[allow(dead_code)]
 struct ExportChunkPresence {
     maybe_present: bool,
     reliable_present: bool,
     reliable_absent: bool,
 }
 
-#[allow(dead_code)]
 impl FileIndex {
     fn build(analyses: &[FileAnalysis]) -> Self {
         let mut index = Self::default();
@@ -324,7 +308,6 @@ impl FileIndex {
     }
 }
 
-#[allow(dead_code)]
 fn push_path_key(map: &mut HashMap<String, Vec<String>>, key: String, path: &str) {
     let entry = map.entry(key).or_default();
     if !entry.iter().any(|existing| existing == path) {
@@ -333,7 +316,6 @@ fn push_path_key(map: &mut HashMap<String, Vec<String>>, key: String, path: &str
     }
 }
 
-#[allow(dead_code)]
 fn collect_path_matches(map: &HashMap<String, Vec<String>>, key: &str, output: &mut Vec<String>) {
     if let Some(paths) = map.get(key) {
         for path in paths {
@@ -342,7 +324,6 @@ fn collect_path_matches(map: &HashMap<String, Vec<String>>, key: &str, output: &
     }
 }
 
-#[allow(dead_code)]
 fn push_unique(values: &mut Vec<String>, value: String) {
     if !values.iter().any(|existing| existing == &value) {
         values.push(value);
@@ -392,7 +373,6 @@ fn normalize_source_path(source: &str, source_root: Option<&str>) -> String {
     source_clean
 }
 
-#[allow(dead_code)]
 fn strip_alias_prefix(path: &str) -> &str {
     let without_at = path.trim_start_matches('@');
     if let Some(idx) = without_at.find('/') {
@@ -402,7 +382,6 @@ fn strip_alias_prefix(path: &str) -> &str {
     }
 }
 
-#[allow(dead_code)]
 fn paths_match(a: &str, b: &str) -> bool {
     if a == b {
         return true;
@@ -442,12 +421,10 @@ fn paths_match(a: &str, b: &str) -> bool {
     false
 }
 
-#[allow(dead_code)]
 fn path_to_string(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
-#[allow(dead_code)]
 fn discover_source_maps(inputs: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
     let mut discovered = Vec::new();
     let mut seen = HashSet::new();
@@ -564,179 +541,6 @@ fn parse_source_map(path: &Path) -> Result<SourceMap, String> {
         return Err(format!("Unsupported source map version: {}", map.version));
     }
     Ok(map)
-}
-
-fn extract_bundled_sources(map: &SourceMap) -> HashSet<String> {
-    map.sources
-        .iter()
-        .map(|source| normalize_source_path(source, map.source_root.as_deref()))
-        .collect()
-}
-
-fn extract_bundled_symbols(mappings: &[SourceMapping], names: &[String]) -> HashSet<String> {
-    let mut symbols = HashSet::new();
-    for mapping in mappings {
-        if let Some(name_idx) = mapping.name_idx
-            && let Some(symbol_name) = names.get(name_idx)
-        {
-            symbols.insert(symbol_name.clone());
-        }
-    }
-    symbols
-}
-
-#[allow(dead_code)]
-fn extract_map_coverage(map: &SourceMap) -> MapCoverage {
-    let bundled_sources = extract_bundled_sources(map);
-
-    if map.names.is_empty() {
-        return MapCoverage {
-            bundled_sources,
-            ..Default::default()
-        };
-    }
-
-    let mappings = parse_mappings(&map.mappings);
-    if mappings.is_empty() {
-        return MapCoverage {
-            bundled_sources,
-            ..Default::default()
-        };
-    }
-
-    let bundled_symbols = extract_bundled_symbols(&mappings, &map.names);
-    if bundled_symbols.is_empty() {
-        return MapCoverage {
-            bundled_sources,
-            ..Default::default()
-        };
-    }
-
-    MapCoverage {
-        symbol_covered_sources: bundled_sources.clone(),
-        bundled_sources,
-        bundled_symbols,
-        has_symbol_level: true,
-    }
-}
-
-#[allow(dead_code)]
-fn is_file_in_bundle(file_path: &str, bundled_sources: &HashSet<String>) -> bool {
-    bundled_sources.iter().any(|bundled| {
-        if bundled == file_path {
-            return true;
-        }
-        if bundled.ends_with(file_path) {
-            return true;
-        }
-        let file_no_ext = file_path
-            .trim_end_matches(".ts")
-            .trim_end_matches(".tsx")
-            .trim_end_matches(".jsx");
-        let bundled_no_ext = bundled
-            .trim_end_matches(".js")
-            .trim_end_matches(".jsx")
-            .trim_end_matches(".mjs");
-        file_no_ext == bundled_no_ext || bundled_no_ext.ends_with(file_no_ext)
-    })
-}
-
-#[allow(dead_code)]
-#[cfg(test)]
-fn find_dead_by_symbol(
-    analyses: &[FileAnalysis],
-    bundled_sources: &HashSet<String>,
-    bundled_symbols: &HashSet<String>,
-) -> Vec<DeadBundleExport> {
-    let mut dead_exports = Vec::new();
-    for analysis in analyses {
-        let file_path = analysis.path.trim_start_matches("./").replace('\\', "/");
-        if !is_file_in_bundle(&file_path, bundled_sources) {
-            for export in &analysis.exports {
-                dead_exports.push(DeadBundleExport {
-                    file: analysis.path.clone(),
-                    line: export.line.unwrap_or(0),
-                    name: export.name.clone(),
-                    kind: export.kind.clone(),
-                });
-            }
-        } else {
-            for export in &analysis.exports {
-                if !bundled_symbols.contains(&export.name) {
-                    dead_exports.push(DeadBundleExport {
-                        file: analysis.path.clone(),
-                        line: export.line.unwrap_or(0),
-                        name: export.name.clone(),
-                        kind: export.kind.clone(),
-                    });
-                }
-            }
-        }
-    }
-    dead_exports
-}
-
-#[allow(dead_code)]
-fn find_dead_bundle_exports(
-    analyses: &[FileAnalysis],
-    bundled_sources: &HashSet<String>,
-) -> Vec<DeadBundleExport> {
-    let mut dead_exports = Vec::new();
-    for analysis in analyses {
-        let file_path = analysis.path.trim_start_matches("./").replace('\\', "/");
-        if !is_file_in_bundle(&file_path, bundled_sources) {
-            for export in &analysis.exports {
-                dead_exports.push(DeadBundleExport {
-                    file: analysis.path.clone(),
-                    line: export.line.unwrap_or(0),
-                    name: export.name.clone(),
-                    kind: export.kind.clone(),
-                });
-            }
-        }
-    }
-    dead_exports
-}
-
-#[allow(dead_code)]
-fn find_dead_exports_across_maps(
-    analyses: &[FileAnalysis],
-    bundled_sources: &HashSet<String>,
-    symbol_covered_sources: &HashSet<String>,
-    bundled_symbols: &HashSet<String>,
-) -> Vec<DeadBundleExport> {
-    let mut dead_exports = Vec::new();
-
-    for analysis in analyses {
-        let file_path = analysis.path.trim_start_matches("./").replace('\\', "/");
-
-        if !is_file_in_bundle(&file_path, bundled_sources) {
-            for export in &analysis.exports {
-                dead_exports.push(DeadBundleExport {
-                    file: analysis.path.clone(),
-                    line: export.line.unwrap_or(0),
-                    name: export.name.clone(),
-                    kind: export.kind.clone(),
-                });
-            }
-            continue;
-        }
-
-        if is_file_in_bundle(&file_path, symbol_covered_sources) {
-            for export in &analysis.exports {
-                if !bundled_symbols.contains(&export.name) {
-                    dead_exports.push(DeadBundleExport {
-                        file: analysis.path.clone(),
-                        line: export.line.unwrap_or(0),
-                        name: export.name.clone(),
-                        kind: export.kind.clone(),
-                    });
-                }
-            }
-        }
-    }
-
-    dead_exports
 }
 
 fn normalize_root_for_scope_compare(root: &Path, snapshot_root: &Path) -> String {
@@ -1565,14 +1369,12 @@ mod tests {
         }
     }
 
-    #[allow(unused_unsafe)]
     fn set_env_var<K: AsRef<std::ffi::OsStr>, V: AsRef<std::ffi::OsStr>>(key: K, value: V) {
         unsafe {
             std::env::set_var(key, value);
         }
     }
 
-    #[allow(unused_unsafe)]
     fn remove_env_var<K: AsRef<std::ffi::OsStr>>(key: K) {
         unsafe {
             std::env::remove_var(key);
@@ -1636,35 +1438,6 @@ mod tests {
         let map = parse_source_map(&map_path).expect("parse source map");
         assert_eq!(map.version, 3);
         assert_eq!(map.sources.len(), 1);
-    }
-
-    #[test]
-    fn test_extract_bundled_sources() {
-        let map = SourceMap {
-            version: 3,
-            sources: vec!["./src/index.ts".to_string()],
-            names: vec![],
-            mappings: "".to_string(),
-            source_root: None,
-        };
-        let sources = extract_bundled_sources(&map);
-        assert!(sources.contains("src/index.ts"));
-    }
-
-    #[test]
-    fn test_extract_bundled_symbols() {
-        let mappings = vec![SourceMapping {
-            gen_line: 0,
-            gen_col: 0,
-            source_idx: Some(0),
-            source_line: Some(1),
-            source_col: Some(0),
-            name_idx: Some(0),
-        }];
-        let names = vec!["foo".to_string(), "bar".to_string()];
-        let symbols = extract_bundled_symbols(&mappings, &names);
-        assert!(symbols.contains("foo"));
-        assert!(!symbols.contains("bar"));
     }
 
     #[test]
@@ -1798,37 +1571,6 @@ mod tests {
         assert_eq!(impacted[0].status, "partially-shaken");
         assert_eq!(impacted[1].file, "src/b.ts");
         assert_eq!(impacted[1].status, "fully-shaken");
-    }
-
-    #[test]
-    fn test_find_dead_by_symbol_partial() {
-        let analyses = vec![FileAnalysis {
-            path: "src/partial.ts".to_string(),
-            exports: vec![
-                ExportSymbol {
-                    name: "usedFunc".to_string(),
-                    kind: "function".to_string(),
-                    export_type: "named".to_string(),
-                    line: Some(10),
-                    params: Vec::new(),
-                },
-                ExportSymbol {
-                    name: "deadFunc".to_string(),
-                    kind: "function".to_string(),
-                    export_type: "named".to_string(),
-                    line: Some(20),
-                    params: Vec::new(),
-                },
-            ],
-            ..Default::default()
-        }];
-        let mut bundled_sources = HashSet::new();
-        bundled_sources.insert("src/partial.ts".to_string());
-        let mut bundled_symbols = HashSet::new();
-        bundled_symbols.insert("usedFunc".to_string());
-        let dead = find_dead_by_symbol(&analyses, &bundled_sources, &bundled_symbols);
-        assert_eq!(dead.len(), 1);
-        assert_eq!(dead[0].name, "deadFunc");
     }
 
     #[test]

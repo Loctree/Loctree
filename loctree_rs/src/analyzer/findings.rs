@@ -424,21 +424,21 @@ impl Findings {
             .sum();
 
         // Calculate summary
-        let summary = calculate_summary(
-            &analyses,
-            &dead_parrots,
-            &shadow_exports,
-            &duplicates,
-            &cycles,
-            &barrel_chaos,
-            &react_lint,
-            &ts_lint,
-            &memory_lint,
+        let summary = calculate_summary(&SummaryInput {
+            analyses: &analyses,
+            dead_parrots: &dead_parrots,
+            shadow_exports: &shadow_exports,
+            duplicates: &duplicates,
+            cycles: &cycles,
+            barrel_chaos: &barrel_chaos,
+            react_lint: &react_lint,
+            ts_lint: &ts_lint,
+            memory_lint: &memory_lint,
             twins_dead_parrots,
-            twins_same_lang_count,
+            twins_same_language: twins_same_lang_count,
             cascade_imports,
-            dist.as_ref(),
-        );
+            dist: dist.as_ref(),
+        });
 
         Findings {
             loctree: version,
@@ -733,29 +733,31 @@ fn generate_quick_wins(
     wins
 }
 
-/// Calculate summary statistics
-#[allow(clippy::too_many_arguments)]
-fn calculate_summary(
-    analyses: &[&FileAnalysis],
-    dead_parrots: &[DeadExport],
-    shadow_exports: &[ShadowExport],
-    duplicates: &[DuplicateGroup],
-    cycles: &[CycleEntry],
-    barrel_chaos: &[BarrelChaosEntry],
-    react_lint: &[ReactLintIssue],
-    ts_lint: &[TsLintIssue],
-    memory_lint: &[MemoryLintIssue],
+/// Bundled input for [`calculate_summary`] to stay under the 7-argument clippy limit.
+struct SummaryInput<'a> {
+    analyses: &'a [&'a FileAnalysis],
+    dead_parrots: &'a [DeadExport],
+    shadow_exports: &'a [ShadowExport],
+    duplicates: &'a [DuplicateGroup],
+    cycles: &'a [CycleEntry],
+    barrel_chaos: &'a [BarrelChaosEntry],
+    react_lint: &'a [ReactLintIssue],
+    ts_lint: &'a [TsLintIssue],
+    memory_lint: &'a [MemoryLintIssue],
     twins_dead_parrots: usize,
     twins_same_language: usize,
     cascade_imports: usize,
-    dist: Option<&DistResult>,
-) -> FindingsSummary {
-    let files = analyses.len();
-    let loc: usize = analyses.iter().map(|a| a.loc).sum();
+    dist: Option<&'a DistResult>,
+}
+
+/// Calculate summary statistics
+fn calculate_summary(input: &SummaryInput) -> FindingsSummary {
+    let files = input.analyses.len();
+    let loc: usize = input.analyses.iter().map(|a| a.loc).sum();
 
     // Count cycles by type
     let mut cycle_counts = CycleCounts::default();
-    for cycle in cycles {
+    for cycle in input.cycles {
         match cycle.cycle_type.as_str() {
             "breaking" => cycle_counts.breaking += 1,
             "structural" => cycle_counts.structural += 1,
@@ -771,14 +773,14 @@ fn calculate_summary(
         // CERTAIN: breaking cycles are critical
         breaking_cycles: cycle_counts.breaking,
         // HIGH: dead exports, twins_dead_parrots
-        dead_exports: dead_parrots.len(),
-        twins_dead_parrots,
+        dead_exports: input.dead_parrots.len(),
+        twins_dead_parrots: input.twins_dead_parrots,
         // SMELL: barrel chaos, structural cycles, duplicates, twins_same_language, cascades
-        barrel_chaos_count: barrel_chaos.len(),
+        barrel_chaos_count: input.barrel_chaos.len(),
         structural_cycles: cycle_counts.structural,
-        duplicate_exports: duplicates.len(),
-        twins_same_language,
-        cascade_imports,
+        duplicate_exports: input.duplicates.len(),
+        twins_same_language: input.twins_same_language,
+        cascade_imports: input.cascade_imports,
         // Context
         files,
         loc,
@@ -789,27 +791,29 @@ fn calculate_summary(
     let health_score = health.health;
 
     // React lint summary
-    let react_lint_summary = if react_lint.is_empty() {
+    let react_lint_summary = if input.react_lint.is_empty() {
         None
     } else {
-        Some(ReactLintSummary::from_issues(react_lint))
+        Some(ReactLintSummary::from_issues(input.react_lint))
     };
 
     // TypeScript lint summary
-    let ts_lint_summary = if ts_lint.is_empty() {
+    let ts_lint_summary = if input.ts_lint.is_empty() {
         None
     } else {
-        Some(TsLintSummary::from_issues(ts_lint))
+        Some(TsLintSummary::from_issues(input.ts_lint))
     };
 
     // Memory lint summary
-    let memory_lint_summary = if memory_lint.is_empty() {
+    let memory_lint_summary = if input.memory_lint.is_empty() {
         None
     } else {
-        Some(crate::analyzer::memory_lint::calculate_summary(memory_lint))
+        Some(crate::analyzer::memory_lint::calculate_summary(
+            input.memory_lint,
+        ))
     };
 
-    let dist_summary = dist.map(|dist| FindingsDistSummary {
+    let dist_summary = input.dist.map(|dist| FindingsDistSummary {
         source_maps: dist.source_maps,
         tree_shaken_exports: dist.tree_shaken_exports,
         coverage_pct: dist.coverage_pct,
@@ -821,11 +825,11 @@ fn calculate_summary(
         files,
         loc,
         health_score,
-        dead_parrots: dead_parrots.len(),
-        shadow_exports: shadow_exports.len(),
-        duplicate_groups: duplicates.len(),
+        dead_parrots: input.dead_parrots.len(),
+        shadow_exports: input.shadow_exports.len(),
+        duplicate_groups: input.duplicates.len(),
         cycles: cycle_counts,
-        barrel_chaos: barrel_chaos.len(),
+        barrel_chaos: input.barrel_chaos.len(),
         react_lint: react_lint_summary,
         ts_lint: ts_lint_summary,
         memory_lint: memory_lint_summary,

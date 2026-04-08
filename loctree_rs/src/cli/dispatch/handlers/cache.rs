@@ -565,7 +565,6 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    #[allow(clippy::too_many_arguments)]
     fn snapshot_record(
         roots: &[&str],
         generated_at: Option<&str>,

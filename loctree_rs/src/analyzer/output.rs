@@ -254,26 +254,29 @@ fn build_cycle_edges(
     edges
 }
 
+pub struct GlobalContext<'a> {
+    pub fe_commands: &'a HashMap<String, Vec<(String, usize, String)>>,
+    pub be_commands: &'a HashMap<String, Vec<(String, usize, String)>>,
+    pub missing_handlers: &'a [CommandGap],
+    pub unregistered_handlers: &'a [CommandGap],
+    pub unused_handlers: &'a [CommandGap],
+    pub pipeline_summary: &'a serde_json::Value,
+    pub git: Option<&'a GitContext>,
+    pub schema_name: &'a str,
+    pub schema_version: &'a str,
+    pub analyses: &'a [FileAnalysis],
+}
+
 pub struct RootArtifacts {
     pub json_items: Vec<serde_json::Value>,
     pub report_section: Option<ReportSection>,
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn process_root_context(
     idx: usize,
     ctx: RootContext,
     parsed: &ParsedArgs,
-    fe_commands: &HashMap<String, Vec<(String, usize, String)>>,
-    be_commands: &HashMap<String, Vec<(String, usize, String)>>,
-    global_missing_handlers: &[CommandGap],
-    global_unregistered_handlers: &[CommandGap],
-    global_unused_handlers: &[CommandGap],
-    pipeline_summary: &serde_json::Value,
-    git: Option<&GitContext>,
-    schema_name: &str,
-    schema_version: &str,
-    global_analyses: &[FileAnalysis],
+    global: &GlobalContext,
 ) -> RootArtifacts {
     let mut json_items = Vec::new();
     let RootContext {
@@ -294,7 +297,7 @@ pub fn process_root_context(
         ..
     } = ctx;
 
-    let pipeline_summary = pipeline_summary.clone();
+    let pipeline_summary = global.pipeline_summary.clone();
 
     resolve_event_constants_across_files(&mut analyses);
 
@@ -314,17 +317,17 @@ pub fn process_root_context(
         .map(|a| a.path.clone())
         .collect();
 
-    let missing_handlers = global_missing_handlers.to_vec();
-    let unregistered_handlers = global_unregistered_handlers.to_vec();
-    let unused_handlers = global_unused_handlers.to_vec();
+    let missing_handlers = global.missing_handlers.to_vec();
+    let unregistered_handlers = global.unregistered_handlers.to_vec();
+    let unused_handlers = global.unused_handlers.to_vec();
 
     let (graph_data, graph_warning) = if parsed.graph && parsed.report_path.is_some() {
         build_graph_data(
             &analyses,
             &graph_edges,
             &loc_map,
-            fe_commands,
-            be_commands,
+            global.fe_commands,
+            global.be_commands,
             parsed.max_graph_nodes.unwrap_or(MAX_GRAPH_NODES),
             parsed.max_graph_edges.unwrap_or(MAX_GRAPH_EDGES),
         )
@@ -489,9 +492,10 @@ pub fn process_root_context(
     let mut languages_vec: Vec<_> = languages.iter().cloned().collect();
     languages_vec.sort();
 
-    let mut all_command_names: Vec<String> = fe_commands
+    let mut all_command_names: Vec<String> = global
+        .fe_commands
         .keys()
-        .chain(be_commands.keys())
+        .chain(global.be_commands.keys())
         .cloned()
         .collect();
     all_command_names.sort();
@@ -506,7 +510,7 @@ pub fn process_root_context(
 
     let mut commands2 = Vec::new();
     for name in &all_command_names {
-        let mut handlers = be_commands.get(name).cloned().unwrap_or_default();
+        let mut handlers = global.be_commands.get(name).cloned().unwrap_or_default();
         handlers.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
         let canonical = handlers.first().map(|(path, line, symbol)| {
             json!({
@@ -517,7 +521,7 @@ pub fn process_root_context(
             })
         });
 
-        let mut call_sites = fe_commands.get(name).cloned().unwrap_or_default();
+        let mut call_sites = global.fe_commands.get(name).cloned().unwrap_or_default();
         call_sites.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
 
         let language = canonical
@@ -559,13 +563,13 @@ pub fn process_root_context(
     // Build command_bridges for full FE↔BE comparison table
     let mut command_bridges: Vec<CommandBridge> = Vec::new();
     for name in &all_command_names {
-        let mut handlers = be_commands.get(name).cloned().unwrap_or_default();
+        let mut handlers = global.be_commands.get(name).cloned().unwrap_or_default();
         handlers.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
         let be_location = handlers
             .first()
             .map(|(path, line, symbol)| (path.clone(), *line, symbol.clone()));
 
-        let mut call_sites = fe_commands.get(name).cloned().unwrap_or_default();
+        let mut call_sites = global.fe_commands.get(name).cloned().unwrap_or_default();
         call_sites.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
         let fe_locations: Vec<(String, usize)> = call_sites
             .iter()
@@ -817,7 +821,7 @@ pub fn process_root_context(
         dead_ok_globs.sort();
         dead_ok_globs.dedup();
         let dead_exports = find_dead_exports(
-            global_analyses,
+            global.analyses,
             true,
             open_base.as_deref(),
             DeadFilterConfig {
@@ -1049,15 +1053,15 @@ pub fn process_root_context(
             }
 
             let ai_payload = json!({
-                "schema": schema_name,
-                "schemaVersion": schema_version,
+                "schema": global.schema_name,
+                "schemaVersion": global.schema_version,
                 "generatedAt": generated_at,
                 "rootDir": root_path,
                 "git": {
-                    "repo": git.and_then(|g| g.repo.clone()),
-                    "branch": git.and_then(|g| g.branch.clone()),
-                    "commit": git.and_then(|g| g.commit.clone()),
-                    "scanId": git.and_then(|g| g.scan_id.clone()),
+                    "repo": global.git.and_then(|g| g.repo.clone()),
+                    "branch": global.git.and_then(|g| g.branch.clone()),
+                    "commit": global.git.and_then(|g| g.commit.clone()),
+                    "scanId": global.git.and_then(|g| g.scan_id.clone()),
                 },
                 "languages": languages_vec,
                 "filesAnalyzed": analyses.len(),
@@ -1066,8 +1070,8 @@ pub fn process_root_context(
                     "reexportFiles": reexport_files.len(),
                     "dynamicImports": dynamic_summary_for_output.len(),
                 "commands": {
-                    "frontendCalls": fe_commands.len(),
-                    "backendHandlers": be_commands.len(),
+                    "frontendCalls": global.fe_commands.len(),
+                    "backendHandlers": global.be_commands.len(),
                     "missingHandlers": missing_handlers.len(),
                     "unusedHandlers": unused_handlers.len(),
                 },
@@ -1140,16 +1144,16 @@ pub fn process_root_context(
             }
         } else {
             let payload = json!({
-                "schema": schema_name,
-                "schemaVersion": schema_version,
+                "schema": global.schema_name,
+                "schemaVersion": global.schema_version,
                 "generatedAt": generated_at,
                 "rootDir": root_path,
                 "root": root_path,
                 "git": {
-                    "repo": git.and_then(|g| g.repo.clone()),
-                    "branch": git.and_then(|g| g.branch.clone()),
-                    "commit": git.and_then(|g| g.commit.clone()),
-                    "scanId": git.and_then(|g| g.scan_id.clone()),
+                    "repo": global.git.and_then(|g| g.repo.clone()),
+                    "branch": global.git.and_then(|g| g.branch.clone()),
+                    "commit": global.git.and_then(|g| g.commit.clone()),
+                    "scanId": global.git.and_then(|g| g.scan_id.clone()),
                 },
                 "languages": languages_vec,
                 "filesAnalyzed": analyses.len(),
@@ -1186,8 +1190,8 @@ pub fn process_root_context(
                 "barrels": barrels_json,
                 "dynamicImports": dynamic_imports_json_for_output,
                 "commands": {
-                    "frontend": fe_commands.iter().map(|(k,v)| json!({"name": k, "locations": v})).collect::<Vec<_>>(),
-                    "backend": be_commands.iter().map(|(k,v)| json!({"name": k, "locations": v})).collect::<Vec<_>>(),
+                    "frontend": global.fe_commands.iter().map(|(k,v)| json!({"name": k, "locations": v})).collect::<Vec<_>>(),
+                    "backend": global.be_commands.iter().map(|(k,v)| json!({"name": k, "locations": v})).collect::<Vec<_>>(),
                     "missingHandlers": missing_handlers.iter().map(|g| json!({"name": g.name, "locations": g.locations})).collect::<Vec<_>>(),
                     "unusedHandlers": unused_handlers.iter().map(|g| {
                         let mut obj = json!({"name": g.name, "locations": g.locations});
@@ -1205,9 +1209,9 @@ pub fn process_root_context(
                 },
                 "commands2": commands2,
                 "tauri_analysis": {
-                    "total_handlers": be_commands.len(),
-                    "total_calls": fe_commands.len(),
-                    "registered": be_commands.len().saturating_sub(unregistered_handlers.len()),
+                    "total_handlers": global.be_commands.len(),
+                    "total_calls": global.fe_commands.len(),
+                    "registered": global.be_commands.len().saturating_sub(unregistered_handlers.len()),
                     "coverage": {
                         "ok": all_command_names.len().saturating_sub(
                             missing_handlers.len() + unused_handlers.len() + unregistered_handlers.len()
@@ -1228,8 +1232,8 @@ pub fn process_root_context(
                     "suspiciousBarrels": suspicious_barrels,
                     "deadSymbols": dead_symbols,
                     "coverage": {
-                        "frontendCommandCount": fe_commands.len(),
-                        "backendHandlerCount": be_commands.len(),
+                        "frontendCommandCount": global.fe_commands.len(),
+                        "backendHandlerCount": global.be_commands.len(),
                         "missingCount": missing_handlers.len(),
                         "unusedCount": unused_handlers.len(),
                         "renamedHandlers": renamed_handlers,
@@ -1580,12 +1584,12 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
             dynamic: sorted_dyn,
             analyze_limit: parsed.analyze_limit,
             generated_at: Some(generated_at.clone()),
-            schema_name: Some(schema_name.to_string()),
-            schema_version: Some(schema_version.to_string()),
+            schema_name: Some(global.schema_name.to_string()),
+            schema_version: Some(global.schema_version.to_string()),
             missing_handlers: missing_sorted,
             unregistered_handlers: unregistered_sorted,
             unused_handlers: unused_sorted,
-            command_counts: (fe_commands.len(), be_commands.len()),
+            command_counts: (global.fe_commands.len(), global.be_commands.len()),
             command_bridges: command_bridges.clone(),
             open_base: if parsed.report_path.is_some() && parsed.serve {
                 current_open_base()
@@ -1595,8 +1599,8 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
             tree: Some(tree),
             graph: graph_data.clone(),
             graph_warning: graph_warning.clone(),
-            git_branch: git.and_then(|g| g.branch.clone()),
-            git_commit: git.and_then(|g| g.commit.clone()),
+            git_branch: global.git.and_then(|g| g.branch.clone()),
+            git_commit: global.git.and_then(|g| g.commit.clone()),
             priority_tasks: Vec::new(),
             hub_files: Vec::new(),
             crowds: crowds.clone(),
