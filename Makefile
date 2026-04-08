@@ -5,7 +5,7 @@
 
 .PHONY: all build install clean test check precheck fmt help setup-protoc
 .PHONY: version version-show version-check publish
-.PHONY: mcp-build mcp-install mcp-test
+.PHONY: mcp-build mcp-install mcp-test smoke-release-macos-arm64
 .PHONY: ai-hooks ai-hooks-claude ai-hooks-codex ai-hooks-gemini git-hooks
 
 # Default target
@@ -118,11 +118,11 @@ help:
 	@echo "  make build        - Build all (installs protobuf if needed)"
 	@echo "  make build-core   - Build only loctree (no protobuf needed)"
 	@echo "  make install      - Install loct, loctree & loctree-mcp"
-	@echo "  make install-all  - Install loct, loctree & loctree-mcp"
 	@echo "  make test         - Run all tests"
-	@echo "  make check        - Quick type check (no clippy)"
+	@echo "  make check        - Full quality gate (fmt+clippy+check+semgrep)"
 	@echo "  make fmt          - Format all code"
 	@echo "  make clean        - Clean build artifacts"
+	@echo "  make smoke-release-macos-arm64 - Verify macOS arm64 release portability"
 	@echo ""
 	@echo "Version Management:"
 	@echo "  make version-show       - Show all crate versions"
@@ -155,7 +155,7 @@ help:
 	@echo ""
 	@echo "Quick start:"
 	@echo "  make install           - Install loct + loctree-mcp"
-	@echo "  make install-all       - Install loct + loctree-mcp"
+	@echo "  make smoke-release-macos-arm64 - Check macOS arm64 release binary portability"
 
 # ============================================================================
 # Version Management
@@ -254,6 +254,16 @@ mcp-test:
 	@echo "Testing loctree-mcp..."
 	@echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"make-test","version":"1.0"}}}' \
 		| $(CARGO_BIN)/loctree-mcp 2>/dev/null | head -1 || echo "Test failed"
+
+# Verify the native macOS arm64 release story stays clean-room safe
+smoke-release-macos-arm64:
+	@if [ "$$(uname -s)" != "Darwin" ] || [ "$$(uname -m)" != "arm64" ]; then \
+		echo "This smoke target must run on macOS arm64."; \
+		exit 1; \
+	fi
+	cargo build --release -p loctree
+	cargo build --release -p loctree-mcp
+	bash distribution/macos/smoke-releaseability.sh target/release/loct target/release/loctree target/release/loctree-mcp
 
 # ============================================================================
 # AI Hooks Installation (Claude, Codex, Gemini)

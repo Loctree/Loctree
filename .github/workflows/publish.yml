@@ -202,6 +202,12 @@ jobs:
       - name: Build release binaries
         run: cargo build -p loctree --release --target aarch64-apple-darwin
 
+      - name: Smoke check CLI macOS ARM64 binaries
+        run: |
+          bash distribution/macos/smoke-releaseability.sh \
+            target/aarch64-apple-darwin/release/loct \
+            target/aarch64-apple-darwin/release/loctree
+
       - name: Package CLI macOS ARM64 artifact
         env:
           MACOS_DEVELOPER_ID_APPLICATION: ${{ secrets.MACOS_DEVELOPER_ID_APPLICATION }}
@@ -388,6 +394,11 @@ jobs:
 
       - name: Build release binary
         run: cargo build -p loctree-mcp --release --target aarch64-apple-darwin
+
+      - name: Smoke check MCP macOS ARM64 binary
+        run: |
+          bash distribution/macos/smoke-releaseability.sh \
+            target/aarch64-apple-darwin/release/loctree-mcp
 
       - name: Package MCP macOS ARM64 artifact
         env:
@@ -766,6 +777,12 @@ jobs:
       - publish-npm
     runs-on: [self-hosted, Linux, X64, ops]
     steps:
+      - name: Download packaged assets
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
       - name: Create monorepo release
         uses: softprops/action-gh-release@v1
         with:
@@ -773,10 +790,13 @@ jobs:
           name: loctree ${{ needs.verify-release.outputs.version }}
           draft: false
           prerelease: false
+          files: |
+            release-assets/*.tar.gz
+            release-assets/*.zip
           body: |
             ## loctree v${{ needs.verify-release.outputs.version }}
 
-            Monorepo release for source, changelog, and publish orchestration.
+            Monorepo release for source, changelog, and installable binary assets.
 
             User-facing binary channels:
             - CLI assets: https://github.com/${{ env.CLI_RELEASE_REPO }}/releases/tag/v${{ needs.verify-release.outputs.version }}
@@ -785,8 +805,8 @@ jobs:
             Installation:
 
             ```bash
-            cargo install loctree loctree-mcp
-            npm install -g loctree
+            cargo install --locked loctree loctree-mcp
+            npm install -g loctree  # CLI only
             brew install loctree/cli/loct
             brew install loctree/mcp/loctree-mcp
             ```

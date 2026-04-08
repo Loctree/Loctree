@@ -7,6 +7,9 @@ the matching platform package, which then downloads the corresponding GitHub
 release asset for your machine from the `Loctree/loct` thin release repo while
 keeping the source of truth in `Loctree/Loctree`.
 
+This npm channel is CLI-only. If you also need `loctree-mcp`, install it via
+Cargo, Homebrew, or the GitHub release assets.
+
 `loct` is the canonical CLI command. `loctree` may still exist as a compatibility
 alias on some install channels, but new docs and examples use `loct`.
 
@@ -38,6 +41,14 @@ Then run:
 loct --help
 ```
 
+For the MCP server:
+
+```bash
+cargo install --locked loctree-mcp
+# or
+brew install loctree/mcp/loctree-mcp
+```
+
 If you already installed Loctree globally via Homebrew, do not mix `brew` and
 `npm -g` for the same machine-level CLI. Pick one global channel or remove the
 existing binary first.
@@ -66,6 +77,7 @@ If installation fails:
 1. verify the matching GitHub release assets exist
 2. ensure your package manager did not disable `optionalDependencies`
 3. fall back to `cargo install loctree`
+4. install `loctree-mcp` separately if your workflow needs MCP
 
 ## Links
 

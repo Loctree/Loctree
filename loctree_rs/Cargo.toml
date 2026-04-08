@@ -35,7 +35,9 @@ globset = "0.4"
 heck = "0.5"
 time = { version = "0.3", features = ["formatting"] }
 report-leptos = { workspace = true }
-git2 = "0.20"
+# Local repository analysis does not need git network transports. Keep libgit2
+# vendored so release binaries stay portable instead of inheriting Homebrew dylibs.
+git2 = { version = "0.20", default-features = false, features = ["vendored-libgit2"] }
 toml = "1.0"
 urlencoding = "2.1"
 once_cell = "1.19"

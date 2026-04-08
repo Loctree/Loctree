@@ -22,9 +22,9 @@
 ## Install
 
 ```bash
-curl -fsSL https://loct.io/install.sh | sh   # One-liner
-cargo install loctree loctree-mcp             # Or via Cargo
-npm install -g loctree                        # Or via npm
+curl -fsSL https://loct.io/install.sh | sh   # CLI + loctree-mcp
+cargo install --locked loctree loctree-mcp   # Cargo, reproducible
+npm install -g loctree                       # CLI only
 brew install loctree/cli/loct                 # CLI via Homebrew tap
 brew install loctree/mcp/loctree-mcp          # MCP via Homebrew tap
 ```
@@ -93,6 +93,9 @@ loctree-mcp    # Start via stdio (configure in your MCP client)
   }
 }
 ```
+
+Direct download users can also fetch signed release assets from the monorepo
+GitHub release page, which mirrors both the CLI and `loctree-mcp` tarballs.
 
 ## Language Support
 
