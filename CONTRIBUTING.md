@@ -28,4 +28,4 @@ make precheck            # Quick validation (fmt + clippy + check)
 
 ---
 
-*Developed with care by The Loctree Team (c)2025*
+*Developed with care by The Loctree Team ⓒ 2025-2026*

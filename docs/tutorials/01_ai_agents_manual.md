@@ -936,4 +936,4 @@ Keep artifacts together: snapshots and agent metadata (e.g., `AI_META.json` or `
 
 ---
 
-Developed with care by The Loctree Team (c)2025.
+Developed with care by The Loctree Team ⓒ 2025-2026.

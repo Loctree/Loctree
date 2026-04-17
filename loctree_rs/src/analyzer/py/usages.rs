@@ -6,7 +6,7 @@
 //! - Function calls
 //! - Bare class references (return statements, isinstance, issubclass, raise)
 //!
-//! VibeCrafted with AI Agents (c)2026 Loctree Team
+//! 𝚅𝚒𝚋𝚎𝚌𝚛𝚊𝚏𝚝𝚎𝚍. with AI Agents ⓒ 2025-2026 Loctree Team
 
 use super::helpers::{
     PYTHON_KEYWORDS, SKIP_BUILTINS, SKIP_TYPE_HINTS, TYPE_FACTORIES, bytes_match_keyword,

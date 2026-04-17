@@ -74,4 +74,4 @@ Real-world TypeScript projects work fine:
 
 ---
 
-*Tested by M&K (c)2025 The Loctree Team*
+*Tested by M&K ⓒ 2025-2026 The Loctree Team*

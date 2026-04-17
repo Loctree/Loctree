@@ -18,7 +18,7 @@
 //! const value = response as UserResponse;
 //! ```
 //!
-//! Developed by The Loctree Team (c)2025
+//! Developed by The Loctree Team ⓒ 2025-2026
 
 use super::is_test_file;
 use regex::Regex;

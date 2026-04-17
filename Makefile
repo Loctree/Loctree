@@ -1,7 +1,7 @@
 # Loctree Build System
 # Includes comprehensive MCP server management
 #
-# Created by M&K (c)2025 The Loctree Team
+# Created by M&K ⓒ 2025-2026 The Loctree Team
 
 .PHONY: all build install clean test check precheck fmt help setup-protoc
 .PHONY: version version-show version-check publish

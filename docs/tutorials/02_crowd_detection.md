@@ -235,4 +235,4 @@ loct diff --since main --problems-only
 
 ---
 
-Developed with 💀 by The Loctree Team (c)2025.
+Developed with 💀 by The Loctree Team ⓒ 2025-2026.

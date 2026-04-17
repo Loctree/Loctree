@@ -1,7 +1,7 @@
 //! End-to-End CLI Tests for loctree
 //!
 //! Following TDD principles - tests define expected behavior.
-//! VibeCrafted with AI Agents (c)2026 Loctree Team
+//! 𝚅𝚒𝚋𝚎𝚌𝚛𝚊𝚏𝚝𝚎𝚍. with AI Agents ⓒ 2025-2026 Loctree Team
 
 use assert_cmd::Command;
 use assert_cmd::cargo::cargo_bin_cmd;
@@ -895,7 +895,7 @@ fn run_git(repo: &std::path::Path, args: &[&str]) {
 // ============================================
 // Instant Commands Tests (<100ms)
 // ============================================
-// VibeCrafted with AI Agents (c)2026 Loctree Team
+// 𝚅𝚒𝚋𝚎𝚌𝚛𝚊𝚏𝚝𝚎𝚍. with AI Agents ⓒ 2025-2026 Loctree Team
 
 mod instant_commands {
     use super::*;
@@ -1207,7 +1207,7 @@ mod instant_commands {
 // ============================================
 // Analysis Commands Tests
 // ============================================
-// VibeCrafted with AI Agents (c)2026 Loctree Team
+// 𝚅𝚒𝚋𝚎𝚌𝚛𝚊𝚏𝚝𝚎𝚍. with AI Agents ⓒ 2025-2026 Loctree Team
 
 mod analysis_commands {
     use super::*;
@@ -1643,7 +1643,7 @@ mod analysis_commands {
 // ============================================
 // Management & Core Workflow Commands Tests
 // ============================================
-// VibeCrafted with AI Agents (c)2026 Loctree Team
+// 𝚅𝚒𝚋𝚎𝚌𝚛𝚊𝚏𝚝𝚎𝚍. with AI Agents ⓒ 2025-2026 Loctree Team
 
 mod management_commands {
     use super::*;
@@ -2234,7 +2234,7 @@ mod management_commands {
 // ============================================
 // Framework-Specific Command Tests
 // ============================================
-// VibeCrafted with AI Agents (c)2026 Loctree Team
+// 𝚅𝚒𝚋𝚎𝚌𝚛𝚊𝚏𝚝𝚎𝚍. with AI Agents ⓒ 2025-2026 Loctree Team
 
 mod framework_commands {
     use super::*;

@@ -133,4 +133,4 @@ Reason: No imports found for 'X'. Checked: direct imports (0),
 
 ---
 
-Developed with care by The Loctree Team (c)2025.
+Developed with care by The Loctree Team ⓒ 2025-2026.

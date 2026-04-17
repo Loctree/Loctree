@@ -3,7 +3,7 @@
 //! Detects threading, asyncio, and multiprocessing patterns that may indicate
 //! potential race conditions or concurrent access issues.
 //!
-//! VibeCrafted with AI Agents (c)2026 Loctree Team
+//! 𝚅𝚒𝚋𝚎𝚌𝚛𝚊𝚏𝚝𝚎𝚍. with AI Agents ⓒ 2025-2026 Loctree Team
 
 use crate::types::PyRaceIndicator;
 
