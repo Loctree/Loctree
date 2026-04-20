@@ -33,11 +33,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Loctree/Loctree.git"
+    "url": "git+https://github.com/Loctree/loctree-ast.git"
   },
   "homepage": "https://loct.io",
   "bugs": {
-    "url": "https://github.com/Loctree/Loctree/issues"
+    "url": "https://github.com/Loctree/loctree-ast/issues"
   },
   "license": "MIT OR Apache-2.0",
   "author": "Loctree <loct@loct.io>",

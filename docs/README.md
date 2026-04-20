@@ -2,7 +2,7 @@
 
 AI-oriented codebase analyzer for detecting dead code, circular imports, and generating dependency graphs.
 
-**Current version:** 0.8.16
+**Current version:** 0.8.17
 **CLI command:** `loct` (with `loctree` kept as a compatibility alias)
 
 ---
@@ -34,9 +34,9 @@ AI-oriented codebase analyzer for detecting dead code, circular imports, and gen
 cargo install loctree
 
 # From source
-git clone https://github.com/Loctree/Loctree
-cd loctree/loctree_rs
-cargo install --path .
+git clone https://github.com/Loctree/loctree-ast.git
+cd loctree-ast
+make install
 ```
 
 ### First Scan
@@ -312,7 +312,7 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for:
 - **Changelog:** [CHANGELOG.md](../CHANGELOG.md)
 - **Main README:** [../README.md](../README.md)
 - **Crates.io:** [loctree](https://crates.io/crates/loctree)
-- **Repository:** [github.com/Loctree/Loctree](https://github.com/Loctree/Loctree)
+- **Repository:** [github.com/Loctree/loctree-ast](https://github.com/Loctree/loctree-ast)
 
 ---
 

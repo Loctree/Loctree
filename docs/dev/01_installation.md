@@ -12,8 +12,8 @@ curl -fsSL https://loct.io/install.sh | sh
 cargo install --locked loctree loctree-mcp
 
 # Or from source
-git clone https://github.com/Loctree/Loctree.git
-cd Loctree
+git clone https://github.com/Loctree/loctree-ast.git
+cd loctree-ast
 make install
 ```
 
@@ -73,8 +73,8 @@ release repos remain available too:
 ### 6. From Source
 
 ```bash
-git clone https://github.com/Loctree/Loctree.git
-cd Loctree
+git clone https://github.com/Loctree/loctree-ast.git
+cd loctree-ast
 make install
 ```
 

@@ -3,7 +3,7 @@
 
 set -e
 
-VERSION="${1:-0.8.16}"
+VERSION="${1:-$(node -p "require('./package.json').version")}"
 
 PLATFORMS=(
   "darwin-arm64:macOS Apple Silicon (ARM64):darwin:arm64"
@@ -28,7 +28,7 @@ for platform_spec in "${PLATFORMS[@]}"; do
   "cpu": ["$cpu"],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Loctree/Loctree.git"
+    "url": "git+https://github.com/Loctree/loctree-ast.git"
   },
   "files": [
     "loct$([ "$os" = "win32" ] && echo ".exe" || echo "")",

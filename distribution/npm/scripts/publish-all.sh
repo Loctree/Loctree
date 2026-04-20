@@ -3,7 +3,7 @@
 
 set -e
 
-VERSION=${1:-"0.8.16"}
+VERSION=${1:-$(node -p "require('../package.json').version")}
 DRY_RUN=${DRY_RUN:-false}
 
 echo "=== loctree npm Publishing Script ==="

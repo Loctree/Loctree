@@ -1,71 +1,57 @@
-# Loctree - Developer Documentation
+# Loctree Developer Docs
 
-Technical documentation for developers and contributors working on the public OSS line.
+Technical notes for contributors working inside the public `loctree-ast`
+workspace.
 
-## Contents
+## Primary Docs
 
-| Document | Description |
-|----------|-------------|
-| [INSTALLATION.md](INSTALLATION.md) | Complete installation guide with all methods |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Workspace structure and crate relationships |
-| [BINARIES.md](BINARIES.md) | CLI reference for all binaries |
+| Document | Purpose |
+|----------|---------|
+| [01_installation.md](01_installation.md) | Install, verify, and update the workspace |
+| [02_architecture.md](02_architecture.md) | Current workspace shape and blast-radius hubs |
+| [03_cli_reference.md](03_cli_reference.md) | CLI contract and developer reference |
 
-## Quick Links
-
-### Getting Started
+## Quick Start
 
 ```bash
-# Install core tools
-cargo install loctree
-
-# Or from source
-git clone https://github.com/Loctree/loctree-suite.git
-cd loctree-suite
+git clone https://github.com/Loctree/loctree-ast.git
+cd loctree-ast
 make install
+make precheck
 ```
 
-### Crates
+## Workspace Crates
 
-| Crate | Version | Description |
-|-------|---------|-------------|
-| [loctree](../../loctree_rs) | 0.7.4 | Core library + CLI |
-| [loctree-mcp](../../loctree-mcp) | 0.1.15 | MCP server for AI agents |
-| [rmcp-memex](../../rmcp-memex) | 0.1.11 | RAG/memory MCP server |
-| [rmcp-mux](../../rmcp-mux) | 0.3.3 | MCP multiplexer |
+The public workspace currently ships these members:
 
-### Binaries
+| Crate | Version | Purpose |
+|-------|---------|---------|
+| `loctree` | 0.8.17 | Core analyzer + CLI (`loct`, `loctree`) |
+| `loctree-mcp` | 0.8.17 | MCP server |
+| `report-leptos` | 0.8.17 | HTML report renderer |
+| `rmcp-common` | 0.8.17 | Shared MCP/common utilities |
+
+## Binaries
 
 | Binary | Purpose |
 |--------|---------|
-| `loct` | Primary CLI (recommended) |
-| `loctree` | Compatibility alias for `loct` |
+| `loct` | Canonical CLI |
+| `loctree` | Quiet compatibility alias for `loct` |
 | `loctree-mcp` | MCP server |
-| `rmcp_memex` | Memory/RAG server |
-| `rmcp-mux` | MCP multiplexer (single process manages all servers) |
 
-## Development
+## External Surfaces
+
+These are part of the broader Loctree ecosystem, but not members of this
+workspace:
+
+- `loctree-suite` for editor/LSP surfaces
+- thin release repos: `Loctree/loct` and `Loctree/loctree-mcp`
+- Homebrew taps: `Loctree/homebrew-cli` and `Loctree/homebrew-mcp`
+
+## Core Gates
 
 ```bash
-# Build all
-cargo build --workspace
-
-# Test all
-cargo test --workspace
-
-# Format
-cargo fmt --all
-
-# Check
-cargo clippy --workspace
+make precheck   # fast repo-wide check
+make check      # fmt + clippy + cargo check + semgrep
+make test       # workspace tests
 ```
-
-## Related Documentation
-
-- [README.md](../../README.md) - Project overview
-- [CHANGELOG.md](../../CHANGELOG.md) - Version history
-- [CONTRIBUTING.md](../CONTRIBUTING.md) - Contribution guide
-- [MIGRATION_0.7.0.md](../MIGRATION_0.7.0.md) - Migration guide
-
----
-
-𝚅𝚒𝚋𝚎𝚌𝚛𝚊𝚏𝚝𝚎𝚍. with AI Agents ⓒ 2025-2026 Loctree Team

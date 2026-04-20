@@ -4,7 +4,7 @@ Loctree no longer treats `homebrew-core` as the primary install path.
 
 The shipping architecture is now:
 
-- source + CI + versioning: `Loctree/Loctree`
+- source + CI + versioning: `Loctree/loctree-ast`
 - CLI binary releases: `Loctree/loct`
 - MCP binary releases: `Loctree/loctree-mcp`
 - CLI tap: `Loctree/homebrew-cli`
@@ -34,7 +34,7 @@ make version TYPE=minor TAG=1 PUSH=1
 
 That tag push triggers:
 
-1. crate publishing in `Loctree/Loctree`
+1. crate publishing in `Loctree/loctree-ast`
 2. binary builds for CLI and MCP
 3. asset upload to `Loctree/loct` and `Loctree/loctree-mcp`
 4. npm publish from `distribution/npm`
@@ -62,7 +62,7 @@ Before the first release on this layout, create these GitHub repositories:
 - `Loctree/homebrew-cli`
 - `Loctree/homebrew-mcp`
 
-Also configure `HOMEBREW_GITHUB_API_TOKEN` in `Loctree/Loctree` with write access
+Also configure `HOMEBREW_GITHUB_API_TOKEN` in `Loctree/loctree-ast` with write access
 to all four repositories.
 
 ## Supported Homebrew Targets

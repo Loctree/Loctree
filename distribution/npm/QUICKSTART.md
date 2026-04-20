@@ -1,100 +1,77 @@
-# Quick Start Guide
+# npm Quick Start
 
-Get the loctree npm package published in 5 steps.
+Fast path to publish the `loctree` npm surface after the CLI thin release
+assets already exist.
 
 ## Prerequisites
 
-- npm account (`npm login`)
-- loct Rust binaries published to GitHub releases
-- Node.js 14+ installed
+- npm publish access
+- CLI thin release assets published to `Loctree/loct`
+- Node.js 20+ available (matches the release workflow)
 
-## Step 1: Verify GitHub Releases
+## 1. Sync Versions
 
-Ensure release assets exist at:
+Run from the repo root:
+
+```bash
+VERSION="$(node -p "require('./distribution/npm/package.json').version")"
+cd distribution/npm
+node sync-version.mjs "$VERSION"
+./CREATE_PLATFORM_PACKAGES.sh "$VERSION"
 ```
-https://github.com/Loctree/loct/releases/tag/v0.8.16
-```
 
-Required files:
+## 2. Verify Thin Assets
+
+For `v$VERSION`, the CLI release repo should already contain:
+
 - `loct-darwin-aarch64.tar.gz`
 - `loct-linux-x86_64.tar.gz`
 - `loct-windows-x86_64.exe.zip`
 
-## Step 2: Generate Platform Packages
+Release page:
 
-```bash
-./CREATE_PLATFORM_PACKAGES.sh
+```text
+https://github.com/Loctree/loct/releases/tag/v$VERSION
 ```
 
-This creates the currently supported platform package directories.
-
-## Step 3: Test Locally (Optional)
+## 3. Publish Platform Packages
 
 ```bash
-cd platform-packages/darwin-arm64
-npm install
-./loct --version
-```
-
-## Step 4: Publish
-
-### Option A: Automated (Recommended)
-
-```bash
-./scripts/publish-all.sh
-```
-
-### Option B: Manual
-
-```bash
-# Publish platform packages first
 for dir in platform-packages/*/; do
   (cd "$dir" && npm publish --access public)
 done
-
-# Then publish main package
-npm publish
 ```
 
-## Step 5: Verify
+Wait a few seconds for npm registry propagation.
+
+## 4. Publish the Main Package
 
 ```bash
-mkdir /tmp/test-loctree
-cd /tmp/test-loctree
+npm publish --access public
+```
+
+## 5. Smoke Test
+
+```bash
+mkdir -p /tmp/loctree-npm-smoke
+cd /tmp/loctree-npm-smoke
 npm init -y
 npm install loctree
 npx loct --version
 ```
 
-## Done!
+## Canonical Automation
 
-Your package is now published and ready to use:
+The normal path is still the repo release workflow, not manual publishing:
 
 ```bash
-npm install loctree
-npx loct --help
+make version TYPE=patch TAG=1 PUSH=1
 ```
 
-## Troubleshooting
+That tag push runs `.github/workflows/publish.yml`, which refreshes versions,
+publishes platform packages, and then publishes the main package.
 
-### "Platform package not found"
+## Need More Detail?
 
-Wait 30-60 seconds for npm registry to propagate, then try again.
-
-### "Binary download failed"
-
-Check that the GitHub release exists with the current supported assets.
-
-### "Permission denied"
-
-Run `chmod +x` on the binary path shown in the error.
-
-## Next Steps
-
-- Read [PUBLISHING.md](./PUBLISHING.md) for detailed publishing guide
-- Read [PACKAGE_OVERVIEW.md](./PACKAGE_OVERVIEW.md) for architecture details
-- Set up CI/CD with `.github/workflows/test-install.yml`
-
----
-
-**Need help?** Open an issue at https://github.com/Loctree/Loctree/issues
+Read [PUBLISHING.md](./PUBLISHING.md) for the full operator guide and the live
+sources of truth.

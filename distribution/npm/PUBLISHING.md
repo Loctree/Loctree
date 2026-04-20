@@ -1,81 +1,70 @@
-# Publishing Guide for loctree npm Package
+# Publishing Guide for the loctree npm Package
 
-This guide explains how to publish the loctree npm package and its platform-specific binaries.
+The npm package is a CLI wrapper around thin release assets from
+`Loctree/loct`. The canonical publish path is the monorepo release workflow:
 
-## Architecture Overview
+- verify release tag and versions
+- publish thin release assets
+- refresh npm package versions
+- publish platform packages
+- publish the main `loctree` package
 
-This package follows the **esbuild/swc pattern** of using `optionalDependencies` for platform-specific binaries:
+See `.github/workflows/publish.yml` for the live source of truth.
 
-1. **Main package** (`loctree`): Contains the wrapper JavaScript code
-2. **Platform packages** (`@loctree/*-*`): Each contains a platform-specific binary
+## Current Layout
 
-The main package lists all platform packages as `optionalDependencies`, so npm/pnpm/yarn will automatically install only the one matching the user's platform.
+The npm surface follows the `optionalDependencies` pattern:
 
-## Prerequisites
+1. `loctree` — main package with the JavaScript wrapper
+2. `@loctree/darwin-arm64`
+3. `@loctree/linux-x64-gnu`
+4. `@loctree/win32-x64-msvc`
 
-1. **npm account** with publish permissions
-2. **GitHub releases** with loct assets for the supported npm platforms
-3. **Node.js 14+** installed locally
+The main package depends on the platform packages. Each platform package
+downloads its matching thin release asset from `Loctree/loct`.
 
-## Publishing Steps
+## Required Thin Assets
 
-### Step 1: Verify GitHub Releases
+For a release tag `vX.Y.Z`, the publish workflow expects these CLI assets:
 
-Ensure the loct release has these assets for version `0.8.16` (or your target version):
+- `loct-darwin-aarch64.tar.gz`
+- `loct-darwin-x86_64.tar.gz`
+- `loct-linux-x86_64.tar.gz`
+- `loct-windows-x86_64.exe.zip`
 
-```
-loct-darwin-aarch64.tar.gz
-loct-linux-x86_64.tar.gz
-loct-windows-x86_64.exe.zip
-```
+The npm platform packages currently consume:
 
-Check: https://github.com/Loctree/loct/releases/tag/v0.8.16
+- `loct-darwin-aarch64.tar.gz`
+- `loct-linux-x86_64.tar.gz`
+- `loct-windows-x86_64.exe.zip`
 
-### Step 2: Create Platform-Specific Packages
+## Standard Publish Flow
 
-Run the helper script to create all platform package directories:
-
-```bash
-./CREATE_PLATFORM_PACKAGES.sh
-```
-
-This creates:
-```
-platform-packages/
-├── darwin-arm64/
-├── linux-x64-gnu/
-└── win32-x64-msvc/
-```
-
-### Step 3: Test Platform Package Installation (Optional)
-
-Before publishing, test that the download mechanism works:
+The normal operator path is a tagged release:
 
 ```bash
-cd platform-packages/darwin-arm64
-npm install
-# Should download the binary from GitHub releases
-ls -lh loct
-./loct --version
+make version TYPE=minor TAG=1 PUSH=1
 ```
 
-### Step 4: Publish Platform Packages
+That triggers `.github/workflows/publish.yml`, which then:
 
-You MUST publish platform packages BEFORE the main package (because the main package depends on them).
+1. syncs `distribution/npm/package.json` to the release version
+2. regenerates `platform-packages/*` with `CREATE_PLATFORM_PACKAGES.sh`
+3. publishes each platform package
+4. publishes the main `loctree` npm package
+
+## Manual Fallback
+
+Use this only when you intentionally need a local/manual npm publish:
 
 ```bash
-# Publish each platform package
-cd platform-packages/darwin-arm64
-npm publish --access public
-
-cd ../linux-x64-gnu
-npm publish --access public
-
-cd ../win32-x64-msvc
-npm publish --access public
+VERSION="$(node -p "require('./distribution/npm/package.json').version")"
+cd distribution/npm
+node sync-version.mjs "$VERSION"
+./CREATE_PLATFORM_PACKAGES.sh "$VERSION"
 ```
 
-**Alternative (automated):**
+Publish platform packages first:
 
 ```bash
 for dir in platform-packages/*/; do
@@ -83,96 +72,31 @@ for dir in platform-packages/*/; do
 done
 ```
 
-### Step 5: Publish Main Package
-
-After all platform packages are published:
+Then publish the main package:
 
 ```bash
-cd /path/to/loctree-npm-package
-npm publish
+npm publish --access public
 ```
 
-### Step 6: Verify Installation
+## Verification
 
-Test on different platforms if possible:
+Sanity-check the release surface before or after publishing:
 
 ```bash
-# Create a test directory
-mkdir /tmp/loctree-test
-cd /tmp/loctree-test
+VERSION="$(node -p "require('./distribution/npm/package.json').version")"
+echo "https://github.com/Loctree/loct/releases/tag/v${VERSION}"
+
+mkdir -p /tmp/loctree-npm-smoke
+cd /tmp/loctree-npm-smoke
 npm init -y
 npm install loctree
-
-# Verify binary works
 npx loct --version
 node -e "console.log(require('loctree').getBinaryPath())"
 ```
 
-## Version Updates
+## Notes
 
-When releasing a new version:
-
-1. **Sync all package.json files**:
-   ```bash
-   node sync-version.mjs 0.8.16
-   ./CREATE_PLATFORM_PACKAGES.sh 0.8.16
-   ```
-
-2. **Re-publish platform packages first**, then the main package
-
-## Troubleshooting
-
-### "Package not found" errors
-
-- Ensure platform packages are published BEFORE the main package
-- Check that package names match exactly: `@loctree/darwin-arm64`, etc.
-- Verify packages are public: `npm access public @loctree/darwin-arm64`
-
-### Binary download failures
-
-- Verify GitHub release exists with correct tag (note the `v` prefix)
-- Check asset filenames match the `BINARY_MAPPINGS` in `platform-packages/postinstall.js`
-- Test download URL manually: `curl -L https://github.com/Loctree/loct/releases/download/v0.8.16/loct-darwin-aarch64.tar.gz -o test`
-
-### optionalDependencies not installing
-
-- Some package managers can disable optionalDependencies
-- Check with: `npm install --no-optional` (should fail)
-- Normal install: `npm install` (should work)
-
-## Alternative: Direct Binary Bundling
-
-If GitHub releases are unreliable, you can bundle binaries directly in platform packages:
-
-1. Download all binaries locally
-2. Place each binary in its respective platform package directory
-3. Remove or simplify the `postinstall.js` script
-4. Increase package size limits in `.npmrc` if needed
-
-This increases package sizes but eliminates download dependencies.
-
-## Package Maintenance
-
-### Sync with Rust releases
-
-Monitor https://github.com/Loctree/loct/releases for new versions.
-
-When a new version is released:
-1. Update all version numbers
-2. Test on multiple platforms
-3. Publish platform packages
-4. Publish main package
-5. Test installation
-
-### Deprecating old versions
-
-```bash
-npm deprecate loctree@0.8.15 "Please upgrade to 0.8.16"
-```
-
-## Resources
-
-- [npm publishing docs](https://docs.npmjs.com/cli/v8/commands/npm-publish)
-- [optionalDependencies](https://docs.npmjs.com/cli/v8/configuring-npm/package-json#optionaldependencies)
-- [esbuild npm package strategy](https://esbuild.github.io/getting-started/)
-- [How to publish binaries on npm (Sentry blog)](https://sentry.engineering/blog/publishing-binaries-on-npm)
+- Do not hard-code old version numbers in docs or helper commands.
+- Do not publish the main package before the platform packages.
+- The source of truth for asset filenames is `distribution/npm/platform-packages/postinstall.js`.
+- The source of truth for publish choreography is `.github/workflows/publish.yml`.

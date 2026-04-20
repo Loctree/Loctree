@@ -16,7 +16,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Loctree/Loctree.git"
+    "url": "git+https://github.com/Loctree/loctree-ast.git"
   },
   "files": [
     "loct",
