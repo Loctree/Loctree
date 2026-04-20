@@ -43,7 +43,7 @@ esac
 cat > "$OUTPUT_PATH" <<EOF
 class ${CLASS_NAME} < Formula
   desc "${DESCRIPTION}"
-  homepage "https://github.com/Loctree/Loctree"
+  homepage "https://loct.io"
   version "${VERSION}"
   license any_of: ["MIT", "Apache-2.0"]
 

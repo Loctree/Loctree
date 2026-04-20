@@ -6,7 +6,7 @@
 //!
 //! This crate provides a type-safe, component-based approach to generating
 //! beautiful HTML reports using [Leptos](https://leptos.dev/) server-side rendering.
-//! Originally built for [loctree](https://github.com/Loctree/Loctree) codebase
+//! Originally built for [loctree](https://github.com/Loctree/loctree-ast) codebase
 //! analysis, it can be used independently for any static report generation needs.
 //!
 //! ## Features

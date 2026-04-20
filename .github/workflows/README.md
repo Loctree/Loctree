@@ -39,12 +39,12 @@ User-facing binary distribution is split into thin repos:
 - Homebrew tap for CLI: `Loctree/homebrew-cli`
 - Homebrew tap for MCP: `Loctree/homebrew-mcp`
 
-This keeps `Loctree/Loctree` focused on code, CI, and release choreography while
+This keeps `Loctree/loctree-ast` focused on code, CI, and release choreography while
 the thin repos stay narrowly scoped to distribution.
 
 ## Required Secrets
 
-The release pipeline expects these secrets in `Loctree/Loctree`:
+The release pipeline expects these secrets in `Loctree/loctree-ast`:
 
 - `CARGO_REGISTRY_TOKEN`
 - `NPM_TOKEN`
@@ -84,7 +84,7 @@ That tag push triggers the publish pipeline. The workflow then:
 
 ## Monitoring
 
-- Monorepo actions: https://github.com/Loctree/Loctree/actions
+- Monorepo actions: https://github.com/Loctree/loctree-ast/actions
 - CLI releases: https://github.com/Loctree/loct/releases
 - MCP releases: https://github.com/Loctree/loctree-mcp/releases
 - CLI tap: https://github.com/Loctree/homebrew-cli

@@ -14,7 +14,6 @@ INSTALL_DIR=${INSTALL_DIR:-"$HOME/.local/bin"}
 CARGO_HOME=${CARGO_HOME:-"$HOME/.cargo"}
 CARGO_BIN="$CARGO_HOME/bin"
 INSTALL_MCP=${INSTALL_MCP:-1}
-REPO_URL="https://github.com/Loctree/Loctree"
 # Allow pinning a branch, tag, or commit; defaults to 'main' regardless of which branch this script is fetched from.
 LOCTREE_REF=${LOCTREE_REF:-"main"}
 

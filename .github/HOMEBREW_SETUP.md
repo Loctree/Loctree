@@ -17,7 +17,7 @@ Loctree now ships through two custom taps, not through `homebrew-core`:
    - `Loctree/homebrew-cli`
    - `Loctree/homebrew-mcp`
 
-3. Store it in `Loctree/Loctree` as:
+3. Store it in `Loctree/loctree-ast` as:
    - `HOMEBREW_GITHUB_API_TOKEN`
 
 ## Runtime Contract

@@ -549,7 +549,7 @@ jobs:
           RELEASE_BODY: |
             Thin release channel for the Loctree CLI.
 
-            Source of truth: `Loctree/Loctree`
+            Source of truth: `Loctree/loctree-ast`
             Install:
             - `brew install loctree/cli/loct`
             - `cargo install loctree`
@@ -645,7 +645,7 @@ jobs:
           RELEASE_BODY: |
             Thin release channel for the Loctree MCP server.
 
-            Source of truth: `Loctree/Loctree`
+            Source of truth: `Loctree/loctree-ast`
             Install:
             - `brew install loctree/mcp/loctree-mcp`
             - `cargo install loctree-mcp`

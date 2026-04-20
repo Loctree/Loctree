@@ -1633,7 +1633,7 @@ impl ServerHandler for LoctreeServer {
                 description: Some("Structural code intelligence for AI agents".to_string()),
                 version: env!("CARGO_PKG_VERSION").to_string(),
                 icons: None,
-                website_url: Some("https://github.com/Loctree/Loctree".to_string()),
+                website_url: Some("https://loct.io".to_string()),
             },
             instructions: Some(
                 "Loctree MCP provides structural code intelligence. Use these tools for codebase awareness.\n\n\
