@@ -1015,7 +1015,7 @@ Quick shortcuts for common commands:
 |-------|------------|-------------|
 | `loct s <file>` | `loct slice <file>` | Extract file context |
 | `loct f <pattern>` | `loct find <pattern>` | Search symbols/files |
-| `loct h` | `loct --summary` | Health summary |
+| `loct h` | `loct health` | Health summary |
 
 ---
 

@@ -22,15 +22,15 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install loctree
-        run: cargo install loctree
+        run: cargo install --locked loctree
 
       - name: Run analysis
-        run: LOCT_CACHE_DIR=.loctree loct --findings > .loctree/findings.json
+        run: LOCT_CACHE_DIR=.loctree loct findings > .loctree/findings.json
 
       - name: Check for issues
         run: |
-          DEAD=$(jq '.dead_exports | length' .loctree/findings.json)
-          CYCLES=$(jq '.cycles | length' .loctree/findings.json)
+          DEAD=$(jq '.dead_exports.total' .loctree/findings.json)
+          CYCLES=$(jq '.cycles.total' .loctree/findings.json)
           if [ "$DEAD" -gt 0 ] || [ "$CYCLES" -gt 0 ]; then
             echo "Found $DEAD dead exports and $CYCLES cycles"
             exit 1
@@ -57,18 +57,18 @@ jobs:
       - name: Install loctree
         run: |
           if ! command -v loct &> /dev/null; then
-            cargo install loctree
+            cargo install --locked loctree
           fi
 
-      - name: Analyze
-        run: loct --fail-stale
+      - name: Analyze summary
+        run: LOCT_CACHE_DIR=.loctree loct findings --summary > .loctree/summary.json
 ```
 
 ### PR Comment with Report
 
 ```yaml
-      - name: Generate report
-        run: loct --summary > report.txt
+      - name: Generate summary report
+        run: loct findings --summary > report.json
 
       - name: Comment on PR
         if: github.event_name == 'pull_request'
@@ -76,7 +76,7 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const report = fs.readFileSync('report.txt', 'utf8');
+            const report = fs.readFileSync('report.json', 'utf8');
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
@@ -94,15 +94,9 @@ jobs:
 repos:
   - repo: local
     hooks:
-      - id: loctree-dead
-        name: Check dead exports
-        entry: loct dead --fail
-        language: system
-        pass_filenames: false
-
-      - id: loctree-cycles
-        name: Check circular imports
-        entry: loct cycles --fail
+      - id: loctree-lint
+        name: Run structural lint
+        entry: loct lint --fail
         language: system
         pass_filenames: false
 ```
@@ -116,7 +110,7 @@ repos:
 echo "Running loctree analysis..."
 loct --quiet
 
-DEAD=$(loct dead --json | jq '. | length')
+DEAD=$(loct findings | jq '.dead_exports.total')
 if [ "$DEAD" -gt 0 ]; then
   echo "ERROR: $DEAD dead exports found"
   echo "Run 'loct dead' for details"
@@ -134,7 +128,7 @@ echo "Loctree: OK"
 | `--quiet` | No progress output | Clean logs |
 | `--fail-stale` | Fail if snapshot outdated | Enforce fresh analysis |
 | `--fresh` | Force full rescan | Ensure accuracy |
-| `--summary` | Health score only | Quick status |
+| `findings --summary` | Summary JSON | Quick status / PR comments |
 
 ## Exit Codes
 
@@ -163,7 +157,7 @@ loctree:
   stage: test
   image: rust:latest
   script:
-    - cargo install loctree
+    - cargo install --locked loctree
     - loct --fail-stale
   cache:
     paths:
@@ -181,8 +175,8 @@ jobs:
       - image: rust:latest
     steps:
       - checkout
-      - run: cargo install loctree
-      - run: loct --json > results.json
+      - run: cargo install --locked loctree
+      - run: loct findings --summary > results.json
       - store_artifacts:
           path: results.json
 ```
