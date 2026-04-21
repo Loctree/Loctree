@@ -29,7 +29,7 @@ const BINARY_MAPPINGS = {
     target: 'loct',
   },
   '@loctree/win32-x64-msvc': {
-    file: 'loct-windows-x86_64.exe.zip',
+    file: 'loct-windows-x86_64.zip',
     target: 'loct.exe',
   },
 };

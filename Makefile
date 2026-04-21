@@ -74,19 +74,21 @@ setup-protoc:
 test:
 	cargo test --workspace
 
-# Quick check (compilation only)
+# Fast gate (fmt + clippy + check)
 precheck:
-	cargo check --workspace
+	@echo "=== Fast Gate ==="
+	@echo "[1/3] Checking formatting..."
+	@cargo fmt --all --check || (echo "Run 'make fmt' to fix" && exit 1)
+	@echo "[2/3] Running clippy..."
+	@cargo clippy --workspace --all-targets -- -D warnings
+	@echo "[3/3] Type checking..."
+	@cargo check --workspace
+	@echo "=== Fast gate passed ==="
 
 # Full quality gate (fmt + clippy + check + semgrep) - run before push
 check:
 	@echo "=== Quality Gate ==="
-	@echo "[1/4] Checking formatting..."
-	@cargo fmt --all --check || (echo "Run 'make fmt' to fix" && exit 1)
-	@echo "[2/4] Running clippy..."
-	@cargo clippy --workspace --all-targets -- -D warnings
-	@echo "[3/4] Type checking..."
-	@cargo check --workspace
+	@$(MAKE) precheck
 	@echo "[4/4] Semgrep security scan..."
 	@if command -v semgrep >/dev/null 2>&1 || command -v pipx >/dev/null 2>&1; then \
 		SEMGREP=$$(command -v semgrep || echo "pipx run semgrep"); \

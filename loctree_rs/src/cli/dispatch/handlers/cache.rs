@@ -565,31 +565,35 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    fn snapshot_record(
-        roots: &[&str],
-        generated_at: Option<&str>,
-        owner_repo: Option<&str>,
-        repo: Option<&str>,
-        branch: Option<&str>,
-        commit: Option<&str>,
-        schema: Option<&str>,
-        modified_at: SystemTime,
+    struct SnapshotRecordSpec<'a> {
+        roots: &'a [&'a str],
+        generated_at: Option<&'a str>,
+        owner_repo: Option<&'a str>,
+        repo: Option<&'a str>,
+        branch: Option<&'a str>,
+        commit: Option<&'a str>,
+        schema: Option<&'a str>,
         is_latest_pointer: bool,
+    }
+
+    fn snapshot_record(
+        spec: SnapshotRecordSpec<'_>,
+        modified_at: SystemTime,
     ) -> CacheSnapshotRecord {
         CacheSnapshotRecord {
             metadata: SnapshotMetadata {
-                schema_version: schema.unwrap_or_default().to_string(),
-                generated_at: generated_at.unwrap_or_default().to_string(),
-                roots: roots.iter().map(|root| root.to_string()).collect(),
-                git_repo: repo.map(str::to_string),
-                git_owner_repo: owner_repo.map(str::to_string),
-                git_branch: branch.map(str::to_string),
-                git_commit: commit.map(str::to_string),
+                schema_version: spec.schema.unwrap_or_default().to_string(),
+                generated_at: spec.generated_at.unwrap_or_default().to_string(),
+                roots: spec.roots.iter().map(|root| root.to_string()).collect(),
+                git_repo: spec.repo.map(str::to_string),
+                git_owner_repo: spec.owner_repo.map(str::to_string),
+                git_branch: spec.branch.map(str::to_string),
+                git_commit: spec.commit.map(str::to_string),
                 git_scan_id: None,
                 ..SnapshotMetadata::default()
             },
             modified_at,
-            is_latest_pointer,
+            is_latest_pointer: spec.is_latest_pointer,
         }
     }
 
@@ -615,26 +619,30 @@ mod tests {
     fn test_select_project_path_prefers_shortest_root() {
         let now = SystemTime::UNIX_EPOCH;
         let primary = snapshot_record(
-            &["/tmp/demo"],
-            Some("2026-03-31T16:18:00Z"),
-            Some("VetCoders/demo"),
-            Some("demo"),
-            Some("main"),
-            Some("abc123"),
-            Some("0.9.0"),
+            SnapshotRecordSpec {
+                roots: &["/tmp/demo"],
+                generated_at: Some("2026-03-31T16:18:00Z"),
+                owner_repo: Some("VetCoders/demo"),
+                repo: Some("demo"),
+                branch: Some("main"),
+                commit: Some("abc123"),
+                schema: Some("0.9.0"),
+                is_latest_pointer: false,
+            },
             now,
-            false,
         );
         let nested = snapshot_record(
-            &["/tmp/demo/src"],
-            Some("2026-03-31T16:19:00Z"),
-            Some("VetCoders/demo"),
-            Some("demo"),
-            Some("feature"),
-            Some("def456"),
-            Some("0.9.0"),
+            SnapshotRecordSpec {
+                roots: &["/tmp/demo/src"],
+                generated_at: Some("2026-03-31T16:19:00Z"),
+                owner_repo: Some("VetCoders/demo"),
+                repo: Some("demo"),
+                branch: Some("feature"),
+                commit: Some("def456"),
+                schema: Some("0.9.0"),
+                is_latest_pointer: false,
+            },
             now,
-            false,
         );
 
         let snapshots = vec![&primary, &nested];
@@ -647,15 +655,17 @@ mod tests {
     #[test]
     fn test_resolve_org_repo_label_uses_local_fallback_for_non_git_bucket() {
         let snapshot = snapshot_record(
-            &["/tmp/local-project"],
-            Some("2026-03-31T16:18:00Z"),
-            None,
-            None,
-            None,
-            None,
-            Some("0.9.0"),
+            SnapshotRecordSpec {
+                roots: &["/tmp/local-project"],
+                generated_at: Some("2026-03-31T16:18:00Z"),
+                owner_repo: None,
+                repo: None,
+                branch: None,
+                commit: None,
+                schema: Some("0.9.0"),
+                is_latest_pointer: false,
+            },
             SystemTime::UNIX_EPOCH,
-            false,
         );
         let snapshots = vec![&snapshot];
 
@@ -668,37 +678,43 @@ mod tests {
     #[test]
     fn test_format_cache_meta_skips_latest_pointer_duplicates() {
         let older = snapshot_record(
-            &["/tmp/demo"],
-            Some("2026-03-30T12:00:00Z"),
-            Some("VetCoders/demo"),
-            Some("demo"),
-            Some("main"),
-            Some("aaa111"),
-            Some("0.9.0"),
+            SnapshotRecordSpec {
+                roots: &["/tmp/demo"],
+                generated_at: Some("2026-03-30T12:00:00Z"),
+                owner_repo: Some("VetCoders/demo"),
+                repo: Some("demo"),
+                branch: Some("main"),
+                commit: Some("aaa111"),
+                schema: Some("0.9.0"),
+                is_latest_pointer: false,
+            },
             SystemTime::UNIX_EPOCH,
-            false,
         );
         let newer = snapshot_record(
-            &["/tmp/demo"],
-            Some("2026-03-31T12:00:00Z"),
-            Some("VetCoders/demo"),
-            Some("demo"),
-            Some("feature"),
-            Some("bbb222"),
-            Some("0.9.0"),
+            SnapshotRecordSpec {
+                roots: &["/tmp/demo"],
+                generated_at: Some("2026-03-31T12:00:00Z"),
+                owner_repo: Some("VetCoders/demo"),
+                repo: Some("demo"),
+                branch: Some("feature"),
+                commit: Some("bbb222"),
+                schema: Some("0.9.0"),
+                is_latest_pointer: false,
+            },
             SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(10),
-            false,
         );
         let latest_pointer = snapshot_record(
-            &["/tmp/demo"],
-            Some("2026-03-31T12:00:00Z"),
-            Some("VetCoders/demo"),
-            Some("demo"),
-            Some("feature"),
-            Some("bbb222"),
-            Some("0.9.0"),
+            SnapshotRecordSpec {
+                roots: &["/tmp/demo"],
+                generated_at: Some("2026-03-31T12:00:00Z"),
+                owner_repo: Some("VetCoders/demo"),
+                repo: Some("demo"),
+                branch: Some("feature"),
+                commit: Some("bbb222"),
+                schema: Some("0.9.0"),
+                is_latest_pointer: true,
+            },
             SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(20),
-            true,
         );
 
         let snapshots = [older, newer, latest_pointer];
