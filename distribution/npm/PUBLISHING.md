@@ -22,7 +22,8 @@ The npm surface follows the `optionalDependencies` pattern:
 5. `@loctree/win32-x64-msvc`
 
 The main package depends on the platform packages. Each platform package
-downloads its matching thin release asset from `Loctree/loct`.
+downloads its matching thin release asset from `Loctree/loct`, with a
+monorepo-release fallback in `Loctree/loctree-ast` while mirroring catches up.
 
 ## Required Thin Assets
 

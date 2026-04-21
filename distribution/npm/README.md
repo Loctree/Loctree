@@ -81,7 +81,7 @@ If installation fails:
 
 1. verify the matching GitHub release assets exist
 2. ensure your package manager did not disable `optionalDependencies`
-3. fall back to `cargo install loctree`
+3. fall back to `cargo install --locked loctree`
 4. install `loctree-mcp` separately if your workflow needs MCP
 
 ## Links

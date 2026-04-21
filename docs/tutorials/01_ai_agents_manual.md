@@ -633,7 +633,7 @@ The agent bundle is a complete analysis package for CI pipelines:
 ```yaml
 - name: Run loctree analysis
   run: |
-    cargo install loctree
+    cargo install --locked loctree
     loct
 
 - name: Upload SARIF

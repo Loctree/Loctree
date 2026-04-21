@@ -74,5 +74,6 @@ to all four repositories.
 ## Operational Notes
 
 - The monorepo release is an orchestration/changelog release, not the main binary channel.
-- npm should pull CLI assets from `Loctree/loct`, never from the monorepo release.
+- npm should prefer CLI assets from `Loctree/loct`; the monorepo release stays a
+  temporary fallback while mirror lag catches up.
 - If a tap sync fails, fix the thin release assets first, then re-run `homebrew-release.yml`.

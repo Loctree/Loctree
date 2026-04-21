@@ -30,9 +30,11 @@ body:
     attributes:
       label: Install method
       options:
+        - loct.io install script
         - cargo install
         - npm install
         - Homebrew
+        - GitHub release asset
         - Built from source
   - type: input
     id: os

@@ -155,7 +155,8 @@ async function install() {
     console.error('Possible solutions:');
     console.error('1. Check your internet connection');
     console.error('2. Verify the matching release assets exist on GitHub');
-    console.error('3. Install loct manually from: https://github.com/Loctree/loctree-ast/releases');
+    console.error('3. Install loct manually from the thin release repo: https://github.com/Loctree/loct/releases');
+    console.error('4. If the thin repo is still missing the asset, try the monorepo fallback: https://github.com/Loctree/loctree-ast/releases');
     process.exit(1);
   }
 }

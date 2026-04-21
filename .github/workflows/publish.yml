@@ -552,7 +552,7 @@ jobs:
             Source of truth: `Loctree/loctree-ast`
             Install:
             - `brew install loctree/cli/loct`
-            - `cargo install loctree`
+            - `cargo install --locked loctree`
             - `npm install -g loctree` (macOS arm64/x64, Linux x64 glibc, Windows x64)
         with:
           github-token: ${{ secrets.HOMEBREW_GITHUB_API_TOKEN }}
@@ -648,7 +648,7 @@ jobs:
             Source of truth: `Loctree/loctree-ast`
             Install:
             - `brew install loctree/mcp/loctree-mcp`
-            - `cargo install loctree-mcp`
+            - `cargo install --locked loctree-mcp`
         with:
           github-token: ${{ secrets.HOMEBREW_GITHUB_API_TOKEN }}
           script: |
