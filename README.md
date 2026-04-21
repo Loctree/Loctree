@@ -24,7 +24,7 @@
 ```bash
 curl -fsSL https://loct.io/install.sh | sh   # CLI + loctree-mcp
 cargo install --locked loctree loctree-mcp   # Cargo, reproducible
-npm install -g loctree                       # CLI only
+npm install -g loctree                       # CLI only; macOS arm64/x64, Linux x64 glibc, Windows x64
 brew install loctree/cli/loct                 # CLI via Homebrew tap
 brew install loctree/mcp/loctree-mcp          # MCP via Homebrew tap
 ```
@@ -191,7 +191,7 @@ loct doctor && echo 'Clean'                 # Health gate
 
 ```bash
 make precheck        # fmt + clippy + check (run before push)
-make install         # Install loct + loctree-mcp
+make install         # Install loct, loctree, loctree-mcp
 make test            # Run all workspace tests
 make publish         # Cascade publish to crates.io
 ```
