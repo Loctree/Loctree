@@ -6,7 +6,7 @@ umask 022
 # Usage:
 #   curl -fsSL https://loct.io/install.sh | sh
 # Env overrides:
-#   INSTALL_DIR   where to place the runnable `loctree` wrapper (default: $HOME/.local/bin)
+#   INSTALL_DIR   where to place the runnable `loct` / `loctree` wrappers (default: $HOME/.local/bin)
 #   CARGO_HOME    override cargo home (default: ~/.cargo)
 #   INSTALL_MCP   install `loctree-mcp` too (default: 1, set 0 for CLI-only)
 
