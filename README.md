@@ -24,10 +24,14 @@
 ```bash
 curl -fsSL https://loct.io/install.sh | sh   # CLI + loctree-mcp
 cargo install --locked loctree loctree-mcp   # Cargo, reproducible
-npm install -g loctree                       # CLI only; macOS arm64/x64, Linux x64 glibc, Windows x64
+npm install -g loctree                       # CLI only; published targets follow the latest npm release
 brew install loctree/cli/loct                 # CLI via Homebrew tap
 brew install loctree/mcp/loctree-mcp          # MCP via Homebrew tap
 ```
+
+Public install channels track the latest published release, which can lag behind
+the workspace version on `main`. If you're validating a specific release, check
+crates.io, npm, or GitHub Releases rather than assuming branch parity.
 
 ## Quick Start
 
@@ -174,9 +178,9 @@ loct '.summary.health_score'                   # Health score
 ## CI Integration
 
 ```bash
-loct lint --fail --sarif > results.sarif    # SARIF for GitHub/GitLab
-loct --findings | jq '.dead_parrots | length'  # Check dead code count
-loct doctor && echo 'Clean'                 # Health gate
+loct lint --fail --sarif > results.sarif        # SARIF for GitHub/GitLab
+loct findings | jq '.dead_exports.total'        # Check dead export count
+loct findings --summary | jq '.health_score'    # Health summary JSON
 ```
 
 ## Crates

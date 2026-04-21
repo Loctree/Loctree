@@ -41,13 +41,13 @@ function getBinaryPath() {
  * Execute loct with given arguments
  * @param {string[]} args - Command line arguments
  * @param {object} options - Execution options
- * @returns {Buffer} - stdout from loct
+ * @returns {Buffer|string} - stdout from loct
  */
 function execLoctree(args = [], options = {}) {
   const binaryPath = getBinaryPath();
 
   const execOptions = {
-    stdio: 'inherit',
+    stdio: 'pipe',
     ...options,
   };
 
@@ -87,5 +87,5 @@ module.exports = {
 // CLI execution
 if (require.main === module) {
   const args = process.argv.slice(2);
-  execLoctree(args);
+  execFileSync(getBinaryPath(), args, { stdio: 'inherit' });
 }

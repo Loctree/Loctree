@@ -4,8 +4,9 @@ Structural code intelligence for AI agents.
 
 This package is the canonical npm distribution surface for Loctree. It installs
 the matching platform package, which then downloads the corresponding GitHub
-release asset for your machine from the `Loctree/loct` thin release repo while
-keeping the source of truth in `Loctree/loctree-ast`.
+release asset for your machine from the `Loctree/loct` thin release repo and
+falls back to the `Loctree/loctree-ast` monorepo release page if the thin repo
+has not mirrored that asset yet.
 
 This npm channel is CLI-only. If you also need `loctree-mcp`, install it via
 Cargo, Homebrew, or the GitHub release assets.

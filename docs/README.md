@@ -2,7 +2,7 @@
 
 AI-oriented codebase analyzer for detecting dead code, circular imports, and generating dependency graphs.
 
-**Current version:** 0.8.17
+**Workspace version:** 0.8.17
 **CLI command:** `loct` (with `loctree` kept as a compatibility alias)
 
 ---
@@ -30,14 +30,25 @@ AI-oriented codebase analyzer for detecting dead code, circular imports, and gen
 ### Installation
 
 ```bash
-# From crates.io (recommended)
-cargo install loctree
+# Fastest public path: CLI + MCP server
+curl -fsSL https://loct.io/install.sh | sh
+
+# From crates.io (reproducible lockfile build)
+cargo install --locked loctree loctree-mcp
+
+# CLI-only npm channel
+npm install -g loctree
 
 # From source
 git clone https://github.com/Loctree/loctree-ast.git
 cd loctree-ast
 make install
 ```
+
+Public install channels follow the latest published release, which can lag
+behind the workspace version shown in this branch. Verify the exact published
+version on crates.io, npm, or GitHub Releases when you're testing a release
+surface.
 
 ### First Scan
 
@@ -91,7 +102,7 @@ All outputs are stored as artifacts in the artifacts dir (cache dir by default; 
 ```bash
 loct                          # Creates snapshot + findings
 loct report                   # Generates report.html
-loct jq '.metadata'           # Query snapshot.json directly
+loct '.metadata'              # Query snapshot.json directly
 ```
 
 ---

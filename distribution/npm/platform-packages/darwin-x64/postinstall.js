@@ -14,8 +14,18 @@ const { execSync } = require('child_process');
 
 const streamPipeline = promisify(pipeline);
 
-// Configuration
-const GITHUB_REPO = 'Loctree/loct';
+// Prefer the thin release repo, but fall back to the monorepo release page
+// while publish choreography is still catching up.
+const RELEASE_REPOS = Object.freeze([
+  {
+    repo: 'Loctree/loct',
+    label: 'thin release repo',
+  },
+  {
+    repo: 'Loctree/loctree-ast',
+    label: 'monorepo release fallback',
+  },
+]);
 const VERSION = require('./package.json').version;
 
 // Platform-specific release assets currently shipped by CI
@@ -62,6 +72,35 @@ async function downloadFile(url, destPath) {
   });
 }
 
+function buildDownloadTargets(version, file) {
+  return RELEASE_REPOS.map(({ repo, label }) => ({
+    label,
+    url: `https://github.com/${repo}/releases/download/v${version}/${file}`,
+  }));
+}
+
+async function downloadReleaseAsset(downloadTargets, destPath) {
+  let lastError = null;
+
+  for (const target of downloadTargets) {
+    if (existsSync(destPath)) {
+      unlinkSync(destPath);
+    }
+
+    console.log(`Downloading loct release asset from ${target.url} (${target.label})...`);
+
+    try {
+      await downloadFile(target.url, destPath);
+      return target;
+    } catch (error) {
+      lastError = error;
+      console.warn(`Download failed from ${target.label}: ${error.message}`);
+    }
+  }
+
+  throw lastError || new Error('No download targets available');
+}
+
 async function install() {
   const packageName = require('./package.json').name;
   const mapping = BINARY_MAPPINGS[packageName];
@@ -72,7 +111,7 @@ async function install() {
   }
 
   const { file, target } = mapping;
-  const downloadUrl = `https://github.com/${GITHUB_REPO}/releases/download/v${VERSION}/${file}`;
+  const downloadTargets = buildDownloadTargets(VERSION, file);
   const targetPath = join(__dirname, target);
   const archivePath = join(__dirname, file);
 
@@ -82,10 +121,8 @@ async function install() {
     return;
   }
 
-  console.log(`Downloading loct release asset from ${downloadUrl}...`);
-
   try {
-    await downloadFile(downloadUrl, archivePath);
+    const downloadedFrom = await downloadReleaseAsset(downloadTargets, archivePath);
 
     if (file.endsWith('.tar.gz')) {
       execSync(`tar -xzf "${archivePath}" -C "${__dirname}"`, { stdio: 'inherit' });
@@ -109,15 +146,16 @@ async function install() {
       chmodSync(targetPath, 0o755);
     }
 
-    console.log(`Successfully installed loct binary to ${targetPath}`);
+    console.log(`Successfully installed loct binary to ${targetPath} via ${downloadedFrom.label}`);
   } catch (error) {
     console.error(`Failed to download loct binary: ${error.message}`);
-    console.error(`URL: ${downloadUrl}`);
+    console.error('Attempted URLs:');
+    downloadTargets.forEach((target) => console.error(`- ${target.url}`));
     console.error('');
     console.error('Possible solutions:');
     console.error('1. Check your internet connection');
-    console.error('2. Verify the release exists on GitHub');
-    console.error('3. Install loct manually from: https://github.com/Loctree/loct/releases');
+    console.error('2. Verify the matching release assets exist on GitHub');
+    console.error('3. Install loct manually from: https://github.com/Loctree/loctree-ast/releases');
     process.exit(1);
   }
 }

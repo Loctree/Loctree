@@ -36,7 +36,7 @@ curl -fsSL https://loct.io/install.sh | sh
 # From source
 git clone https://github.com/Loctree/loctree-ast.git
 cd loctree-ast
-make mcp-install
+make install-mcp
 ```
 
 ## Configuration

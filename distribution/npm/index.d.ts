@@ -11,7 +11,7 @@ import { ExecFileSyncOptions } from 'child_process';
  * @returns stdout from loct execution
  * @throws Error if loct binary is not found or execution fails
  */
-export function execLoctree(args?: string[], options?: ExecFileSyncOptions): Buffer;
+export function execLoctree(args?: string[], options?: ExecFileSyncOptions): Buffer | string;
 
 /**
  * Execute loct and return result as string

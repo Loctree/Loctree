@@ -17,6 +17,10 @@ cd loctree-ast
 make install
 ```
 
+Public install channels follow the latest published release, which can lag
+behind the workspace version on this branch. Verify the exact published version
+on crates.io, npm, or GitHub Releases when you need release-exact behavior.
+
 ## What Gets Installed
 
 | Binary | Crate | Description |
@@ -59,17 +63,17 @@ remove the existing global binaries.
 npm install -g loctree
 ```
 
-Supported npm targets today: macOS Apple Silicon, macOS Intel, Linux x64
-(glibc), and Windows x64. Alpine/musl should use Cargo or direct release
-assets instead.
+Supported npm targets are defined by the latest published npm release. Alpine
+/musl should use Cargo or direct release assets instead.
 
 This installs the CLI only. Install `loctree-mcp` separately via Cargo,
 Homebrew, or GitHub Releases if your workflow needs MCP.
 
 ### 5. Direct GitHub Release Assets
 
-The monorepo release page mirrors the installable CLI and MCP tarballs. Thin
-release repos remain available too:
+The monorepo release page is the public fallback for installable CLI and MCP
+tarballs. Thin release repos are part of the release choreography and may lag
+while assets are being mirrored:
 
 - CLI: `Loctree/loct`
 - MCP: `Loctree/loctree-mcp`
@@ -140,14 +144,16 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | loctree-mcp
 
 ```bash
 make install        # Install loct, loctree, loctree-mcp
+make install-cli    # Install only loct + loctree
+make install-mcp    # Install only loctree-mcp
 make build          # Build all crates (release)
 make build-core     # Build only core
+make precheck       # Fast repo-wide gate
 make test           # Run all workspace tests
 make check          # Run the full quality gate
 make fmt            # Format code
 make clean          # Clean build artifacts
 make mcp-build      # Build loctree-mcp
-make mcp-install    # Install loctree-mcp
 make smoke-release-macos-arm64  # Verify macOS arm64 release portability
 ```
 

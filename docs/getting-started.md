@@ -14,7 +14,7 @@ curl -fsSL https://loct.io/install.sh | sh
 # Cargo, reproducible lockfile build
 cargo install --locked loctree loctree-mcp
 
-# npm (CLI only; macOS arm64/x64, Linux x64 glibc, Windows x64)
+# npm (CLI only; published targets follow the latest npm release)
 npm install -g loctree
 
 # From source
@@ -22,6 +22,10 @@ git clone https://github.com/Loctree/loctree-ast.git
 cd loctree-ast
 make install
 ```
+
+Public install channels follow the latest published release, not necessarily the
+workspace version on the branch you're reading. Check crates.io, npm, or GitHub
+Releases if you need release-exact verification.
 
 Verify the install:
 
@@ -72,8 +76,8 @@ Query artifacts directly:
 ```bash
 loct '.metadata'
 loct '.files | length'
-loct --findings | jq '.dead_exports[] | select(.confidence == "high")'
-loct --agent-json | jq '.summary'
+loct findings | jq '.dead_exports.items[] | select(.confidence == "high")'
+loct findings --summary | jq '.health_score'
 ```
 
 ## MCP Server
