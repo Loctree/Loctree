@@ -24,7 +24,7 @@ body:
     attributes:
       label: Loctree version
       description: "Output of `loct --version`"
-      placeholder: "loctree 0.8.16"
+      placeholder: "loctree 0.8.17"
   - type: dropdown
     id: install
     attributes:
