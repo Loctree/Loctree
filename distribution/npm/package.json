@@ -25,6 +25,7 @@
     "index.d.ts",
     "bin/loctree",
     "install.js",
+    "platform-support.js",
     "README.md",
     "LICENSE"
   ],
@@ -46,6 +47,7 @@
   },
   "optionalDependencies": {
     "@loctree/darwin-arm64": "0.8.17",
+    "@loctree/darwin-x64": "0.8.17",
     "@loctree/linux-x64-gnu": "0.8.17",
     "@loctree/win32-x64-msvc": "0.8.17"
   }

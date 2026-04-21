@@ -7,6 +7,7 @@ VERSION="${1:-$(node -p "require('./package.json').version")}"
 
 PLATFORMS=(
   "darwin-arm64:macOS Apple Silicon (ARM64):darwin:arm64"
+  "darwin-x64:macOS Intel (x64):darwin:x64"
   "linux-x64-gnu:Linux x64 (glibc):linux:x64"
   "win32-x64-msvc:Windows x64:win32:x64"
 )

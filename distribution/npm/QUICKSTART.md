@@ -25,6 +25,7 @@ node sync-version.mjs "$VERSION"
 For `v$VERSION`, the CLI release repo should already contain:
 
 - `loct-darwin-aarch64.tar.gz`
+- `loct-darwin-x86_64.tar.gz`
 - `loct-linux-x86_64.tar.gz`
 - `loct-windows-x86_64.zip`
 

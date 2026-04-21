@@ -24,6 +24,10 @@ const BINARY_MAPPINGS = {
     file: 'loct-darwin-aarch64.tar.gz',
     target: 'loct',
   },
+  '@loctree/darwin-x64': {
+    file: 'loct-darwin-x86_64.tar.gz',
+    target: 'loct',
+  },
   '@loctree/linux-x64-gnu': {
     file: 'loct-linux-x86_64.tar.gz',
     target: 'loct',

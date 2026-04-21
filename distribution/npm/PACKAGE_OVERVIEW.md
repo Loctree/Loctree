@@ -8,6 +8,7 @@
 - command alias: `loct`
 - platform packages:
   - `@loctree/darwin-arm64`
+  - `@loctree/darwin-x64`
   - `@loctree/linux-x64-gnu`
   - `@loctree/win32-x64-msvc`
 

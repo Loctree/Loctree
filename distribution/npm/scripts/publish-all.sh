@@ -80,6 +80,7 @@ echo "Step 3: Publishing platform packages..."
 
 PLATFORMS=(
   "darwin-arm64:@loctree/darwin-arm64"
+  "darwin-x64:@loctree/darwin-x64"
   "linux-x64-gnu:@loctree/linux-x64-gnu"
   "win32-x64-msvc:@loctree/win32-x64-msvc"
 )

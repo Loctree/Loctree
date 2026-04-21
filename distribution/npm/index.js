@@ -4,63 +4,23 @@ const { execFileSync } = require('child_process');
 const { join } = require('path');
 const { existsSync } = require('fs');
 
-// Platform mapping to package names
-const PLATFORMS = {
-  'darwin-arm64': '@loctree/darwin-arm64',
-  'linux-x64-gnu': '@loctree/linux-x64-gnu',
-  'win32-x64-msvc': '@loctree/win32-x64-msvc',
-};
-
-function getPlatformKey() {
-  const platform = process.platform;
-  const arch = process.arch;
-
-  const archMap = {
-    'x64': 'x64',
-    'arm64': 'arm64',
-    'aarch64': 'arm64',
-  };
-
-  const normalizedArch = archMap[arch] || arch;
-
-  if (platform === 'linux') {
-    const isMusl = isMuslLibc();
-    const libc = isMusl ? 'musl' : 'gnu';
-    return `${platform}-${normalizedArch}-${libc}`;
-  }
-
-  if (platform === 'win32') {
-    return `${platform}-${normalizedArch}-msvc`;
-  }
-
-  if (platform === 'darwin') {
-    return `${platform}-${normalizedArch}`;
-  }
-
-  return null;
-}
-
-function isMuslLibc() {
-  const { spawnSync } = require('child_process');
-  try {
-    const lddVersion = spawnSync('ldd', ['--version'], { encoding: 'utf8' });
-    return lddVersion.stderr && lddVersion.stderr.includes('musl');
-  } catch (err) {
-    return false;
-  }
-}
+const {
+  getPackageNameForPlatformKey,
+  resolvePlatformKey,
+  unsupportedPlatformMessage,
+} = require('./platform-support');
 
 function getBinaryPath() {
-  const platformKey = getPlatformKey();
+  const platformKey = resolvePlatformKey();
 
   if (!platformKey) {
     throw new Error(`Unsupported platform: ${process.platform}-${process.arch}`);
   }
 
-  const packageName = PLATFORMS[platformKey];
+  const packageName = getPackageNameForPlatformKey(platformKey);
 
   if (!packageName) {
-    throw new Error(`No package available for platform: ${platformKey}`);
+    throw new Error(unsupportedPlatformMessage({ platformKey }));
   }
 
   const binaryName = process.platform === 'win32' ? 'loct.exe' : 'loct';

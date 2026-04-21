@@ -553,7 +553,7 @@ jobs:
             Install:
             - `brew install loctree/cli/loct`
             - `cargo install loctree`
-            - `npm install -g loctree`
+            - `npm install -g loctree` (macOS arm64/x64, Linux x64 glibc, Windows x64)
         with:
           github-token: ${{ secrets.HOMEBREW_GITHUB_API_TOKEN }}
           script: |
@@ -806,7 +806,7 @@ jobs:
 
             ```bash
             cargo install --locked loctree loctree-mcp
-            npm install -g loctree  # CLI only
+            npm install -g loctree  # CLI only; macOS arm64/x64, Linux x64 glibc, Windows x64
             brew install loctree/cli/loct
             brew install loctree/mcp/loctree-mcp
             ```

@@ -17,8 +17,9 @@ The npm surface follows the `optionalDependencies` pattern:
 
 1. `loctree` — main package with the JavaScript wrapper
 2. `@loctree/darwin-arm64`
-3. `@loctree/linux-x64-gnu`
-4. `@loctree/win32-x64-msvc`
+3. `@loctree/darwin-x64`
+4. `@loctree/linux-x64-gnu`
+5. `@loctree/win32-x64-msvc`
 
 The main package depends on the platform packages. Each platform package
 downloads its matching thin release asset from `Loctree/loct`.
@@ -35,6 +36,7 @@ For a release tag `vX.Y.Z`, the publish workflow expects these CLI assets:
 The npm platform packages currently consume:
 
 - `loct-darwin-aarch64.tar.gz`
+- `loct-darwin-x86_64.tar.gz`
 - `loct-linux-x86_64.tar.gz`
 - `loct-windows-x86_64.zip`
 

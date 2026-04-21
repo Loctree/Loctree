@@ -14,6 +14,9 @@ curl -fsSL https://loct.io/install.sh | sh
 # Cargo, reproducible lockfile build
 cargo install --locked loctree loctree-mcp
 
+# npm (CLI only; macOS arm64/x64, Linux x64 glibc, Windows x64)
+npm install -g loctree
+
 # From source
 git clone https://github.com/Loctree/loctree-ast.git
 cd loctree-ast

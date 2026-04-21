@@ -16,6 +16,7 @@ alias on some install channels, but new docs and examples use `loct`.
 ## Supported npm targets
 
 - macOS Apple Silicon: `@loctree/darwin-arm64`
+- macOS Intel: `@loctree/darwin-x64`
 - Linux x64 glibc: `@loctree/linux-x64-gnu`
 - Windows x64: `@loctree/win32-x64-msvc`
 
@@ -34,6 +35,9 @@ For global CLI usage:
 ```bash
 npm install -g loctree
 ```
+
+On Linux, the npm channel currently targets glibc builds only. Alpine/musl
+users should install via Cargo or direct release assets instead.
 
 Then run:
 

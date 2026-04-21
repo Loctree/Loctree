@@ -59,6 +59,10 @@ remove the existing global binaries.
 npm install -g loctree
 ```
 
+Supported npm targets today: macOS Apple Silicon, macOS Intel, Linux x64
+(glibc), and Windows x64. Alpine/musl should use Cargo or direct release
+assets instead.
+
 This installs the CLI only. Install `loctree-mcp` separately via Cargo,
 Homebrew, or GitHub Releases if your workflow needs MCP.
 
@@ -176,7 +180,7 @@ make install
 |----------|-----|-----|-------|
 | macOS (Apple Silicon) | Full | Full | Primary releaseability target |
 | macOS (Intel) | Full | Full | Built in release workflow |
-| Linux (x86_64) | Full | Full | Built in release workflow |
+| Linux (x86_64 glibc) | Full | Full | Built in release workflow |
 | Windows (x86_64) | Full | Full | Built in release workflow |
 
 ## Updating
