@@ -353,7 +353,7 @@ pub fn run_tree(root_list: &[PathBuf], parsed: &crate::args::ParsedArgs) -> io::
         }
 
         let mut sorted_large = large_entries;
-        sorted_large.sort_by(|a, b| b.loc.cmp(&a.loc));
+        sorted_large.sort_by_key(|b| std::cmp::Reverse(b.loc));
 
         let summary = json!({
             "directories": stats.directories,

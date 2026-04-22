@@ -474,7 +474,7 @@ impl LoctreeServer {
             *import_counts.entry(&edge.to).or_default() += 1;
         }
         let mut hubs: Vec<_> = import_counts.into_iter().collect();
-        hubs.sort_by(|a, b| b.1.cmp(&a.1));
+        hubs.sort_by_key(|b| std::cmp::Reverse(b.1));
         let top_hubs: Vec<_> = hubs.into_iter().take(5).collect();
 
         // Languages
@@ -1081,7 +1081,7 @@ impl LoctreeServer {
 
         // Sort directories by LOC
         let mut sorted_dirs: Vec<_> = dir_loc.into_iter().collect();
-        sorted_dirs.sort_by(|a, b| b.1.cmp(&a.1));
+        sorted_dirs.sort_by_key(|b| std::cmp::Reverse(b.1));
 
         // Sort large files
         large_files.sort_by(|a, b| {
@@ -1390,7 +1390,7 @@ impl LoctreeServer {
                 *import_counts.entry(&edge.to).or_default() += 1;
             }
             let mut hubs: Vec<_> = import_counts.into_iter().collect();
-            hubs.sort_by(|a, b| b.1.cmp(&a.1));
+            hubs.sort_by_key(|b| std::cmp::Reverse(b.1));
 
             let signals: Vec<_> = hubs
                 .iter()

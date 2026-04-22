@@ -150,10 +150,8 @@ pub(super) fn extract_class_from_containers(content: &str, local_uses: &mut Vec<
             while i < len && depth > 0 {
                 match bytes[i] {
                     b'(' | b'[' | b'{' => depth += 1,
-                    b')' | b']' | b'}' => {
-                        if bytes[i] == closing {
-                            depth -= 1;
-                        }
+                    b')' | b']' | b'}' if bytes[i] == closing => {
+                        depth -= 1;
                     }
                     b'\'' | b'"' => {
                         // Skip string literals

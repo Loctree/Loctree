@@ -160,7 +160,7 @@ fn detect_missing_barrels(snapshot: &Snapshot) -> Vec<MissingBarrel> {
     }
 
     // Sort by external import count descending
-    missing.sort_by(|a, b| b.external_import_count.cmp(&a.external_import_count));
+    missing.sort_by_key(|b| std::cmp::Reverse(b.external_import_count));
     missing
 }
 
@@ -216,7 +216,7 @@ fn detect_deep_chains(snapshot: &Snapshot) -> Vec<ReexportChain> {
     }
 
     // Deduplicate and sort by depth
-    deep_chains.sort_by(|a, b| b.depth.cmp(&a.depth));
+    deep_chains.sort_by_key(|b| std::cmp::Reverse(b.depth));
     deep_chains
 }
 
@@ -287,7 +287,7 @@ fn detect_inconsistent_paths(snapshot: &Snapshot) -> Vec<InconsistentImport> {
 
         // Find canonical (most-used) path
         let mut sources_vec: Vec<_> = sources.into_iter().collect();
-        sources_vec.sort_by(|a, b| b.1.cmp(&a.1));
+        sources_vec.sort_by_key(|b| std::cmp::Reverse(b.1));
 
         if let Some((canonical, _canonical_count)) = sources_vec.first() {
             let alternative_paths: Vec<_> = sources_vec
@@ -308,7 +308,7 @@ fn detect_inconsistent_paths(snapshot: &Snapshot) -> Vec<InconsistentImport> {
     }
 
     // Sort by number of alternative paths
-    inconsistent.sort_by(|a, b| b.alternative_paths.len().cmp(&a.alternative_paths.len()));
+    inconsistent.sort_by_key(|b| std::cmp::Reverse(b.alternative_paths.len()));
     inconsistent
 }
 

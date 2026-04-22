@@ -1312,7 +1312,7 @@ pub(crate) fn find_hub_files(analyses: &[FileAnalysis]) -> Vec<HubFile> {
         })
         .collect();
 
-    scored.sort_by(|a, b| b.5.cmp(&a.5));
+    scored.sort_by_key(|b| std::cmp::Reverse(b.5));
 
     scored
         .into_iter()

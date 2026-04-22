@@ -1365,7 +1365,7 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
                 parsed.analyze_limit
             );
             let mut sorted_dyn = dynamic_summary_for_output.clone();
-            sorted_dyn.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+            sorted_dyn.sort_by_key(|b| std::cmp::Reverse(b.1.len()));
             for (file, sources) in sorted_dyn.iter().take(parsed.analyze_limit) {
                 println!(
                     "  - {}: {}{}",
@@ -1443,7 +1443,7 @@ Top duplicate exports (showing {} actionable, {} cross-lang silenced):",
     // Build ReportSection for HTML reports OR for agent feed (--for-agent-feed/--agent-json)
     if parsed.report_path.is_some() || parsed.for_agent_feed {
         let mut sorted_dyn = dynamic_summary.clone();
-        sorted_dyn.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+        sorted_dyn.sort_by_key(|b| std::cmp::Reverse(b.1.len()));
         let insights = collect_ai_insights(
             &analyses,
             &filtered_ranked,

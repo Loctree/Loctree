@@ -932,7 +932,7 @@ pub fn detect_exact_twins_with_frameworks(
     }
 
     // Sort by number of locations (most duplicated first)
-    twins.sort_by(|a, b| b.locations.len().cmp(&a.locations.len()));
+    twins.sort_by_key(|b| std::cmp::Reverse(b.locations.len()));
 
     twins
 }

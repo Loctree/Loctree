@@ -413,7 +413,7 @@ fn calculate_quick_wins(findings: &AuditFindings) -> Vec<String> {
 
     // Sort by count and take top directories
     let mut dirs: Vec<_> = by_dir.into_iter().collect();
-    dirs.sort_by(|a, b| b.1.0.cmp(&a.1.0));
+    dirs.sort_by_key(|b| std::cmp::Reverse(b.1.0));
 
     for (dir, (count, loc_estimate)) in dirs.into_iter().take(3) {
         if count >= 3 {

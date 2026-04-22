@@ -477,7 +477,7 @@ fn compute_cross_matches(query: &str, analyses: &[FileAnalysis]) -> Vec<CrossMat
         .collect();
 
     // Sort by number of matched terms (most first)
-    results.sort_by(|a, b| b.matched_terms.len().cmp(&a.matched_terms.len()));
+    results.sort_by_key(|b| std::cmp::Reverse(b.matched_terms.len()));
     results
 }
 

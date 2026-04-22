@@ -1056,7 +1056,7 @@ impl Snapshot {
     }
 
     fn newest_snapshot_path(snapshots: &mut [(PathBuf, std::time::SystemTime)]) -> Option<PathBuf> {
-        snapshots.sort_by(|a, b| b.1.cmp(&a.1));
+        snapshots.sort_by_key(|b| std::cmp::Reverse(b.1));
         snapshots.first().map(|(path, _)| path.clone())
     }
 

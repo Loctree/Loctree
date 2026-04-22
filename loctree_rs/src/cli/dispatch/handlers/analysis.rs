@@ -1578,7 +1578,7 @@ pub fn handle_zombie_command(opts: &ZombieOptions, global: &GlobalOptions) -> Di
         .collect();
 
     // Sort by LOC descending (biggest files first - most impact)
-    orphan_files.sort_by(|a, b| b.1.cmp(&a.1));
+    orphan_files.sort_by_key(|b| std::cmp::Reverse(b.1));
 
     // 3. Find shadow exports (same symbol exported by multiple files where some have 0 imports)
     let twins = detect_exact_twins(&snapshot.files, opts.include_tests);
@@ -2185,7 +2185,7 @@ pub fn handle_audit_command(opts: &AuditOptions, global: &GlobalOptions) -> Disp
         })
         .collect();
 
-    orphan_files.sort_by(|a, b| b.1.cmp(&a.1));
+    orphan_files.sort_by_key(|b| std::cmp::Reverse(b.1));
     let _orphan_loc: usize = orphan_files.iter().map(|(_, loc)| loc).sum();
 
     // 5. Shadow exports
