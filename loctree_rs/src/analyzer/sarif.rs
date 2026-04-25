@@ -236,7 +236,7 @@ fn build_sarif(inputs: SarifInputs) -> serde_json::Value {
     let tool = json!({
         "driver": {
             "name": "loctree",
-            "informationUri": "https://github.com/Loctree/Loctree",
+            "informationUri": "https://github.com/Loctree/loctree-ast",
             "version": env!("CARGO_PKG_VERSION"),
             "rules": [
                 { "id": "duplicate-export", "shortDescription": { "text": "Duplicate export detected" } },

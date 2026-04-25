@@ -4,11 +4,20 @@ Structural code intelligence for AI agents.
 
 This package is the canonical npm distribution surface for Loctree. It installs
 the matching platform package, which then downloads the corresponding GitHub
-release asset for your machine.
+release asset for your machine from the `Loctree/loct` thin release repo and
+falls back to the `Loctree/loctree-ast` monorepo release page if the thin repo
+has not mirrored that asset yet.
+
+This npm channel is CLI-only. If you also need `loctree-mcp`, install it via
+Cargo, Homebrew, or the GitHub release assets.
+
+`loct` is the canonical CLI command. `loctree` may still exist as a compatibility
+alias on some install channels, but new docs and examples use `loct`.
 
 ## Supported npm targets
 
 - macOS Apple Silicon: `@loctree/darwin-arm64`
+- macOS Intel: `@loctree/darwin-x64`
 - Linux x64 glibc: `@loctree/linux-x64-gnu`
 - Windows x64: `@loctree/win32-x64-msvc`
 
@@ -28,13 +37,34 @@ For global CLI usage:
 npm install -g loctree
 ```
 
+On Linux, the npm channel currently targets glibc builds only. Alpine/musl
+users should install via Cargo or direct release assets instead.
+
+Then run:
+
+```bash
+loct --help
+```
+
+For the MCP server:
+
+```bash
+cargo install --locked loctree-mcp
+# or
+brew install loctree/mcp/loctree-mcp
+```
+
+If you already installed Loctree globally via Homebrew, do not mix `brew` and
+`npm -g` for the same machine-level CLI. Pick one global channel or remove the
+existing binary first.
+
 ## CLI examples
 
 ```bash
-npx loctree .
-npx loctree health
-npx loctree slice src/App.tsx --consumers
-npx loctree report --serve --port 4173
+npx loct .
+npx loct health
+npx loct slice src/App.tsx --consumers
+npx loct report --serve --port 4173
 ```
 
 ## What you get
@@ -51,10 +81,12 @@ If installation fails:
 
 1. verify the matching GitHub release assets exist
 2. ensure your package manager did not disable `optionalDependencies`
-3. fall back to `cargo install loctree`
+3. fall back to `cargo install --locked loctree`
+4. install `loctree-mcp` separately if your workflow needs MCP
 
 ## Links
 
-- Repo: https://github.com/Loctree/Loctree
+- Source: https://github.com/Loctree/loctree-ast
+- CLI releases: https://github.com/Loctree/loct/releases
 - Docs: https://docs.rs/loctree
 - Website: https://loct.io

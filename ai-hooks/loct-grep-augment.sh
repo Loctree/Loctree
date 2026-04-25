@@ -2,7 +2,7 @@
 # ============================================================================
 # loct-grep-augment.sh v10 - SEMANTIC AUGMENTATION WITH loct find
 # ============================================================================
-# Created by M&K (c)2026 The Loctree Team
+# Created by M&K ⓒ 2025-2026 The Loctree Team
 #
 # PHILOSOPHY: Every grep gets loctree context. Always <100ms.
 #

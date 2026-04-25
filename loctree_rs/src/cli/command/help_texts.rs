@@ -2,7 +2,7 @@
 //!
 //! Each constant provides detailed usage documentation for a specific command.
 //!
-//! VibeCrafted with AI Agents (c)2026 Loctree Team
+//! 𝚅𝚒𝚋𝚎𝚌𝚛𝚊𝚏𝚝𝚎𝚍. with AI Agents ⓒ 2025-2026 Loctree Team
 
 pub(super) const AUTO_HELP: &str =
     "loct auto - Full auto-scan with stack detection (default command)
@@ -1417,3 +1417,29 @@ RELATED COMMANDS:
     loct focus <dir>     Holographic context for a directory
     loct cycles          Detect circular imports
     loct audit           Full codebase audit";
+
+pub(super) const CACHE_HELP: &str = "loct cache - Manage snapshot cache
+
+USAGE:
+    loct cache <SUBCOMMAND> [OPTIONS]
+
+DESCRIPTION:
+    List and clean snapshot caches. Each project gets a cached snapshot
+    in the global cache directory (~/Library/Caches/loctree/ on macOS,
+    $XDG_CACHE_HOME/loctree/ on Linux).
+
+SUBCOMMANDS:
+    list                   List cached buckets grouped by repo, path, size, and scan metadata
+    clean                  Remove cached snapshots
+
+CLEAN OPTIONS:
+    --project <DIR>        Only clean cache for a specific project
+    --older-than <DAYS>d   Only remove entries older than N days (e.g., 7d, 30d)
+    --force, -f            Skip confirmation prompt
+
+EXAMPLES:
+    loct cache list                        # Show grouped cached buckets
+    loct cache clean                       # Remove all (with confirmation)
+    loct cache clean --force               # Remove all without asking
+    loct cache clean --project .           # Clean cache for current project
+    loct cache clean --older-than 30d      # Remove entries older than 30 days";

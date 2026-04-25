@@ -4,7 +4,7 @@
 //! or compile() calls with template strings. Also detects monkey-patching via
 //! sys.modules injection. These patterns should not be flagged as dead code.
 //!
-//! VibeCrafted with AI Agents (c)2026 Loctree Team
+//! 𝚅𝚒𝚋𝚎𝚌𝚛𝚊𝚏𝚝𝚎𝚍. with AI Agents ⓒ 2025-2026 Loctree Team
 
 use crate::types::{DynamicExecTemplate, SysModulesInjection};
 

@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
+## [0.8.17] - 2026-03-27
+
+### Fixed
+- wire cache command help text
+- canonicalize root in normalize_root_dir
+- load .loctignore in auto-rescan path
+- prevent symlink escape from scanning outside repo root
+
 ## [0.8.16] - 2026-03-11
 
 ### Changed

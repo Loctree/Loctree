@@ -35,6 +35,10 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 *.pyc
+/.env
+/.env.*
+!/.env.example
+!/.env.sample
 /reports/target
 *.zip
 # Test fixtures - generated .loctree snapshots
@@ -75,6 +79,6 @@ reports/report.html
 **/.DS_Store
 /.idea
 SeniorDev/
-reports/report.html
 /reports/.loctree
-reports/report.html
+/.vibecrafted/*
+!/.vibecrafted/GUIDELINES.md

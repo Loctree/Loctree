@@ -9,12 +9,12 @@ members = [
 ]
 
 # Removed from workspace:
-# - rmcp-memex: use crates.io version (0.3.2+), standalone: ~/Libraxis/rmcp-memex
+# - rust-memex: use crates.io version (0.3.2+), standalone: ~/Libraxis/rmcp-memex
 # - rmcp-mux: deprecated (dead end approach)
 # - rmcp-config-ui: moved to ~/Libraxis/rmcp-config-ui
 
 [workspace.package]
-version = "0.8.16"
+version = "0.8.17"
 edition = "2024"
 rust-version = "1.85.0"
 license = "MIT OR Apache-2.0"
@@ -42,8 +42,8 @@ rmcp = { version = "0.17", features = ["server"] }
 futures = "0.3"
 
 # The local crates (for inter-crate dependencies)
-loctree = { path = "loctree_rs", version = "0.8.16" }
-report-leptos = { path = "reports", version = "0.8.16" }
+loctree = { path = "loctree_rs", version = "0.8.17" }
+report-leptos = { path = "reports", version = "0.8.17" }
 
 # Release profile - good defaults for all crates
 [profile.release]

@@ -100,7 +100,7 @@ fn detect_crowd_internal(
         .collect();
 
     // Sort by importer count (most popular first)
-    members.sort_by(|a, b| b.importer_count.cmp(&a.importer_count));
+    members.sort_by_key(|b| std::cmp::Reverse(b.importer_count));
 
     // 5. Detect issues
     let issues = detect_issues(&members, &similarities);

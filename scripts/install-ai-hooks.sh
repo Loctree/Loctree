@@ -22,7 +22,7 @@
 #
 # ============================================================================
 # Part of loctree - https://loct.io
-# Created by M&K (c)2025 The LibraxisAI Team
+# Created by M&K ⓒ 2025-2026 The LibraxisAI Team
 # ============================================================================
 
 set -euo pipefail

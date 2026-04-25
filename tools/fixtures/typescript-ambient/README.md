@@ -41,4 +41,4 @@ loctree -A --dead --output=json > output.json
 - `namespace-types.d.ts`: has_ambient_declarations = true, no dead exports
 - `regular-exports.ts`: has_ambient_declarations = false, all 3 exports flagged as dead
 
-VibeCrafted with AI Agents (c)2026 Loctree Team
+𝚅𝚒𝚋𝚎𝚌𝚛𝚊𝚏𝚝𝚎𝚍. with AI Agents ⓒ 2025-2026 Loctree Team

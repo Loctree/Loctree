@@ -1,309 +1,126 @@
 # Getting Started with loctree
 
-5-minute quickstart to analyzing your codebase with loctree.
+5-minute quickstart to scanning a codebase, reading the artifacts, and wiring
+Loctree into an AI workflow.
 
-## Installation
+## Install
+
+Choose one channel per machine:
 
 ```bash
-# From crates.io (recommended)
-cargo install loctree
+# Fastest public path: CLI + MCP server
+curl -fsSL https://loct.io/install.sh | sh
 
-# Or from source
-git clone https://github.com/Loctree/Loctree
-cd loctree/loctree_rs
-cargo install --path .
+# Cargo, reproducible lockfile build
+cargo install --locked loctree loctree-mcp
 
-# Verify installation
+# npm (CLI only; published targets follow the latest npm release)
+npm install -g loctree
+
+# From source
+git clone https://github.com/Loctree/loctree-ast.git
+cd loctree-ast
+make install
+```
+
+Public install channels follow the latest published release, not necessarily the
+workspace version on the branch you're reading. Check crates.io, npm, or GitHub
+Releases if you need release-exact verification.
+
+Verify the install:
+
+```bash
 loct --version
+loctree --version
+loctree-mcp --version
 ```
 
 ## First Scan
 
-Run loctree in any project directory:
+Run Loctree inside any project directory:
 
 ```bash
 cd your-project
 loct
 ```
 
-```
-Analyzing: your-project
-Stack detected: TypeScript (tsconfig.json)
-Scanning 247 files...
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% 247/247 files
-
-Artifacts saved under your cache dir (default)
-  snapshot.json   - Full dependency graph (127 KB)
-  findings.json   - Issues detected (dead code, cycles, etc.)
-  agent.json      - AI-optimized context bundle
-  manifest.json   - Index for tooling
-
-Health score: 82/100
-  ✓ No circular imports
-  ⚠ 3 unused exports (--confidence high)
-  ⚠ 1 dead parrot (0 imports)
-
-Tip: set `LOCT_CACHE_DIR=.loctree` to write artifacts into the repo (handy for CI and quick inspection).
-```
-
-## Key Artifacts
-
-After scanning, loctree writes these artifacts (in the cache dir by default; override via `LOCT_CACHE_DIR`):
-
-### snapshot.json
-Complete import/export graph. Query it with jq-style syntax:
-
-```bash
-loct '.metadata'                    # Project info
-loct '.files | length'              # Count files
-loct '.edges[] | select(.from | contains("api"))'  # Filter edges
-```
-
-### findings.json
-All detected issues:
-
-```bash
-loct --findings | jq '.dead_exports[] | select(.confidence == "high")'
-```
-
-### agent.json
-AI-optimized bundle with health score and quick wins:
-
-```bash
-loct --agent-json | jq '.summary'
-```
-
-### manifest.json
-Index for IDE integrations and tooling:
-
-```bash
-loct manifests --json
-```
+Artifacts are written into your OS cache directory by default. In CI or when
+you want repo-local output, set `LOCT_CACHE_DIR=.loctree`.
 
 ## Essential Commands
 
-### Scan and analyze
 ```bash
-loct                    # Full scan with auto-detection
-loct --fresh            # Force rescan (ignore cache)
-loct --watch            # Continuous scan on file changes
+loct                              # Scan or refresh the cached snapshot
+loct --for-ai                     # AI-optimized overview
+loct slice src/App.tsx --consumers # File + deps + consumers
+loct find useAuth                 # Find symbol definitions/usages
+loct impact src/utils/api.ts      # Blast radius before refactor/delete
+loct health                       # Quick health summary
+loct dead --confidence high       # High-confidence dead exports
+loct cycles                       # Circular imports
+loct twins                        # Duplicate exports / dead parrots / barrel drift
+loct audit                        # Full structural review
 ```
 
-### Get context for a file
-```bash
-loct slice src/components/ChatPanel.tsx
-```
+## Artifacts
 
-Output shows 3 layers:
-- **Core**: The file itself
-- **Deps**: Direct and transitive dependencies
-- **Consumers**: Files that import this file (use `--consumers`)
+After a scan, Loctree keeps four core files per project snapshot:
 
-```
-Slice for: src/components/ChatPanel.tsx
+- `snapshot.json` — the dependency graph and file metadata
+- `findings.json` — structural findings such as dead exports and cycles
+- `agent.json` — AI-optimized overview with quick wins and health data
+- `manifest.json` — artifact index for tooling
 
-Core (1 files, 180 LOC):
-  src/components/ChatPanel.tsx (180 LOC, tsx)
-
-Deps (4 files, 320 LOC):
-  [d1] src/hooks/useChat.ts (90 LOC)
-    [d2] src/contexts/ChatContext.tsx (150 LOC)
-    [d2] src/utils/api.ts (80 LOC)
-
-Consumers (3 files, 240 LOC):
-  src/App.tsx (120 LOC)
-  src/routes/chat.tsx (80 LOC)
-  src/layouts/MainLayout.tsx (40 LOC)
-
-Total: 8 files, 740 LOC
-```
-
-Add `--json` for AI consumption:
-```bash
-loct slice src/main.rs --consumers --json | claude
-```
-
-### Search for symbols
-```bash
-loct find useAuth                # Find symbol definitions/usage
-loct find ChatPanel              # Find similar components
-loct f useAuth                   # Short alias
-```
-
-### Find dead exports
-```bash
-loct dead                        # All unused exports
-loct dead --confidence high      # High confidence only
-```
-
-Detects:
-- Unused exports across all languages
-- Re-export chains (barrel files)
-- Registry patterns (WeakMap/WeakSet)
-- Python `__all__` declarations
-
-### Detect circular imports
-```bash
-loct cycles
-```
-
-```
-Circular import detected:
-  src/components/UserProfile.tsx
-  → src/hooks/useUser.ts
-  → src/contexts/UserContext.tsx
-  → src/components/UserProfile.tsx
-
-Cycle length: 3 files
-Impact: 12 files in component
-```
-
-### Quick health check
-```bash
-loct health
-```
-
-```
-Health Score: 82/100
-
-Issues:
-  ✓ Circular imports: 0
-  ⚠ Dead exports: 3 (high confidence)
-  ⚠ Dead parrots: 1 (0 imports)
-  ⚠ Twins: 0
-
-Recommendations:
-  1. Review unused export in src/utils/helpers.ts:45
-  2. Check dead parrot: calculateDistance (src/geo/distance.ts)
-```
-
-### Full codebase audit
-```bash
-loct audit
-```
-
-Runs comprehensive checks:
-- Circular imports
-- Dead exports
-- Twins (duplicate exports)
-- Zombie code (orphan files + shadows)
-- Functional crowds (clustering)
-
-## Query Mode (jq-style)
-
-Query snapshot data directly:
+Query artifacts directly:
 
 ```bash
-# Extract metadata
 loct '.metadata'
-
-# Count files
 loct '.files | length'
-
-# Find all dead exports
-loct '.dead_parrots[]'
-
-# Find cycles
-loct '.cycles[]'
-
-# Filter by path
-loct '.files[] | select(.path | contains("src/api"))'
+loct findings | jq '.dead_exports.items[] | select(.confidence == "high")'
+loct findings --summary | jq '.health_score'
 ```
 
-Options:
-- `-r, --raw` - Raw output (no JSON quotes)
-- `-c, --compact` - One line per result
-- `-e, --exit-status` - Exit 1 if result is false/null
+## MCP Server
+
+`loctree-mcp` is the production MCP surface for AI agents. Start it via stdio:
+
+```bash
+loctree-mcp
+```
+
+Example Claude Desktop / Claude Code config:
+
+```json
+{
+  "mcpServers": {
+    "loctree": {
+      "command": "loctree-mcp",
+      "args": []
+    }
+  }
+}
+```
+
+The server exposes seven tools:
+
+- `repo-view`
+- `slice`
+- `find`
+- `impact`
+- `focus`
+- `tree`
+- `follow`
+
+See [integrations/mcp-server.md](integrations/mcp-server.md) for the full MCP contract.
+
+## IDE / LSP
+
+The public OSS workspace does not ship `loct lsp`. Editor integrations live in
+the external `loctree-suite` project. The docs in [`docs/ide/`](ide/) are kept
+as compatibility notes and setup pointers for that external surface.
 
 ## Next Steps
 
-### IDE Integration
-
-loctree provides language server (LSP) integration for real-time analysis:
-
-```bash
-# Coming soon - see docs/ide/ for setup
-loct lsp --install
-```
-
-See [ide/](ide/) for editor-specific setup guides.
-
-### MCP Server
-
-Use loctree as a Model Context Protocol server for AI agents:
-
-```bash
-# Coming soon - see docs/integrations/ for setup
-loct mcp --start
-```
-
-See [integrations/](integrations/) for AI tool integration guides.
-
-### CI Integration
-
-Add loctree to your CI pipeline:
-
-```bash
-# GitHub Actions example
-loct lint --fail --sarif > loctree.sarif
-loct health --json | jq '.summary.health_score'
-```
-
-Fail on issues:
-- `--fail` - Exit non-zero if findings detected
-- `--sarif` - SARIF 2.1.0 output for GitHub/GitLab
-
-### Tauri Projects
-
-For Tauri applications, loctree provides specialized commands:
-
-```bash
-loct commands              # Show FE↔BE handler bridges
-loct trace <handler>       # Trace handler end-to-end
-loct events                # Event flow analysis
-loct coverage --handlers   # Handler test coverage
-```
-
-## Getting Help
-
-```bash
-loct --help              # Main help
-loct --help-full         # All 27 commands
-loct <command> --help    # Per-command help
-loct --help-legacy       # Legacy flag migration
-```
-
-## Common Workflows
-
-### Before creating a new component
-```bash
-loct find ChatSurface
-# Found: ChatPanel (distance: 2), ChatWindow (distance: 3)
-# → Consider reusing ChatPanel instead
-```
-
-### Before refactoring
-```bash
-loct impact src/utils/api.ts
-# Shows all files that depend on api.ts
-```
-
-### Continuous development
-```bash
-loct --watch
-# Auto-rescans on file changes
-# Press Ctrl+C to stop
-```
-
-### AI-assisted development
-```bash
-# Get AI bundle with health + quick wins
-loct --for-ai > context.json
-
-# Get context for specific file
-loct slice src/main.rs --json | your-ai-tool
-```
-
----
-
-VibeCrafted with AI Agents (c)2026 Loctree Team
+- Read [CLI Commands](cli/commands.md) for the full command surface
+- Read [Use Cases](use-cases/README.md) for real-world analysis flows
+- Read [dev/01_installation.md](dev/01_installation.md) if you are contributing to the workspace itself

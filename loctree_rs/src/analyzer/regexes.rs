@@ -303,7 +303,6 @@ fn test_tauri_command_with_inline_comment() {
 
     // Inline comment after attribute (common pattern for documenting why an attribute is needed)
     let with_comment = r#"#[tauri::command]
-#[allow(non_snake_case)] // parameter name matches frontend camelCase
 pub async fn convert_audio(
     app_handle: tauri::AppHandle,
     audioData: Vec<u8>,
@@ -327,7 +326,6 @@ fn test_tauri_command_comment_between_attrs() {
     // Comment on separate line between attributes
     let comment_between = r#"#[tauri::command]
 // This is a comment explaining the function
-#[allow(dead_code)]
 pub fn my_handler() {}"#;
 
     let caps = re.captures(comment_between);
@@ -381,7 +379,6 @@ fn test_tauri_command_with_block_comment() {
 
     // Block comments /* */ after attributes should be supported
     let with_block_comment = r#"#[tauri::command]
-#[allow(non_snake_case)] /* camelCase for frontend */
 pub fn handler_with_block_comment() {}"#;
 
     let caps = re.captures(with_block_comment);
@@ -404,7 +401,6 @@ fn test_tauri_command_with_multiline_block_comment() {
 /* This is a longer explanation
    spanning multiple lines
    about why this attribute exists */
-#[allow(dead_code)]
 pub async fn handler_multiline() {}"#;
 
     let caps = re.captures(multiline_comment);
@@ -432,7 +428,6 @@ fn test_tauri_command_with_doc_comments() {
 ///
 /// # Returns
 /// The processed result as a string
-#[allow(dead_code)]
 pub async fn documented_handler(data: String) -> Result<String, String> {"#;
 
     let caps = re.captures(with_doc_comments);
@@ -452,7 +447,6 @@ fn test_tauri_command_with_doc_comments_after_attr() {
 
     // Doc comment after attribute (less common but valid)
     let doc_after_attr = r#"#[tauri::command]
-#[allow(non_snake_case)] /// This allows camelCase params
 pub fn handler_with_doc_after_attr() {}"#;
 
     let caps = re.captures(doc_after_attr);

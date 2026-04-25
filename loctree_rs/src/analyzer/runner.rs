@@ -17,7 +17,7 @@ use super::dead_parrots::{
     print_impact_results, print_similarity_results, print_symbol_results, search_symbol,
 };
 use super::open_server::{open_in_browser, start_open_server};
-use super::output::{RootArtifacts, process_root_context, write_report};
+use super::output::{GlobalContext, RootArtifacts, process_root_context, write_report};
 use super::pipelines::build_pipeline_summary;
 use super::root_scan::{ScanConfig, ScanResults, scan_results_from_snapshot, scan_roots};
 use super::scan::{opt_globset, python_stdlib};
@@ -613,16 +613,18 @@ pub fn run_import_analyzer(root_list: &[PathBuf], parsed: &ParsedArgs) -> io::Re
             idx,
             ctx,
             &parsed,
-            &global_fe_commands,
-            &global_be_commands,
-            &global_missing_handlers,
-            &global_unregistered_handlers,
-            &global_unused_handlers,
-            &pipeline_summary,
-            Some(&git_ctx),
-            SCHEMA_NAME,
-            SCHEMA_VERSION,
-            &global_analyses,
+            &GlobalContext {
+                fe_commands: &global_fe_commands,
+                be_commands: &global_be_commands,
+                missing_handlers: &global_missing_handlers,
+                unregistered_handlers: &global_unregistered_handlers,
+                unused_handlers: &global_unused_handlers,
+                pipeline_summary: &pipeline_summary,
+                git: Some(&git_ctx),
+                schema_name: SCHEMA_NAME,
+                schema_version: SCHEMA_VERSION,
+                analyses: &global_analyses,
+            },
         );
         json_results.extend(json_items);
         if let Some(section) = report_section {

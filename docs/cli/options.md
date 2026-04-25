@@ -66,13 +66,14 @@ loct dead --json
 
 ---
 
-### `--findings`
+### `findings`
 
-Output `findings.json` to stdout. Contains all issues (dead, cycles, twins...).
+Emit the canonical findings JSON to stdout. Use this in new scripts instead of
+the legacy bare `loct --findings` shortcut.
 
 ```bash
-loct --findings
-loct auto --findings > findings.json
+loct findings
+loct findings > findings.json
 ```
 
 **Use Case:**
@@ -82,22 +83,25 @@ loct auto --findings > findings.json
 
 ---
 
-### `--summary`
+### `findings --summary`
 
-Output summary only to stdout. Quick health check format.
+Emit the compact summary JSON for CI/status checks. `--summary` remains valid on
+`loct tree`, but for findings output the modern path is `loct findings --summary`.
 
 ```bash
-loct --summary
-loct h                     # Alias for --summary
+loct findings --summary
+loct findings --summary | jq '.health_score'
+loct tree --summary 10
 ```
 
 **Output:**
 ```
-Health Check Summary
-
-Cycles:      3 total (2 hard, 1 structural)
-Dead:        6 high confidence, 24 low
-Twins:       2 duplicate symbol groups
+{
+  "health_score": 85,
+  "dead_exports": 12,
+  "cycles": 3,
+  "twins": 2
+}
 ```
 
 ---
@@ -595,8 +599,8 @@ loct auto --verbose
 | `--fresh` | - | Flag | Off | All |
 | `--no-scan` | - | Flag | Off | Query commands |
 | `--fail-stale` | - | Flag | Off | All |
-| `--findings` | - | Flag | Off | `auto` |
-| `--summary` | - | Flag | Off | `auto` |
+| `--findings` | - | Flag | Legacy | bare `loct` only (compat alias for `findings`) |
+| `--summary` | - | Flag | Legacy | bare `loct` compat alias for `findings --summary`; also `tree` |
 | `--for-ai` | - | Flag | Off | `auto` |
 | `--agent-json` | - | Flag | Off | `auto` |
 | `--py-root <path>` | - | Value | - | `scan`, `auto` |
@@ -607,4 +611,4 @@ loct auto --verbose
 
 ---
 
-VibeCrafted with AI Agents (c)2026 Loctree Team
+𝚅𝚒𝚋𝚎𝚌𝚛𝚊𝚏𝚝𝚎𝚍. with AI Agents ⓒ 2025-2026 Loctree Team

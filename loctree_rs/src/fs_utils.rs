@@ -324,6 +324,20 @@ pub fn gather_files(
     files: &mut Vec<PathBuf>,
 ) -> io::Result<()> {
     let dir_canon = dir.canonicalize()?;
+    // First call: scan_root = dir_canon. Recursive calls pass it through.
+    gather_files_inner(dir, &dir_canon, options, depth, git_checker, visited, files)
+}
+
+fn gather_files_inner(
+    dir: &Path,
+    scan_root: &Path,
+    options: &Options,
+    depth: usize,
+    git_checker: Option<&GitIgnoreChecker>,
+    visited: &mut HashSet<PathBuf>,
+    files: &mut Vec<PathBuf>,
+) -> io::Result<()> {
+    let dir_canon = dir.canonicalize()?;
     if !visited.insert(dir_canon.clone()) {
         return Ok(());
     }
@@ -376,12 +390,27 @@ pub fn gather_files(
             if visited.contains(&target) {
                 continue;
             }
+            // Don't follow symlinks that escape the scan root (e.g. DMG staging
+            // dirs with /Applications symlink). Compares against the top-level
+            // scan root, not the current recursion dir, so intra-repo symlinks
+            // like src/data -> ../shared/data still work.
+            if !target.starts_with(scan_root) {
+                continue;
+            }
             let meta = match fs::metadata(&path) {
                 Ok(m) => m,
                 Err(_) => continue,
             };
             if meta.is_dir() && options.max_depth.is_none_or(|max| depth < max) {
-                gather_files(&target, options, depth + 1, git_checker, visited, files)?;
+                gather_files_inner(
+                    &target,
+                    scan_root,
+                    options,
+                    depth + 1,
+                    git_checker,
+                    visited,
+                    files,
+                )?;
             } else if meta.is_file() && matches_extension(&target, options.extensions.as_ref()) {
                 files.push(target);
             }
@@ -396,7 +425,15 @@ pub fn gather_files(
             continue;
         }
         if path.is_dir() && options.max_depth.is_none_or(|max| depth < max) {
-            gather_files(&path, options, depth + 1, git_checker, visited, files)?;
+            gather_files_inner(
+                &path,
+                scan_root,
+                options,
+                depth + 1,
+                git_checker,
+                visited,
+                files,
+            )?;
         }
     }
 

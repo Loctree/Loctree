@@ -5,14 +5,17 @@
 ## Shape
 
 - main package: `loctree`
+- command alias: `loct`
 - platform packages:
   - `@loctree/darwin-arm64`
+  - `@loctree/darwin-x64`
   - `@loctree/linux-x64-gnu`
   - `@loctree/win32-x64-msvc`
 
 The main package depends on those platform packages through
-`optionalDependencies`. Each platform package downloads the matching GitHub
-release asset during install.
+`optionalDependencies`. Each platform package first tries the matching GitHub
+release asset from `Loctree/loct`, then falls back to the monorepo release in
+`Loctree/loctree-ast` if the thin repo has not mirrored that asset yet.
 
 ## Why this shape
 

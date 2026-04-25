@@ -1,6 +1,6 @@
 //! Byte manipulation helper functions for Python parsing.
 //!
-//! VibeCrafted with AI Agents (c)2026 Loctree Team
+//! 𝚅𝚒𝚋𝚎𝚌𝚛𝚊𝚏𝚝𝚎𝚍. with AI Agents ⓒ 2025-2026 Loctree Team
 
 /// Helper to safely compare bytes at position with a keyword.
 /// Returns true if the bytes at position match the keyword.

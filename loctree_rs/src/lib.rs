@@ -53,9 +53,9 @@
 //! loctree --for-ai           # AI-optimized JSON output
 //! ```
 //!
-//! See the [README](https://github.com/Loctree/Loctree) for full documentation.
+//! See the [README](https://github.com/Loctree/loctree-ast#readme) for full documentation.
 
-#![doc(html_root_url = "https://docs.rs/loctree/0.8.16")]
+#![doc(html_root_url = "https://docs.rs/loctree/0.8.17")]
 #![doc(html_favicon_url = "https://loct.io/assets/loctree-logo.png")]
 #![doc(html_logo_url = "https://loct.io/assets/loctree-logo.png")]
 

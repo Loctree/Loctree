@@ -29,15 +29,13 @@ fn layout_positions(comps: &[Vec<String>]) -> HashMap<String, (f32, f32)> {
     positions
 }
 
-#[allow(clippy::type_complexity)]
-fn compute_components(
-    nodes: &[String],
-    edges: &[(String, String, String)],
-) -> (
+type ComponentResult = (
     Vec<Vec<String>>,
     HashMap<String, usize>,
     HashMap<String, usize>,
-) {
+);
+
+fn compute_components(nodes: &[String], edges: &[(String, String, String)]) -> ComponentResult {
     let mut adj: HashMap<String, Vec<String>> = HashMap::new();
     for n in nodes {
         adj.entry(n.clone()).or_default();

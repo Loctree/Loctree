@@ -13,7 +13,7 @@
   <a href="https://crates.io/crates/loctree"><img src="https://img.shields.io/crates/v/loctree.svg" alt="crates.io"/></a>
   <a href="https://crates.io/crates/loctree"><img src="https://img.shields.io/crates/d/loctree.svg" alt="downloads"/></a>
   <a href="https://docs.rs/loctree"><img src="https://docs.rs/loctree/badge.svg" alt="docs.rs"/></a>
-  <a href="https://github.com/Loctree/Loctree/actions/workflows/ci.yml"><img src="https://github.com/Loctree/Loctree/actions/workflows/ci.yml/badge.svg" alt="CI"/></a>
+  <a href="https://github.com/Loctree/loctree-ast/actions/workflows/ci.yml"><img src="https://github.com/Loctree/loctree-ast/actions/workflows/ci.yml/badge.svg" alt="CI"/></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue.svg" alt="License"/></a>
 </p>
 
@@ -22,19 +22,21 @@
 ## Install
 
 ```bash
-curl -fsSL https://loct.io/install.sh | sh   # One-liner (installs from crates.io)
+curl -fsSL https://loct.io/install.sh | sh   # CLI + loctree-mcp
+cargo install --locked loctree loctree-mcp   # Cargo, reproducible
+npm install -g loctree                       # CLI only; published targets follow the latest npm release
+brew install loctree/cli/loct                 # CLI via Homebrew tap
+brew install loctree/mcp/loctree-mcp          # MCP via Homebrew tap
 ```
 
-Or directly via Cargo:
-
-```bash
-cargo install loctree        # CLI: loct, loctree
-cargo install loctree-mcp    # MCP server for AI agents
-```
+Public install channels track the latest published release, which can lag behind
+the workspace version on `main`. If you're validating a specific release, check
+crates.io, npm, or GitHub Releases rather than assuming branch parity.
 
 ## Quick Start
 
 Artifacts are stored in your OS cache dir by default (override via `LOCT_CACHE_DIR`).
+`loct` is the canonical CLI command. `loctree` remains available as a quiet compatibility alias.
 
 ```bash
 loct                              # Scan project, write cached artifacts
@@ -64,6 +66,17 @@ loctree captures your project's real dependency graph in a single scan, then ans
 - **Impact Analysis** - see what breaks before you delete or refactor
 - **jq Queries** - query snapshot data with jq syntax (`loct '.files | length'`)
 
+## Why loctree
+
+| | grep/rg | LSP | loctree |
+|---|---------|-----|---------|
+| Knows imports vs definitions | No | Per-file | Whole graph |
+| Dead export detection | No | No | Yes (multi-lang) |
+| Cross-file impact analysis | No | Limited | Full transitive |
+| AI agent integration | No | No | MCP server + `--for-ai` |
+| Speed on 1M LOC repo | Fast (text) | Slow (indexing) | **~3s** (structural) |
+| Setup | None | Per-editor | One binary |
+
 ## MCP Server
 
 loctree ships as an MCP server for seamless AI agent integration:
@@ -72,7 +85,7 @@ loctree ships as an MCP server for seamless AI agent integration:
 loctree-mcp    # Start via stdio (configure in your MCP client)
 ```
 
-Tools: `repo-view`, `slice`, `find`, `impact`, `focus`, `tree`. Each tool accepts a `project` parameter - auto-scans on first use, caches snapshots in RAM.
+7 tools: `repo-view`, `slice`, `find`, `impact`, `focus`, `tree`, `follow`. Each tool accepts a `project` parameter — auto-scans on first use, caches snapshots in RAM. Project-agnostic: analyze any repo without configuration.
 
 ```json
 {
@@ -84,6 +97,9 @@ Tools: `repo-view`, `slice`, `find`, `impact`, `focus`, `tree`. Each tool accept
   }
 }
 ```
+
+Direct download users can also fetch signed release assets from the monorepo
+GitHub release page, which mirrors both the CLI and `loctree-mcp` tarballs.
 
 ## Language Support
 
@@ -162,9 +178,9 @@ loct '.summary.health_score'                   # Health score
 ## CI Integration
 
 ```bash
-loct lint --fail --sarif > results.sarif    # SARIF for GitHub/GitLab
-loct --findings | jq '.dead_parrots | length'  # Check dead code count
-loct doctor && echo 'Clean'                 # Health gate
+loct lint --fail --sarif > results.sarif        # SARIF for GitHub/GitLab
+loct findings | jq '.dead_exports.total'        # Check dead export count
+loct findings --summary | jq '.health_score'    # Health summary JSON
 ```
 
 ## Crates
@@ -179,7 +195,7 @@ loct doctor && echo 'Clean'                 # Health gate
 
 ```bash
 make precheck        # fmt + clippy + check (run before push)
-make install         # Install loct + loctree-mcp
+make install         # Install loct, loctree, loctree-mcp
 make test            # Run all workspace tests
 make publish         # Cascade publish to crates.io
 ```
@@ -196,4 +212,4 @@ MIT OR Apache-2.0. See [LICENSE-MIT](LICENSE-MIT) and [LICENSE-APACHE](LICENSE-A
 
 ---
 
-VibeCrafted with AI Agents (c)2026 Loctree Team
+𝚅𝚒𝚋𝚎𝚌𝚛𝚊𝚏𝚝𝚎𝚍. with AI Agents ⓒ 2025-2026 Loctree Team

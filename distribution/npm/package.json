@@ -1,6 +1,6 @@
 {
   "name": "loctree",
-  "version": "0.8.16",
+  "version": "0.8.17",
   "description": "Structural code intelligence for AI agents. Dead exports, circular imports, dependency graphs, reports, and MCP-ready analysis.",
   "keywords": [
     "static-analysis",
@@ -17,13 +17,15 @@
   "main": "index.js",
   "types": "index.d.ts",
   "bin": {
-    "loctree": "bin/loctree"
+    "loctree": "bin/loctree",
+    "loct": "bin/loctree"
   },
   "files": [
     "index.js",
     "index.d.ts",
     "bin/loctree",
     "install.js",
+    "platform-support.js",
     "README.md",
     "LICENSE"
   ],
@@ -32,11 +34,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Loctree/Loctree.git"
+    "url": "git+https://github.com/Loctree/loctree-ast.git"
   },
   "homepage": "https://loct.io",
   "bugs": {
-    "url": "https://github.com/Loctree/Loctree/issues"
+    "url": "https://github.com/Loctree/loctree-ast/issues"
   },
   "license": "MIT OR Apache-2.0",
   "author": "Loctree <loct@loct.io>",
@@ -44,8 +46,9 @@
     "node": ">=14.0.0"
   },
   "optionalDependencies": {
-    "@loctree/darwin-arm64": "0.8.16",
-    "@loctree/linux-x64-gnu": "0.8.16",
-    "@loctree/win32-x64-msvc": "0.8.16"
+    "@loctree/darwin-arm64": "0.8.17",
+    "@loctree/darwin-x64": "0.8.17",
+    "@loctree/linux-x64-gnu": "0.8.17",
+    "@loctree/win32-x64-msvc": "0.8.17"
   }
 }

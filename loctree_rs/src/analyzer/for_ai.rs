@@ -5,7 +5,7 @@
 //! - Navigate via slice references
 //! - Get actionable quick wins
 //!
-//! VibeCrafted with AI Agents (c)2026 Loctree Team
+//! 𝚅𝚒𝚋𝚎𝚌𝚛𝚊𝚏𝚝𝚎𝚍. with AI Agents ⓒ 2025-2026 Loctree Team
 
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -1312,7 +1312,7 @@ pub(crate) fn find_hub_files(analyses: &[FileAnalysis]) -> Vec<HubFile> {
         })
         .collect();
 
-    scored.sort_by(|a, b| b.5.cmp(&a.5));
+    scored.sort_by_key(|b| std::cmp::Reverse(b.5));
 
     scored
         .into_iter()

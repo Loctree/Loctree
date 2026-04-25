@@ -6,7 +6,7 @@
 //! - Function calls
 //! - Bare class references (return statements, isinstance, issubclass, raise)
 //!
-//! VibeCrafted with AI Agents (c)2026 Loctree Team
+//! 𝚅𝚒𝚋𝚎𝚌𝚛𝚊𝚏𝚝𝚎𝚍. with AI Agents ⓒ 2025-2026 Loctree Team
 
 use super::helpers::{
     PYTHON_KEYWORDS, SKIP_BUILTINS, SKIP_TYPE_HINTS, TYPE_FACTORIES, bytes_match_keyword,
@@ -150,10 +150,8 @@ pub(super) fn extract_class_from_containers(content: &str, local_uses: &mut Vec<
             while i < len && depth > 0 {
                 match bytes[i] {
                     b'(' | b'[' | b'{' => depth += 1,
-                    b')' | b']' | b'}' => {
-                        if bytes[i] == closing {
-                            depth -= 1;
-                        }
+                    b')' | b']' | b'}' if bytes[i] == closing => {
+                        depth -= 1;
                     }
                     b'\'' | b'"' => {
                         // Skip string literals

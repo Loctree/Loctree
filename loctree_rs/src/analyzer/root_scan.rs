@@ -20,7 +20,8 @@ use super::resolvers::{
     resolve_python_relative,
 };
 use super::scan::{
-    analyze_file, matches_focus, resolve_event_constants_across_files, strip_excluded,
+    AnalyzeContext, analyze_file, matches_focus, resolve_event_constants_across_files,
+    strip_excluded,
 };
 use super::{DupLocation, DupSeverity, RankedDup, coverage::CommandUsage, twins};
 
@@ -428,6 +429,17 @@ fn scan_single_root(
     let mut cached_hits = 0usize;
     let mut fresh_scans = 0usize;
 
+    let analyze_ctx = AnalyzeContext {
+        root_canon: &root_canon,
+        extensions: options.extensions.as_ref(),
+        ts_resolver: ts_resolver.as_ref(),
+        py_roots: &py_roots,
+        py_stdlib: cfg.py_stdlib,
+        symbol: options.symbol.as_deref(),
+        custom_command_macros: cfg.custom_command_macros,
+        command_cfg: &cfg.command_detection,
+    };
+
     for file in files {
         // Get current file mtime and size for incremental scanning
         // Using both mtime + size avoids FP on fast edits (sub-second granularity)
@@ -459,17 +471,7 @@ fn scan_single_root(
                 } else {
                     // File changed - re-analyze
                     fresh_scans += 1;
-                    match analyze_file(
-                        &file,
-                        &root_canon,
-                        options.extensions.as_ref(),
-                        ts_resolver.as_ref(),
-                        &py_roots,
-                        cfg.py_stdlib,
-                        options.symbol.as_deref(),
-                        cfg.custom_command_macros,
-                        &cfg.command_detection,
-                    ) {
+                    match analyze_file(&file, &analyze_ctx) {
                         Ok(mut a) => {
                             a.mtime = current_mtime;
                             a.size = current_size;
@@ -485,17 +487,7 @@ fn scan_single_root(
             } else {
                 // New file - analyze
                 fresh_scans += 1;
-                match analyze_file(
-                    &file,
-                    &root_canon,
-                    options.extensions.as_ref(),
-                    ts_resolver.as_ref(),
-                    &py_roots,
-                    cfg.py_stdlib,
-                    options.symbol.as_deref(),
-                    cfg.custom_command_macros,
-                    &cfg.command_detection,
-                ) {
+                match analyze_file(&file, &analyze_ctx) {
                     Ok(mut a) => {
                         a.mtime = current_mtime;
                         a.size = current_size;
@@ -511,17 +503,7 @@ fn scan_single_root(
         } else {
             // No cache - fresh scan
             fresh_scans += 1;
-            match analyze_file(
-                &file,
-                &root_canon,
-                options.extensions.as_ref(),
-                ts_resolver.as_ref(),
-                &py_roots,
-                cfg.py_stdlib,
-                options.symbol.as_deref(),
-                cfg.custom_command_macros,
-                &cfg.command_detection,
-            ) {
+            match analyze_file(&file, &analyze_ctx) {
                 Ok(mut a) => {
                     a.mtime = current_mtime;
                     a.size = current_size;

@@ -3,7 +3,7 @@
 //! Handles resolution of Python imports (absolute and relative) to their
 //! source files, with stdlib detection.
 //!
-//! VibeCrafted with AI Agents (c)2026 Loctree Team
+//! 𝚅𝚒𝚋𝚎𝚌𝚛𝚊𝚏𝚝𝚎𝚍. with AI Agents ⓒ 2025-2026 Loctree Team
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};

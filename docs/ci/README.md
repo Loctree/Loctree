@@ -7,10 +7,10 @@
 Add this badge to your README:
 
 ```markdown
-[![loctree](https://raw.githubusercontent.com/Loctree/Loctree/main/assets/loctree-badge.svg)](https://github.com/Loctree/Loctree)
+[![loctree](https://raw.githubusercontent.com/Loctree/loctree-ast/main/assets/loctree-badge.svg)](https://github.com/Loctree/loctree-ast)
 ```
 
-Result: [![loctree](https://raw.githubusercontent.com/Loctree/Loctree/main/assets/loctree-badge.svg)](https://github.com/Loctree/Loctree)
+Result: [![loctree](https://raw.githubusercontent.com/Loctree/loctree-ast/main/assets/loctree-badge.svg)](https://github.com/Loctree/loctree-ast)
 
 ## GitHub Actions Workflow
 
@@ -101,4 +101,4 @@ Generate SARIF for GitHub Code Scanning:
 
 ---
 
-VibeCrafted with AI Agents (c)2026 Loctree Team
+𝚅𝚒𝚋𝚎𝚌𝚛𝚊𝚏𝚝𝚎𝚍. with AI Agents ⓒ 2025-2026 Loctree Team

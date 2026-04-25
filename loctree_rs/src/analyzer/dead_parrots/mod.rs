@@ -1004,7 +1004,7 @@ pub fn find_shadow_exports(analyses: &[FileAnalysis]) -> Vec<ShadowExport> {
     }
 
     // Sort by total_dead_loc descending (highest impact first)
-    shadows.sort_by(|a, b| b.total_dead_loc.cmp(&a.total_dead_loc));
+    shadows.sort_by_key(|b| std::cmp::Reverse(b.total_dead_loc));
 
     shadows
 }

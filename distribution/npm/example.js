@@ -6,7 +6,7 @@
 
 const { execLoctreeSync, execLoctree, getBinaryPath } = require('./index.js');
 
-console.log('=== loctree npm package examples ===\n');
+console.log('=== loctree npm package examples (loct binary) ===\n');
 
 // Example 1: Get binary path
 console.log('1. Binary location:');

@@ -3,10 +3,11 @@
 
 set -e
 
-VERSION="${1:-0.8.16}"
+VERSION="${1:-$(node -p "require('./package.json').version")}"
 
 PLATFORMS=(
   "darwin-arm64:macOS Apple Silicon (ARM64):darwin:arm64"
+  "darwin-x64:macOS Intel (x64):darwin:x64"
   "linux-x64-gnu:Linux x64 (glibc):linux:x64"
   "win32-x64-msvc:Windows x64:win32:x64"
 )
@@ -21,17 +22,17 @@ for platform_spec in "${PLATFORMS[@]}"; do
 {
   "name": "@loctree/$platform",
   "version": "$VERSION",
-  "description": "loctree binary for $desc",
+  "description": "loct binary for $desc",
   "keywords": ["loctree", "$os", "$cpu"],
   "license": "MIT OR Apache-2.0",
   "os": ["$os"],
   "cpu": ["$cpu"],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Loctree/Loctree.git"
+    "url": "git+https://github.com/Loctree/loctree-ast.git"
   },
   "files": [
-    "loctree$([ "$os" = "win32" ] && echo ".exe" || echo "")",
+    "loct$([ "$os" = "win32" ] && echo ".exe" || echo "")",
     "postinstall.js"
   ],
   "scripts": {

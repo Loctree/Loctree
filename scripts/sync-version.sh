@@ -1,18 +1,21 @@
 #!/bin/bash
-# Sync version across all crates and hardcoded strings
+# Sync version across release surfaces and hardcoded strings.
 # Usage: ./scripts/sync-version.sh [new-version]
-# If no version provided, reads from loctree_rs/Cargo.toml
+# If no version provided, reads from the workspace version in Cargo.toml.
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 
-# Get version from Cargo.toml or argument
+# Get version from workspace Cargo.toml or argument
 if [ -n "$1" ]; then
     VERSION="$1"
 else
-    VERSION=$(grep '^version = ' "$ROOT_DIR/loctree_rs/Cargo.toml" | head -1 | cut -d'"' -f2)
+    VERSION=$(awk '
+        /^\[workspace.package\]$/ { in_section=1; next }
+        in_section && /^version = / { gsub(/"/, "", $3); print $3; exit }
+    ' "$ROOT_DIR/Cargo.toml")
 fi
 
 echo "Syncing version to: $VERSION"
@@ -35,17 +38,25 @@ update_file() {
     fi
 }
 
-# Update loctree_rs Cargo.toml
-update_file "$ROOT_DIR/loctree_rs/Cargo.toml" 's/^version = ".*"/version = "'$VERSION'"/'
-
 # Update lib.rs docs link
 update_file "$ROOT_DIR/loctree_rs/src/lib.rs" 's|html_root_url = "https://docs.rs/loctree/[^"]*"|html_root_url = "https://docs.rs/loctree/'$VERSION'"|'
 
 # Update reports crate footer
 update_file "$ROOT_DIR/reports/src/components/document.rs" 's/"loctree v[^"]*"/"loctree v'$VERSION'"/'
 
+# Sync canonical npm release surface
+if [ -f "$ROOT_DIR/distribution/npm/sync-version.mjs" ]; then
+    if command -v node >/dev/null 2>&1; then
+        node "$ROOT_DIR/distribution/npm/sync-version.mjs" "$VERSION"
+        echo "  Updated: distribution/npm/package.json"
+    else
+        echo "Node.js is required to sync distribution/npm version" >&2
+        exit 1
+    fi
+fi
+
 echo ""
 echo "Version sync complete: v$VERSION"
 echo ""
 echo "Verify with:"
-echo "  grep -r 'v$VERSION\|$VERSION' --include='*.rs' --include='Cargo.toml' $ROOT_DIR | grep -v target | grep -v '#'"
+echo "  grep -r 'v$VERSION\|$VERSION' --include='*.rs' --include='Cargo.toml' --include='package.json' $ROOT_DIR | grep -v target | grep -v '#'"

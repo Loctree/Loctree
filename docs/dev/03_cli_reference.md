@@ -1,143 +1,98 @@
-# Loctree Suite - CLI Reference
+# Loctree - CLI Reference
 
-Complete reference for all binaries in loctree-suite.
+Truthful reference for the public Loctree command surface in this repo.
 
 ## loct
 
-Primary CLI for codebase analysis. Agent-optimized with artifact persistence.
+`loct` is the canonical CLI. It auto-scans by default, writes artifacts to the
+user cache dir (override with `LOCT_CACHE_DIR`), and lets you query the same
+snapshot through focused commands.
 
-### Basic Usage
+### Everyday usage
 
 ```bash
-# Scan current directory
-loct
-
-# Scan specific project
-loct /path/to/project
-
-# Force rescan
-loct --force
+loct                              # Default auto-scan for current directory
+loct /path/to/project             # Auto-scan a specific project
+loct --fresh                      # Force rescan even if snapshot exists
+loct --for-ai                     # AI context bundle (JSONL)
+loct --agent-json                 # Single agent bundle JSON
 ```
 
-### Query Mode (jq-style)
+### Query mode
 
 ```bash
-# Extract metadata
 loct '.metadata'
-
-# Count files
 loct '.files | length'
-
-# Get health score
 loct '.summary.health_score'
-
-# Filter edges
-loct '.edges[] | select(.from | contains("api"))'
-
-# Dead exports
-loct '.dead_parrots'
-
-# Cycles
-loct '.cycles'
+loct '.dead_parrots[]'
+loct '.cycles[]'
 ```
 
-### Output Flags
+### Core commands
 
 ```bash
-loct --for-ai          # AI-optimized hierarchical output
-loct --findings        # All issues (dead, cycles, twins)
-loct --summary         # Quick summary stats
-loct --json            # Raw JSON output
-```
-
-### Slice Command
-
-Extract file context with dependencies and consumers:
-
-```bash
-loct slice src/App.tsx
-loct slice src/api/client.ts --consumers
-loct slice src/utils.ts --json
-```
-
-### Analysis Commands
-
-```bash
-loct health            # Quick health check
-loct cycles            # Circular imports
-loct dead              # Dead exports
+loct findings                     # Canonical findings JSON
+loct findings --summary           # Summary JSON for CI / status checks
+loct slice src/App.tsx --consumers
+loct find useAuth
+loct impact src/utils/api.ts
+loct health
 loct dead --confidence high
-loct twins             # Code duplication
-loct audit             # Full audit report
+loct cycles
+loct twins
+loct audit
+loct doctor
+loct lint --fail --sarif > loctree.sarif
+loct report --serve --port 4173
 ```
 
-### Report Generation
-
-```bash
-loct report            # Generate HTML report
-loct report --serve    # Serve with live reload
-loct report --open     # Open in browser
-```
-
-### Options
+### Common flags
 
 | Flag | Description |
 |------|-------------|
-| `--force`, `-f` | Force rescan |
-| `--json` | JSON output |
-| `--for-ai` | AI-optimized output |
-| `--findings` | Show all issues |
-| `--summary` | Show summary only |
-| `--verbose`, `-v` | Verbose output |
-| `--quiet`, `-q` | Minimal output |
+| `--fresh` | Force rescan even if snapshot exists |
+| `--json` | JSON output on commands that support it |
+| `--for-ai` | AI-optimized JSONL stream |
+| `--agent-json` | One-shot agent bundle JSON |
+| `--quiet`, `-q` | Suppress non-essential output |
+| `--verbose` | Show detailed progress |
+| `--fail-stale` | Fail if cached snapshot is stale |
 
----
+Notes:
+- Prefer `loct findings` over the legacy bare `loct --findings` shortcut in new docs and scripts.
+- Use `loct findings --summary` for summary JSON. The `--summary` flag still belongs on commands like `loct tree`.
 
 ## loctree
 
-Full CLI with all features. **Deprecated** - use `loct` instead.
-
-Shows deprecation warning:
-```
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃  DEPRECATED: `loctree` will be removed in v0.9.0                  ┃
-┃  Use `loct` instead - it has all features + agent optimizations  ┃
-┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
-```
-
-Same commands as `loct`.
-
----
+`loctree` is the quiet compatibility alias for `loct`. Keep using `loct` in new
+examples; use `loctree` only when preserving older scripts or operator muscle
+memory.
 
 ## loctree-mcp
 
-MCP server for AI agents. Runs over stdio.
+`loctree-mcp` is the production MCP server for this workspace. It runs over
+stdio and auto-scans a project on first use when no snapshot exists.
 
 ### Usage
 
 ```bash
-# Start server (stdio)
 loctree-mcp
-
-# With logging
-loctree-mcp --log-level debug
+loctree-mcp --version
 ```
 
-### MCP Tools
+### MCP tools
 
 | Tool | Description |
 |------|-------------|
-| `for_ai` | AI-optimized project overview |
-| `slice` | File context with deps + consumers |
-| `find` | Symbol search |
-| `impact` | Change impact analysis |
-| `health` | Quick health check |
-| `scan` | Trigger project scan |
-| `query` | Graph queries |
+| `repo-view` | Repo overview: files, LOC, languages, health, top hubs |
+| `slice` | File + dependencies + consumers in one call |
+| `find` | Symbol search and reverse-import lookups |
+| `impact` | Direct + transitive consumer blast radius |
+| `focus` | Module/directory deep-dive |
+| `tree` | Directory tree with LOC counts |
+| `follow` | Structural signals: dead, cycles, twins, hotspots, trace, pipelines |
 
 ### Configuration
-
-Add to MCP config:
 
 ```json
 {
@@ -150,324 +105,30 @@ Add to MCP config:
 }
 ```
 
----
+### Recommended agent flow
 
-## rmcp_memex
-
-RAG/memory MCP server with vector storage.
-
-### Subcommands
-
-#### serve (default)
-
-Start MCP server:
-
-```bash
-rmcp_memex serve
-rmcp_memex  # same as serve
+```text
+repo-view -> focus -> slice -> impact -> find -> follow
 ```
 
-Options:
-
-| Flag | Description |
-|------|-------------|
-| `--mode` | `memory` or `full` |
-| `--cache-mb` | Cache size in MB |
-| `--db-path` | LanceDB path |
-| `--config` | TOML config file |
-
-#### wizard
-
-Interactive setup TUI:
-
-```bash
-rmcp_memex wizard
-rmcp_memex wizard --dry-run
-```
-
-#### index
-
-Batch document indexing:
-
-```bash
-# Single file
-rmcp_memex index document.pdf
-
-# Directory with glob
-rmcp_memex index ./docs -r -g "*.md"
-
-# With namespace
-rmcp_memex index ./docs -r -g "*.md" -n my-project
-
-# Custom depth
-rmcp_memex index ./src -r --max-depth 3
-```
-
-Options:
-
-| Flag | Short | Description |
-|------|-------|-------------|
-| `--namespace` | `-n` | Namespace for documents |
-| `--recursive` | `-r` | Walk subdirectories |
-| `--glob` | `-g` | File pattern filter |
-| `--max-depth` | | Max directory depth |
-| `--db-path` | | Custom LanceDB path |
-
-### MCP Tools
-
-| Tool | Description |
-|------|-------------|
-| `rag_index` | Index document from path |
-| `rag_index_text` | Index raw text |
-| `rag_search` | Semantic search |
-| `memory_upsert` | Store memory chunk |
-| `memory_get` | Get by namespace + ID |
-| `memory_search` | Semantic memory search |
-| `memory_delete` | Delete chunk |
-| `memory_purge_namespace` | Clear namespace |
-| `health` | Server health check |
-
-### Configuration
-
-TOML config file:
-
-```toml
-# ~/.config/rmcp-memex/config.toml
-mode = "full"
-features = "filesystem,memory,search"
-cache_mb = 4096
-db_path = "~/.rmcp_servers/rmcp_memex/lancedb"
-log_level = "info"
-```
-
-MCP config:
-
-```json
-{
-  "mcpServers": {
-    "rmcp-memex": {
-      "command": "rmcp_memex",
-      "args": ["serve", "--mode", "full"]
-    }
-  }
-}
-```
-
----
-
-## rmcp-mux
-
-MCP server multiplexer. **Single process manages ALL servers**.
-
-### Architecture
-
-```
-rmcp-mux --config mux.toml
-    │
-    ├── loctree-mcp (child)
-    ├── rmcp_memex (child)
-    ├── brave-search (child)
-    └── ... (all servers from config)
-```
-
-### Basic Usage
-
-```bash
-# Start all servers from config (default)
-rmcp-mux --config ~/.rmcp_servers/config/mux.toml
-
-# Start only specific servers
-rmcp-mux --config mux.toml --only loctree,rmcp-memex
-
-# Start all except some
-rmcp-mux --config mux.toml --except youtube-transcript
-
-# Show status of all servers
-rmcp-mux --show-status --config mux.toml
-
-# Restart a specific service
-rmcp-mux --restart-service memex --config mux.toml
-```
-
-### Subcommands
-
-#### wizard
-
-Interactive server configuration TUI:
-
-```bash
-rmcp-mux wizard
-```
-
-#### scan
-
-Scan for existing MCP servers in host configs:
-
-```bash
-rmcp-mux scan
-```
-
-#### proxy
-
-Bridge STDIO to a mux socket (for MCP hosts):
-
-```bash
-rmcp-mux proxy --socket ~/.rmcp_servers/sockets/loctree.sock
-```
-
-#### health
-
-Check connection to a mux socket:
-
-```bash
-rmcp-mux health --config mux.toml --service loctree
-```
-
-### CLI Flags
-
-| Flag | Description |
-|------|-------------|
-| `--config` | Path to mux.toml config file |
-| `--only` | Comma-separated list of servers to start |
-| `--except` | Comma-separated list of servers to exclude |
-| `--show-status` | Show status of all servers and exit |
-| `--restart-service NAME` | Restart a specific service |
-| `--lazy-start` | Enable lazy loading for all servers |
-| `--log-level` | Log level (trace, debug, info, warn, error) |
-
-### Configuration
-
-```toml
-# ~/.rmcp_servers/config/mux.toml
-
-[servers.loctree]
-socket = "~/.rmcp_servers/sockets/loctree.sock"
-cmd = "loctree-mcp"
-args = []
-max_active_clients = 5
-mode = "eager"  # or "lazy"
-
-[servers.rmcp-memex]
-socket = "~/.rmcp_servers/sockets/rmcp-memex.sock"
-cmd = "rmcp_memex"
-args = ["serve", "--db-path", "~/.rmcp_servers/rmcp_memex/lancedb"]
-env = {}
-max_active_clients = 5
-mode = "lazy"
-```
-
-### Makefile Targets
-
-```bash
-make mux-setup     # Create directories and initial config
-make mux-start     # Start rmcp-mux (manages all servers)
-make mux-stop      # Stop rmcp-mux
-make mux-restart   # Restart rmcp-mux
-make mux-status    # Check status of all servers
-make mux-kill      # Force kill rmcp-mux
-make mux-tui       # Launch TUI dashboard
-make mux-restart-service SERVICE=name  # Restart single service
-make mux-logs      # Tail mux.log
-make mux-config    # Edit mux.toml
-make mcp-health    # Health check all sockets
-```
-
-### Host Configuration
-
-Use `rmcp-mux proxy` subcommand in MCP configs:
-
-```json
-{
-  "mcpServers": {
-    "loctree": {
-      "command": "rmcp-mux",
-      "args": ["proxy", "--socket", "~/.rmcp_servers/sockets/loctree.sock"]
-    },
-    "rmcp-memex": {
-      "command": "rmcp-mux",
-      "args": ["proxy", "--socket", "~/.rmcp_servers/sockets/rmcp-memex.sock"]
-    }
-  }
-}
-```
-
----
-
-## Environment Variables
-
-| Variable | Used By | Description |
-|----------|---------|-------------|
-| `LANCEDB_PATH` | rmcp-memex | Override LanceDB path |
-| `RUST_LOG` | all | Log level (trace, debug, info, warn, error) |
-| `CARGO_HOME` | make install | Cargo bin directory |
-
----
-
-## Exit Codes
+## Exit codes
 
 | Code | Meaning |
 |------|---------|
-| 0 | Success |
-| 1 | General error |
-| 2 | Invalid arguments |
-| 101 | Panic (Rust) |
+| `0` | Success |
+| `1` | Command reported findings or general runtime failure |
+| `2` | Invalid arguments / usage error |
+| `101` | Rust panic |
+
+## Cross-check sources
+
+When this page and the runtime ever disagree, trust these repo-owned sources:
+
+- `loctree_rs/src/bin/loct.rs`
+- `loctree_rs/src/cli/command/help.rs`
+- `loctree_rs/src/cli/parser/core.rs`
+- `loctree-mcp/src/main.rs`
 
 ---
 
-## Examples
-
-### Full Workflow
-
-```bash
-# 1. Scan project
-cd my-project
-loct
-
-# 2. Check health
-loct health
-
-# 3. Find issues
-loct --findings
-
-# 4. Get AI context for specific file
-loct slice src/main.ts --consumers --json
-
-# 5. Generate report
-loct report --serve
-```
-
-### Memory Indexing
-
-```bash
-# Index project docs
-rmcp_memex index ./docs -r -g "*.md" -n project-docs
-
-# Index with server running (works concurrently)
-rmcp_memex index ./notes -r -n personal-notes
-```
-
-### Multiplexer Setup
-
-```bash
-# Setup infrastructure
-make mux-setup
-
-# Configure servers in mux.toml
-make mux-config
-
-# Start rmcp-mux (single process for all servers)
-make mux-start
-
-# Verify all servers are running
-make mux-status
-
-# Launch TUI dashboard
-make mux-tui
-
-# Configure Claude/Cursor to use rmcp-mux proxy subcommand
-# See Host Configuration section above
-```
-
----
-
-VibeCrafted with AI Agents (c)2026 Loctree Team
+𝚅𝚒𝚋𝚎𝚌𝚛𝚊𝚏𝚝𝚎𝚍. with AI Agents ⓒ 2025-2026 Loctree Team

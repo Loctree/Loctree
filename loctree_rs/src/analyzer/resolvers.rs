@@ -228,7 +228,7 @@ impl TsPathResolver {
         // Try Vite aliases (resolve.alias from vite.config.js/ts)
         // Sort by prefix length (longest first) to ensure @core matches before @
         let mut sorted_aliases: Vec<_> = self.vite_aliases.iter().collect();
-        sorted_aliases.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+        sorted_aliases.sort_by_key(|b| std::cmp::Reverse(b.0.len()));
 
         for (prefix, target_path) in sorted_aliases {
             if let Some(rest) = normalized.strip_prefix(prefix.as_str()) {

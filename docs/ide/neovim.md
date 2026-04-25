@@ -2,7 +2,7 @@
 
 > **Part of [loctree-suite](https://github.com/Loctree/loctree-suite)**
 > The LSP server and editor integrations ship with loctree-suite.
-> Install the free CLI with `cargo install loctree`, then upgrade to suite for IDE features.
+> Install the free CLI with `cargo install --locked loctree`, then upgrade to suite for IDE features.
 
 Configure Neovim to use the loctree-suite language server for dead code detection and navigation.
 
@@ -11,7 +11,7 @@ Configure Neovim to use the loctree-suite language server for dead code detectio
 - Neovim 0.8+
 - [nvim-lspconfig](https://github.com/neovim/nvim-lspconfig)
 - [loctree-suite](https://github.com/Loctree/loctree-suite) with language server binary
-- Loctree CLI installed: `cargo install loctree`
+- Loctree CLI installed: `cargo install --locked loctree`
 
 ## Configuration
 
@@ -140,4 +140,4 @@ loct  # Generate snapshot
 
 ---
 
-VibeCrafted with AI Agents (c)2026 Loctree Team
+𝚅𝚒𝚋𝚎𝚌𝚛𝚊𝚏𝚝𝚎𝚍. with AI Agents ⓒ 2025-2026 Loctree Team

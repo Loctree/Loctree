@@ -61,4 +61,4 @@ rg "handler" --type ts           # sprawdź matche
 
 ---
 
-*M&K (c)2025*
+*M&K ⓒ 2025-2026*

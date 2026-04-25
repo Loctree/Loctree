@@ -3,7 +3,7 @@
 
 set -e
 
-VERSION=${1:-"0.8.16"}
+VERSION=${1:-$(node -p "require('../package.json').version")}
 DRY_RUN=${DRY_RUN:-false}
 
 echo "=== loctree npm Publishing Script ==="
@@ -51,7 +51,7 @@ publish_package() {
 
 # Step 1: Verify GitHub releases
 echo "Step 1: Verifying GitHub releases..."
-RELEASE_URL="https://github.com/Loctree/Loctree/releases/tag/v$VERSION"
+RELEASE_URL="https://github.com/Loctree/loct/releases/tag/v$VERSION"
 
 if command -v curl &> /dev/null; then
   if curl -s -o /dev/null -w "%{http_code}" "$RELEASE_URL" | grep -q "200"; then
@@ -80,6 +80,7 @@ echo "Step 3: Publishing platform packages..."
 
 PLATFORMS=(
   "darwin-arm64:@loctree/darwin-arm64"
+  "darwin-x64:@loctree/darwin-x64"
   "linux-x64-gnu:@loctree/linux-x64-gnu"
   "win32-x64-msvc:@loctree/win32-x64-msvc"
 )
@@ -112,7 +113,7 @@ if [ "$DRY_RUN" = false ]; then
   npm init -y > /dev/null
   npm install loctree
 
-  if npx loctree --version; then
+  if npx loct --version; then
     echo -e "${GREEN}  ✓ Installation verified successfully${NC}"
   else
     echo -e "${RED}  ✗ Installation verification failed${NC}"

@@ -1,5 +1,4 @@
 use std::any::Any;
-use std::io::IsTerminal;
 use std::panic;
 
 use loctree::cli::entrypoint::{EntryOptions, run};
@@ -24,43 +23,23 @@ fn install_broken_pipe_handler() {
 fn main() -> std::io::Result<()> {
     install_broken_pipe_handler();
 
-    // Deprecation warning — stderr only, interactive only, suppressed in JSON/quiet mode
-    // nosemgrep: rust.lang.security.args.args
-    let raw_args: Vec<String> = std::env::args().skip(1).collect();
-    let wants_json = raw_args.iter().any(|a| a == "--json");
-    let quiet = raw_args.iter().any(|a| a == "--quiet" || a == "-q");
-    let interactive = std::io::stderr().is_terminal();
-    if interactive && !wants_json && !quiet {
-        eprintln!("\x1b[1;33m");
-        eprintln!("  DEPRECATED: `loctree` will be removed in v1.0");
-        eprintln!("  Use `loct` instead — same features, shorter name");
-        eprintln!("\x1b[0m");
-    }
-
     run(&EntryOptions {
         binary_name: "loctree",
-        deprecated: true,
+        deprecated: false,
         show_banner: false,
         usage: USAGE,
     })
 }
 
-const USAGE: &str = "loctree (DEPRECATED - use `loct` instead)\n\n\
-This binary will be removed in v1.0. All commands work with `loct`.\n\n\
-Migration Guide:\n  \
-  loctree                    ->  loct auto\n  \
-  loctree -A --dead          ->  loct dead\n  \
-  loctree -A --circular      ->  loct cycles\n  \
-  loctree -A --report f.html ->  loct report --html f.html\n  \
-  loctree slice file         ->  loct slice file\n  \
-  loctree --for-ai           ->  loct --for-ai\n\n\
-New Features in `loct`:\n  \
-  loct auto              Full scan + findings (cached artifacts; set LOCT_CACHE_DIR to override)\n  \
-  loct doctor            Interactive diagnostics\n  \
-  loct findings          Canonical findings JSON\n  \
-  loct dead              Find unused exports\n  \
-  loct cycles            Find circular imports\n  \
-  loct twins             Find duplicate symbols\n  \
-  loct health            Quick health check\n  \
-  loct find <name>       Find symbol definitions\n\n\
-Run `loct --help` for full documentation.\n";
+const USAGE: &str = "loctree - Compatibility alias for `loct`\n\n\
+`loct` is the canonical CLI command. `loctree` remains available as a quiet\n\
+compatibility alias for existing scripts and muscle memory.\n\n\
+Recommended:\n  \
+  loct auto                      Full scan → cached artifacts\n  \
+  loct slice src/foo.ts          Extract file context for AI agent\n  \
+  loct report --html out.html    Generate visual HTML report\n\n\
+Alias examples:\n  \
+  loctree                        Same behavior as `loct auto`\n  \
+  loctree slice src/foo.ts       Same behavior as `loct slice src/foo.ts`\n  \
+  loctree --for-ai               Same behavior as `loct --for-ai`\n\n\
+Run `loct --help` for the full command reference.\n";

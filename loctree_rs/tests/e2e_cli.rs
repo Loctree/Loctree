@@ -1,7 +1,7 @@
 //! End-to-End CLI Tests for loctree
 //!
 //! Following TDD principles - tests define expected behavior.
-//! VibeCrafted with AI Agents (c)2026 Loctree Team
+//! 𝚅𝚒𝚋𝚎𝚌𝚛𝚊𝚏𝚝𝚎𝚍. with AI Agents ⓒ 2025-2026 Loctree Team
 
 use assert_cmd::Command;
 use assert_cmd::cargo::cargo_bin_cmd;
@@ -23,6 +23,11 @@ fn fixtures_path() -> PathBuf {
 /// Get a command pointing to the loctree binary
 fn loctree() -> Command {
     cargo_bin_cmd!("loctree")
+}
+
+/// Get a command pointing to the loct binary
+fn loct() -> Command {
+    cargo_bin_cmd!("loct")
 }
 
 // ============================================
@@ -274,9 +279,6 @@ mod analyzer_mode {
     #[test]
     fn analyzes_impact() {
         let fixture = fixtures_path().join("simple_ts");
-
-        // Refresh the snapshot first so self-hosted runners don't reuse stale cache state.
-        loctree().current_dir(&fixture).assert().success();
 
         loctree()
             .current_dir(&fixture)
@@ -893,7 +895,7 @@ fn run_git(repo: &std::path::Path, args: &[&str]) {
 // ============================================
 // Instant Commands Tests (<100ms)
 // ============================================
-// VibeCrafted with AI Agents (c)2026 Loctree Team
+// 𝚅𝚒𝚋𝚎𝚌𝚛𝚊𝚏𝚝𝚎𝚍. with AI Agents ⓒ 2025-2026 Loctree Team
 
 mod instant_commands {
     use super::*;
@@ -1205,7 +1207,7 @@ mod instant_commands {
 // ============================================
 // Analysis Commands Tests
 // ============================================
-// VibeCrafted with AI Agents (c)2026 Loctree Team
+// 𝚅𝚒𝚋𝚎𝚌𝚛𝚊𝚏𝚝𝚎𝚍. with AI Agents ⓒ 2025-2026 Loctree Team
 
 mod analysis_commands {
     use super::*;
@@ -1445,14 +1447,22 @@ mod analysis_commands {
     fn audit_stdout_flag() {
         let fixture = fixtures_path().join("simple_ts");
 
+        // `audit --stdout` was removed: audit now writes to artifact files only.
+        // The --json flag is the stdout-oriented contract.
         loctree()
             .current_dir(&fixture)
             .args(["audit", "--stdout"])
             .assert()
             .failure()
-            .stderr(predicate::str::contains(
-                "writes markdown reports to an artifact file only",
-            ));
+            .stderr(predicate::str::contains("--json"));
+
+        // Verify --json contract works
+        loctree()
+            .current_dir(&fixture)
+            .args(["audit", "--json"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("{"));
     }
 
     // ----------------------------------------
@@ -1633,10 +1643,18 @@ mod analysis_commands {
 // ============================================
 // Management & Core Workflow Commands Tests
 // ============================================
-// VibeCrafted with AI Agents (c)2026 Loctree Team
+// 𝚅𝚒𝚋𝚎𝚌𝚛𝚊𝚏𝚝𝚎𝚍. with AI Agents ⓒ 2025-2026 Loctree Team
 
 mod management_commands {
     use super::*;
+    use serde_json::json;
+
+    fn write_cache_snapshot(path: &std::path::Path, metadata: serde_json::Value) {
+        std::fs::create_dir_all(path.parent().expect("snapshot parent")).expect("create dir");
+        let body = serde_json::to_vec_pretty(&json!({ "metadata": metadata }))
+            .expect("serialize snapshot");
+        std::fs::write(path, body).expect("write snapshot");
+    }
 
     // ----------------------------------------
     // Doctor Command Tests
@@ -1722,6 +1740,250 @@ mod management_commands {
                     .or(predicate::str::contains("memory"))
                     .or(predicate::str::contains("vector")),
             );
+    }
+
+    // ----------------------------------------
+    // Cache Command Tests
+    // ----------------------------------------
+
+    #[test]
+    fn cache_list_groups_multiscan_bucket_by_repo() {
+        let cache = TempDir::new().unwrap();
+        let bucket = cache.path().join("projects").join("bucket1234567890ab");
+        let repo_root = cache.path().join("demo-repo");
+        let nested_root = repo_root.join("src");
+
+        write_cache_snapshot(
+            &bucket.join("main@aaa111").join("snapshot.json"),
+            json!({
+                "schema_version": "0.9.0",
+                "generated_at": "2026-03-30T12:00:00Z",
+                "roots": [repo_root.display().to_string()],
+                "git_owner_repo": "VetCoders/Loctree",
+                "git_repo": "Loctree",
+                "git_branch": "main",
+                "git_commit": "aaa111"
+            }),
+        );
+        write_cache_snapshot(
+            &bucket.join("feature@bbb222").join("snapshot.json"),
+            json!({
+                "schema_version": "0.9.0",
+                "generated_at": "2026-03-31T12:00:00Z",
+                "roots": [nested_root.display().to_string()],
+                "git_owner_repo": "VetCoders/Loctree",
+                "git_repo": "Loctree",
+                "git_branch": "feature",
+                "git_commit": "bbb222"
+            }),
+        );
+        write_cache_snapshot(
+            &bucket.join("latest").join("snapshot.json"),
+            json!({
+                "schema_version": "0.9.0",
+                "generated_at": "2026-03-31T12:00:00Z",
+                "roots": [nested_root.display().to_string()],
+                "git_owner_repo": "VetCoders/Loctree",
+                "git_repo": "Loctree",
+                "git_branch": "feature",
+                "git_commit": "bbb222"
+            }),
+        );
+        std::fs::write(
+            bucket.join("feature@bbb222").join("analysis.json"),
+            b"analysis",
+        )
+        .unwrap();
+        std::fs::write(bucket.join("latest").join("manifest.json"), b"manifest").unwrap();
+
+        let output = loct()
+            .env("LOCT_CACHE_DIR", cache.path())
+            .args(["cache", "list"])
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "cache list failed.\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("Org/Repo | Path | Cache size MB | Meta"));
+        assert!(stdout.contains(&format!("VetCoders/Loctree | {} |", repo_root.display())));
+        assert!(stdout.contains("scans 2"));
+        assert!(stdout.contains("roots 2"));
+        assert!(stdout.contains("branches 2"));
+        assert!(stdout.contains("ref feature@bbb222"));
+        assert!(stdout.contains("schema 0.9.0"));
+    }
+
+    #[test]
+    fn cache_list_uses_local_fallback_for_non_git_bucket() {
+        let cache = TempDir::new().unwrap();
+        let bucket = cache.path().join("projects").join("bucketfedcba098765");
+        let project_root = cache.path().join("local-project");
+
+        write_cache_snapshot(
+            &bucket.join("snapshot.json"),
+            json!({
+                "schema_version": "0.9.0",
+                "generated_at": "2026-03-31T09:00:00Z",
+                "roots": [project_root.display().to_string()]
+            }),
+        );
+
+        let output = loct()
+            .env("LOCT_CACHE_DIR", cache.path())
+            .args(["cache", "list"])
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "cache list failed.\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains(&format!(
+            "local/local-project | {} |",
+            project_root.display()
+        )));
+        assert!(stdout.contains("scans 1"));
+        assert!(stdout.contains("schema 0.9.0"));
+    }
+
+    #[test]
+    fn cache_list_uses_unknown_fallback_when_metadata_is_missing() {
+        let cache = TempDir::new().unwrap();
+        let bucket_id = "feedfacecafebeef";
+        let bucket = cache.path().join("projects").join(bucket_id);
+        std::fs::create_dir_all(&bucket).unwrap();
+        std::fs::write(bucket.join("artifact.bin"), b"cache-bytes").unwrap();
+
+        let output = loct()
+            .env("LOCT_CACHE_DIR", cache.path())
+            .args(["cache", "list"])
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "cache list failed.\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains(&format!("unknown/{bucket_id} | (unknown path) |")));
+        assert!(stdout.contains("scans 0; latest unknown; schema unknown"));
+    }
+
+    #[test]
+    fn cache_clean_without_force_shows_confirmation() {
+        let cache = TempDir::new().unwrap();
+        let bucket = cache.path().join("projects").join("bucket_clean_test01");
+        std::fs::create_dir_all(&bucket).unwrap();
+        std::fs::write(bucket.join("snapshot.json"), b"{}").unwrap();
+
+        let output = loct()
+            .env("LOCT_CACHE_DIR", cache.path())
+            .args(["cache", "clean"])
+            .output()
+            .unwrap();
+
+        assert!(
+            !output.status.success(),
+            "cache clean without --force should fail.\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("Use --force"),
+            "stderr should mention --force.\nstderr: {}",
+            stderr
+        );
+
+        assert!(
+            bucket.exists(),
+            "cache bucket should not be removed without --force"
+        );
+    }
+
+    #[test]
+    fn cache_clean_force_removes_all_buckets() {
+        let cache = TempDir::new().unwrap();
+        let projects_dir = cache.path().join("projects");
+        let bucket_a = projects_dir.join("bucket_clean_a_1234");
+        let bucket_b = projects_dir.join("bucket_clean_b_5678");
+
+        std::fs::create_dir_all(&bucket_a).unwrap();
+        std::fs::write(bucket_a.join("snapshot.json"), b"{}").unwrap();
+        std::fs::create_dir_all(&bucket_b).unwrap();
+        std::fs::write(bucket_b.join("snapshot.json"), b"{}").unwrap();
+
+        let output = loct()
+            .env("LOCT_CACHE_DIR", cache.path())
+            .args(["cache", "clean", "--force"])
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "cache clean --force should succeed.\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("Cleaned 2 project(s)"),
+            "should report 2 cleaned projects.\nstdout: {}",
+            stdout
+        );
+
+        assert!(!bucket_a.exists(), "bucket_a should be removed");
+        assert!(!bucket_b.exists(), "bucket_b should be removed");
+    }
+
+    #[test]
+    fn cache_clean_older_than_skips_recent_entries() {
+        let cache = TempDir::new().unwrap();
+        let projects_dir = cache.path().join("projects");
+        let bucket = projects_dir.join("bucket_clean_recent1");
+
+        std::fs::create_dir_all(&bucket).unwrap();
+        std::fs::write(bucket.join("snapshot.json"), b"{}").unwrap();
+
+        let output = loct()
+            .env("LOCT_CACHE_DIR", cache.path())
+            .args(["cache", "clean", "--older-than", "9999d", "--force"])
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "cache clean --older-than should succeed.\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("Nothing to clean"),
+            "recent entries should not match 9999d threshold.\nstdout: {}",
+            stdout
+        );
+
+        assert!(
+            bucket.exists(),
+            "recent bucket should not be removed by age filter"
+        );
     }
 
     // ----------------------------------------
@@ -1972,7 +2234,7 @@ mod management_commands {
 // ============================================
 // Framework-Specific Command Tests
 // ============================================
-// VibeCrafted with AI Agents (c)2026 Loctree Team
+// 𝚅𝚒𝚋𝚎𝚌𝚛𝚊𝚏𝚝𝚎𝚍. with AI Agents ⓒ 2025-2026 Loctree Team
 
 mod framework_commands {
     use super::*;

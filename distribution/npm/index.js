@@ -4,71 +4,31 @@ const { execFileSync } = require('child_process');
 const { join } = require('path');
 const { existsSync } = require('fs');
 
-// Platform mapping to package names
-const PLATFORMS = {
-  'darwin-arm64': '@loctree/darwin-arm64',
-  'linux-x64-gnu': '@loctree/linux-x64-gnu',
-  'win32-x64-msvc': '@loctree/win32-x64-msvc',
-};
-
-function getPlatformKey() {
-  const platform = process.platform;
-  const arch = process.arch;
-
-  const archMap = {
-    'x64': 'x64',
-    'arm64': 'arm64',
-    'aarch64': 'arm64',
-  };
-
-  const normalizedArch = archMap[arch] || arch;
-
-  if (platform === 'linux') {
-    const isMusl = isMuslLibc();
-    const libc = isMusl ? 'musl' : 'gnu';
-    return `${platform}-${normalizedArch}-${libc}`;
-  }
-
-  if (platform === 'win32') {
-    return `${platform}-${normalizedArch}-msvc`;
-  }
-
-  if (platform === 'darwin') {
-    return `${platform}-${normalizedArch}`;
-  }
-
-  return null;
-}
-
-function isMuslLibc() {
-  const { spawnSync } = require('child_process');
-  try {
-    const lddVersion = spawnSync('ldd', ['--version'], { encoding: 'utf8' });
-    return lddVersion.stderr && lddVersion.stderr.includes('musl');
-  } catch (err) {
-    return false;
-  }
-}
+const {
+  getPackageNameForPlatformKey,
+  resolvePlatformKey,
+  unsupportedPlatformMessage,
+} = require('./platform-support');
 
 function getBinaryPath() {
-  const platformKey = getPlatformKey();
+  const platformKey = resolvePlatformKey();
 
   if (!platformKey) {
     throw new Error(`Unsupported platform: ${process.platform}-${process.arch}`);
   }
 
-  const packageName = PLATFORMS[platformKey];
+  const packageName = getPackageNameForPlatformKey(platformKey);
 
   if (!packageName) {
-    throw new Error(`No package available for platform: ${platformKey}`);
+    throw new Error(unsupportedPlatformMessage({ platformKey }));
   }
 
-  const binaryName = process.platform === 'win32' ? 'loctree.exe' : 'loctree';
+  const binaryName = process.platform === 'win32' ? 'loct.exe' : 'loct';
   const binaryPath = join(__dirname, 'node_modules', packageName, binaryName);
 
   if (!existsSync(binaryPath)) {
     throw new Error(
-      `loctree binary not found at ${binaryPath}. ` +
+      `loct binary not found at ${binaryPath}. ` +
       `This may happen if optionalDependencies are disabled. ` +
       `Please ensure "${packageName}" is installed.`
     );
@@ -78,16 +38,16 @@ function getBinaryPath() {
 }
 
 /**
- * Execute loctree with given arguments
+ * Execute loct with given arguments
  * @param {string[]} args - Command line arguments
  * @param {object} options - Execution options
- * @returns {Buffer} - stdout from loctree
+ * @returns {Buffer|string} - stdout from loct
  */
 function execLoctree(args = [], options = {}) {
   const binaryPath = getBinaryPath();
 
   const execOptions = {
-    stdio: 'inherit',
+    stdio: 'pipe',
     ...options,
   };
 
@@ -102,9 +62,9 @@ function execLoctree(args = [], options = {}) {
 }
 
 /**
- * Execute loctree and return result as string
+ * Execute loct and return result as string
  * @param {string[]} args - Command line arguments
- * @returns {string} - stdout from loctree
+ * @returns {string} - stdout from loct
  */
 function execLoctreeSync(args = []) {
   const binaryPath = getBinaryPath();
@@ -127,5 +87,5 @@ module.exports = {
 // CLI execution
 if (require.main === module) {
   const args = process.argv.slice(2);
-  execLoctree(args);
+  execFileSync(getBinaryPath(), args, { stdio: 'inherit' });
 }

@@ -45,7 +45,7 @@ Loctree is a static analysis tool designed for AI agents. It solves the fundamen
 
 ```bash
 # Install from crates.io
-cargo install loctree
+cargo install --locked loctree loctree-mcp
 
 # Verify installation
 loct --version
@@ -199,8 +199,6 @@ loct impact src/utils/api.ts
 
 ### `loct dead`
 
-> **Note (0.7.0+):** This command is deprecated. Use `loct doctor` for interactive diagnostics or jq queries (`loct '.dead_parrots'`) for scripting.
-
 Detect unused exports (dead code).
 
 ```bash
@@ -215,8 +213,6 @@ loct dead --json               # JSON output
 - `low` - Complex re-export patterns, may be false positive
 
 ### `loct cycles`
-
-> **Note (0.7.0+):** This command is deprecated. Use `loct doctor` for interactive diagnostics or jq queries (`loct '.cycles'`) for scripting.
 
 Detect circular imports.
 
@@ -255,8 +251,6 @@ Run `loct cycles`, `loct dead`, `loct twins` for details.
 Use this for quick sanity checks before commits or in CI pipelines.
 
 ### `loct audit`
-
-> **Note (0.7.0+):** This command is deprecated. Use `loct doctor` for interactive diagnostics with actionable recommendations.
 
 Full codebase audit — combines ALL structural analyses into one actionable report. Perfect for getting a complete picture of codebase health on day one.
 
@@ -363,8 +357,6 @@ loct doctor --apply-suppressions
 ```
 
 ### `loct twins`
-
-> **Note (0.7.0+):** This command is deprecated. Use `loct doctor` for interactive diagnostics or jq queries (`loct '.twins'`) for scripting.
 
 Semantic duplicate analysis — finds dead parrots, exact twins, and barrel chaos.
 
@@ -641,7 +633,7 @@ The agent bundle is a complete analysis package for CI pipelines:
 ```yaml
 - name: Run loctree analysis
   run: |
-    cargo install loctree
+    cargo install --locked loctree
     loct
 
 - name: Upload SARIF
@@ -936,4 +928,4 @@ Keep artifacts together: snapshots and agent metadata (e.g., `AI_META.json` or `
 
 ---
 
-Developed with care by The Loctree Team (c)2025.
+Developed with care by The Loctree Team ⓒ 2025-2026.

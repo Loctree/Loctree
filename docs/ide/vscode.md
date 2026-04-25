@@ -2,7 +2,7 @@
 
 > **Part of [loctree-suite](https://github.com/Loctree/loctree-suite)**
 > The LSP server and editor integrations ship with loctree-suite.
-> Install the free CLI with `cargo install loctree`, then upgrade to suite for IDE features.
+> Install the free CLI with `cargo install --locked loctree`, then upgrade to suite for IDE features.
 
 The Loctree VSCode extension provides real-time dead code detection, circular import warnings, and code navigation powered by the loctree-suite language server.
 
@@ -108,7 +108,7 @@ Open command palette (`F1`) and search for "Loctree":
 ## Requirements
 
 - [loctree-suite](https://github.com/Loctree/loctree-suite) with the language server binary
-- Loctree CLI installed (`cargo install loctree`)
+- Loctree CLI installed (`cargo install --locked loctree`)
 - Run `loct` once in the project root (writes snapshot to cache; set `LOCT_CACHE_DIR=.loctree` for repo-local artifacts)
 
 ## Troubleshooting
@@ -135,4 +135,4 @@ Click status bar → "Loctree: Refresh" or run `loct` in terminal.
 
 ---
 
-VibeCrafted with AI Agents (c)2026 Loctree Team
+𝚅𝚒𝚋𝚎𝚌𝚛𝚊𝚏𝚝𝚎𝚍. with AI Agents ⓒ 2025-2026 Loctree Team

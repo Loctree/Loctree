@@ -1,11 +1,11 @@
 # Loctree Build System
 # Includes comprehensive MCP server management
 #
-# Created by M&K (c)2025 The Loctree Team
+# Created by M&K ⓒ 2025-2026 The Loctree Team
 
 .PHONY: all build install clean test check precheck fmt help setup-protoc
 .PHONY: version version-show version-check publish
-.PHONY: mcp-build mcp-install mcp-test
+.PHONY: mcp-build mcp-install mcp-test smoke-release-macos-arm64
 .PHONY: ai-hooks ai-hooks-claude ai-hooks-codex ai-hooks-gemini git-hooks
 
 # Default target
@@ -29,26 +29,12 @@ LOCKFILE ?= /tmp/loctree-make.lock
 
 # Install loctree CLI + MCP server
 # Lock is auto-cleaned on success, failure, or if stale (dead PID)
-install: setup-protoc
-	@if [ -f "$(LOCKFILE)" ]; then \
-		old_pid=$$(cat "$(LOCKFILE)" 2>/dev/null); \
-		if [ -n "$$old_pid" ] && kill -0 "$$old_pid" 2>/dev/null; then \
-			echo "Another build running (PID $$old_pid). Aborting."; \
-			exit 1; \
-		fi; \
-		echo "Removing stale lock (PID $$old_pid dead)"; \
-		rm -f "$(LOCKFILE)"; \
-	fi
-	@echo $$$$ > "$(LOCKFILE)"
-	@trap 'rm -f "$(LOCKFILE)"' EXIT; \
-	set -e; \
-	cargo install --path loctree_rs --force; \
-	cargo install --path loctree-mcp --force; \
-	echo "Installed: loct, loctree, loctree-mcp → $(CARGO_BIN)"; \
-	$(MAKE) git-hooks
+# Install everything (CLI + MCP server + hooks)
+install: install-cli install-mcp git-hooks
+	@echo "Installed: loct, loctree, loctree-mcp → $(CARGO_BIN)"
 
-# Install all available CLI binaries in this repo (loct/loctree + loctree-mcp)
-install-all: setup-protoc
+# Install CLI only (loct + loctree binaries)
+install-cli: setup-protoc
 	@if [ -f "$(LOCKFILE)" ]; then \
 		old_pid=$$(cat "$(LOCKFILE)" 2>/dev/null); \
 		if [ -n "$$old_pid" ] && kill -0 "$$old_pid" 2>/dev/null; then \
@@ -60,11 +46,22 @@ install-all: setup-protoc
 	fi
 	@echo $$$$ > "$(LOCKFILE)"
 	@trap 'rm -f "$(LOCKFILE)"' EXIT; \
-	set -e; \
-	cargo install --path loctree_rs --force; \
-	cargo install --path loctree-mcp --force; \
-	echo "Installed: loct, loctree, loctree-mcp → $(CARGO_BIN)"; \
-	$(MAKE) git-hooks
+	cargo install --path loctree_rs --force
+
+# Install MCP server only
+install-mcp: setup-protoc
+	@if [ -f "$(LOCKFILE)" ]; then \
+		old_pid=$$(cat "$(LOCKFILE)" 2>/dev/null); \
+		if [ -n "$$old_pid" ] && kill -0 "$$old_pid" 2>/dev/null; then \
+			echo "Another build running (PID $$old_pid). Aborting."; \
+			exit 1; \
+		fi; \
+		echo "Removing stale lock (PID $$old_pid dead)"; \
+		rm -f "$(LOCKFILE)"; \
+	fi
+	@echo $$$$ > "$(LOCKFILE)"
+	@trap 'rm -f "$(LOCKFILE)"' EXIT; \
+	cargo install --path loctree-mcp --force
 
 # Setup protoc - check system or use Homebrew
 setup-protoc:
@@ -77,20 +74,29 @@ setup-protoc:
 test:
 	cargo test --workspace
 
-# Quick check (compilation only)
-check:
-	cargo check --workspace
-
-# Full pre-push validation (fmt + clippy + check) - FAST, run before build!
-# This catches 90% of issues in seconds instead of waiting for 20min build
+# Fast gate (fmt + clippy + check)
 precheck:
-	@echo "=== Pre-push Check ==="
+	@echo "=== Fast Gate ==="
 	@echo "[1/3] Checking formatting..."
 	@cargo fmt --all --check || (echo "Run 'make fmt' to fix" && exit 1)
 	@echo "[2/3] Running clippy..."
 	@cargo clippy --workspace --all-targets -- -D warnings
 	@echo "[3/3] Type checking..."
 	@cargo check --workspace
+	@echo "=== Fast gate passed ==="
+
+# Full quality gate (fmt + clippy + check + semgrep) - run before push
+check:
+	@echo "=== Quality Gate ==="
+	@$(MAKE) precheck
+	@echo "[4/4] Semgrep security scan..."
+	@if command -v semgrep >/dev/null 2>&1 || command -v pipx >/dev/null 2>&1; then \
+		SEMGREP=$$(command -v semgrep || echo "pipx run semgrep"); \
+		$$SEMGREP scan --config auto --error --quiet . 2>/dev/null || \
+			echo "[!] Semgrep found issues (see above)"; \
+	else \
+		echo "[!] Semgrep not available, skipping (install: pipx install semgrep)"; \
+	fi
 	@echo "=== All checks passed ==="
 
 # Format code
@@ -114,11 +120,11 @@ help:
 	@echo "  make build        - Build all (installs protobuf if needed)"
 	@echo "  make build-core   - Build only loctree (no protobuf needed)"
 	@echo "  make install      - Install loct, loctree & loctree-mcp"
-	@echo "  make install-all  - Install loct, loctree & loctree-mcp"
 	@echo "  make test         - Run all tests"
-	@echo "  make check        - Quick type check (no clippy)"
+	@echo "  make check        - Full quality gate (fmt+clippy+check+semgrep)"
 	@echo "  make fmt          - Format all code"
 	@echo "  make clean        - Clean build artifacts"
+	@echo "  make smoke-release-macos-arm64 - Verify macOS arm64 release portability"
 	@echo ""
 	@echo "Version Management:"
 	@echo "  make version-show       - Show all crate versions"
@@ -151,7 +157,7 @@ help:
 	@echo ""
 	@echo "Quick start:"
 	@echo "  make install           - Install loct + loctree-mcp"
-	@echo "  make install-all       - Install loct + loctree-mcp"
+	@echo "  make smoke-release-macos-arm64 - Check macOS arm64 release binary portability"
 
 # ============================================================================
 # Version Management
@@ -250,6 +256,16 @@ mcp-test:
 	@echo "Testing loctree-mcp..."
 	@echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"make-test","version":"1.0"}}}' \
 		| $(CARGO_BIN)/loctree-mcp 2>/dev/null | head -1 || echo "Test failed"
+
+# Verify the native macOS arm64 release story stays clean-room safe
+smoke-release-macos-arm64:
+	@if [ "$$(uname -s)" != "Darwin" ] || [ "$$(uname -m)" != "arm64" ]; then \
+		echo "This smoke target must run on macOS arm64."; \
+		exit 1; \
+	fi
+	cargo build --release -p loctree
+	cargo build --release -p loctree-mcp
+	bash distribution/macos/smoke-releaseability.sh target/release/loct target/release/loctree target/release/loctree-mcp
 
 # ============================================================================
 # AI Hooks Installation (Claude, Codex, Gemini)

@@ -177,20 +177,21 @@ pub fn resolve_event_constants_across_files(analyses: &mut [FileAnalysis]) {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn analyze_file(
-    path: &Path,
-    root_canon: &Path,
-    extensions: Option<&HashSet<String>>,
-    ts_resolver: Option<&TsPathResolver>,
-    py_roots: &[PathBuf],
-    py_stdlib: &HashSet<String>,
-    symbol: Option<&str>,
-    custom_command_macros: &[String],
-    command_cfg: &CommandDetectionConfig,
-) -> io::Result<FileAnalysis> {
+/// Bundles the non-path parameters for [`analyze_file`].
+pub(crate) struct AnalyzeContext<'a> {
+    pub root_canon: &'a Path,
+    pub extensions: Option<&'a HashSet<String>>,
+    pub ts_resolver: Option<&'a TsPathResolver>,
+    pub py_roots: &'a [PathBuf],
+    pub py_stdlib: &'a HashSet<String>,
+    pub symbol: Option<&'a str>,
+    pub custom_command_macros: &'a [String],
+    pub command_cfg: &'a CommandDetectionConfig,
+}
+
+pub(crate) fn analyze_file(path: &Path, ctx: &AnalyzeContext) -> io::Result<FileAnalysis> {
     let canonical = path.canonicalize()?;
-    if !canonical.starts_with(root_canon) {
+    if !canonical.starts_with(ctx.root_canon) {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
             "analyzed file escapes provided root",
@@ -222,7 +223,7 @@ pub(crate) fn analyze_file(
         Err(e) => return Err(e),
     };
     let relative = canonical
-        .strip_prefix(root_canon)
+        .strip_prefix(ctx.root_canon)
         .unwrap_or(&canonical)
         .to_string_lossy()
         .to_string();
@@ -234,34 +235,40 @@ pub(crate) fn analyze_file(
         .unwrap_or_default();
 
     let mut analysis = match ext.as_str() {
-        "rs" => analyze_rust_file(&content, relative, custom_command_macros),
+        "rs" => analyze_rust_file(&content, relative, ctx.custom_command_macros),
         "css" => analyze_css_file(&content, relative),
         "py" => analyze_py_file(
-            &content, &canonical, root_canon, extensions, relative, py_roots, py_stdlib,
+            &content,
+            &canonical,
+            ctx.root_canon,
+            ctx.extensions,
+            relative,
+            ctx.py_roots,
+            ctx.py_stdlib,
         ),
         "go" => crate::analyzer::go::analyze_go_file(&content, relative),
         "dart" => analyze_dart_file(&content, relative),
         "html" | "htm" => analyze_html_file(
             &content,
             &canonical,
-            root_canon,
-            extensions,
-            ts_resolver,
+            ctx.root_canon,
+            ctx.extensions,
+            ctx.ts_resolver,
             relative,
-            command_cfg,
+            ctx.command_cfg,
         ),
         _ => analyze_js_file(
             &content,
             &canonical,
-            root_canon,
-            extensions,
-            ts_resolver,
+            ctx.root_canon,
+            ctx.extensions,
+            ctx.ts_resolver,
             relative,
-            command_cfg,
+            ctx.command_cfg,
         ),
     };
 
-    if let Some(sym) = symbol {
+    if let Some(sym) = ctx.symbol {
         for (i, line) in content.lines().enumerate() {
             if line.contains(sym) {
                 analysis.matches.push(crate::types::SymbolMatch {
@@ -287,7 +294,7 @@ pub(crate) fn analyze_file(
             for imp in analysis.imports.iter_mut() {
                 if imp.resolved_path.is_none() {
                     imp.resolved_path =
-                        resolve_rust_import(&imp.source, &canonical, crate_root, root_canon);
+                        resolve_rust_import(&imp.source, &canonical, crate_root, ctx.root_canon);
                 }
             }
             // Resolve reexports (pub use statements)
@@ -295,7 +302,7 @@ pub(crate) fn analyze_file(
             for re in analysis.reexports.iter_mut() {
                 if re.resolved.is_none() {
                     re.resolved =
-                        resolve_rust_import(&re.source, &canonical, crate_root, root_canon);
+                        resolve_rust_import(&re.source, &canonical, crate_root, ctx.root_canon);
                 }
             }
         }
@@ -305,12 +312,15 @@ pub(crate) fn analyze_file(
     for imp in analysis.imports.iter_mut() {
         if imp.resolved_path.is_none() && imp.source.starts_with('.') {
             let resolved = match ext.as_str() {
-                "py" => resolve_python_relative(&imp.source, &canonical, root_canon, extensions),
+                "py" => {
+                    resolve_python_relative(&imp.source, &canonical, ctx.root_canon, ctx.extensions)
+                }
                 "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "css" | "svelte" | "vue" | "html"
-                | "htm" => ts_resolver
-                    .and_then(|r| r.resolve(&imp.source, extensions))
+                | "htm" => ctx
+                    .ts_resolver
+                    .and_then(|r| r.resolve(&imp.source, ctx.extensions))
                     .or_else(|| {
-                        resolve_js_relative(&canonical, root_canon, &imp.source, extensions)
+                        resolve_js_relative(&canonical, ctx.root_canon, &imp.source, ctx.extensions)
                     }),
                 _ => None,
             };

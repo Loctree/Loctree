@@ -1,8 +1,8 @@
 //! Shared CLI entry point for both `loct` and `loctree` binaries.
 //!
 //! This module contains all the dispatch logic and mode handlers so that
-//! both binaries can share a single implementation. The `loctree` binary
-//! adds a deprecation warning and delegates here.
+//! both binaries can share a single implementation. `loct` is the canonical
+//! command; `loctree` is the compatibility alias that delegates here.
 
 use std::fs;
 use std::path::PathBuf;
@@ -17,7 +17,7 @@ use crate::{OutputMode, analyzer, detect, diff, fs_utils, git, slicer, snapshot,
 pub struct EntryOptions {
     /// Name shown in `--version` output (e.g. "loctree" or "loct").
     pub binary_name: &'static str,
-    /// If true, show deprecation banner before dispatch.
+    /// Reserved for binary-specific compatibility behavior.
     pub deprecated: bool,
     /// If true, show the animated startup banner on `Init` mode.
     pub show_banner: bool,
@@ -338,7 +338,7 @@ fn run_trace(
 fn run_for_ai(root_list: &[PathBuf], parsed: &ParsedArgs) -> std::io::Result<()> {
     use analyzer::coverage::{compute_command_gaps_with_confidence, compute_unregistered_handlers};
     use analyzer::for_ai::{generate_for_ai_report, print_for_ai_json};
-    use analyzer::output::process_root_context;
+    use analyzer::output::{GlobalContext, process_root_context};
     use analyzer::root_scan::{ScanConfig, ScanResults, scan_roots};
     use analyzer::scan::{opt_globset, python_stdlib};
     use std::collections::HashSet;
@@ -458,16 +458,18 @@ fn run_for_ai(root_list: &[PathBuf], parsed: &ParsedArgs) -> std::io::Result<()>
             idx,
             ctx,
             parsed,
-            &global_fe_commands,
-            &global_be_commands,
-            &global_missing,
-            &global_unregistered,
-            &global_unused,
-            &pipeline_summary,
-            Some(&git_ctx),
-            "loctree-json",
-            "1.2.0",
-            &global_analyses,
+            &GlobalContext {
+                fe_commands: &global_fe_commands,
+                be_commands: &global_be_commands,
+                missing_handlers: &global_missing,
+                unregistered_handlers: &global_unregistered,
+                unused_handlers: &global_unused,
+                pipeline_summary: &pipeline_summary,
+                git: Some(&git_ctx),
+                schema_name: "loctree-json",
+                schema_version: "1.2.0",
+                analyses: &global_analyses,
+            },
         );
         if let Some(section) = artifacts.report_section {
             report_sections.push(section);

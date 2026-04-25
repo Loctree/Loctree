@@ -13,6 +13,13 @@ Current direction:
 - sign binaries with Developer ID Application
 - notarize a zipped bundle with `notarytool`
 - upload the notarized macOS asset to GitHub Releases
+- run `distribution/macos/smoke-releaseability.sh` before packaging so releases fail on non-system dylib paths such as `/opt/homebrew/...`
+
+Releaseability smoke path:
+
+```bash
+make smoke-release-macos-arm64
+```
 
 Apple references:
 

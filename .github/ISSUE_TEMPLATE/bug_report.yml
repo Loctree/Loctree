@@ -23,16 +23,18 @@ body:
     id: version
     attributes:
       label: Loctree version
-      description: "Output of `loct --version`"
-      placeholder: "loctree 0.8.16"
+      description: "Exact output of `loct --version` or `loctree --version`"
+      placeholder: "loct 0.x.y"
   - type: dropdown
     id: install
     attributes:
       label: Install method
       options:
+        - loct.io install script
         - cargo install
         - npm install
         - Homebrew
+        - GitHub release asset
         - Built from source
   - type: input
     id: os

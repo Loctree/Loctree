@@ -1,25 +1,38 @@
-# Homebrew
+# Homebrew Distribution
 
-Canonical shape:
+The monorepo does not ship one generic Homebrew formula anymore.
 
-- formula source of truth lives at `distribution/homebrew/Formula/loctree.rb`
-- helper tooling lives next to it
-- published tap lives in `Loctree/homebrew-loctree`
+Instead:
 
-Decision:
+- CLI formula is rendered into `Loctree/homebrew-cli`
+- MCP formula is rendered into `Loctree/homebrew-mcp`
 
-- use a custom tap now
-- treat `homebrew-core` as a later nice-to-have, not the primary path
+The rendering source of truth lives in:
 
-Why:
+- `scripts/render-homebrew-formula.sh`
+- `.github/workflows/homebrew-release.yml`
 
-- the tap already exists
-- we control merge velocity
-- we avoid pretending `brew install loctree` is live before it actually is
+## Release Contract
 
-User-facing install path once live:
+1. `publish.yml` builds and uploads binary assets into the thin repos:
+   - `Loctree/loct`
+   - `Loctree/loctree-mcp`
+2. `homebrew-release.yml` downloads those tarballs, computes SHA256 values, and
+   writes the tap formulas.
+
+## Local Test Flow
+
+After a release exists, you can render formulas locally by exporting the same
+SHA variables the workflow uses and running:
 
 ```bash
-brew tap Loctree/loctree
-brew install loctree
+scripts/render-homebrew-formula.sh loct 0.9.0 /tmp/loct.rb
+scripts/render-homebrew-formula.sh loctree-mcp 0.9.0 /tmp/loctree-mcp.rb
+```
+
+Then test with Homebrew:
+
+```bash
+brew install --build-from-source /tmp/loct.rb
+brew install --build-from-source /tmp/loctree-mcp.rb
 ```
